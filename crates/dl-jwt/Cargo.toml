@@ -1,0 +1,32 @@
+[package]
+name = "dl-jwt"
+description = "JSON Web Tokens with HMAC signatures (RFC 7519)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[features]
+default = ["std"]
+# Adds `now()` and `decode_now()`, which read the system clock. Not available on
+# wasm32-unknown-unknown even when enabled.
+std = []
+
+[dependencies]
+dl-hash.workspace = true
+dl-encoding.workspace = true
+dl-json.workspace = true
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "jwt"
+harness = false
+
+[lints]
+workspace = true

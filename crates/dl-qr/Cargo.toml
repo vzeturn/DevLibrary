@@ -1,0 +1,24 @@
+[package]
+name = "dl-qr"
+description = "QR Code Model 2 encoder (versions 1-40) with SVG and text output."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "qr"
+harness = false
+
+[lints]
+workspace = true

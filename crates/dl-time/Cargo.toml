@@ -1,0 +1,31 @@
+[package]
+name = "dl-time"
+description = "Dates, times, offsets, durations, RFC 3339 and custom formats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+keywords = ["date", "time", "rfc3339", "iso8601", "no_std"]
+categories = ["date-and-time", "no-std", "parser-implementations"]
+
+[features]
+default = ["std"]
+# Enables `OffsetDateTime::now_utc()` and `now()` via `std::time::SystemTime`
+# (not on wasm32-unknown-unknown, which has no clock).
+std = []
+
+[dependencies]
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "time"
+harness = false
+
+[lints]
+workspace = true

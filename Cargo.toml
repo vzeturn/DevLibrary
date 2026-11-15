@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["vzeturn"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/vzeturn/DevLibrary"
+publish = false
+
+# Internal crates. Every crate in this workspace depends only on these
+# and the Rust standard library (core / alloc / std). No third-party crates.
+[workspace.dependencies]
+dl-encoding = { path = "crates/dl-encoding" }
+dl-hash = { path = "crates/dl-hash" }
+dl-rand = { path = "crates/dl-rand" }
+dl-json = { path = "crates/dl-json" }
+dl-decimal = { path = "crates/dl-decimal" }
+dl-time = { path = "crates/dl-time" }
+dl-log = { path = "crates/dl-log" }
+dl-cli = { path = "crates/dl-cli" }
+dl-qr = { path = "crates/dl-qr" }
+dl-vn = { path = "crates/dl-vn" }
+dl-uuid = { path = "crates/dl-uuid" }
+dl-otp = { path = "crates/dl-otp" }
+dl-jwt = { path = "crates/dl-jwt" }
+dl-bench = { path = "crates/dl-bench" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+# Every crate is listed in [workspace.dependencies] so applications inside the
+# workspace can write `dl-x.workspace = true`, even if no library depends on it.
+[workspace.lints.cargo]
+unused_workspace_dependencies = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# Smallest output, intended for wasm32 builds shipped to the browser.
+[profile.min-size]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
+
+[profile.bench]
+debug = true
+strip = false

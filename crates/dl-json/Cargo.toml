@@ -1,0 +1,24 @@
+[package]
+name = "dl-json"
+description = "JSON parser, serializer and value model (RFC 8259)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "json"
+harness = false
+
+[lints]
+workspace = true

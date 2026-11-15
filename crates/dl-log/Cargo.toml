@@ -1,0 +1,25 @@
+[package]
+name = "dl-log"
+description = "Structured logging with levels, text/JSON output and rotating files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-time.workspace = true
+dl-json.workspace = true
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "log"
+harness = false
+
+[lints]
+workspace = true

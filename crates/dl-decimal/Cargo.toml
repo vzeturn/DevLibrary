@@ -1,0 +1,25 @@
+[package]
+name = "dl-decimal"
+description = "Exact decimal arithmetic for money (i128 mantissa, scale up to 28)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+
+[dev-dependencies]
+dl-bench.workspace = true
+dl-rand.workspace = true
+
+[[bench]]
+name = "decimal"
+harness = false
+
+[lints]
+workspace = true

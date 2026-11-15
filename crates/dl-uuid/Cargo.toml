@@ -1,0 +1,31 @@
+[package]
+name = "dl-uuid"
+description = "RFC 9562 UUIDs: parse, format, v4/v7/v3/v5 generation, .NET Guid and SQL Server interop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[features]
+default = ["std"]
+# OS random numbers and the system clock: new_v4, now_v7, V7Generator::try_generate*.
+std = ["dep:dl-rand"]
+
+[dependencies]
+dl-rand = { workspace = true, optional = true }
+dl-hash.workspace = true
+
+[dev-dependencies]
+dl-bench.workspace = true
+
+[[bench]]
+name = "uuid"
+harness = false
+required-features = ["std"]
+
+[lints]
+workspace = true
