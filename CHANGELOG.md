@@ -4,6 +4,17 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may change APIs.
 
+## [0.2.1] - 2026-11-15
+
+### Fixed
+
+- `dl-ffi` `DL_VIETQR_FOLD_TEXT`: a word ending exactly at character 25 followed by more
+  text produced a 27-character field 62 and an invalid payload ("Thanh toán hoá đơn bàn số
+  12"). Folded text is now always at most 25 characters, without leading or trailing
+  spaces; every prefix of a long test sentence is checked.
+- .NET package: native libraries are at `runtimes/<rid>/native/<file>` (0.2.0 nested the
+  folder twice). Crate versions now follow the release version.
+
 ## [0.2.0] - 2026-11-15
 
 ### Added
@@ -50,5 +61,6 @@ macOS, Windows and `wasm32-unknown-unknown`.
   CCCD and VietQR.
 - `dl-hash`, `dl-encoding`, `dl-rand`, `dl-bench`: foundation crates.
 
+[0.2.1]: https://github.com/vzeturn/DevLibrary/releases/tag/v0.2.1
 [0.2.0]: https://github.com/vzeturn/DevLibrary/releases/tag/v0.2.0
 [0.1.0]: https://github.com/vzeturn/DevLibrary/releases/tag/v0.1.0

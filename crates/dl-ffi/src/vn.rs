@@ -146,7 +146,7 @@ const MAX_ADDITIONAL: usize = 25;
 
 fn fold_field(s: &str) -> Option<String> {
     let folded = text::remove_diacritics(s);
-    let mut out = String::with_capacity(folded.len());
+    let mut out = String::with_capacity(MAX_ADDITIONAL);
     let mut space = false;
     for c in folded.chars() {
         let c = if (' '..='~').contains(&c) { c } else { ' ' };
@@ -154,18 +154,19 @@ fn fold_field(s: &str) -> Option<String> {
             space = !out.is_empty();
             continue;
         }
+        // `out` is ASCII, so bytes are characters. Stop before the separator and the
+        // character would exceed the limit, so the result never ends with a space.
+        let need = 1 + usize::from(space);
+        if out.len() + need > MAX_ADDITIONAL {
+            break;
+        }
         if space {
             out.push(' ');
             space = false;
         }
-        if out.len() == MAX_ADDITIONAL {
-            break;
-        }
         out.push(c);
     }
-    // Cutting may leave a trailing space at position 25; `out` is ASCII.
-    let trimmed = out.trim_end();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
+    (!out.is_empty()).then_some(out)
 }
 
 fn optional(s: &str, fold: bool) -> Option<String> {
@@ -436,6 +437,33 @@ mod tests {
         assert_eq!(s, DL_OK);
         assert!(p.contains("0824Tien phong 101 khach san63"), "{p}");
         assert_eq!(verify(&p), DL_OK);
+        // A word ending exactly at character 25 followed by more text (regression of 0.2.0,
+        // which produced 27 characters and an invalid payload).
+        let (s, p) = payload(
+            "970436",
+            "1031933430",
+            0,
+            DL_VIETQR_FOLD_TEXT,
+            "",
+            "Thanh toán hoá đơn bàn số 12",
+        );
+        assert_eq!(s, DL_OK, "{p}");
+        assert!(p.contains("0825Thanh toan hoa don ban so63"), "{p}");
+        // Every cut length from 1 to 60 characters stays valid and at most 25 long.
+        let long = "ab cde f ghij klm nopqrs tuv wx yz Đà Nẵng Hà Nội Sài Gòn Huế";
+        for end in 1..=long.chars().count() {
+            let part: String = long.chars().take(end).collect();
+            let folded = fold_field(&part);
+            if let Some(f) = &folded {
+                assert!(
+                    f.len() <= MAX_ADDITIONAL && !f.ends_with(' ') && !f.starts_with(' '),
+                    "{part:?} -> {f:?}"
+                );
+            }
+            let (s, p) = payload("970436", "1031933430", 0, DL_VIETQR_FOLD_TEXT, &part, &part);
+            assert_eq!(s, DL_OK, "{part:?}: {p}");
+            assert_eq!(verify(&p), DL_OK, "{part:?}");
+        }
         // Text that folds to nothing is omitted.
         let (s, p) = payload("970436", "1031933430", 0, DL_VIETQR_FOLD_TEXT, "", "🎉");
         assert_eq!(s, DL_OK);

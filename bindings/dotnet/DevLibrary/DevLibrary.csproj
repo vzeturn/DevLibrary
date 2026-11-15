@@ -16,7 +16,7 @@
     <RootNamespace>DevLibrary</RootNamespace>
 
     <PackageId>DevLibrary</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Authors>vzeturn</Authors>
     <Description>.NET binding for DevLibrary (Rust): Vietnamese amount in words, diacritics, VietQR. No dependencies.</Description>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
@@ -29,7 +29,8 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <!-- Filled by build-native.ps1 / CI: runtimes/win-x64/native/dl_ffi.dll,
          runtimes/linux-x64/native/libdl_ffi.so, ... -->
-    <None Include="..\runtimes\**\*" Pack="true" PackagePath="runtimes\%(RecursiveDir)" />
+    <!-- PackagePath is a folder, so NuGet appends %(RecursiveDir) (<rid>\native\) itself. -->
+    <None Include="..\runtimes\**\*" Pack="true" PackagePath="runtimes" />
   </ItemGroup>
 
 </Project>

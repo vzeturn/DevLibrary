@@ -4,18 +4,18 @@ version = 4
 
 [[package]]
 name = "dl-bench"
-version = "0.1.0"
+version = "0.2.1"
 
 [[package]]
 name = "dl-cli"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-decimal"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-rand",
@@ -23,21 +23,21 @@ dependencies = [
 
 [[package]]
 name = "dl-encoding"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-ffi"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-vn",
 ]
 
 [[package]]
 name = "dl-hash"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-encoding",
@@ -45,14 +45,14 @@ dependencies = [
 
 [[package]]
 name = "dl-json"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-jwt"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-encoding",
@@ -62,7 +62,7 @@ dependencies = [
 
 [[package]]
 name = "dl-log"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-json",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "dl-otp"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-encoding",
@@ -82,28 +82,28 @@ dependencies = [
 
 [[package]]
 name = "dl-qr"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-rand"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-time"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
 
 [[package]]
 name = "dl-uuid"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
  "dl-hash",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "dl-vn"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
