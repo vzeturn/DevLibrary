@@ -29,6 +29,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-ffi"
+version = "0.1.0"
+dependencies = [
+ "dl-vn",
+]
+
+[[package]]
 name = "dl-hash"
 version = "0.1.0"
 dependencies = [

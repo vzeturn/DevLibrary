@@ -1,0 +1,98 @@
+name: release
+
+# On a tag v*: build dl-ffi for every supported runtime, test the .NET binding against each
+# native library on its own OS, pack the NuGet package and attach everything to the release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: win-x64,     os: windows-latest, target: x86_64-pc-windows-msvc,     file: dl_ffi.dll }
+          - { rid: win-arm64,   os: windows-latest, target: aarch64-pc-windows-msvc,    file: dl_ffi.dll }
+          - { rid: linux-x64,   os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu,   file: libdl_ffi.so }
+          - { rid: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, file: libdl_ffi.so }
+          - { rid: osx-arm64,   os: macos-latest,   target: aarch64-apple-darwin,       file: libdl_ffi.dylib }
+          - { rid: osx-x64,     os: macos-latest,   target: x86_64-apple-darwin,        file: libdl_ffi.dylib }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      # ubuntu-22.04 (glibc 2.35) keeps the .so loadable on older distributions too.
+      - run: cargo build -p dl-ffi --profile min-size --target ${{ matrix.target }}
+      - name: stage
+        shell: bash
+        run: |
+          mkdir -p out/runtimes/${{ matrix.rid }}/native
+          cp target/${{ matrix.target }}/min-size/${{ matrix.file }} out/runtimes/${{ matrix.rid }}/native/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: out/runtimes
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo build -p dl-ffi --profile min-size --target wasm32-unknown-unknown
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: target/wasm32-unknown-unknown/min-size/dl_ffi.wasm
+
+  dotnet:
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: bindings/dotnet/runtimes
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet run -c Release --project bindings/dotnet/Tests
+      - if: matrix.os == 'ubuntu-22.04'
+        run: dotnet pack bindings/dotnet/DevLibrary -c Release -o nuget
+      - if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget
+          path: nuget/*.nupkg
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [dotnet, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: archive native libraries
+        run: |
+          cd dist
+          for d in native-*; do (cd "$d" && zip -qr "../dl-ffi-${d#native-}.zip" .); done
+      - name: attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "DevLibrary $GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          gh release upload "$GITHUB_REF_NAME" dist/*.zip dist/wasm/dl_ffi.wasm dist/nuget/*.nupkg crates/dl-ffi/include/dl_ffi.h --clobber

@@ -14,7 +14,8 @@ helpers (amount in words, tax codes, VietQR).
 - **Runs everywhere Rust runs.** Linux, macOS and Windows, and `wasm32-unknown-unknown`
   for the browser. Most crates are `#![no_std]` + `alloc`.
 - **Safe by default.** `unsafe` is denied workspace-wide (allowed only for the OS calls
-  in `dl-rand`). Parsers return typed errors with positions and never panic on input.
+  in `dl-rand` and the C ABI in `dl-ffi`). Parsers return typed errors with positions and
+  never panic on input.
 - **Documented.** Every crate has a full guide in its README, and every example in it is
   compiled and run as a test.
 
@@ -40,6 +41,15 @@ helpers (amount in words, tax codes, VietQR).
 | [`dl-encoding`](crates/dl-encoding) | Strict Base64 / Base32 / hex (RFC 4648) | `Convert.ToBase64String`, Buffer, base64 crate | ✅ | [README](crates/dl-encoding/README.md) |
 | [`dl-rand`](crates/dl-rand) | OS CSPRNG and fast xoshiro256** | RandomNumberGenerator, crypto.getRandomValues, rand | – | [README](crates/dl-rand/README.md) |
 | [`dl-bench`](crates/dl-bench) | Tiny benchmark harness used by the other crates | criterion | – | [README](crates/dl-bench/README.md) |
+| [`dl-ffi`](crates/dl-ffi) | C ABI for .NET, Go (cgo), Flutter and WebAssembly hosts: the rules stay in Rust | hand-ported rules in every language | – | [README](crates/dl-ffi/README.md) |
+
+### Using the crates from other languages
+
+| Host | How | Package |
+|---|---|---|
+| .NET 8 / 10 | [`bindings/dotnet`](bindings/dotnet): `LibraryImport` binding, AOT and trimming compatible, no `PackageReference` | `DevLibrary` NuGet with `runtimes/{win-x64,win-arm64,linux-x64,linux-arm64,osx-x64,osx-arm64}/native` (release assets) |
+| C / C++ / cgo | [`crates/dl-ffi/include/dl_ffi.h`](crates/dl-ffi/include/dl_ffi.h) | `dl-ffi-<rid>.zip` (release assets) |
+| Browser / Node | `dl_ffi.wasm` (≈45 KB) | release asset |
 
 How the crates depend on each other (all arrows stay inside this repository):
 

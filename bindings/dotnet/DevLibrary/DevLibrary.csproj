@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Thin binding over the DevLibrary C ABI (crates/dl-ffi). No business logic in C#,
+       no PackageReference. Native libraries are packed under runtimes/<rid>/native. -->
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <Deterministic>true</Deterministic>
+    <RootNamespace>DevLibrary</RootNamespace>
+
+    <PackageId>DevLibrary</PackageId>
+    <Version>0.2.0</Version>
+    <Authors>vzeturn</Authors>
+    <Description>.NET binding for DevLibrary (Rust): Vietnamese amount in words, diacritics, VietQR. No dependencies.</Description>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/vzeturn/DevLibrary</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/vzeturn/DevLibrary</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <!-- Filled by build-native.ps1 / CI: runtimes/win-x64/native/dl_ffi.dll,
+         runtimes/linux-x64/native/libdl_ffi.so, ... -->
+    <None Include="..\runtimes\**\*" Pack="true" PackagePath="runtimes\%(RecursiveDir)" />
+  </ItemGroup>
+
+</Project>

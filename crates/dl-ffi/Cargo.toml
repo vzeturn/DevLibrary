@@ -1,0 +1,23 @@
+[package]
+name = "dl-ffi"
+description = "C ABI over DevLibrary for .NET, Go, Flutter and WebAssembly hosts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[lib]
+# cdylib: dl_ffi.dll / libdl_ffi.so / libdl_ffi.dylib / dl_ffi.wasm.
+# staticlib: for hosts that link statically (cgo, Flutter on iOS).
+# rlib: so the Rust tests can call the exported functions directly.
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+dl-vn.workspace = true
+
+[lints]
+workspace = true
