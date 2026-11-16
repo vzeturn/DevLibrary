@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::Error;
+use crate::{Error, TlsVersion};
 
 /// Encryption mode, the `encrypt` connection-string key.
 ///
@@ -41,6 +41,7 @@ pub enum Encrypt {
 ///   ignored).
 ///
 /// Recognised keys: `server`, `port`, `user id`, `password`, `database`, `encrypt`,
+/// `tlsmin` (`1.0`, `1.1`, `1.2`, `1.3`; default 1.2; any other value is an error),
 /// `trustservercertificate`, `hostnameincertificate`, `packet size`, `connection timeout`
 /// (seconds, per read/write like go-mssqldb; 0 = none), `dial timeout` (seconds,
 /// default 15), `app name`, `workstation id`, `applicationintent`, `integrated security`
@@ -75,6 +76,7 @@ pub struct Config {
     pub(crate) workstation: String,
     pub(crate) language: String,
     pub(crate) encrypt: Encrypt,
+    pub(crate) tls_min: dl_tls::Version,
     pub(crate) trust_server_certificate: bool,
     pub(crate) host_name_in_certificate: Option<String>,
     pub(crate) packet_size: u16,
@@ -99,6 +101,7 @@ impl std::fmt::Debug for Config {
             .field("app_name", &self.app_name)
             .field("workstation", &self.workstation)
             .field("encrypt", &self.encrypt)
+            .field("tls_min", &self.tls_min)
             .field("trust_server_certificate", &self.trust_server_certificate)
             .field("packet_size", &self.packet_size)
             .field("connect_timeout", &self.connect_timeout)
@@ -143,6 +146,7 @@ impl Config {
             workstation: local_hostname(),
             language: String::new(),
             encrypt: Encrypt::Off,
+            tls_min: dl_tls::Version::Tls12,
             trust_server_certificate: true,
             host_name_in_certificate: None,
             packet_size: 4096,
@@ -193,6 +197,14 @@ impl Config {
     /// unless a port is set.
     pub fn with_instance(mut self, instance: &str) -> Config {
         self.instance = (!instance.is_empty()).then(|| instance.to_string());
+        self
+    }
+
+    /// Sets the oldest TLS version offered (the `tlsmin` key: `1.0`, `1.1`, `1.2`, `1.3`;
+    /// default TLS 1.2). TLS 1.0 is what SQL Server 2008 without the TLS 1.2 update
+    /// speaks; see [`dl_tls::Config::min_version`] for the caveats.
+    pub fn with_tls_min(mut self, version: TlsVersion) -> Config {
+        self.tls_min = version;
         self
     }
 
@@ -271,6 +283,11 @@ impl Config {
     /// Encryption mode.
     pub fn encrypt(&self) -> Encrypt {
         self.encrypt
+    }
+
+    /// Oldest TLS version offered.
+    pub fn tls_min(&self) -> TlsVersion {
+        self.tls_min
     }
     /// Whether any server certificate is accepted.
     pub fn trust_server_certificate(&self) -> bool {
@@ -421,6 +438,9 @@ impl Config {
                 ));
             }
         };
+        if let Some(v) = get("tlsmin") {
+            c.tls_min = parse_tls_min(v)?;
+        }
         if let Some(t) = get("trustservercertificate") {
             trust = go_parse_bool(t).ok_or_else(|| {
                 Error::config(
@@ -434,6 +454,22 @@ impl Config {
         }
         c.trust_server_certificate = trust;
         Ok(c)
+    }
+}
+
+/// `tlsmin` values, as go-mssqldb names them. go-mssqldb silently keeps its default for
+/// any other value; here that is an error, so a connection string never asks for a
+/// transport it does not get.
+fn parse_tls_min(v: &str) -> Result<dl_tls::Version, Error> {
+    match v.trim() {
+        "1.0" => Ok(dl_tls::Version::Tls10),
+        "1.1" => Ok(dl_tls::Version::Tls11),
+        "1.2" => Ok(dl_tls::Version::Tls12),
+        "1.3" => Ok(dl_tls::Version::Tls13),
+        other => Err(Error::config(
+            "tlsmin",
+            format!("invalid tlsmin '{other}' (expected 1.0, 1.1, 1.2 or 1.3)"),
+        )),
     }
 }
 
@@ -759,6 +795,37 @@ mod tests {
         assert_eq!((c.user(), c.password()), ("user", ""));
         let c = p("sqlserver://./SQL2019");
         assert_eq!((c.host(), c.instance()), ("localhost", Some("SQL2019")));
+    }
+
+    #[test]
+    fn tls_min_key() {
+        assert_eq!(p("sqlserver://h").tls_min(), TlsVersion::Tls12);
+        // The DSN form the e-invoice agent seals for SQL Server 2008 sites.
+        let c = p("sqlserver://u:p@h:1433/SQL2008?database=FO&encrypt=disable&tlsmin=1.0");
+        assert_eq!(c.tls_min(), TlsVersion::Tls10);
+        assert_eq!(c.encrypt(), Encrypt::Disabled);
+        assert_eq!((c.port(), c.instance()), (Some(1433), Some("SQL2008")));
+        for (v, want) in [
+            ("1.1", TlsVersion::Tls11),
+            ("1.2", TlsVersion::Tls12),
+            ("1.3", TlsVersion::Tls13),
+        ] {
+            assert_eq!(p(&format!("sqlserver://h?tlsmin={v}")).tls_min(), want);
+        }
+        assert_eq!(p("Server=h;TLSMin=1.0").tls_min(), TlsVersion::Tls10);
+        for bad in ["1", "tls1.0", "1.4", ""] {
+            let e = format!("sqlserver://h?tlsmin={bad}")
+                .parse::<Config>()
+                .unwrap_err();
+            assert!(
+                matches!(e, Error::Config { ref key, .. } if key == "tlsmin"),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            Config::new("h").with_tls_min(TlsVersion::Tls10).tls_min(),
+            TlsVersion::Tls10
+        );
     }
 
     #[test]

@@ -5,7 +5,8 @@ enumeration, WOW64 views), RAW print jobs through the print spooler (printer lis
 default printer, `WritePrinter`), late-bound COM automation through `IDispatch` (SAPI
 text-to-speech, OPOS printers, cash drawers, line displays and other automation objects)
 and dynamic loading of vendor SDK DLLs (typed exports, clear errors for missing DLLs,
-missing symbols and 32/64-bit mismatches, ANSI string buffers). On Linux, macOS and
+missing symbols and 32/64-bit mismatches, ANSI string buffers), plus console echo control
+for password prompts. On Linux, macOS and
 WebAssembly the same API compiles and every call returns `Error::Unsupported`, so one
 code base can choose at run time; only the PE header reader `Library::machine` works
 everywhere.
@@ -317,6 +318,25 @@ pass as `const char*`. A character without an exact mapping is
 1258 has it, 1252 only some letters, UTF-8 everything), and `ansi::code_page()` tells
 which. `ansi::decode(&[u8])` reads up to the first NUL with `MultiByteToWideChar(CP_ACP)`.
 On other platforms both return `Error::Unsupported`.
+
+## Console
+
+`console::hide_input()` turns echo off on the console behind standard input until the
+returned guard is dropped (or `restore()`d), for reading a password with `read_line`. It
+fails with `GetConsoleMode` when standard input is redirected and with `Unsupported` off
+Windows; callers usually go on without hiding then.
+
+```rust,no_run
+use std::io::BufRead;
+
+eprint!("Mat khau SQL: ");
+let echo = dl_winos::console::hide_input().ok();
+let mut password = String::new();
+std::io::stdin().lock().read_line(&mut password)?;
+drop(echo);
+eprintln!();
+# Ok::<(), std::io::Error>(())
+```
 
 ## Limits
 

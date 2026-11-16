@@ -46,3 +46,15 @@ pub(crate) fn default_printer() -> Result<Option<String>, Error> {
 pub(crate) fn write_raw(_printer: &[u16], _document: &[u16], _data: &[u8]) -> Result<u32, Error> {
     Err(Error::Unsupported)
 }
+
+// Never constructed: `console_echo_off` fails first.
+#[allow(dead_code)]
+pub(crate) struct ConsoleIn(());
+
+pub(crate) fn console_echo_off() -> Result<(ConsoleIn, u32), Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn console_set_mode(_c: &ConsoleIn, _mode: u32) -> Result<(), Error> {
+    Err(Error::Unsupported)
+}

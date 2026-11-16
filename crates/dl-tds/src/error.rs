@@ -245,6 +245,14 @@ impl From<dl_tls::Error> for Error {
 }
 
 impl Error {
+    /// `true` for [`Error::Tls`]: the TLS handshake failed, including a connection the
+    /// server dropped or reset during the handshake (the usual answer of a server that
+    /// cannot speak the offered TLS versions). Callers use it to decide whether retrying
+    /// with an older TLS version or without encryption can help.
+    pub fn is_tls(&self) -> bool {
+        matches!(self, Error::Tls(_))
+    }
+
     /// `true` for [`Error::Server`].
     pub fn is_server(&self) -> bool {
         matches!(self, Error::Server { .. })

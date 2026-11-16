@@ -24,7 +24,7 @@ pub mod codes {
 /// Errors from registry, print spooler, COM and DLL calls.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// The platform has no Windows registry, print spooler, COM or DLL loader.
+    /// The platform has no Windows registry, print spooler, console, COM or DLL loader.
     Unsupported,
     /// Loading a DLL or looking up one of its symbols failed (see [`crate::dll`]). The
     /// message explains the common codes [`codes::MOD_NOT_FOUND`],
@@ -128,8 +128,8 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Unsupported => f.write_str(
-                "the Windows registry, print spooler, COM and DLL loader are not available on \
-                 this platform",
+                "the Windows registry, print spooler, console, COM and DLL loader are not \
+                 available on this platform",
             ),
             Error::Library { op, code, detail } => {
                 write!(f, "{op} failed for {detail}: ")?;

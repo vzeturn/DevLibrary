@@ -515,7 +515,9 @@ impl Port {
         let rc = unsafe { ioctl(fd, TIOCEXCL) };
         if rc < 0 {
             return Err(match errno() {
-                ENOTTY | EINVAL => Error::NotASerialPort(name.to_string()),
+                // macOS answers ENODEV for character devices without terminal ioctls
+                // (e.g. /dev/null); Linux answers ENOTTY.
+                ENOTTY | EINVAL | ENODEV => Error::NotASerialPort(name.to_string()),
                 code => Error::Os {
                     op: "ioctl(TIOCEXCL)",
                     code,
@@ -868,8 +870,13 @@ mod tests {
         let (master, slave) = pty();
         let mut port = Port::open(&slave, &quick()).unwrap();
         assert_eq!(port.write(BINARY).unwrap(), BINARY.len());
+        // A macOS pty keeps written bytes in the slave's output queue until the master
+        // reads them (like a UART that has not sent them yet), so flush only returns once
+        // someone reads: read on another thread, as the far end of a cable would.
+        let reader = master.try_clone().unwrap();
+        let far_end = std::thread::spawn(move || read_master(&reader, BINARY.len()));
         port.flush().unwrap();
-        assert_eq!(read_master(&master, BINARY.len()), BINARY);
+        assert_eq!(far_end.join().unwrap(), BINARY);
 
         (&master).write_all(BINARY).unwrap();
         let mut got = Vec::new();

@@ -119,6 +119,49 @@ unsafe extern "system" {
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn ExpandEnvironmentStringsW(src: *const u16, dst: *mut u16, size: u32) -> u32;
+    fn GetStdHandle(which: u32) -> Handle;
+    fn GetConsoleMode(console: Handle, mode: *mut u32) -> i32;
+    fn SetConsoleMode(console: Handle, mode: u32) -> i32;
+}
+
+/// `STD_INPUT_HANDLE` ((DWORD)-10).
+const STD_INPUT_HANDLE: u32 = -10i32 as u32;
+const ENABLE_ECHO_INPUT: u32 = 0x0004;
+const INVALID_HANDLE_VALUE: isize = -1;
+
+/// The process's standard input console handle (owned by the process, never closed here).
+pub(crate) struct ConsoleIn(Handle);
+
+/// Turns echo off on standard input; returns the handle and the previous mode.
+pub(crate) fn console_echo_off() -> Result<(ConsoleIn, u32), Error> {
+    // SAFETY: GetStdHandle takes a constant and returns a handle the process owns.
+    let h = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    if h.is_null() || h as isize == INVALID_HANDLE_VALUE {
+        return Err(Error::Win32 {
+            op: "GetStdHandle",
+            code: if h.is_null() { 6 } else { last_code() },
+        });
+    }
+    let mut mode = 0u32;
+    // SAFETY: `h` is the live standard input handle; `mode` is a writable u32. Fails with
+    // ERROR_INVALID_HANDLE when standard input is a file or pipe instead of a console.
+    if unsafe { GetConsoleMode(h, &mut mode) } == 0 {
+        return Err(last_error("GetConsoleMode"));
+    }
+    // SAFETY: as above; only the echo bit changes.
+    if unsafe { SetConsoleMode(h, mode & !ENABLE_ECHO_INPUT) } == 0 {
+        return Err(last_error("SetConsoleMode"));
+    }
+    Ok((ConsoleIn(h), mode))
+}
+
+/// Restores a console mode saved by [`console_echo_off`].
+pub(crate) fn console_set_mode(c: &ConsoleIn, mode: u32) -> Result<(), Error> {
+    // SAFETY: `c.0` is the standard input console handle `console_echo_off` validated.
+    if unsafe { SetConsoleMode(c.0, mode) } == 0 {
+        return Err(last_error("SetConsoleMode"));
+    }
+    Ok(())
 }
 
 #[link(name = "winspool")]

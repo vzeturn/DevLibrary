@@ -28,6 +28,7 @@ mod dll_sys;
 mod dll_sys;
 
 pub mod com;
+pub mod console;
 pub mod dll;
 pub mod registry;
 pub mod spooler;

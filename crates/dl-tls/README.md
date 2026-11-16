@@ -11,6 +11,15 @@ OS trust store, and security fixes arrive with OS updates.
 | Linux and other non-Apple Unix | system OpenSSL 3 or 1.1, loaded at run time (`libssl.so.3`) | TLS 1.2, TLS 1.3 |
 | macOS, WebAssembly | none yet: `connect` returns `Error::Unsupported` | |
 
+TLS 1.0 and 1.1 are off unless `Config::min_version(Version::Tls10)` (or `Tls11`) asks
+for them. They exist for servers that cannot do TLS 1.2, such as SQL Server 2008: use
+them only as a fallback after a TLS 1.2 handshake failed. With OpenSSL 3 this also sets
+the security level of that connection to 0, since level 1 and above refuse TLS 1.0/1.1
+and SHA-1 signatures. The OS can still refuse them (on Windows, the SChannel
+`Protocols\TLS 1.0\Client` registry key applies to every process). `tests/legacy_server.rs`
+checks both outcomes against `openssl s_server -tls1` when `DL_TLS_TEST_TLS10_ADDR` is
+set.
+
 OpenSSL is opened with `dlopen` on first use, so programs build and link without OpenSSL
 headers or libraries and report `Error::Unsupported` when it is missing at run time
 (`apt install libssl3`).

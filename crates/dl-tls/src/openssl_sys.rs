@@ -50,6 +50,7 @@ api! {
     SSL_CTX_ctrl: fn(Ptr, c_int, c_long, Ptr) -> c_long;
     SSL_CTX_set_default_verify_paths: fn(Ptr) -> c_int;
     SSL_CTX_set_verify: fn(Ptr, c_int, Ptr) -> ();
+    SSL_CTX_set_security_level: fn(Ptr, c_int) -> ();
     SSL_new: fn(Ptr) -> Ptr;
     SSL_free: fn(Ptr) -> ();
     SSL_ctrl: fn(Ptr, c_int, c_long, Ptr) -> c_long;
@@ -133,7 +134,10 @@ pub(crate) fn available() -> bool {
 
 const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
 const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
-const TLS1_2_VERSION: c_long = 0x303;
+pub(crate) const TLS1_VERSION: c_long = 0x301;
+pub(crate) const TLS1_1_VERSION: c_long = 0x302;
+pub(crate) const TLS1_2_VERSION: c_long = 0x303;
+pub(crate) const TLS1_3_VERSION: c_long = 0x304;
 const SSL_VERIFY_NONE: c_int = 0;
 const SSL_VERIFY_PEER: c_int = 1;
 const BIO_CTRL_PENDING: c_int = 10;
@@ -189,7 +193,15 @@ pub(crate) fn error_string() -> (u64, String) {
 
 impl Ssl {
     /// `host` must be NUL-free. `alpn` is the encoded protocol list (may be empty).
-    pub(crate) fn new(host: &str, is_ip: bool, verify: bool, alpn: &[u8]) -> Option<Ssl> {
+    /// `min_version` is a `TLS1_*_VERSION` constant; below TLS 1.2 the security level is
+    /// lowered to 0, since OpenSSL 3 refuses TLS 1.0/1.1 at level 1 and above.
+    pub(crate) fn new(
+        host: &str,
+        is_ip: bool,
+        verify: bool,
+        alpn: &[u8],
+        min_version: c_long,
+    ) -> Option<Ssl> {
         let lib = lib()?;
         let a = &lib.api;
         let host_c = std::ffi::CString::new(host).ok()?;
@@ -204,9 +216,12 @@ impl Ssl {
             (a.SSL_CTX_ctrl)(
                 ctx,
                 SSL_CTRL_SET_MIN_PROTO_VERSION,
-                TLS1_2_VERSION,
+                min_version,
                 core::ptr::null_mut(),
             );
+            if min_version < TLS1_2_VERSION {
+                (a.SSL_CTX_set_security_level)(ctx, 0);
+            }
             if verify {
                 (a.SSL_CTX_set_default_verify_paths)(ctx);
             }

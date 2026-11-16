@@ -136,6 +136,37 @@ is not checked: the traffic is encrypted but a machine in the middle can read it
 Over TLS each TDS packet is written as its own TLS record; SQL Server closes encrypted
 sessions where records and packets do not line up.
 
+### Old servers (SQL Server 2008, 2012 without the TLS 1.2 update)
+
+The TLS handshake offers TLS 1.2 and 1.3 by default. `tlsmin=1.0` (or
+`Config::with_tls_min(TlsVersion::Tls10)`) also offers TLS 1.0 and 1.1, as go-mssqldb's
+`tlsmin` key does; `tlsmin` accepts `1.0`, `1.1`, `1.2` and `1.3` and any other value is a
+`Config` error. `encrypt=disable` skips TLS entirely, which works unless the server forces
+encryption. Every failure during the handshake, including a connection the server drops
+or resets, is `Error::Tls`, so `Error::is_tls()` tells a caller that an older transport
+may help, while a login or network failure is not retried that way:
+
+```rust,no_run
+use dl_tds::{Client, Config, Encrypt, TlsVersion};
+
+let cfg: Config = "sqlserver://smile:pw@10.0.0.5:1433?database=SMILE_FO".parse()?;
+let client = match Client::connect(&cfg) {
+    Err(e) if e.is_tls() => Client::connect(&cfg.clone().with_tls_min(TlsVersion::Tls10))
+        .or_else(|e| if e.is_tls() {
+            Client::connect(&cfg.with_encrypt(Encrypt::Disabled))
+        } else {
+            Err(e)
+        })?,
+    r => r?,
+};
+# let _ = client;
+# Ok::<(), dl_tds::Error>(())
+```
+
+The OS can still refuse TLS 1.0: Windows administrators can disable it for every process
+with the SChannel `Protocols\TLS 1.0\Client` registry key, and the handshake then fails
+with `Error::Tls`.
+
 ## Types
 
 | SQL Server | `Value` |

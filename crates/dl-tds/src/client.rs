@@ -152,6 +152,13 @@ fn prelogin_exchange<S: Read + Write>(
     prelogin::decode(&reply)
 }
 
+/// Every failure of the TLS handshake, I/O included, is [`Error::Tls`]: a server that
+/// cannot speak the offered versions often just closes or resets the connection, and
+/// callers must be able to tell that from a failure before or after the handshake.
+fn handshake_error(e: dl_tls::Error) -> Error {
+    Error::Tls(e)
+}
+
 fn dial(cfg: &Config) -> Result<TcpStream, Error> {
     let host = cfg.host();
     let dial_host = if host == "."
@@ -213,13 +220,13 @@ impl Client {
         tcp.set_write_timeout(login_timeout)?;
 
         let tls_config = || {
-            dl_tls::Config::new(cfg.host_name_in_certificate()).verify(
-                if cfg.trust_server_certificate() {
+            dl_tls::Config::new(cfg.host_name_in_certificate())
+                .verify(if cfg.trust_server_certificate() {
                     Verify::None
                 } else {
                     Verify::Full
-                },
-            )
+                })
+                .min_version(cfg.tls_min())
         };
         let strict = cfg.encrypt() == Encrypt::Strict;
         let mut reader = MessageReader::new();
@@ -239,7 +246,8 @@ impl Client {
         let (stream, login_only) = if strict {
             // TDS 8: TLS directly on the socket, then PRELOGIN inside it.
             let t = TdsTlsTransport::new(tcp, false, packet::DEFAULT_PACKET_SIZE);
-            let tls = TlsStream::connect(&tls_config().alpn(&[b"tds/8.0"]), t)?;
+            let tls = TlsStream::connect(&tls_config().alpn(&[b"tds/8.0"]), t)
+                .map_err(handshake_error)?;
             let mut s = Stream::Tls(Box::new(tls));
             prelogin_exchange(&mut s, &mut reader, &pl)?;
             (s, false)
@@ -255,8 +263,10 @@ impl Client {
             // server did not answer NOT_SUP. Answer OFF means "encrypt the login only".
             if server.encryption != ENCRYPT_NOT_SUP {
                 let t = TdsTlsTransport::new(tcp, true, packet::DEFAULT_PACKET_SIZE);
-                let mut tls = TlsStream::connect(&tls_config(), t)?;
-                tls.get_mut().finish_handshake()?;
+                let mut tls = TlsStream::connect(&tls_config(), t).map_err(handshake_error)?;
+                tls.get_mut()
+                    .finish_handshake()
+                    .map_err(|e| handshake_error(dl_tls::Error::Io(e)))?;
                 debug_assert!(!tls.get_ref().in_handshake());
                 (Stream::Tls(Box::new(tls)), server.encryption == ENCRYPT_OFF)
             } else {

@@ -23,6 +23,8 @@ mod wire;
 pub use client::Client;
 pub use collation::Collation;
 pub use config::{Config, Encrypt};
+/// TLS protocol version, for [`Config::with_tls_min`] (re-exported from `dl-tls`).
+pub use dl_tls::Version as TlsVersion;
 pub use error::Error;
 pub use params::{IntoParam, NotRef, Param, ParamValue};
 pub use results::{Column, ColumnIndex, Message, MessageKind, ResultSet, Results, Row};
