@@ -44,6 +44,7 @@ helpers (amount in words, tax codes, VietQR).
 | [`dl-ffi`](crates/dl-ffi) | C ABI for .NET, Go (cgo), Flutter and WebAssembly hosts: the rules stay in Rust | hand-ported rules in every language | – | [README](crates/dl-ffi/README.md) |
 | [`dl-tls`](crates/dl-tls) | TLS 1.2/1.3 client over the OS stack: SChannel on Windows, system OpenSSL (loaded at run time) on Linux | rustls, native-tls, Go `crypto/tls` client | – | [README](crates/dl-tls/README.md) |
 | [`dl-http`](crates/dl-http) | HTTP/1.1 client: URLs, keep-alive pool, deadlines, chunked bodies, `HTTP(S)_PROXY` and CONNECT; sans-I/O message layer | Go `net/http` client, `HttpClient`, axios, ureq | – | [README](crates/dl-http/README.md) |
+| [`dl-ws`](crates/dl-ws) | WebSocket (RFC 6455): `ws://`/`wss://` client over dl-http (TLS, proxies, deadlines), frame codec, server-side framing | nhooyr.io/websocket, coder/websocket, `ClientWebSocket`, ws, tungstenite | – | [README](crates/dl-ws/README.md) |
 | [`dl-tds`](crates/dl-tds) | SQL Server client (TDS 7.4/8): SQL login, `sp_executesql` parameters, every common type, collation code pages, login-only/required/strict TLS; conversions match go-mssqldb | go-mssqldb, Microsoft.Data.SqlClient, tedious, tiberius | – | [README](crates/dl-tds/README.md) |
 | [`dl-winsvc`](crates/dl-winsvc) | Windows services (dispatcher, SCM install/start/stop/delete) and DPAPI; stubs elsewhere | `x/sys/windows/svc` + `mgr`, `ProtectedData`, windows-service | – | [README](crates/dl-winsvc/README.md) |
 
@@ -63,6 +64,7 @@ dl-otp ──► dl-hash, dl-encoding, dl-rand
 dl-uuid ─► dl-hash, dl-rand
 dl-log ──► dl-time, dl-json
 dl-http ─► dl-tls, dl-encoding
+dl-ws ───► dl-http, dl-hash, dl-encoding, dl-rand
 dl-tds ──► dl-tls, dl-decimal, dl-time, dl-uuid
 dl-tls, dl-winsvc: OS libraries only (secur32/crypt32/advapi32 on Windows, libssl at run time on Linux)
 dl-json, dl-decimal, dl-time, dl-qr, dl-vn, dl-cli, dl-hash, dl-encoding, dl-rand: no dependencies

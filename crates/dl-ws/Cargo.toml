@@ -1,0 +1,23 @@
+[package]
+name = "dl-ws"
+description = "WebSocket (RFC 6455): frame codec, client over dl-http with TLS and proxies, server-side framing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-encoding.workspace = true
+dl-hash.workspace = true
+dl-rand.workspace = true
+
+# Connecting needs sockets, which the browser target does not have.
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+dl-http.workspace = true
+
+[lints]
+workspace = true

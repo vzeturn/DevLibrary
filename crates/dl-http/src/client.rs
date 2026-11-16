@@ -639,15 +639,14 @@ impl Client {
         }
     }
 
-    fn exchange(
-        &self,
+    /// Writes the request head and body.
+    fn write_request(
         conn: &mut Conn,
         request: &Request,
         route: &Route,
         user_agent: Option<&str>,
         deadline: Option<Instant>,
-        progress: &mut Progress,
-    ) -> Result<(Response, bool), Error> {
+    ) -> Result<(), Error> {
         let absolute = route.proxy.is_some() && request.url.scheme() == Scheme::Http;
         let mut extra: Vec<(&str, &str)> = Vec::with_capacity(2);
         if let Some(ua) = user_agent {
@@ -670,9 +669,22 @@ impl Client {
             conn.write_all(&head, deadline)?;
             conn.write_all(&request.body, deadline)?;
         }
+        Ok(())
+    }
+
+    fn exchange(
+        &self,
+        conn: &mut Conn,
+        request: &Request,
+        route: &Route,
+        user_agent: Option<&str>,
+        deadline: Option<Instant>,
+        progress: &mut Progress,
+    ) -> Result<(Response, bool), Error> {
+        Self::write_request(conn, request, route, user_agent, deadline)?;
         progress.request_written = true;
 
-        let mut response = loop {
+        let response = loop {
             let r = conn.read_head(deadline, progress)?;
             match r.status.as_u16() {
                 101 => return Err(truncated("unexpected 101 Switching Protocols")),
@@ -680,6 +692,17 @@ impl Client {
                 _ => break r,
             }
         };
+        self.read_body(conn, request, response, deadline)
+    }
+
+    /// Reads the body of `response`; returns it with whether the connection is reusable.
+    fn read_body(
+        &self,
+        conn: &mut Conn,
+        request: &Request,
+        mut response: Response,
+        deadline: Option<Instant>,
+    ) -> Result<(Response, bool), Error> {
         let max_body = self.options.max_body;
         let mut reusable =
             keep_alive(&response) && !request.headers.has_token("connection", "close");
@@ -814,6 +837,160 @@ impl Client {
     /// Closes all idle connections.
     pub fn close_idle(&self) {
         self.lock_pool().clear();
+    }
+
+    /// Sends `request` on a new connection and takes the connection over when the server
+    /// answers `101 Switching Protocols` (WebSocket and other `Upgrade` protocols).
+    ///
+    /// The caller sets the `Connection: Upgrade` and `Upgrade` fields. The deadline
+    /// ([`Request::timeout`] or [`ClientOptions::timeout`]) covers connecting and the
+    /// response head; the returned [`Upgraded`] has no read or write timeout. Any other
+    /// final status is read in full and returned with `None`, so the caller can report
+    /// it (a `401` from a hub, for instance). Redirects are not followed.
+    ///
+    /// # Errors
+    /// As [`Client::request`].
+    pub fn upgrade(&self, request: &Request) -> Result<(Response, Option<Upgraded>), Error> {
+        let user_agent = match &self.options.user_agent {
+            Some(ua) => Some(validate_value(ua)?),
+            None => None,
+        };
+        let timeout = request.timeout.or(self.options.timeout);
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
+        let route = self.route(&request.url)?;
+        let mut conn = self.connect(&request.url, &route, user_agent, deadline)?;
+        Self::write_request(&mut conn, request, &route, user_agent, deadline)?;
+        let mut progress = Progress {
+            request_written: true,
+            ..Progress::default()
+        };
+        let response = loop {
+            let r = conn.read_head(deadline, &mut progress)?;
+            match r.status.as_u16() {
+                101 => break r,
+                100..=199 => continue,
+                _ => {
+                    let (response, _) = self.read_body(&mut conn, request, r, deadline)?;
+                    return Ok((response, None));
+                }
+            }
+        };
+        let tcp = conn.io.tcp();
+        tcp.set_read_timeout(None).map_err(Error::Io)?;
+        tcp.set_write_timeout(None).map_err(Error::Io)?;
+        let Conn { io, buf, .. } = conn;
+        Ok((response, Some(Upgraded { io, buf, pos: 0 })))
+    }
+}
+
+/// A connection after `101 Switching Protocols`, returned by [`Client::upgrade`].
+///
+/// Reads first return any bytes the server sent right after the response head, then
+/// read from the socket (through TLS for `https`). It is `Send`; use one thread at a
+/// time, and [`Upgraded::shutdown_handle`] to unblock a reader from another thread.
+pub struct Upgraded {
+    io: Transport,
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl Upgraded {
+    /// Sets the socket read timeout (`None` blocks). A read that times out fails with
+    /// [`io::ErrorKind::WouldBlock`] or [`io::ErrorKind::TimedOut`] and loses no data:
+    /// partial TLS records stay buffered for the next read.
+    ///
+    /// # Errors
+    /// The OS error, e.g. for a zero duration.
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.io.tcp().set_read_timeout(timeout)
+    }
+
+    /// Sets the socket write timeout (`None` blocks).
+    ///
+    /// # Errors
+    /// The OS error, e.g. for a zero duration.
+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.io.tcp().set_write_timeout(timeout)
+    }
+
+    /// Whether the connection runs over TLS.
+    pub fn is_tls(&self) -> bool {
+        matches!(self.io, Transport::Tls(_))
+    }
+
+    /// A handle that closes the socket from another thread; a blocked read then returns.
+    ///
+    /// # Errors
+    /// The OS error from duplicating the socket handle.
+    pub fn shutdown_handle(&self) -> io::Result<ShutdownHandle> {
+        self.io.tcp().try_clone().map(ShutdownHandle)
+    }
+
+    /// Sends TLS close_notify (for `https`) and shuts the socket down in both directions.
+    ///
+    /// # Errors
+    /// The OS error; a peer that already closed is not an error.
+    pub fn shutdown(&mut self) -> io::Result<()> {
+        if let Transport::Tls(t) = &mut self.io {
+            let _ = t.shutdown();
+        }
+        match self.io.tcp().shutdown(std::net::Shutdown::Both) {
+            Err(e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
+            r => r,
+        }
+    }
+}
+
+impl Read for Upgraded {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.pos < self.buf.len() {
+            let n = out.len().min(self.buf.len() - self.pos);
+            out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+            self.pos += n;
+            if self.pos == self.buf.len() {
+                self.buf = Vec::new();
+                self.pos = 0;
+            }
+            return Ok(n);
+        }
+        self.io.read(out)
+    }
+}
+
+impl Write for Upgraded {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.io.write(data)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.io.flush()
+    }
+}
+
+impl fmt::Debug for Upgraded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Upgraded")
+            .field("tls", &self.is_tls())
+            .field("buffered", &(self.buf.len() - self.pos))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Closes an [`Upgraded`] connection's socket from another thread.
+#[derive(Debug)]
+pub struct ShutdownHandle(TcpStream);
+
+impl ShutdownHandle {
+    /// Shuts the socket down in both directions. Blocked reads and writes on the
+    /// connection return; later ones fail.
+    ///
+    /// # Errors
+    /// The OS error; a socket that is already closed is not an error.
+    pub fn shutdown(&self) -> io::Result<()> {
+        match self.0.shutdown(std::net::Shutdown::Both) {
+            Err(e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
+            r => r,
+        }
     }
 }
 
