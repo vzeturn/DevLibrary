@@ -109,7 +109,33 @@ sessions where records and packets do not line up.
 Parameters: `&str`/`String` → `nvarchar(4000)` or `nvarchar(max)`, `i32` → `int`, `i64` →
 `bigint`, `bool` → `bit`, `f64` → `float`, `Decimal` → `decimal(38, s)`, `DateTime` →
 `datetime2(7)`, `OffsetDateTime` → `datetimeoffset(7)`, `Uuid` → `uniqueidentifier`,
-`&[u8]` → `varbinary`; `None` of any of them is a typed NULL.
+`&[u8]` → `varbinary`; `None` of any of them is a typed NULL. `ParamValue::VarChar` sends
+`varchar` encoded in the code page of the connection's collation (characters the code
+page cannot hold become `?`, as SQL Server itself converts them).
+
+## Stored procedures
+
+```rust,no_run
+use dl_tds::{Client, Config, Param, Value};
+
+let cfg: Config = "sqlserver://smile:secret@localhost?database=MM_PMS".parse()?;
+let mut c = Client::connect(&cfg)?;
+let r = c.call(
+    "dbo.MM_Op_CreateLog",
+    &[
+        Param::new("OpId", "3f0c…"),
+        Param::output("LogId", Option::<i64>::None),
+    ],
+)?;
+assert_eq!(r.return_status(), Some(0));
+let (name, value) = &r.output_params()[0];
+assert_eq!((name.as_str(), value), ("LogId", &Value::I64(1)));
+# Ok::<(), dl_tds::Error>(())
+```
+
+`Client::call` sends an RPC request by procedure name (not an `EXEC` batch), so the
+procedure's `RETURN` value and its `OUTPUT` parameters come back exactly as with
+go-mssqldb's `sql.Out` and `mssql.ReturnStatus`, together with every result set.
 
 Code pages: varchar bytes are decoded exactly like go-mssqldb, with full tables for 874,
 1250–1258 and the code pages of the SQL sort orders. The double-byte code pages 932, 936,

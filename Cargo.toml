@@ -34,6 +34,8 @@ dl-http = { path = "crates/dl-http" }
 dl-winsvc = { path = "crates/dl-winsvc" }
 dl-tds = { path = "crates/dl-tds" }
 dl-ws = { path = "crates/dl-ws" }
+dl-ed25519 = { path = "crates/dl-ed25519" }
+dl-flate = { path = "crates/dl-flate" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

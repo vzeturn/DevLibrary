@@ -341,6 +341,92 @@ impl Service {
     }
 }
 
+/// What the SCM does after a service failure (`SC_ACTION`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryAction {
+    /// Nothing.
+    None,
+    /// Restart the service after the delay.
+    Restart(Duration),
+    /// Reboot the machine after the delay.
+    Reboot(Duration),
+    /// Run the configured failure command after the delay.
+    RunCommand(Duration),
+}
+
+impl RecoveryAction {
+    fn to_raw(self) -> (u32, u32) {
+        let ms = |d: Duration| u32::try_from(d.as_millis()).unwrap_or(u32::MAX);
+        match self {
+            RecoveryAction::None => (0, 0),
+            RecoveryAction::Restart(d) => (1, ms(d)),
+            RecoveryAction::Reboot(d) => (2, ms(d)),
+            RecoveryAction::RunCommand(d) => (3, ms(d)),
+        }
+    }
+
+    fn from_raw(kind: u32, delay_ms: u32) -> RecoveryAction {
+        let d = Duration::from_millis(u64::from(delay_ms));
+        match kind {
+            1 => RecoveryAction::Restart(d),
+            2 => RecoveryAction::Reboot(d),
+            3 => RecoveryAction::RunCommand(d),
+            _ => RecoveryAction::None,
+        }
+    }
+}
+
+const SERVICE_CONFIG_DELAYED_AUTO_START_INFO: u32 = 3;
+const SERVICE_CONFIG_FAILURE_ACTIONS_FLAG: u32 = 4;
+
+impl Service {
+    /// Sets the recovery actions (`sc failure`): the first failure runs `actions[0]`, the
+    /// second `actions[1]`, and every later one the last action; the failure count goes
+    /// back to zero after `reset_after` without a failure. An empty list removes every
+    /// action. Like Go's `SetRecoveryActions`.
+    pub fn set_recovery_actions(
+        &self,
+        actions: &[RecoveryAction],
+        reset_after: Duration,
+    ) -> Result<(), Error> {
+        let raw: Vec<(u32, u32)> = actions.iter().map(|a| a.to_raw()).collect();
+        let reset = u32::try_from(reset_after.as_secs()).unwrap_or(u32::MAX);
+        sys::set_failure_actions(&self.h, reset, &raw)
+    }
+
+    /// The recovery actions and the reset period (`sc qfailure`).
+    pub fn recovery_actions(&self) -> Result<(Vec<RecoveryAction>, Duration), Error> {
+        let (reset, raw) = sys::query_failure_actions(&self.h)?;
+        Ok((
+            raw.into_iter()
+                .map(|(k, d)| RecoveryAction::from_raw(k, d))
+                .collect(),
+            Duration::from_secs(u64::from(reset)),
+        ))
+    }
+
+    /// Whether a stop with a non-zero exit code counts as a failure (`sc failureflag`);
+    /// by default only crashes do.
+    pub fn set_recovery_on_non_crash_failures(&self, on: bool) -> Result<(), Error> {
+        sys::set_bool_config(&self.h, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, on)
+    }
+
+    /// See [`Service::set_recovery_on_non_crash_failures`].
+    pub fn recovery_on_non_crash_failures(&self) -> Result<bool, Error> {
+        sys::query_bool_config(&self.h, SERVICE_CONFIG_FAILURE_ACTIONS_FLAG)
+    }
+
+    /// Delays an automatic start until shortly after boot ("Automatic (Delayed Start)").
+    pub fn set_delayed_auto_start(&self, on: bool) -> Result<(), Error> {
+        sys::set_bool_config(&self.h, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, on)
+    }
+
+    /// See [`Service::set_delayed_auto_start`].
+    pub fn delayed_auto_start(&self) -> Result<bool, Error> {
+        sys::query_bool_config(&self.h, SERVICE_CONFIG_DELAYED_AUTO_START_INFO)
+    }
+}
+
 fn state_name(s: State) -> &'static str {
     match s {
         State::Stopped => "service state Stopped",
@@ -372,6 +458,15 @@ mod tests {
             assert!(!matches!(State::from_raw(v), State::Unknown(_)));
         }
         assert_eq!(State::from_raw(99), State::Unknown(99));
+        for a in [
+            RecoveryAction::None,
+            RecoveryAction::Restart(Duration::from_secs(5)),
+            RecoveryAction::Reboot(Duration::from_millis(1)),
+            RecoveryAction::RunCommand(Duration::ZERO),
+        ] {
+            let (k, d) = a.to_raw();
+            assert_eq!(RecoveryAction::from_raw(k, d), a);
+        }
         let st = Status::from(ServiceStatus {
             current_state: SERVICE_RUNNING,
             controls_accepted: SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN,

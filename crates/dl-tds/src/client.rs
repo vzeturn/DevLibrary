@@ -375,7 +375,31 @@ impl Client {
         if params.is_empty() {
             return self.batch(sql);
         }
-        let payload = params::sp_executesql(sql, params, self.session.transaction)?;
+        let payload = params::sp_executesql(
+            sql,
+            params,
+            self.session.transaction,
+            self.session.collation.unwrap_or_default(),
+        )?;
+        self.request(packet::RPC, &payload)
+    }
+
+    /// Calls the stored procedure `procedure` (e.g. `dbo.MM_Op_GetLog`) as an RPC request
+    /// with named parameters, the way go-mssqldb runs a query text that is a bare
+    /// procedure name. Every result set, the procedure's return status
+    /// ([`Results::return_status`]) and the values of [`Param::output`] parameters
+    /// ([`Results::output_params`]) are returned. No SQL text is built from the
+    /// parameters.
+    ///
+    /// # Errors
+    /// As [`query`](Self::query); [`Error::Param`] for an empty procedure name.
+    pub fn call(&mut self, procedure: &str, params: &[Param]) -> Result<Results, Error> {
+        let payload = params::rpc_call(
+            procedure,
+            params,
+            self.session.transaction,
+            self.session.collation.unwrap_or_default(),
+        )?;
         self.request(packet::RPC, &payload)
     }
 

@@ -574,15 +574,15 @@ pub(crate) fn enum_services(scm: &ScHandle) -> Result<Vec<RawService>, Error> {
     }
 }
 
-pub(crate) fn crypt_protect(data: &[u8], flags: u32) -> Result<Vec<u8>, Error> {
-    blob_call(data, flags, true)
+pub(crate) fn crypt_protect(data: &[u8], flags: u32, entropy: &[u8]) -> Result<Vec<u8>, Error> {
+    blob_call(data, flags, true, entropy)
 }
 
-pub(crate) fn crypt_unprotect(data: &[u8], flags: u32) -> Result<Vec<u8>, Error> {
-    blob_call(data, flags, false)
+pub(crate) fn crypt_unprotect(data: &[u8], flags: u32, entropy: &[u8]) -> Result<Vec<u8>, Error> {
+    blob_call(data, flags, false, entropy)
 }
 
-fn blob_call(data: &[u8], flags: u32, protect: bool) -> Result<Vec<u8>, Error> {
+fn blob_call(data: &[u8], flags: u32, protect: bool, entropy: &[u8]) -> Result<Vec<u8>, Error> {
     // DPAPI rejects a NULL data pointer even with length 0, so empty input points at a
     // dummy byte.
     let dummy = [0u8; 1];
@@ -591,18 +591,29 @@ fn blob_call(data: &[u8], flags: u32, protect: bool) -> Result<Vec<u8>, Error> {
         cb_data: len_u32(data.len(), "data too large")?,
         pb_data: src.as_ptr().cast_mut(),
     };
+    let entropy_blob = DataBlob {
+        cb_data: len_u32(entropy.len(), "entropy too large")?,
+        pb_data: entropy.as_ptr().cast_mut(),
+    };
+    // No entropy is a NULL pointer, as callers without entropy pass.
+    let entropy_ptr: *const DataBlob = if entropy.is_empty() {
+        ptr::null()
+    } else {
+        &entropy_blob
+    };
     let mut output = DataBlob {
         cb_data: 0,
         pb_data: ptr::null_mut(),
     };
-    // SAFETY: input describes `cb_data` readable bytes (DPAPI does not write to it);
-    // output receives a LocalAlloc'ed buffer, freed below; the other pointers are NULL.
+    // SAFETY: input (and entropy, when not NULL) describe `cb_data` readable bytes that
+    // outlive the call (DPAPI does not write to them); output receives a LocalAlloc'ed
+    // buffer, freed below; the other pointers are NULL.
     let ok = unsafe {
         if protect {
             CryptProtectData(
                 &input,
                 ptr::null(),
-                ptr::null(),
+                entropy_ptr,
                 ptr::null_mut(),
                 ptr::null(),
                 flags,
@@ -612,7 +623,7 @@ fn blob_call(data: &[u8], flags: u32, protect: bool) -> Result<Vec<u8>, Error> {
             CryptUnprotectData(
                 &input,
                 ptr::null_mut(),
-                ptr::null(),
+                entropy_ptr,
                 ptr::null_mut(),
                 ptr::null(),
                 flags,
@@ -720,6 +731,364 @@ pub(crate) fn parent_is_services() -> Result<bool, Error> {
         };
     }
     Ok(false)
+}
+
+const SERVICE_CONFIG_FAILURE_ACTIONS: u32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ScAction {
+    kind: u32,
+    delay_ms: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ServiceFailureActionsW {
+    reset_period: u32,
+    reboot_msg: *const u16,
+    command: *const u16,
+    actions_len: u32,
+    actions: *const ScAction,
+}
+
+/// Sets `SERVICE_FAILURE_ACTIONSW`; `actions` are `(SC_ACTION_TYPE, delay ms)`.
+pub(crate) fn set_failure_actions(
+    h: &ScHandle,
+    reset_seconds: u32,
+    actions: &[(u32, u32)],
+) -> Result<(), Error> {
+    let list: Vec<ScAction> = actions
+        .iter()
+        .map(|&(kind, delay_ms)| ScAction { kind, delay_ms })
+        .collect();
+    let info = ServiceFailureActionsW {
+        reset_period: reset_seconds,
+        reboot_msg: ptr::null(),
+        command: ptr::null(),
+        actions_len: len_u32(list.len(), "too many actions")?,
+        // Never NULL: NULL means "leave the actions unchanged", while a non-NULL pointer with
+        // zero actions deletes them (an empty Vec's dangling pointer is non-NULL).
+        actions: list.as_ptr(),
+    };
+    // SAFETY: h is valid (opened with SERVICE_ALL_ACCESS, which includes SERVICE_START as
+    // restart actions need); info and the action array it points to outlive the call (with
+    // zero actions the pointer is never read); NULL strings mean "unchanged".
+    let ok = unsafe {
+        ChangeServiceConfig2W(
+            h.0,
+            SERVICE_CONFIG_FAILURE_ACTIONS,
+            (&raw const info).cast(),
+        )
+    };
+    check(ok, "ChangeServiceConfig2W")
+}
+
+/// Reads `SERVICE_FAILURE_ACTIONSW`: reset period (s) and `(type, delay ms)` actions.
+pub(crate) fn query_failure_actions(h: &ScHandle) -> Result<(u32, Vec<(u32, u32)>), Error> {
+    let buf = query_config2(
+        h,
+        SERVICE_CONFIG_FAILURE_ACTIONS,
+        size_of::<ServiceFailureActionsW>(),
+    )?;
+    let bytes = buf.bytes();
+    let fa: ServiceFailureActionsW = read_pod(bytes, 0).ok_or(Error::Win32 {
+        op: "QueryServiceConfig2W",
+        code: 0,
+    })?;
+    let mut actions = Vec::new();
+    let base = bytes.as_ptr() as usize;
+    let at = fa.actions as usize;
+    if !fa.actions.is_null() && at >= base {
+        for i in 0..fa.actions_len as usize {
+            let off = at - base + i * size_of::<ScAction>();
+            let Some(a) = read_pod::<ScAction>(bytes, off) else {
+                break;
+            };
+            actions.push((a.kind, a.delay_ms));
+        }
+    }
+    Ok((fa.reset_period, actions))
+}
+
+/// Sets a `ChangeServiceConfig2W` level whose structure is a single BOOL
+/// (`SERVICE_CONFIG_DELAYED_AUTO_START_INFO`, `SERVICE_CONFIG_FAILURE_ACTIONS_FLAG`).
+pub(crate) fn set_bool_config(h: &ScHandle, level: u32, value: bool) -> Result<(), Error> {
+    let v: i32 = value.into();
+    // SAFETY: h is valid; both structures are one 32-bit BOOL, which `v` provides.
+    let ok = unsafe { ChangeServiceConfig2W(h.0, level, (&raw const v).cast()) };
+    check(ok, "ChangeServiceConfig2W")
+}
+
+pub(crate) fn query_bool_config(h: &ScHandle, level: u32) -> Result<bool, Error> {
+    let buf = query_config2(h, level, 4)?;
+    let v: i32 = read_pod(buf.bytes(), 0).ok_or(Error::Win32 {
+        op: "QueryServiceConfig2W",
+        code: 0,
+    })?;
+    Ok(v != 0)
+}
+
+/// `QueryServiceConfig2W` into an aligned buffer. Pointers in the structure point into
+/// the same buffer; they are only used as offsets with `read_pod`.
+fn query_config2(h: &ScHandle, level: u32, min: usize) -> Result<AlignedBuf, Error> {
+    let mut needed = 0u32;
+    // SAFETY: a NULL buffer with size 0 only asks for the required size.
+    let ok = unsafe { QueryServiceConfig2W(h.0, level, ptr::null_mut(), 0, &mut needed) };
+    if ok == 0 && last_code() != ERROR_INSUFFICIENT_BUFFER {
+        return Err(last_error("QueryServiceConfig2W"));
+    }
+    let mut buf = AlignedBuf::new((needed as usize).max(min));
+    let size = len_u32(buf.len(), "buffer too large")?;
+    // SAFETY: buf is writable for `size` bytes and 8-byte aligned.
+    let ok = unsafe { QueryServiceConfig2W(h.0, level, buf.as_mut_ptr(), size, &mut needed) };
+    check(ok, "QueryServiceConfig2W")?;
+    Ok(buf)
+}
+
+const SE_FILE_OBJECT: u32 = 1;
+const OWNER_SECURITY_INFORMATION: u32 = 0x1;
+const DACL_SECURITY_INFORMATION: u32 = 0x4;
+const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x8000_0000;
+const SE_DACL_PROTECTED: u16 = 0x1000;
+const INHERITED_ACE: u8 = 0x10;
+const SDDL_REVISION_1: u32 = 1;
+const WIN_BUILTIN_ADMINISTRATORS_SID: u32 = 26;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AclHeader {
+    revision: u8,
+    sbz1: u8,
+    size: u16,
+    ace_count: u16,
+    sbz2: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AceHeader {
+    kind: u8,
+    flags: u8,
+    size: u16,
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn GetNamedSecurityInfoW(
+        name: *const u16,
+        object_type: u32,
+        info: u32,
+        owner: *mut *mut c_void,
+        group: *mut *mut c_void,
+        dacl: *mut *mut c_void,
+        sacl: *mut *mut c_void,
+        sd: *mut *mut c_void,
+    ) -> u32;
+    fn SetNamedSecurityInfoW(
+        name: *const u16,
+        object_type: u32,
+        info: u32,
+        owner: *mut c_void,
+        group: *mut c_void,
+        dacl: *mut c_void,
+        sacl: *mut c_void,
+    ) -> u32;
+    fn GetSecurityDescriptorControl(sd: *mut c_void, control: *mut u16, revision: *mut u32) -> i32;
+    fn GetSecurityDescriptorDacl(
+        sd: *mut c_void,
+        present: *mut i32,
+        dacl: *mut *mut c_void,
+        defaulted: *mut i32,
+    ) -> i32;
+    fn ConvertSidToStringSidW(sid: *mut c_void, out: *mut *mut u16) -> i32;
+    fn IsValidSid(sid: *mut c_void) -> i32;
+    fn CreateWellKnownSid(kind: u32, domain: *mut c_void, sid: *mut c_void, size: *mut u32) -> i32;
+    fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl: *const u16,
+        revision: u32,
+        sd: *mut *mut c_void,
+        size: *mut u32,
+    ) -> i32;
+}
+
+/// Frees a LocalAlloc'ed pointer when dropped.
+struct LocalBox(*mut c_void);
+
+impl Drop for LocalBox {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: the pointer came from a Win32 call documented to LocalAlloc it, and is
+            // freed exactly once.
+            unsafe { LocalFree(self.0) };
+        }
+    }
+}
+
+fn sid_string(sid: *mut c_void) -> Result<String, Error> {
+    let mut out: *mut u16 = ptr::null_mut();
+    // SAFETY: sid points to a SID inside a security descriptor that the caller keeps
+    // alive; out receives a LocalAlloc'ed NUL-terminated string.
+    let ok = unsafe { ConvertSidToStringSidW(sid, &mut out) };
+    check(ok, "ConvertSidToStringSidW")?;
+    let guard = LocalBox(out.cast());
+    let mut units = Vec::new();
+    let mut i = 0;
+    loop {
+        // SAFETY: `out` is NUL-terminated; reading stops at the terminator.
+        let u = unsafe { *out.add(i) };
+        if u == 0 {
+            break;
+        }
+        units.push(u);
+        i += 1;
+    }
+    drop(guard);
+    Ok(String::from_utf16_lossy(&units))
+}
+
+pub(crate) fn read_security(path: &[u16]) -> Result<crate::acl::Descriptor, Error> {
+    let mut owner: *mut c_void = ptr::null_mut();
+    let mut dacl: *mut c_void = ptr::null_mut();
+    let mut sd: *mut c_void = ptr::null_mut();
+    // SAFETY: path is NUL-terminated; the out-pointers point into the descriptor that is
+    // returned in `sd` (LocalAlloc'ed, freed by the guard below).
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(Error::Win32 {
+            op: "GetNamedSecurityInfoW",
+            code: rc,
+        });
+    }
+    let _guard = LocalBox(sd);
+    let mut control = 0u16;
+    let mut revision = 0u32;
+    // SAFETY: sd is the valid descriptor returned above.
+    let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
+    check(ok, "GetSecurityDescriptorControl")?;
+    let mut d = crate::acl::Descriptor {
+        owner: String::new(),
+        protected: control & SE_DACL_PROTECTED != 0,
+        null_dacl: dacl.is_null(),
+        aces: Vec::new(),
+    };
+    if !owner.is_null() {
+        d.owner = sid_string(owner)?;
+    }
+    if dacl.is_null() {
+        return Ok(d);
+    }
+    // SAFETY: dacl points to an ACL inside the descriptor; the header is 8 bytes.
+    let header: AclHeader = unsafe { ptr::read_unaligned(dacl.cast::<AclHeader>()) };
+    let acl_end = dacl as usize + usize::from(header.size);
+    let mut at = dacl as usize + size_of::<AclHeader>();
+    for _ in 0..header.ace_count {
+        if at + size_of::<AceHeader>() > acl_end {
+            break;
+        }
+        // SAFETY: `at` is inside the ACL (checked against its declared size).
+        let ace: AceHeader = unsafe { ptr::read_unaligned(at as *const AceHeader) };
+        let size = usize::from(ace.size);
+        if size < size_of::<AceHeader>() || at + size > acl_end {
+            break;
+        }
+        let mut entry = crate::acl::Ace {
+            kind: ace.kind,
+            sid: String::new(),
+            mask: 0,
+            inherited: ace.flags & INHERITED_ACE != 0,
+        };
+        // ACCESS_ALLOWED_ACE / ACCESS_DENIED_ACE: header, mask, then the SID.
+        if (ace.kind == 0 || ace.kind == 1) && size >= 8 + 8 {
+            // SAFETY: the mask is the 4 bytes after the 4-byte header, inside the ACE.
+            entry.mask = unsafe { ptr::read_unaligned((at + 4) as *const u32) };
+            let sid = (at + 8) as *mut c_void;
+            // SAFETY: the SID starts inside the ACE; IsValidSid checks its structure.
+            if unsafe { IsValidSid(sid) } != 0 {
+                entry.sid = sid_string(sid)?;
+            }
+        }
+        d.aces.push(entry);
+        at += size;
+    }
+    Ok(d)
+}
+
+fn wide_lit(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(core::iter::once(0)).collect()
+}
+
+/// Owner Administrators; a protected DACL with full control for SYSTEM and
+/// Administrators (inherited by children for a directory).
+pub(crate) fn restrict_path(path: &[u16], is_dir: bool) -> Result<(), Error> {
+    let sddl = if is_dir {
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+    } else {
+        "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+    };
+    let sddl = wide_lit(sddl);
+    let mut sd: *mut c_void = ptr::null_mut();
+    // SAFETY: sddl is NUL-terminated; sd receives a LocalAlloc'ed descriptor.
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut sd,
+            ptr::null_mut(),
+        )
+    };
+    check(ok, "ConvertStringSecurityDescriptorToSecurityDescriptorW")?;
+    let _guard = LocalBox(sd);
+    let mut present = 0i32;
+    let mut defaulted = 0i32;
+    let mut dacl: *mut c_void = ptr::null_mut();
+    // SAFETY: sd is the valid descriptor built above; dacl points into it.
+    let ok = unsafe { GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted) };
+    check(ok, "GetSecurityDescriptorDacl")?;
+    let mut sid = [0u64; 9]; // SECURITY_MAX_SID_SIZE is 68 bytes
+    let mut size = (sid.len() * 8) as u32;
+    // SAFETY: sid is a writable, aligned buffer of `size` bytes.
+    let ok = unsafe {
+        CreateWellKnownSid(
+            WIN_BUILTIN_ADMINISTRATORS_SID,
+            ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    check(ok, "CreateWellKnownSid")?;
+    // SAFETY: path is NUL-terminated; owner and dacl are valid for the call's duration.
+    let rc = unsafe {
+        SetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            sid.as_mut_ptr().cast(),
+            ptr::null_mut(),
+            dacl,
+            ptr::null_mut(),
+        )
+    };
+    if rc != 0 {
+        return Err(Error::Win32 {
+            op: "SetNamedSecurityInfoW",
+            code: rc,
+        });
+    }
+    Ok(())
 }
 
 /// Blocks in `StartServiceCtrlDispatcherW` until the service stops.
