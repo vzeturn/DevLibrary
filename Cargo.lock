@@ -143,3 +143,13 @@ dependencies = [
 [[package]]
 name = "dl-winsvc"
 version = "0.2.1"
+
+[[package]]
+name = "dl-ws"
+version = "0.2.1"
+dependencies = [
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-rand",
+]
