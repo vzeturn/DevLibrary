@@ -1,0 +1,21 @@
+[package]
+name = "dl-http"
+description = "HTTP/1.1 client: URLs, requests, chunked bodies, proxies (CONNECT), TLS through dl-tls."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-tls.workspace = true
+
+# Proxy basic auth in the client, which is not built for the browser.
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+dl-encoding.workspace = true
+
+[lints]
+workspace = true

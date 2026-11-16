@@ -29,6 +29,10 @@ dl-otp = { path = "crates/dl-otp" }
 dl-jwt = { path = "crates/dl-jwt" }
 dl-bench = { path = "crates/dl-bench" }
 dl-ffi = { path = "crates/dl-ffi" }
+dl-tls = { path = "crates/dl-tls" }
+dl-http = { path = "crates/dl-http" }
+dl-winsvc = { path = "crates/dl-winsvc" }
+dl-tds = { path = "crates/dl-tds" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

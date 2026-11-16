@@ -42,6 +42,10 @@ helpers (amount in words, tax codes, VietQR).
 | [`dl-rand`](crates/dl-rand) | OS CSPRNG and fast xoshiro256** | RandomNumberGenerator, crypto.getRandomValues, rand | – | [README](crates/dl-rand/README.md) |
 | [`dl-bench`](crates/dl-bench) | Tiny benchmark harness used by the other crates | criterion | – | [README](crates/dl-bench/README.md) |
 | [`dl-ffi`](crates/dl-ffi) | C ABI for .NET, Go (cgo), Flutter and WebAssembly hosts: the rules stay in Rust | hand-ported rules in every language | – | [README](crates/dl-ffi/README.md) |
+| [`dl-tls`](crates/dl-tls) | TLS 1.2/1.3 client over the OS stack: SChannel on Windows, system OpenSSL (loaded at run time) on Linux | rustls, native-tls, Go `crypto/tls` client | – | [README](crates/dl-tls/README.md) |
+| [`dl-http`](crates/dl-http) | HTTP/1.1 client: URLs, keep-alive pool, deadlines, chunked bodies, `HTTP(S)_PROXY` and CONNECT; sans-I/O message layer | Go `net/http` client, `HttpClient`, axios, ureq | – | [README](crates/dl-http/README.md) |
+| [`dl-tds`](crates/dl-tds) | SQL Server client (TDS 7.4/8): SQL login, `sp_executesql` parameters, every common type, collation code pages, login-only/required/strict TLS; conversions match go-mssqldb | go-mssqldb, Microsoft.Data.SqlClient, tedious, tiberius | – | [README](crates/dl-tds/README.md) |
+| [`dl-winsvc`](crates/dl-winsvc) | Windows services (dispatcher, SCM install/start/stop/delete) and DPAPI; stubs elsewhere | `x/sys/windows/svc` + `mgr`, `ProtectedData`, windows-service | – | [README](crates/dl-winsvc/README.md) |
 
 ### Using the crates from other languages
 
@@ -58,6 +62,9 @@ dl-jwt ──► dl-json, dl-hash, dl-encoding
 dl-otp ──► dl-hash, dl-encoding, dl-rand
 dl-uuid ─► dl-hash, dl-rand
 dl-log ──► dl-time, dl-json
+dl-http ─► dl-tls, dl-encoding
+dl-tds ──► dl-tls, dl-decimal, dl-time, dl-uuid
+dl-tls, dl-winsvc: OS libraries only (secur32/crypt32/advapi32 on Windows, libssl at run time on Linux)
 dl-json, dl-decimal, dl-time, dl-qr, dl-vn, dl-cli, dl-hash, dl-encoding, dl-rand: no dependencies
 ```
 
@@ -161,9 +168,10 @@ The full list is in [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 ## Status and roadmap
 
 Version 0.1: APIs may still change before 1.0. Each crate's README lists what it does not
-do yet. Planned next: HTTP/1.1 client and server, deflate/gzip (and PNG output for
-`dl-qr`), SQL drivers (PostgreSQL, SQL Server), RS256/ES256 for `dl-jwt`, Argon2id,
-IANA time zones for `dl-time`, and bindings for C, .NET, Node.js and Python.
+do yet. Planned next: HTTP/1.1 server and WebSocket, macOS TLS (Security.framework),
+PostgreSQL driver (SCRAM-SHA-256), an embedded key-value store for agent outboxes,
+deflate/gzip (and PNG output for `dl-qr`), RS256/ES256 for `dl-jwt`, Argon2id, IANA time
+zones for `dl-time`, and bindings for Node.js and Python.
 
 Cryptographic code here (`dl-hash`, `dl-jwt`, `dl-otp`) follows the standards and their
 test vectors but **has not been independently audited**. See [SECURITY.md](SECURITY.md).

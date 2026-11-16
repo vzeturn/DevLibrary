@@ -44,6 +44,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-http"
+version = "0.2.1"
+dependencies = [
+ "dl-encoding",
+ "dl-tls",
+]
+
+[[package]]
 name = "dl-json"
 version = "0.2.1"
 dependencies = [
@@ -95,11 +103,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-tds"
+version = "0.2.1"
+dependencies = [
+ "dl-decimal",
+ "dl-rand",
+ "dl-time",
+ "dl-tls",
+ "dl-uuid",
+]
+
+[[package]]
 name = "dl-time"
 version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
+
+[[package]]
+name = "dl-tls"
+version = "0.2.1"
 
 [[package]]
 name = "dl-uuid"
@@ -116,3 +139,7 @@ version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
+
+[[package]]
+name = "dl-winsvc"
+version = "0.2.1"
