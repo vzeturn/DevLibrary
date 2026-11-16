@@ -11,6 +11,9 @@ mod packet;
 mod params;
 mod prelogin;
 mod results;
+mod sspi;
+#[cfg(windows)]
+mod sspi_windows;
 mod tls;
 mod token;
 mod types;

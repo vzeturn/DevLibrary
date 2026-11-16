@@ -1,7 +1,8 @@
 # dl-tds
 
-A SQL Server client (TDS 7.4, and TDS 8 with strict encryption) with no dependencies and
-no `unsafe`: login with SQL authentication, plain batches, parameterised queries through
+A SQL Server client (TDS 7.4, and TDS 8 with strict encryption) with no dependencies:
+login with SQL authentication or, on Windows, integrated authentication (SSPI), plain
+batches, parameterised queries through
 `sp_executesql`, every common column type, multiple result sets, `RETURN` values, server
 messages and query cancellation. TLS goes through [`dl-tls`](../dl-tls) (SChannel on
 Windows, system OpenSSL on Linux).
@@ -16,7 +17,7 @@ with go-mssqldb: connection strings, encryption defaults and the conversions of
 | Ecosystem | Packages |
 |-----------|----------|
 | Go        | `github.com/microsoft/go-mssqldb` (+ `golang-sql/civil`, `shopspring/decimal`, `x/crypto` md4) |
-| .NET      | `Microsoft.Data.SqlClient` (SQL authentication) |
+| .NET      | `Microsoft.Data.SqlClient` (SQL and Windows integrated authentication) |
 | Node.js   | `tedious`, `mssql` |
 | Rust      | `tiberius` |
 
@@ -70,6 +71,52 @@ Server=.;Database=SMILE_POS;User Id=smile;Password=...;Encrypt=false;TrustServer
 - Keys are case-insensitive; URL values are percent-decoded.
 - `connection timeout` bounds connecting and login; `Client::set_timeout` bounds each
   request. A request that times out sends ATTENTION, so the connection stays usable.
+
+## Integrated authentication (Windows)
+
+```rust,no_run
+use dl_tds::{Client, Config};
+
+// Any of these logs in as the current Windows account (DOMAIN\user):
+let cfg: Config = "Server=.\\SQLEXPRESS;Database=master;Integrated Security=SSPI".parse()?;
+let _same: Config = "Server=localhost;Trusted_Connection=yes".parse()?;
+let _url: Config = "sqlserver://localhost?trusted_connection=true".parse()?;
+let _no_user: Config = "sqlserver://localhost/SQLEXPRESS?database=master".parse()?;
+let _built = Config::new("db01").with_integrated_auth();
+
+let mut c = Client::connect(&cfg)?;
+let rs = c.query("SELECT SUSER_SNAME()", &[])?;
+let me: String = rs.rows()[0].get(0)?;
+println!("logged in as {me}");
+# Ok::<(), dl_tds::Error>(())
+```
+
+`Integrated Security=SSPI|true|yes` or `Trusted_Connection=yes` (ADO), and
+`trusted_connection=true` or a URL **without a user name** (go-mssqldb's rule) turn it on.
+The client uses SSPI's `Negotiate` package with the logged-on user's credentials, so it
+is Kerberos where a domain controller can issue a ticket for the server and NTLM
+otherwise (`sys.dm_exec_connections.auth_scheme` shows which). The first token goes into
+LOGIN7; the server's SSPI challenges are answered until it sends LOGINACK; the Kerberos
+mutual-authentication reply is checked. User name and password are not sent.
+
+The service principal name follows Microsoft.Data.SqlClient:
+
+| Server | SPN |
+|--------|-----|
+| `ServerSPN=...` (also `Server SPN`) given | that value |
+| `host,port` or `host:port` | `MSSQLSvc/<fqdn>:<port>` |
+| `host\INSTANCE`, no port | `MSSQLSvc/<fqdn>:INSTANCE` |
+| `host` | `MSSQLSvc/<fqdn>:1433` |
+
+`<fqdn>` is the computer's DNS name (`GetComputerNameExW`) for `.`, `(local)`,
+`localhost` and loopback addresses, the canonical DNS name of any other host name
+(`GetAddrInfoW` with `AI_CANONNAME`, as SqlClient's `Dns.GetHostEntry`), and an IP address
+as given. When no SPN is registered for that name, Negotiate falls back to NTLM.
+
+Outside Windows `Client::connect` returns `Error::Unsupported("integrated authentication
+needs Windows (SSPI)")` before opening a socket; Kerberos and NTLM are not implemented
+by hand. SSPI failures are `Error::Sspi { function, status }`; error messages never
+contain tokens or passwords.
 
 ## Encryption
 
@@ -165,8 +212,13 @@ NULLs, five collations): identical output, with two deliberate differences:
 
 ## Limits
 
-- SQL authentication only. Windows integrated authentication (SSPI) is not implemented;
-  the login code has the FEATUREEXT/SSPI hook where it would go.
+- SQL authentication everywhere; integrated authentication on Windows only (SSPI, the
+  current user; no explicit Windows user name/password, no Kerberos or NTLM on Linux or
+  macOS). No Azure AD / Entra ID (FEDAUTH) logins.
+- Integrated authentication sends no TLS channel bindings, so a server configured with
+  `Extended Protection = Required` may refuse it (the default, `Off`, works).
+- No reverse DNS for SPNs: a server given by IP address gets `MSSQLSvc/<ip>:<port>`, which
+  usually means NTLM; use the host name or `ServerSPN` for Kerberos.
 - No MARS: one request at a time per connection; results are read completely.
 - No bulk copy, table-valued parameters or Always Encrypted columns.
 - Routing (Azure redirects) is reported as an error.

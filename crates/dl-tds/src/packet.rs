@@ -13,6 +13,8 @@ pub(crate) const RPC: u8 = 0x03;
 pub(crate) const REPLY: u8 = 0x04;
 pub(crate) const ATTENTION: u8 = 0x06;
 pub(crate) const LOGIN7: u8 = 0x10;
+/// SSPI message: the client's answer to an SSPI token during integrated authentication.
+pub(crate) const SSPI: u8 = 0x11;
 pub(crate) const PRELOGIN: u8 = 0x12;
 
 pub(crate) const HEADER_LEN: usize = 8;

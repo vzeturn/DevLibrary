@@ -40,9 +40,9 @@ pub(crate) struct Login {
     pub(crate) language: String,
     pub(crate) database: String,
     pub(crate) client_id: [u8; 6],
-    /// Initial SSPI blob for Windows integrated authentication. When non-empty,
-    /// `fIntSecurity` is set and user name / password are not sent. Extension point:
-    /// nothing fills it yet.
+    /// First SSPI token for Windows integrated authentication. When non-empty,
+    /// `fIntSecurity` is set and user name / password are not sent. Tokens of 65535 bytes
+    /// or more put `0xFFFF` in `cbSSPI` and the real length in `cbSSPILong`.
     pub(crate) sspi: Vec<u8>,
     pub(crate) change_password: String,
     /// Raw FEATUREEXT block (features + 0xFF terminator); empty = no extension.
@@ -287,5 +287,89 @@ mod tests {
         let off = u16::from_le_bytes([b[78], b[79]]) as usize;
         assert_eq!(u16::from_le_bytes([b[80], b[81]]), 3);
         assert_eq!(&b[off..off + 3], &[1, 2, 3]);
+    }
+
+    fn le16(b: &[u8], at: usize) -> usize {
+        u16::from_le_bytes([b[at], b[at + 1]]) as usize
+    }
+
+    fn le32(b: &[u8], at: usize) -> usize {
+        u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]]) as usize
+    }
+
+    #[test]
+    fn sspi_layout() {
+        let token: Vec<u8> = b"NTLMSSP\0\x01\0\0\0"
+            .iter()
+            .copied()
+            .cycle()
+            .take(40)
+            .collect();
+        let login = Login {
+            tds_version: TDS_74,
+            packet_size: 4096,
+            host_name: "PC1".into(),
+            app_name: "agent".into(),
+            server_name: "localhost".into(),
+            library_name: "dl-tds".into(),
+            database: "master".into(),
+            sspi: token.clone(),
+            ..Login::default()
+        };
+        let b = login.encode();
+        assert_eq!(le32(&b, 0), b.len());
+        assert_eq!(b[25], F_ODBC | F_INT_SECURITY);
+        assert_eq!(b[27], 0); // no FEATUREEXT, no password change
+        // No user name, no password: zero lengths.
+        assert_eq!((le16(&b, 42), le16(&b, 46)), (0, 0));
+        // SSPI data right after the last string (database), at the advertised offset.
+        let db_end = le16(&b, 68) + 2 * le16(&b, 70);
+        assert_eq!(le16(&b, 78), db_end);
+        assert_eq!(le16(&b, 80), token.len());
+        assert_eq!(le32(&b, 90), 0); // cbSSPILong unused
+        assert_eq!(&b[db_end..db_end + token.len()], &token[..]);
+        // AttachDB and ChangePassword are empty and start after the token.
+        assert_eq!(le16(&b, 82), db_end + token.len());
+        assert_eq!((le16(&b, 84), le16(&b, 88)), (0, 0));
+        assert_eq!(b.len(), db_end + token.len());
+        // The password is not sent even when set.
+        let with_pw = Login {
+            user_name: "sa".into(),
+            password: "secret".into(),
+            ..login.clone()
+        };
+        assert_eq!(with_pw.encode(), b);
+    }
+
+    #[test]
+    fn sspi_long_length() {
+        for (n, short, long) in [
+            (65534usize, 65534usize, 0usize),
+            (65535, 0xFFFF, 65535),
+            (70_000, 0xFFFF, 70_000),
+        ] {
+            let token: Vec<u8> = (0..n).map(|i| i as u8).collect();
+            let login = Login {
+                tds_version: TDS_74,
+                host_name: "h".into(),
+                sspi: token.clone(),
+                ..Login::default()
+            };
+            let b = login.encode();
+            assert_eq!(le32(&b, 0), b.len(), "{n}");
+            assert_eq!(b[25] & F_INT_SECURITY, F_INT_SECURITY);
+            assert_eq!(le16(&b, 80), short, "{n}");
+            assert_eq!(le32(&b, 90), long, "{n}");
+            let off = le16(&b, 78);
+            assert_eq!(off, HEADER_LEN + 2);
+            assert_eq!(&b[off..off + n], &token[..], "{n}");
+            // The framed message splits into packets but carries every byte.
+            let mut framed = Vec::new();
+            crate::packet::frame(crate::packet::LOGIN7, &b, 4096, &mut framed);
+            let mut r = crate::packet::MessageReader::new();
+            r.push_raw(&framed);
+            let (t, m) = r.poll().unwrap().unwrap();
+            assert_eq!((t, m.len()), (crate::packet::LOGIN7, b.len()));
+        }
     }
 }

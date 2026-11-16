@@ -105,6 +105,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-pcsc"
+version = "0.2.1"
+
+[[package]]
 name = "dl-qr"
 version = "0.2.1"
 dependencies = [
@@ -117,6 +121,23 @@ version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
+
+[[package]]
+name = "dl-serial"
+version = "0.2.1"
+
+[[package]]
+name = "dl-signalr"
+version = "0.2.1"
+dependencies = [
+ "dl-http",
+ "dl-json",
+ "dl-ws",
+]
+
+[[package]]
+name = "dl-sqlite"
+version = "0.2.1"
 
 [[package]]
 name = "dl-tds"
@@ -157,6 +178,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-winos"
+version = "0.2.1"
+
+[[package]]
 name = "dl-winsvc"
 version = "0.2.1"
 
@@ -168,4 +193,12 @@ dependencies = [
  "dl-hash",
  "dl-http",
  "dl-rand",
+]
+
+[[package]]
+name = "dl-zip"
+version = "0.2.1"
+dependencies = [
+ "dl-flate",
+ "dl-hash",
 ]

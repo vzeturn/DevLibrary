@@ -14,11 +14,14 @@ use crate::packet::{self, MessageReader};
 use crate::params::{self, Param};
 use crate::prelogin::{self, ENCRYPT_NOT_SUP, ENCRYPT_OFF, ENCRYPT_ON};
 use crate::results::{Message, Results};
+use crate::sspi::{self, Negotiate};
 use crate::tls::TdsTlsTransport;
 use crate::token::{self, DONE, DONE_ATTN, LoginAck, Session};
 
 /// How long to wait for the server to acknowledge an ATTENTION (go-mssqldb uses 5 s).
 const CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Most SSPI round trips after LOGIN7 (NTLM needs 1, Kerberos 0 or 1).
+const MAX_SSPI_ROUNDS: usize = 8;
 
 type Tls = TlsStream<TdsTlsTransport<TcpStream>>;
 
@@ -189,8 +192,17 @@ impl Client {
     /// # Errors
     /// [`Error::Io`] (network), [`Error::Tls`], [`Error::EncryptionNotSupported`],
     /// [`Error::Server`] (login failed, e.g. error 18456), [`Error::Browser`] (named
-    /// instance not found), [`Error::Routing`], [`Error::Malformed`].
+    /// instance not found), [`Error::Routing`], [`Error::Malformed`]. With
+    /// [`Config::integrated_auth`]: [`Error::Sspi`] when Windows cannot authenticate, and
+    /// [`Error::Unsupported`] outside Windows.
     pub fn connect(cfg: &Config) -> Result<Client, Error> {
+        // Integrated authentication: get the user's credentials before touching the
+        // network, so a platform without SSPI fails fast.
+        let mut negotiate = if cfg.integrated_auth() {
+            Some(Negotiate::acquire()?)
+        } else {
+            None
+        };
         let tcp = dial(cfg)?;
         tcp.set_nodelay(true)?;
         // Bound the handshake even without a configured timeout.
@@ -258,6 +270,18 @@ impl Client {
             Some(i) => format!("{}\\{}", cfg.host(), i),
             None => cfg.host().to_string(),
         };
+        let sspi_token = match negotiate.as_mut() {
+            Some(n) => {
+                let t = n.initialize(&sspi::target_name(cfg))?;
+                if t.is_empty() {
+                    return Err(Error::Unsupported(
+                        "the SSPI package produced no initial token",
+                    ));
+                }
+                t
+            }
+            None => Vec::new(),
+        };
         let login = Login {
             tds_version: if strict { TDS_80 } else { TDS_74 },
             packet_size: cfg.packet_size() as u32,
@@ -272,6 +296,7 @@ impl Client {
             library_name: "dl-tds".into(),
             language: cfg.language.clone(),
             database: cfg.database().to_string(),
+            sspi: sspi_token,
             ..Login::default()
         };
         let payload = login.encode();
@@ -313,36 +338,89 @@ impl Client {
             login_ack: LoginAck::default(),
             encrypted,
         };
-        let (ptype, msg) = client.reader.read_message(&mut client.stream)?;
-        if ptype != packet::REPLY {
-            return Err(Error::Malformed {
-                token: 0,
-                offset: 0,
-                what: "login response is not a REPLY packet",
-            });
-        }
-        let resp = token::parse(&msg, &mut client.session)?;
-        client.messages.extend(resp.messages);
-        if let Some(e) = resp.error {
-            return Err(e);
-        }
-        if let Some((server, port)) = client.session.routing.take() {
-            return Err(Error::Routing { server, port });
-        }
-        let Some(ack) = resp.login_ack else {
-            if resp.sspi {
-                return Err(Error::Unsupported("integrated (SSPI) authentication"));
-            }
-            return Err(Error::Malformed {
-                token: 0,
-                offset: msg.len(),
-                what: "login response has no LOGINACK",
-            });
-        };
+        let ack = client.finish_login(negotiate.as_mut())?;
         client.login_ack = ack;
         client.apply_packet_size();
         client.set_timeout(cfg.timeout())?;
         Ok(client)
+    }
+
+    /// Reads the login response(s) until LOGINACK. With integrated authentication each
+    /// SSPI token the server sends is answered with an SSPI message.
+    fn finish_login(&mut self, mut negotiate: Option<&mut Negotiate>) -> Result<LoginAck, Error> {
+        let mut rounds = 0;
+        loop {
+            let (ptype, msg) = self.reader.read_message(&mut self.stream)?;
+            if ptype != packet::REPLY {
+                return Err(Error::Malformed {
+                    token: 0,
+                    offset: 0,
+                    what: "login response is not a REPLY packet",
+                });
+            }
+            let resp = token::parse(&msg, &mut self.session)?;
+            self.messages.extend(resp.messages);
+            if let Some(e) = resp.error {
+                return Err(e);
+            }
+            if let Some((server, port)) = self.session.routing.take() {
+                return Err(Error::Routing { server, port });
+            }
+            match (resp.login_ack, resp.sspi, negotiate.as_deref_mut()) {
+                (Some(ack), challenge, neg) => {
+                    // Kerberos mutual authentication: the server's last token (AP-REP)
+                    // comes with LOGINACK; SSPI verifies it, nothing is sent back.
+                    if let (Some(tok), Some(neg)) = (challenge, neg)
+                        && !neg.is_done()
+                    {
+                        neg.next(&tok)?;
+                    }
+                    return Ok(ack);
+                }
+                (None, Some(challenge), Some(neg)) => {
+                    rounds += 1;
+                    if rounds > MAX_SSPI_ROUNDS {
+                        return Err(Error::Malformed {
+                            token: token::SSPI,
+                            offset: 0,
+                            what: "too many SSPI round trips during login",
+                        });
+                    }
+                    let answer = if neg.is_done() {
+                        Vec::new()
+                    } else {
+                        neg.next(&challenge)?
+                    };
+                    // SPNEGO's last server token (accept-completed + mechListMIC) arrives
+                    // in a message of its own and needs no answer: LOGINACK follows. An
+                    // empty SSPI message here would be read by the server as a request
+                    // and shift every later response by one.
+                    if !answer.is_empty() {
+                        let mut framed = Vec::new();
+                        packet::frame(
+                            packet::SSPI,
+                            &answer,
+                            packet::DEFAULT_PACKET_SIZE,
+                            &mut framed,
+                        );
+                        write_packets(&mut self.stream, &framed)?;
+                        self.stream.flush()?;
+                    }
+                }
+                (None, Some(_), None) => {
+                    return Err(Error::Unsupported(
+                        "the server asked for integrated (SSPI) authentication; set Integrated Security=SSPI",
+                    ));
+                }
+                (None, None, _) => {
+                    return Err(Error::Malformed {
+                        token: 0,
+                        offset: msg.len(),
+                        what: "login response has no LOGINACK",
+                    });
+                }
+            }
+        }
     }
 
     fn apply_packet_size(&mut self) {
