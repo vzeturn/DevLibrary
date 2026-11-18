@@ -15,6 +15,7 @@ dependencies = [
  "dl-log",
  "dl-rand",
  "dl-tds",
+ "dl-tls",
  "dl-winsvc",
 ]
 

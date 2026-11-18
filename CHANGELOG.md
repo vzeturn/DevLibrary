@@ -12,12 +12,6 @@ All notable changes are listed here. The format follows
   10+ x64/x86 and Windows 7 / Server 2008 R2 / 2012 x64/x86, static, system-DLL-only
   import check, wine smoke. Win7 builds report the `windows7-<arch>` target.
 
-### Fixed
-
-- `dl-rand`: Windows 7 builds (`*-win7-windows-*`) take entropy from `RtlGenRandom`;
-  `ProcessPrng` (bcryptprimitives.dll) does not exist before Windows 8, so the agent
-  could not start there.
-
 - `dl-agent`: one on-prem agent for every project (RT-0164). Windows service and systemd
   install, enrolment and Ed25519-signed hub calls with clock-skew correction and hub
   fallback, signed self-update with probation, automatic rollback and version blacklist,
@@ -34,6 +28,17 @@ All notable changes are listed here. The format follows
 - `services/agent-hub`: Cloudflare Worker control plane for `dl-agent` (D1, R2):
   enrolment codes, heartbeats, commands, per-product release lines, canary gate before
   promotion to stable, problem reports and a read-only status page.
+- `dl-agent` SQL bridge: transport ladder for old SQL Servers (as configured → TLS 1.0 →
+  unencrypted on a server-side handshake failure or a reset after it, as SQL Server 2008 R2
+  RTM does; kept until restart, pinnable with `transport`, `sql_unencrypted` report, rung in
+  stats and `sql-test`), `SET LOCK_TIMEOUT` on every session (`lock_timeout_seconds`,
+  default 8 s); default query timeout 15 s (was 30), below the hub's 20 s wait.
+
+### Fixed
+
+- `dl-rand`: Windows 7 builds (`*-win7-windows-*`) take entropy from `RtlGenRandom`;
+  `ProcessPrng` (bcryptprimitives.dll) does not exist before Windows 8, so the agent
+  could not start there.
 
 ## [0.2.1] - 2026-11-15
 

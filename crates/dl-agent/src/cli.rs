@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dl_cli::{Arg, Command, Matches};
+use dl_json::Value;
 use dl_winsvc::StopSignal;
 
 use crate::agent::{Agent, Options};
@@ -218,7 +219,19 @@ fn sql_test(dir: &Path, only: Option<&str>) -> i32 {
         }
         checked += 1;
         match pool.check() {
-            Ok(d) => println!("{}: ok ({} ms)", pool.name(), d.as_millis()),
+            Ok(d) => {
+                let t = pool
+                    .stats()
+                    .get("transport")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let rung = t.get("rung").and_then(Value::as_str).unwrap_or("-");
+                println!(
+                    "{}: ok ({} ms, transport {rung})",
+                    pool.name(),
+                    d.as_millis()
+                );
+            }
             Err(e) => {
                 all_ok = false;
                 println!("{}: FAILED {e}", pool.name());

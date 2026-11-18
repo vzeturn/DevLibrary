@@ -26,6 +26,10 @@ pub trait Connector: Send + Sync + 'static {
     type Conn: Connection;
     /// Opens a new session.
     fn connect(&self) -> Result<Self::Conn, Error>;
+    /// How sessions are opened, for stats (`transport` key); `null` by default.
+    fn describe(&self) -> Value {
+        Value::Null
+    }
 }
 
 /// What the pool needs from a session.
@@ -66,7 +70,7 @@ impl Default for PoolOptions {
         PoolOptions {
             max_connections: 4,
             acquire_timeout: Duration::from_secs(10),
-            query_timeout: Some(Duration::from_secs(30)),
+            query_timeout: Some(Duration::from_secs(15)),
             idle_timeout: Duration::from_secs(300),
             max_lifetime: Duration::from_secs(1800),
             ping_after_idle: Duration::from_secs(30),
@@ -253,6 +257,7 @@ impl<C: Connector> Pool<C> {
             "discarded": get(&c.discarded),
             "down_since": state.down.as_ref().map(|d| d.since),
             "last_error": state.down.as_ref().map(|d| d.error.clone()),
+            "transport": self.connector.describe(),
         })
     }
 

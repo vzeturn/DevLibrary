@@ -23,6 +23,7 @@ pub const CHECK_EVERY: Duration = Duration::from_secs(30);
 pub struct SqlModule<C: Connector> {
     pools: Pools<C>,
     down: BTreeSet<String>,
+    unencrypted: BTreeSet<String>,
 }
 
 /// Factory for the module over the site's pools.
@@ -36,6 +37,7 @@ impl<C: Connector> SqlModule<C> {
         SqlModule {
             pools,
             down: BTreeSet::new(),
+            unencrypted: BTreeSet::new(),
         }
     }
 
@@ -50,6 +52,26 @@ impl<C: Connector> SqlModule<C> {
                     if self.down.remove(&name) {
                         let msg = format!("{name}: reachable again");
                         ctx.report(Severity::Info, "sql_recovered", &msg, db_context(&name));
+                    }
+                    let rung = pool
+                        .stats()
+                        .get("transport")
+                        .and_then(|t| t.get("rung"))
+                        .cloned();
+                    if rung.as_ref().and_then(Value::as_str) == Some("unencrypted")
+                        && self.unencrypted.insert(name.clone())
+                    {
+                        let msg = format!(
+                            "{name}: the server accepts only unencrypted sessions (no TLS 1.0+ \
+                             it can finish); login travels in clear on the LAN. Install the \
+                             SQL Server TLS 1.2 update or service pack."
+                        );
+                        ctx.report(
+                            Severity::Warning,
+                            "sql_unencrypted",
+                            &msg,
+                            db_context(&name),
+                        );
                     }
                 }
                 Err(e) => {

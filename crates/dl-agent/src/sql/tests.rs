@@ -117,7 +117,7 @@ fn reuses_an_idle_session_and_sets_the_query_timeout() {
     let (p, server) = pool();
     drop(p.get().unwrap());
     let c = p.get().unwrap();
-    assert_eq!(c.timeout, Some(Duration::from_secs(30)));
+    assert_eq!(c.timeout, Some(Duration::from_secs(15)));
     drop(c);
     assert_eq!(server.attempts(), 1);
     assert_eq!((stat(&p, "open"), stat(&p, "idle")), (1, 1));
@@ -277,6 +277,30 @@ fn app_name_defaults_to_dl_agent() {
 }
 
 #[test]
+fn transport_and_lock_timeout_are_local_settings_reported_in_stats() {
+    let pools = SqlPools::from_json(&json!({"databases": {
+        "SMILE_FO": {"connection": FO},
+        "OLD": {"connection": FO, "transport": "unencrypted", "lock_timeout_seconds": 0}
+    }}))
+    .unwrap();
+    let t = pools.get("SMILE_FO").unwrap().stats()["transport"].clone();
+    assert_eq!(t["lock_timeout_ms"].as_u64(), Some(8000));
+    assert!(t["rung"].is_null(), "no rung before the first connect");
+    let old = pools.get("OLD").unwrap().stats()["transport"].clone();
+    assert!(
+        old["lock_timeout_ms"].is_null(),
+        "0 = wait for locks forever"
+    );
+
+    let c = TdsConnector::parse(FO).unwrap();
+    assert_eq!(c.rung(), None);
+    for bad in [json!("tls"), json!(1)] {
+        let doc = json!({"databases": {"FO": {"connection": FO, "transport": bad}}});
+        assert!(SqlPools::from_json(&doc).is_err());
+    }
+}
+
+#[test]
 fn declare_writes_sql_json_that_load_reads_back() {
     let d = TestDir::new("sql-declare");
     declare(&d.0, "SMILE_FO", FO, 4).unwrap();
@@ -294,4 +318,21 @@ fn declare_writes_sql_json_that_load_reads_back() {
         assert_eq!(mode & 0o777, 0o600, "sql.json holds passwords");
     }
     assert_eq!(pools.get("SMILE_POS").unwrap().options().max_connections, 2);
+}
+
+/// Live check against a real server: `DL_AGENT_LIVE_SQL="Server=…;User Id=…;Password=…"
+/// cargo test -p dl-agent live_sql -- --ignored`.
+#[test]
+#[ignore = "needs a SQL Server in DL_AGENT_LIVE_SQL"]
+fn live_sql_connects_on_a_rung_and_caps_lock_waits() {
+    let cs = std::env::var("DL_AGENT_LIVE_SQL").expect("DL_AGENT_LIVE_SQL");
+    // A client without TLS (macOS) must pin `unencrypted`: it never steps down by itself.
+    let want = std::env::var("DL_AGENT_LIVE_SQL_RUNG").unwrap_or("as_configured".into());
+    let pin = transport::Rung::parse(&want).unwrap();
+    let c = TdsConnector::parse(&cs).unwrap().with_transport(pin);
+    let mut s = Connector::connect(&c).unwrap();
+    assert_eq!(c.rung().map(transport::Rung::name), Some(want.as_str()));
+    let r = s.query("SELECT @@LOCK_TIMEOUT AS t", &[]).unwrap();
+    let t: i32 = r.first().unwrap().rows()[0].get("t").unwrap();
+    assert_eq!(t, 8000);
 }

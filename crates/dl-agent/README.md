@@ -38,7 +38,9 @@ No dependencies outside DevLibrary, no `unsafe`.
 - **SQL Server bridge**: one pool per database declared in `<data>/sql.json` (connection
   strings stay on the machine, mode 0600), shared by every module through
   `ctx.sql("SMILE_FO")`. Sessions are reused and health-checked, a down database trips a
-  breaker with backoff instead of hammering it, every query has a timeout, and a built-in
+  breaker with backoff instead of hammering it, every query has a timeout (15 s) and lock waits
+  are capped (8 s), old servers are reached by stepping down TLS 1.2 → TLS 1.0 → unencrypted
+  (reported), and a built-in
   `sql` module reports outages and answers `sql.ping` / `sql.status`. The hub may tune the
   limits (`body.sql`) but never the connection. See PROTOCOL.md §9.
 

@@ -131,8 +131,9 @@ module fails within 2 minutes the agent restores last-known-good and reports
 The agent is the one bridge between hub-side projects and the site's SQL Server databases.
 
 - **Declaration stays local.** `<data>/sql.json` = `{"databases":{"<name>":{"connection":"…",
-  "max_connections":4,"query_timeout_seconds":30,"acquire_timeout_seconds":10,
-  "idle_timeout_seconds":300,"max_lifetime_seconds":1800}}}`. Names are 1–64 of
+  "max_connections":4,"query_timeout_seconds":15,"acquire_timeout_seconds":10,
+  "idle_timeout_seconds":300,"max_lifetime_seconds":1800,"lock_timeout_seconds":8,
+  "transport":"auto"}}}`. Names are 1–64 of
   `[A-Za-z0-9_-]`; connection strings use the ADO (`Server=…;Database=…`) or `sqlserver://`
   form and never leave the machine (file mode 0600 / service-account ACL). `dl-agent sql-add
   <name> --connection …` (or env `DL_AGENT_SQL_CONNECTION`) writes an entry after validating
@@ -146,6 +147,18 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   breaker: callers fail fast with "database unavailable" and one caller probes after a
   backoff (1 s doubling to 60 s). Each query carries `query_timeout` (0 = none); a timeout
   cancels the request with an attention and keeps the session.
+- **Transport ladder** (`transport`, local only): with the default `encrypt=false` (TLS for
+  the login) and `transport: "auto"`, a failed connect steps down *as configured* → *TLS 1.0
+  minimum* → *unencrypted* when the TLS handshake fails at the server or the server resets /
+  closes an accepted connection (SQL Server 2008 R2 RTM completes TLS 1.0 and then resets).
+  A refused or timed-out dial, a SQL error (login, database), a certificate error or a client
+  without TLS never steps down. The first rung that connects is kept until restart; later
+  drops are outages. `encrypt=true|strict|disable` never steps down; `transport` may pin
+  `as_configured`, `tls1.0` or `unencrypted`. Ending unencrypted files one `sql_unencrypted`
+  (warning); the rung is in stats (`transport.rung`) and in `sql-test` output.
+- **Lock waits**: every new session runs `SET LOCK_TIMEOUT` (`lock_timeout_seconds`, default
+  8, 0 = wait forever), so a row locked by the product fails fast with SQL error 1222
+  instead of holding a slot until `query_timeout` (default 15 s, below the hub's 20 s wait).
 - **Hub tuning**: remote config `body.sql = {"<name>": {"max_connections": 8, …}}` overrides
   the limits per database; a `connection` key there is ignored. Removing the override restores
   the local values.
@@ -155,6 +168,6 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `{"database"}`), and publishes pool stats as the `databases` metric.
 - **Commands**: `sql.ping {database?}` → `{"<name>":{"ok":true,"ms":3}}`; `sql.status` → pool
   stats (`open`, `idle`, `in_use`, `max`, `connects`, `connect_failures`, `acquires`, `waits`,
-  `timeouts`, `discarded`, `down_since`, `last_error`). There is deliberately no command that
+  `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`). There is deliberately no command that
   runs arbitrary SQL sent by the hub: projects reach their databases through their own
   modules.
