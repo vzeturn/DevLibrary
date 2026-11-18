@@ -17,7 +17,7 @@ use crate::config::Rules;
 use crate::gojson::{self, Obj, array};
 use crate::sql::SpNames;
 
-const CONFIG_FILE: &str = "config.enc";
+pub(crate) const CONFIG_FILE: &str = "config.enc";
 
 /// `AgentConfig`.
 #[derive(Debug, Clone, PartialEq)]

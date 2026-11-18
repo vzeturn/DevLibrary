@@ -65,6 +65,11 @@ runs it after the dl-agent enrolment, with the arguments from `DL_AGENT_SETUP_AR
 - **No `config.enc`**: the module is `degraded` with `not enrolled: no config.enc in
   <dir>` and looks again every 30 s; it is not a failure and does not restart. An
   unreadable file is reported once (`einvoice_config_unreadable`).
+- **Re-sealed `config.enc`**: a running module looks at the file every 5 s. When it changes
+  (`einvoice-enroll --force` seals a new API key and the platform revokes the old one) and
+  has held still for one look, the workers stop and the module loads the new file. A
+  replaced device recovers this way without a service restart; a removed file falls back to
+  `not enrolled`.
 - **Enrolled**: the collector (a cycle at once, then every interval) and the relay worker
   run on their own threads; the module is `running` once both are up and `degraded` while
   the last cycle failed to push, read SQL or write the outbox. Blocking calls cannot be

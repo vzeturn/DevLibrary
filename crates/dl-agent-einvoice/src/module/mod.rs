@@ -11,11 +11,11 @@
 pub mod collector;
 pub mod settings;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use dl_agent::Error;
 use dl_agent::command::Command;
@@ -44,6 +44,8 @@ pub const OUTBOX_FILE: &str = "outbox.json";
 const TICK: Duration = Duration::from_secs(1);
 /// How often a module without a usable `config.enc` looks again.
 const RECHECK: Duration = Duration::from_secs(30);
+/// How often a running module looks for a re-sealed `config.enc` (re-enroll, new key).
+const CONFIG_WATCH: Duration = Duration::from_secs(5);
 /// How long a stop waits for the worker threads before leaving them to finish.
 const WORKER_STOP_WAIT: Duration = Duration::from_secs(5);
 /// The poll interval when the sealed config has none.
@@ -69,10 +71,72 @@ impl Module for EinvoiceModule {
 
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
         let settings = Settings::from_config(ctx.config());
-        match wait_for_config(ctx, &settings.config_dir) {
-            Some(cfg) => run_enrolled(ctx, cfg, &settings),
-            None => Ok(()),
+        let path = settings.config_dir.join(crate::agent_config::CONFIG_FILE);
+        loop {
+            let Some(cfg) = wait_for_config(ctx, &settings.config_dir) else {
+                return Ok(());
+            };
+            let watch = ConfigWatch::new(path.clone(), Instant::now());
+            match run_enrolled(ctx, cfg, &settings, watch)? {
+                Outcome::Stopped => return Ok(()),
+                Outcome::Reload => log::info(
+                    "einvoice module reloading config.enc",
+                    &[("reason", V::S("config.enc changed on disk"))],
+                ),
+            }
         }
+    }
+}
+
+/// Why `run_enrolled` returned without an error.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    /// `ctx.stop()` fired.
+    Stopped,
+    /// `config.enc` was re-sealed (or removed): load it again with fresh workers.
+    Reload,
+}
+
+/// Size and modification time of `config.enc`; `None` when it is missing.
+type Fingerprint = Option<(u64, Option<SystemTime>)>;
+
+fn fingerprint(path: &Path) -> Fingerprint {
+    std::fs::metadata(path)
+        .ok()
+        .map(|m| (m.len(), m.modified().ok()))
+}
+
+/// Notices that `config.enc` changed under a running module. A change counts once it has
+/// held still for one look, so a file that is still being written is not loaded half-way.
+#[derive(Debug)]
+struct ConfigWatch {
+    path: PathBuf,
+    loaded: Fingerprint,
+    seen: Fingerprint,
+    next: Instant,
+}
+
+impl ConfigWatch {
+    fn new(path: PathBuf, now: Instant) -> Self {
+        let loaded = fingerprint(&path);
+        Self {
+            path,
+            seen: loaded,
+            loaded,
+            next: now + CONFIG_WATCH,
+        }
+    }
+
+    /// True when the file differs from the loaded one and did not change since the last look.
+    fn changed(&mut self, now: Instant) -> bool {
+        if now < self.next {
+            return false;
+        }
+        self.next = now + CONFIG_WATCH;
+        let cur = fingerprint(&self.path);
+        let stable = cur == self.seen;
+        self.seen = cur;
+        stable && cur != self.loaded
     }
 }
 
@@ -139,7 +203,8 @@ fn run_enrolled(
     ctx: &ModuleContext,
     mut cfg: AgentConfig,
     settings: &Settings,
-) -> Result<(), Error> {
+    mut watch: ConfigWatch,
+) -> Result<Outcome, Error> {
     if let Some(p) = settings.poll_interval {
         cfg.poll_interval = p;
     }
@@ -190,7 +255,7 @@ fn run_enrolled(
     ctx.set_running(&running);
     log::info("einvoice module started", &[("detail", V::S(&running))]);
 
-    let result = supervise(ctx, &shared, &stop, &mut workers, &running);
+    let result = supervise(ctx, &shared, &stop, &mut workers, &running, &mut watch);
     stop.stop();
     finish(workers);
     result
@@ -203,7 +268,8 @@ fn supervise(
     stop: &StopSignal,
     workers: &mut Vec<(&'static str, JoinHandle<()>)>,
     running: &str,
-) -> Result<(), Error> {
+    watch: &mut ConfigWatch,
+) -> Result<Outcome, Error> {
     let mut replaced = false;
     loop {
         let detail = if replaced {
@@ -251,8 +317,13 @@ fn supervise(
             log::error(&msg, &[]);
             return Err(Error::Module(msg));
         }
+        // A re-enroll (`einvoice-enroll --force`) seals a new key: the old one is revoked, so
+        // the workers must start again on the new file, and a replaced device recovers.
+        if watch.changed(Instant::now()) {
+            return Ok(Outcome::Reload);
+        }
         if ctx.stop().wait_timeout(TICK) {
-            return Ok(());
+            return Ok(Outcome::Stopped);
         }
     }
 }
@@ -304,5 +375,61 @@ fn answer(ctx: &ModuleContext, cmd: &Command, shared: Option<&Shared>, detail: &
             false,
             &format!("unknown einvoice command {:?}", cmd.kind),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!(
+            "dl-einvoice-watch-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir.join("config.enc")
+    }
+
+    /// Looks `n` watch periods after `start`.
+    fn look(w: &mut ConfigWatch, start: Instant, n: u32) -> bool {
+        w.changed(start + CONFIG_WATCH * n)
+    }
+
+    #[test]
+    fn unchanged_file_never_reloads() {
+        let path = scratch("same");
+        std::fs::write(&path, b"sealed-1").expect("write");
+        let start = Instant::now();
+        let mut w = ConfigWatch::new(path, start);
+        assert!(!w.changed(start), "too early to look");
+        assert!(!look(&mut w, start, 1));
+        assert!(!look(&mut w, start, 2));
+    }
+
+    #[test]
+    fn resealed_file_reloads_once_it_holds_still() {
+        let path = scratch("reseal");
+        std::fs::write(&path, b"sealed-1").expect("write");
+        let start = Instant::now();
+        let mut w = ConfigWatch::new(path.clone(), start);
+        std::fs::write(&path, b"sealed-two-longer").expect("rewrite");
+        assert!(!look(&mut w, start, 1), "first sight of the change waits");
+        assert!(look(&mut w, start, 2), "stable change reloads");
+    }
+
+    #[test]
+    fn removed_file_reloads_into_not_enrolled() {
+        let path = scratch("gone");
+        std::fs::write(&path, b"sealed-1").expect("write");
+        let start = Instant::now();
+        let mut w = ConfigWatch::new(path.clone(), start);
+        std::fs::remove_file(&path).expect("remove");
+        assert!(!look(&mut w, start, 1));
+        assert!(look(&mut w, start, 2));
     }
 }
