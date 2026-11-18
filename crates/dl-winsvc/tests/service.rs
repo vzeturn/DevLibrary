@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use dl_winsvc::scm::{Manager, ServiceConfig, StartType, State};
+use dl_winsvc::scm::{Manager, RecoveryAction, ServiceConfig, StartType, State};
 use dl_winsvc::{codes, command_line};
 
 const NAME: &str = "dl-winsvc-test";
@@ -98,6 +98,44 @@ fn install_run_stop_delete() {
         svc.stop().err().and_then(|e| e.code()),
         Some(codes::SERVICE_NOT_ACTIVE)
     );
+
+    // A service that stops by itself with a service-specific code reports 1066 + code.
+    let failing = ServiceConfig::new(
+        &cfg.display_name,
+        StartType::Manual,
+        &command_line(&exe, &[beat.to_str().unwrap(), "exit=7"]),
+    );
+    svc.update_config(&failing).unwrap();
+    svc.start(&[]).unwrap();
+    svc.wait_for_state(State::Stopped, Duration::from_secs(30))
+        .unwrap();
+    let st = svc.status().unwrap();
+    assert_eq!(
+        (st.win32_exit_code, st.service_specific_exit_code),
+        (1066, 7)
+    );
+
+    // Recovery settings round-trip (the agent's restart 5s/30s/60s, reset after 24h).
+    let actions = [
+        RecoveryAction::Restart(Duration::from_secs(5)),
+        RecoveryAction::Restart(Duration::from_secs(30)),
+        RecoveryAction::Restart(Duration::from_secs(60)),
+    ];
+    let day = Duration::from_secs(24 * 3600);
+    svc.set_recovery_actions(&actions, day).unwrap();
+    assert_eq!(svc.recovery_actions().unwrap(), (actions.to_vec(), day));
+    assert!(!svc.recovery_on_non_crash_failures().unwrap());
+    svc.set_recovery_on_non_crash_failures(true).unwrap();
+    assert!(svc.recovery_on_non_crash_failures().unwrap());
+    svc.set_recovery_actions(&[], Duration::ZERO).unwrap();
+    assert_eq!(
+        svc.recovery_actions().unwrap(),
+        (Vec::new(), Duration::ZERO)
+    );
+    svc.set_start_type(StartType::Automatic).unwrap();
+    assert!(!svc.delayed_auto_start().unwrap());
+    svc.set_delayed_auto_start(true).unwrap();
+    assert!(svc.delayed_auto_start().unwrap());
 
     let updated = cfg.clone().with_description("Updated description.");
     svc.update_config(&updated).unwrap();

@@ -22,6 +22,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-ed25519"
+version = "0.2.1"
+dependencies = [
+ "dl-encoding",
+ "dl-hash",
+]
+
+[[package]]
 name = "dl-encoding"
 version = "0.2.1"
 dependencies = [
@@ -33,6 +41,14 @@ name = "dl-ffi"
 version = "0.2.1"
 dependencies = [
  "dl-vn",
+]
+
+[[package]]
+name = "dl-flate"
+version = "0.2.1"
+dependencies = [
+ "dl-encoding",
+ "dl-hash",
 ]
 
 [[package]]
@@ -89,6 +105,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-pcsc"
+version = "0.2.1"
+
+[[package]]
 name = "dl-qr"
 version = "0.2.1"
 dependencies = [
@@ -101,6 +121,23 @@ version = "0.2.1"
 dependencies = [
  "dl-bench",
 ]
+
+[[package]]
+name = "dl-serial"
+version = "0.2.1"
+
+[[package]]
+name = "dl-signalr"
+version = "0.2.1"
+dependencies = [
+ "dl-http",
+ "dl-json",
+ "dl-ws",
+]
+
+[[package]]
+name = "dl-sqlite"
+version = "0.2.1"
 
 [[package]]
 name = "dl-tds"
@@ -141,5 +178,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-winos"
+version = "0.2.1"
+
+[[package]]
 name = "dl-winsvc"
 version = "0.2.1"
+
+[[package]]
+name = "dl-ws"
+version = "0.2.1"
+dependencies = [
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-rand",
+]
+
+[[package]]
+name = "dl-zip"
+version = "0.2.1"
+dependencies = [
+ "dl-flate",
+ "dl-hash",
+]

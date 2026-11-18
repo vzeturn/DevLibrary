@@ -76,6 +76,13 @@ match client.get("https://api.example.com/") {
 - The overall deadline is enforced by setting the socket read/write timeout to the time
   left before every read and write; DNS runs on a helper thread so it is bounded too.
 
+## Protocol upgrades
+
+`Client::upgrade` sends a request on a new connection (same proxy, TLS and deadline
+handling) and, on `101 Switching Protocols`, hands the connection over as an `Upgraded`
+stream (`Read + Write`, with read/write timeouts and a cross-thread shutdown handle). Any
+other status is returned with its body. `dl-ws` builds its WebSocket client on this.
+
 ## Sans-I/O layer
 
 ```rust

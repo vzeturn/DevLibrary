@@ -19,6 +19,8 @@ const SCH_CRED_MANUAL_CRED_VALIDATION: u32 = 0x8;
 const SCH_CRED_NO_DEFAULT_CREDS: u32 = 0x10;
 const SCH_CRED_AUTO_CRED_VALIDATION: u32 = 0x20;
 const SCH_USE_STRONG_CRYPTO: u32 = 0x0040_0000;
+pub(crate) const SP_PROT_TLS1_0_CLIENT: u32 = 0x80;
+pub(crate) const SP_PROT_TLS1_1_CLIENT: u32 = 0x200;
 pub(crate) const SP_PROT_TLS1_2_CLIENT: u32 = 0x800;
 pub(crate) const SP_PROT_TLS1_3_CLIENT: u32 = 0x2000;
 
@@ -230,9 +232,10 @@ impl Drop for Cred {
     }
 }
 
-/// Acquires client credentials. `modern` uses `SCH_CREDENTIALS` (TLS 1.2 and 1.3, Windows
-/// 10 1809+); otherwise `SCHANNEL_CRED` (TLS 1.2).
-pub(crate) fn acquire(verify: bool, modern: bool) -> Result<Cred, i32> {
+/// Acquires client credentials for the `SP_PROT_*_CLIENT` protocols in `enabled`.
+/// `modern` uses `SCH_CREDENTIALS` (TLS 1.3 possible, Windows 10 1809+); otherwise
+/// `SCHANNEL_CRED`, which cannot offer TLS 1.3.
+pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, i32> {
     let mut package: Vec<u16> = "Microsoft Unified Security Protocol Provider\0"
         .encode_utf16()
         .collect();
@@ -246,7 +249,7 @@ pub(crate) fn acquire(verify: bool, modern: bool) -> Result<Cred, i32> {
     let mut params = TlsParameters {
         alpn_ids: 0,
         rgstr_alpn_ids: ptr::null_mut(),
-        disabled_protocols: !(SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_3_CLIENT),
+        disabled_protocols: !enabled,
         disabled_crypto: 0,
         p_disabled_crypto: ptr::null_mut(),
         flags: 0,
@@ -273,7 +276,7 @@ pub(crate) fn acquire(verify: bool, modern: bool) -> Result<Cred, i32> {
         aph_mappers: ptr::null_mut(),
         supported_algs: 0,
         palg_supported_algs: ptr::null_mut(),
-        enabled_protocols: SP_PROT_TLS1_2_CLIENT,
+        enabled_protocols: enabled & !SP_PROT_TLS1_3_CLIENT,
         minimum_cipher_strength: 0,
         maximum_cipher_strength: 0,
         session_lifespan: 0,

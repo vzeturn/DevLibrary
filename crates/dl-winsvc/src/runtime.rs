@@ -74,12 +74,12 @@ pub fn is_service_process() -> Result<bool, Error> {
     sys::parent_is_services()
 }
 
-type Work = Box<dyn FnOnce(StopSignal) + Send>;
+type Work = Box<dyn FnOnce(StopSignal) -> u32 + Send>;
 
 enum Event {
     Stop,
     Interrogate,
-    WorkDone { panicked: bool },
+    WorkDone { panicked: bool, code: u32 },
 }
 
 struct Slot {
@@ -119,6 +119,21 @@ fn slot() -> MutexGuard<'static, Slot> {
 pub fn run_service<F>(name: &str, work: F) -> Result<(), Error>
 where
     F: FnOnce(StopSignal) + Send + 'static,
+{
+    run_service_with_exit_code(name, move |stop| {
+        work(stop);
+        0
+    })
+}
+
+/// Like [`run_service`], but `work` returns the service-specific exit code. A non-zero
+/// code stops the service with `ERROR_SERVICE_SPECIFIC_ERROR` (1066) and that code, which
+/// the SCM treats as a failure (and runs the recovery actions) when
+/// [`Service::set_recovery_on_non_crash_failures`](crate::scm::Service::set_recovery_on_non_crash_failures)
+/// is on; 0 is a clean stop that recovery never restarts.
+pub fn run_service_with_exit_code<F>(name: &str, work: F) -> Result<(), Error>
+where
+    F: FnOnce(StopSignal) -> u32 + Send + 'static,
 {
     let wide = to_wide(name)?;
     if STARTED.swap(true, Ordering::SeqCst) {
@@ -212,12 +227,13 @@ fn service_body() {
             let result = catch_unwind(AssertUnwindSafe(|| work(worker_signal)));
             let _ = tx.send(Event::WorkDone {
                 panicked: result.is_err(),
+                code: result.unwrap_or(0),
             });
         });
     let worker = match spawned {
         Ok(w) => w,
         Err(_) => {
-            stop_with(&handle, &mut status, true);
+            stop_with(&handle, &mut status, 1);
             slot().panicked = true;
             return;
         }
@@ -225,6 +241,7 @@ fn service_body() {
 
     let mut stopping = false;
     let mut panicked = false;
+    let mut exit_code = 0u32;
     loop {
         let event = if stopping {
             match rx.recv_timeout(Duration::from_secs(1)) {
@@ -257,8 +274,9 @@ fn service_body() {
                 signal.stop();
             }
             Event::Stop => {}
-            Event::WorkDone { panicked: p } => {
+            Event::WorkDone { panicked: p, code } => {
                 panicked = p;
+                exit_code = if p { 1 } else { code };
                 break;
             }
         }
@@ -271,18 +289,19 @@ fn service_body() {
     }
     // The outcome is recorded before Stopped is reported: after that the dispatcher may
     // return and the process exit.
-    stop_with(&handle, &mut status, panicked);
+    stop_with(&handle, &mut status, exit_code);
 }
 
-fn stop_with(handle: &sys::StatusHandle, status: &mut ServiceStatus, failed: bool) {
+/// Reports Stopped; a non-zero `code` is a service-specific failure.
+fn stop_with(handle: &sys::StatusHandle, status: &mut ServiceStatus, code: u32) {
     const ERROR_SERVICE_SPECIFIC_ERROR: u32 = 1066;
     status.current_state = SERVICE_STOPPED;
     status.controls_accepted = 0;
     status.check_point = 0;
     status.wait_hint = 0;
-    if failed {
+    if code != 0 {
         status.win32_exit_code = ERROR_SERVICE_SPECIFIC_ERROR;
-        status.service_specific_exit_code = 1;
+        status.service_specific_exit_code = code;
     }
     let _ = handle.set(status);
 }

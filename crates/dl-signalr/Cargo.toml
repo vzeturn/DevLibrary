@@ -1,0 +1,19 @@
+[package]
+name = "dl-signalr"
+description = "ASP.NET Core SignalR client (JSON hub protocol over WebSocket): invoke, events, negotiate or direct connect."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-json.workspace = true
+dl-http.workspace = true
+dl-ws.workspace = true
+
+[lints]
+workspace = true

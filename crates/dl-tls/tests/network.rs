@@ -125,6 +125,18 @@ fn bad_certificates_are_refused() {
                 ));
                 eprintln!("note: {host} timed out in SChannel validation");
             }
+            // badssl.com sometimes resets connections from CI networks before the
+            // certificate arrives (seen on GitHub's Ubuntu runners for expired.badssl.com).
+            // The handshake still did not succeed, but the certificate check was not
+            // reached, so this case says nothing about it: note it and move on.
+            Err(Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
+                ) && std::env::var("DL_TLS_REQUIRE_NETWORK").as_deref() != Ok("1") =>
+            {
+                eprintln!("note: skipping {host}, the server dropped the connection: {e}");
+            }
             Err(e) => assert!(want(&e), "{host}: unexpected error {e:?}"),
         }
     }

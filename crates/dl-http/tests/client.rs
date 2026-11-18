@@ -643,3 +643,89 @@ fn invalid_urls_fail_before_connecting() {
         assert!(matches!(c.get(u), Err(Error::InvalidUrl { .. })), "{u}");
     }
 }
+
+#[test]
+fn upgrade_hands_over_the_connection_with_early_bytes() {
+    use std::io::{Read, Write};
+    let server = Server::start(|peer, _| {
+        let Some(req) = peer.read_request() else {
+            return;
+        };
+        if req.header("upgrade") != Some("echo") {
+            peer.respond("400 Bad Request", "", b"need upgrade");
+            return;
+        }
+        // The first payload bytes arrive in the same segment as the head.
+        peer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nhi:",
+        );
+        let mut buf = [0u8; 64];
+        loop {
+            match peer.stream.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => peer.write(&buf[..n]),
+            }
+        }
+    });
+    let c = client();
+    let req = Request::get(url(&server.url("/ws")))
+        .with_header("Connection", "Upgrade")
+        .unwrap()
+        .with_header("Upgrade", "echo")
+        .unwrap();
+    let (resp, conn) = c.upgrade(&req).unwrap();
+    assert_eq!(resp.status.as_u16(), 101);
+    assert_eq!(resp.headers.get("upgrade"), Some("echo"));
+    let mut conn = conn.expect("switched");
+    assert!(!conn.is_tls());
+    let mut got = [0u8; 3];
+    conn.read_exact(&mut got).unwrap();
+    assert_eq!(&got, b"hi:");
+    conn.write_all(b"ping").unwrap();
+    let mut echo = [0u8; 4];
+    conn.read_exact(&mut echo).unwrap();
+    assert_eq!(&echo, b"ping");
+
+    // A read timeout loses nothing and the connection keeps working.
+    conn.set_read_timeout(Some(Duration::from_millis(30)))
+        .unwrap();
+    let err = conn.read(&mut echo).unwrap_err();
+    assert!(matches!(
+        err.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ));
+    conn.write_all(b"more").unwrap();
+    conn.read_exact(&mut echo).unwrap();
+    assert_eq!(&echo, b"more");
+
+    // Another thread can unblock a pending read.
+    conn.set_read_timeout(None).unwrap();
+    let handle = conn.shutdown_handle().unwrap();
+    let t = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        handle.shutdown().unwrap();
+    });
+    let start = Instant::now();
+    let r = conn.read(&mut echo);
+    assert!(matches!(r, Ok(0) | Err(_)));
+    assert!(start.elapsed() < Duration::from_secs(5));
+    t.join().unwrap();
+}
+
+#[test]
+fn upgrade_refused_returns_the_response() {
+    let server = Server::start(|peer, _| {
+        while peer.read_request().is_some() {
+            peer.respond("401 Unauthorized", "", b"no token");
+        }
+    });
+    let req = Request::get(url(&server.url("/ws")))
+        .with_header("Connection", "Upgrade")
+        .unwrap()
+        .with_header("Upgrade", "websocket")
+        .unwrap();
+    let (resp, conn) = client().upgrade(&req).unwrap();
+    assert_eq!(resp.status.as_u16(), 401);
+    assert_eq!(resp.text().unwrap(), "no token");
+    assert!(conn.is_none());
+}

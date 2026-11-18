@@ -84,6 +84,40 @@ for s in m.list_services()? {
 `syscall.EscapeArg`, so paths with spaces work. Services are created as
 `SERVICE_WIN32_OWN_PROCESS` under LocalSystem with normal error control.
 
+## Recovery, delayed start and exit codes
+
+```rust,no_run
+use std::time::Duration;
+use dl_winsvc::scm::{Manager, RecoveryAction};
+
+let svc = Manager::connect()?.open("My Agent")?;
+// Restart after 5 s, 30 s, then 60 s for every later failure; forget failures after a day.
+svc.set_recovery_actions(
+    &[
+        RecoveryAction::Restart(Duration::from_secs(5)),
+        RecoveryAction::Restart(Duration::from_secs(30)),
+        RecoveryAction::Restart(Duration::from_secs(60)),
+    ],
+    Duration::from_secs(24 * 3600),
+)?;
+// Count a stop with a non-zero exit code as a failure too, not only crashes.
+svc.set_recovery_on_non_crash_failures(true)?;
+svc.set_delayed_auto_start(true)?;
+# Ok::<(), dl_winsvc::Error>(())
+```
+
+With `run_service_with_exit_code` the work returns a `u32`: 0 is a clean stop that
+recovery never restarts, any other value stops the service with Win32 code 1066 and that
+service-specific code, which triggers the recovery actions when the flag above is on.
+
+## File and directory ACLs
+
+`acl::restrict(path)` makes Administrators the owner and sets a protected DACL that grants
+full control to SYSTEM and Administrators only (inherited by children of a directory).
+`acl::read(path)` returns the owner, the protection flag and the ACEs as SID strings, and
+`acl::check` reports what is wrong with a descriptor, so a program can repair a widened
+state directory at start-up.
+
 ## DPAPI
 
 ```rust,no_run
@@ -96,7 +130,9 @@ assert_eq!(unprotect(&blob, Scope::LocalMachine)?, b"api key");
 
 `Scope::LocalMachine` lets any account on the machine open the blob: an administrator can
 seal a configuration that the LocalSystem service reads. `Scope::CurrentUser` limits it to
-the sealing user. No entropy or description is used. Altered blobs fail to open.
+the sealing user. No description is used. `protect_with_entropy` / `unprotect_with_entropy`
+bind the blob to an extra secret (`pOptionalEntropy`); opening it needs the same bytes.
+Altered blobs fail to open.
 
 Blobs written by the Go on-prem agent contain `BE32(len(plaintext)) || plaintext`, sealed
 with `CRYPTPROTECT_LOCAL_MACHINE`. These functions do no framing:
@@ -127,7 +163,7 @@ process list with `NtQuerySystemInformation` and does not need elevation.
 
 - One service per process (`SERVICE_WIN32_OWN_PROCESS`); a second `run_service` call
   returns `Error::AlreadyRunning`.
-- Pause/continue, custom control codes, recovery actions and service accounts other than
-  LocalSystem are not exposed.
+- Pause/continue, custom control codes, reboot messages, failure commands and service
+  accounts other than LocalSystem are not exposed.
 - All `unsafe` code is in `src/sys_windows.rs`; buffers returned by Win32 are read with
   bounds checks.

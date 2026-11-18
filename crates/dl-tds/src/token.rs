@@ -71,8 +71,8 @@ pub(crate) struct Response {
     pub(crate) login_ack: Option<LoginAck>,
     /// A DONE with the ATTN bit (cancellation acknowledged) was seen.
     pub(crate) attention_ack: bool,
-    /// An SSPI token was seen (integrated authentication continuation).
-    pub(crate) sspi: bool,
+    /// The data of the last SSPI token (the server's integrated authentication challenge).
+    pub(crate) sspi: Option<Vec<u8>>,
 }
 
 /// Parses a complete response message. Every length is bounds-checked; malformed input
@@ -244,8 +244,7 @@ pub(crate) fn parse(msg: &[u8], sess: &mut Session) -> Result<Response, Error> {
             }
             SSPI => {
                 let len = cur.u16()? as usize;
-                cur.skip(len)?;
-                resp.sspi = true;
+                resp.sspi = Some(cur.take(len)?.to_vec());
             }
             FEDAUTHINFO | SESSIONSTATE => {
                 let len = cur.u32()? as usize;
@@ -579,7 +578,47 @@ pub(crate) mod tests {
         assert_eq!(ack.tds_version, 0x7400_0004);
         assert_eq!(ack.prog_name, "Microsoft SQL Server");
         assert_eq!(ack.version, (16, 0, 0x1027));
-        assert!(r.sspi);
+        assert_eq!(r.sspi.as_deref(), Some(&[9u8, 9][..]));
+    }
+
+    #[test]
+    fn sspi_token() {
+        // An NTLM CHALLENGE as SQL Server sends it: SSPI token, no LOGINACK.
+        let challenge = b"NTLMSSP\0\x02\0\0\0challenge-bytes";
+        let b = B::default().len16(SSPI, B::default().raw(challenge));
+        let r = run(&b);
+        assert_eq!(r.sspi.as_deref(), Some(&challenge[..]));
+        assert!(r.login_ack.is_none());
+        assert!(r.error.is_none());
+        // Empty token.
+        assert_eq!(
+            run(&B::default().len16(SSPI, B::default())).sspi.as_deref(),
+            Some(&[][..])
+        );
+        // No SSPI token at all.
+        assert!(run(&B::default().done(DONE, 0, 0)).sspi.is_none());
+        // Declared length larger than the message.
+        assert!(matches!(
+            parse(&[SSPI, 0x10, 0x00, 1, 2, 3], &mut Session::default()),
+            Err(Error::Malformed {
+                token: SSPI,
+                offset: 3,
+                ..
+            })
+        ));
+        // Truncated length field.
+        assert!(matches!(
+            parse(&[SSPI, 0x10], &mut Session::default()),
+            Err(Error::Malformed { token: SSPI, .. })
+        ));
+        // A login failure after the SSPI exchange is reported as a server error.
+        let b = B::default()
+            .error(ERROR, 18452, 14, "Login failed. The login is from an untrusted domain and cannot be used with Integrated authentication.", "", 1)
+            .done(DONE, DONE_ERROR, 0);
+        assert!(matches!(
+            run(&b).error,
+            Some(Error::Server { number: 18452, .. })
+        ));
     }
 
     #[test]

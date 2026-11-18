@@ -1,0 +1,18 @@
+[package]
+name = "dl-zip"
+description = "ZIP archives: read (stored, deflate, ZIP64) and write (stored, deflate), with CRC-32 and size limits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-flate.workspace = true
+dl-hash.workspace = true
+
+[lints]
+workspace = true

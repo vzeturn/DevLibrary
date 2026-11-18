@@ -2,8 +2,10 @@
 //!
 //! The blob is bound to this machine ([`Scope::LocalMachine`]: any account on the machine
 //! can open it, which is what a service needs when an administrator sealed the data) or to
-//! the current user ([`Scope::CurrentUser`]). No optional entropy and no description are
-//! used, so blobs interoperate with other programs that call DPAPI the same way.
+//! the current user ([`Scope::CurrentUser`]). [`protect`] and [`unprotect`] pass no
+//! optional entropy and no description, so blobs interoperate with other programs that call
+//! DPAPI the same way; [`protect_with_entropy`] binds a blob to an application-chosen
+//! value (Go's agent seals its Ed25519 key with `smile-pms-agent/ed25519/v1`).
 //!
 //! Interoperating with the Go on-prem agent: it seals `BE32(len(plaintext)) || plaintext`
 //! with `CRYPTPROTECT_LOCAL_MACHINE` and checks the prefix after opening. These functions
@@ -33,17 +35,28 @@ fn flags(scope: Scope) -> u32 {
 ///
 /// Fails with [`Error::Unsupported`] outside Windows.
 pub fn protect(data: &[u8], scope: Scope) -> Result<Vec<u8>, Error> {
-    sys::crypt_protect(data, flags(scope))
+    sys::crypt_protect(data, flags(scope), &[])
 }
 
 /// Decrypts a blob made by [`protect`] or any DPAPI caller with the same scope. A blob that
 /// was altered, or sealed for another user or machine, fails with [`Error::Win32`] (usually
 /// code 13, `ERROR_INVALID_DATA`, or `0x8009000B`).
 pub fn unprotect(blob: &[u8], scope: Scope) -> Result<Vec<u8>, Error> {
+    unprotect_with_entropy(blob, scope, &[])
+}
+
+/// Like [`protect`], with optional entropy (`pOptionalEntropy`): the same bytes must be
+/// passed to open the blob, which binds it to one use. An empty slice means none.
+pub fn protect_with_entropy(data: &[u8], scope: Scope, entropy: &[u8]) -> Result<Vec<u8>, Error> {
+    sys::crypt_protect(data, flags(scope), entropy)
+}
+
+/// Opens a blob sealed with [`protect_with_entropy`] and the same `entropy`.
+pub fn unprotect_with_entropy(blob: &[u8], scope: Scope, entropy: &[u8]) -> Result<Vec<u8>, Error> {
     if blob.is_empty() {
         return Err(Error::InvalidInput("empty DPAPI blob"));
     }
-    sys::crypt_unprotect(blob, flags(scope))
+    sys::crypt_unprotect(blob, flags(scope), entropy)
 }
 
 #[cfg(all(test, windows))]
@@ -59,6 +72,18 @@ mod tests {
                 assert_eq!(unprotect(&blob, scope).unwrap(), data);
             }
         }
+    }
+
+    #[test]
+    fn entropy_binds_the_blob() {
+        let e = b"smile-pms-agent/ed25519/v1";
+        let blob = protect_with_entropy(b"seed", Scope::LocalMachine, e).unwrap();
+        assert_eq!(
+            unprotect_with_entropy(&blob, Scope::LocalMachine, e).unwrap(),
+            b"seed"
+        );
+        assert!(unprotect(&blob, Scope::LocalMachine).is_err());
+        assert!(unprotect_with_entropy(&blob, Scope::LocalMachine, b"other").is_err());
     }
 
     #[test]

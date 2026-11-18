@@ -82,11 +82,43 @@ pub(crate) fn enum_services(_scm: &ScHandle) -> Result<Vec<RawService>, Error> {
     Err(Error::Unsupported)
 }
 
-pub(crate) fn crypt_protect(_data: &[u8], _flags: u32) -> Result<Vec<u8>, Error> {
+pub(crate) fn crypt_protect(_data: &[u8], _flags: u32, _entropy: &[u8]) -> Result<Vec<u8>, Error> {
     Err(Error::Unsupported)
 }
 
-pub(crate) fn crypt_unprotect(_data: &[u8], _flags: u32) -> Result<Vec<u8>, Error> {
+pub(crate) fn crypt_unprotect(
+    _data: &[u8],
+    _flags: u32,
+    _entropy: &[u8],
+) -> Result<Vec<u8>, Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn set_failure_actions(
+    _h: &ScHandle,
+    _reset_seconds: u32,
+    _actions: &[(u32, u32)],
+) -> Result<(), Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn query_failure_actions(_h: &ScHandle) -> Result<(u32, Vec<(u32, u32)>), Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn set_bool_config(_h: &ScHandle, _level: u32, _value: bool) -> Result<(), Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn query_bool_config(_h: &ScHandle, _level: u32) -> Result<bool, Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn read_security(_path: &[u16]) -> Result<crate::acl::Descriptor, Error> {
+    Err(Error::Unsupported)
+}
+
+pub(crate) fn restrict_path(_path: &[u16], _is_dir: bool) -> Result<(), Error> {
     Err(Error::Unsupported)
 }
 

@@ -4,6 +4,7 @@ use dl_decimal::Decimal;
 use dl_time::{Date, DateTime, OffsetDateTime, Time};
 use dl_uuid::Uuid;
 
+use crate::collation::Collation;
 use crate::types::ty;
 use crate::wire::{put_utf16, to_utf16, utf16_len};
 use crate::{Error, Value};
@@ -17,6 +18,7 @@ use crate::{Error, Value};
 /// | `F32` / `F64` | `real` / `float` |
 /// | `Decimal` | `decimal(38, s)`, `s` = the value's scale (0 for NULL) |
 /// | `String` | `nvarchar(4000)`, or `nvarchar(max)` above 4000 UTF-16 units |
+/// | `VarChar` | `varchar(8000)`, or `varchar(max)` above 8000 UTF-8 bytes; the text is encoded in the code page of the connection's collation |
 /// | `Bytes` | `varbinary(8000)`, or `varbinary(max)` above 8000 bytes |
 /// | `Uuid` | `uniqueidentifier` |
 /// | `Date` / `Time` | `date` / `time(7)` |
@@ -46,6 +48,9 @@ pub enum ParamValue {
     Decimal(Option<Decimal>),
     /// `nvarchar`.
     String(Option<String>),
+    /// `varchar`, encoded in the code page of the connection's collation (characters the
+    /// code page lacks become `?`, as SQL Server's own conversion does).
+    VarChar(Option<String>),
     /// `varbinary`.
     Bytes(Option<Vec<u8>>),
     /// `uniqueidentifier`.
@@ -206,6 +211,7 @@ impl<T: NotRef> NotRef for Option<T> {}
 pub struct Param {
     name: String,
     value: ParamValue,
+    output: bool,
 }
 
 impl Param {
@@ -214,7 +220,28 @@ impl Param {
         Param {
             name: name.strip_prefix('@').unwrap_or(name).to_string(),
             value: value.into_param(),
+            output: false,
         }
+    }
+
+    /// An `OUTPUT` parameter. `value` gives its type and the value passed in (usually a
+    /// typed NULL such as `Option::<i64>::None`); the value the procedure sets comes back
+    /// in [`Results::output_params`](crate::Results::output_params).
+    ///
+    /// ```
+    /// let p = dl_tds::Param::output("Total", Option::<i64>::None);
+    /// assert!(p.is_output());
+    /// ```
+    pub fn output(name: &str, value: impl IntoParam) -> Param {
+        Param {
+            output: true,
+            ..Param::new(name, value)
+        }
+    }
+
+    /// Whether this is an `OUTPUT` parameter.
+    pub fn is_output(&self) -> bool {
+        self.output
     }
 
     /// The name without `@`.
@@ -227,9 +254,17 @@ impl Param {
         &self.value
     }
 
-    /// The SQL type declaration used in the `sp_executesql` parameter list.
+    /// The SQL type declaration used in the `sp_executesql` parameter list (without the
+    /// `OUTPUT` keyword).
     pub fn declaration(&self) -> String {
         match &self.value {
+            ParamValue::VarChar(s) => {
+                if s.as_deref().map_or(0, str::len) > 8000 {
+                    "varchar(max)".into()
+                } else {
+                    "varchar(8000)".into()
+                }
+            }
             ParamValue::Null => "nvarchar(4000)".into(),
             ParamValue::Bool(_) => "bit".into(),
             ParamValue::U8(_) => "tinyint".into(),
@@ -288,6 +323,7 @@ pub(crate) fn sp_executesql(
     sql: &str,
     params: &[Param],
     transaction: u64,
+    collation: Collation,
 ) -> Result<Vec<u8>, Error> {
     let mut out = Vec::with_capacity(64 + sql.len() * 2);
     all_headers(&mut out, transaction);
@@ -296,18 +332,53 @@ pub(crate) fn sp_executesql(
     out.extend_from_slice(&0u16.to_le_bytes()); // option flags
     let decls: Vec<String> = params
         .iter()
-        .map(|p| format!("@{} {}", p.name, p.declaration()))
+        .map(|p| {
+            let out = if p.output { " OUTPUT" } else { "" };
+            format!("@{} {}{out}", p.name, p.declaration())
+        })
         .collect();
     write_string_param(&mut out, "", sql);
     write_string_param(&mut out, "", &decls.join(","));
     for p in params {
-        if p.name.is_empty() || utf16_len(&p.name) > 127 {
-            return Err(Error::Param {
-                name: p.name.clone(),
-                message: "name must be 1 to 127 characters".into(),
-            });
-        }
-        write_param(&mut out, p)?;
+        check_name(p)?;
+        write_param(&mut out, p, collation)?;
+    }
+    Ok(out)
+}
+
+fn check_name(p: &Param) -> Result<(), Error> {
+    if p.name.is_empty() || utf16_len(&p.name) > 127 {
+        return Err(Error::Param {
+            name: p.name.clone(),
+            message: "name must be 1 to 127 characters".into(),
+        });
+    }
+    Ok(())
+}
+
+/// RPC payload calling the stored procedure `procedure` by name with named parameters,
+/// as go-mssqldb sends a query text that is a bare procedure name.
+pub(crate) fn rpc_call(
+    procedure: &str,
+    params: &[Param],
+    transaction: u64,
+    collation: Collation,
+) -> Result<Vec<u8>, Error> {
+    let len = utf16_len(procedure);
+    if len == 0 || len > 1046 || procedure.contains('\0') {
+        return Err(Error::Param {
+            name: procedure.to_owned(),
+            message: "procedure name must be 1 to 1046 characters without NUL".into(),
+        });
+    }
+    let mut out = Vec::with_capacity(64 + len * 2);
+    all_headers(&mut out, transaction);
+    out.extend_from_slice(&(len as u16).to_le_bytes());
+    put_utf16(&mut out, procedure);
+    out.extend_from_slice(&0u16.to_le_bytes()); // option flags
+    for p in params {
+        check_name(p)?;
+        write_param(&mut out, p, collation)?;
     }
     Ok(out)
 }
@@ -385,9 +456,47 @@ fn put_date3(out: &mut Vec<u8>, d: Date) {
     out.extend_from_slice(&days_0001(d).to_le_bytes()[..3]);
 }
 
-fn write_param(out: &mut Vec<u8>, p: &Param) -> Result<(), Error> {
+fn write_varchar(
+    out: &mut Vec<u8>,
+    p: &Param,
+    s: Option<&str>,
+    collation: Collation,
+) -> Result<(), Error> {
+    let bytes = match s {
+        Some(s) => Some(collation.encode(s).map_err(|e| match e {
+            Error::UnsupportedCodePage { code_page } => Error::Param {
+                name: p.name.clone(),
+                message: format!("varchar in code page {code_page} is not supported; use nvarchar"),
+            },
+            e => e,
+        })?),
+        None => None,
+    };
+    out.push(ty::BIGVARCHR);
+    // Same rule as the declaration: max above 8000 UTF-8 bytes.
+    let max = s.is_some_and(|s| s.len() > 8000);
+    let c = collation.to_bytes();
+    if max {
+        out.extend_from_slice(&0xFFFFu16.to_le_bytes());
+        out.extend_from_slice(&c);
+        write_plp(out, bytes.as_deref());
+    } else {
+        out.extend_from_slice(&8000u16.to_le_bytes());
+        out.extend_from_slice(&c);
+        match bytes {
+            None => out.extend_from_slice(&0xFFFFu16.to_le_bytes()),
+            Some(b) => {
+                out.extend_from_slice(&(b.len() as u16).to_le_bytes());
+                out.extend_from_slice(&b);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_param(out: &mut Vec<u8>, p: &Param, collation: Collation) -> Result<(), Error> {
     write_name(out, &p.name);
-    out.push(0); // status: input
+    out.push(u8::from(p.output)); // status: 1 = fByRefValue (OUTPUT)
     // Writes a byte-length type: type id, max size, then the value (len 0 = NULL).
     fn bytelen(out: &mut Vec<u8>, id: u8, size: u8, v: Option<&[u8]>) {
         out.push(id);
@@ -454,6 +563,7 @@ fn write_param(out: &mut Vec<u8>, p: &Param) -> Result<(), Error> {
             }
         }
         ParamValue::String(s) => write_nvarchar(out, s.as_deref()),
+        ParamValue::VarChar(s) => write_varchar(out, p, s.as_deref(), collation)?,
         ParamValue::Bytes(b) => {
             out.push(ty::BIGVARBIN);
             match b {
@@ -566,8 +676,106 @@ mod tests {
 
     fn encoded(p: Param) -> Vec<u8> {
         let mut out = Vec::new();
-        write_param(&mut out, &p).unwrap();
+        write_param(&mut out, &p, Collation::default()).unwrap();
         out
+    }
+
+    #[test]
+    fn varchar_output_and_procedure_calls() {
+        let latin1 = Collation {
+            lcid_and_flags: 0x00D0_0409,
+            sort_id: 52,
+        };
+        let mut out = Vec::new();
+        write_param(
+            &mut out,
+            &Param::new("k", ParamValue::VarChar(Some("é?".into()))),
+            latin1,
+        )
+        .unwrap();
+        // name, status, BIGVARCHAR, 8000, collation, len 2, cp1252 bytes
+        assert_eq!(
+            out,
+            [
+                2,
+                b'@',
+                0,
+                b'k',
+                0,
+                0,
+                ty::BIGVARCHR,
+                0x40,
+                0x1F,
+                0x09,
+                0x04,
+                0xD0,
+                0,
+                52,
+                2,
+                0,
+                0xE9,
+                b'?'
+            ]
+        );
+        // A character outside cp1252 becomes '?'.
+        let mut out = Vec::new();
+        write_param(
+            &mut out,
+            &Param::new("k", ParamValue::VarChar(Some("đ".into()))),
+            latin1,
+        )
+        .unwrap();
+        assert_eq!(out[out.len() - 1], b'?');
+        // varchar(max) above 8000 bytes, and NULL.
+        let long = Param::new("k", ParamValue::VarChar(Some("a".repeat(8001))));
+        assert_eq!(long.declaration(), "varchar(max)");
+        let mut out = Vec::new();
+        write_param(&mut out, &long, latin1).unwrap();
+        assert_eq!(out[6..9], [ty::BIGVARCHR, 0xFF, 0xFF]);
+        let null = encoded(Param::new("k", ParamValue::VarChar(None)));
+        assert_eq!(null[null.len() - 2..], [0xFF, 0xFF]);
+        // DBCS collations are refused rather than mis-encoded.
+        let jp = Collation {
+            lcid_and_flags: 0x0411,
+            sort_id: 0,
+        };
+        let mut out = Vec::new();
+        assert!(matches!(
+            write_param(
+                &mut out,
+                &Param::new("k", ParamValue::VarChar(Some("x".into()))),
+                jp
+            ),
+            Err(Error::Param { .. })
+        ));
+        // OUTPUT status bit and the procedure call payload.
+        let o = encoded(Param::output("n", Option::<i64>::None));
+        assert_eq!(o[..6], [2, b'@', 0, b'n', 0, 1]);
+        let rpc = rpc_call("dbo.P", &[Param::new("a", 1i32)], 7, latin1).unwrap();
+        assert_eq!(
+            rpc[..22],
+            {
+                let mut h = Vec::new();
+                all_headers(&mut h, 7);
+                h
+            }[..]
+        );
+        assert_eq!(rpc[22..24], [5, 0]);
+        assert_eq!(rpc[24..34], [b'd', 0, b'b', 0, b'o', 0, b'.', 0, b'P', 0]);
+        assert_eq!(rpc[34..36], [0, 0]);
+        assert!(rpc_call("", &[], 0, latin1).is_err());
+        let s = sp_executesql(
+            "select @n = 1",
+            &[Param::output("n", Option::<i32>::None)],
+            0,
+            latin1,
+        )
+        .unwrap();
+        let text: Vec<u8> = "@n int OUTPUT"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert!(s.windows(text.len()).any(|w| w == text.as_slice()));
     }
 
     #[test]
@@ -626,7 +834,8 @@ mod tests {
         let go = hex(&line[2..]);
         let go = &go[8..]; // packet header
         let sql = "EXEC dbo.sp_X @Limit = @Limit, @CollectFrom = @CollectFrom";
-        let ours = sp_executesql(sql, &[Param::new("Limit", 50i32)], 0).unwrap();
+        let ours =
+            sp_executesql(sql, &[Param::new("Limit", 50i32)], 0, Collation::default()).unwrap();
         // ALL_HEADERS + proc id + flags + @stmt as go-mssqldb: type, max len, collation, value.
         let stmt_end = 22 + 6 + 2 + 1 + 2 + 5 + 2 + sql.len() * 2;
         assert_eq!(ours[..22 + 6], go[..22 + 6]);
@@ -759,7 +968,7 @@ mod tests {
         // Out-of-range year.
         let early: DateTime = "0000-12-31T00:00:00".parse().unwrap();
         let mut out = Vec::new();
-        assert!(write_param(&mut out, &Param::new("a", early)).is_err());
-        assert!(sp_executesql("x", &[Param::new("", 1i32)], 0).is_err());
+        assert!(write_param(&mut out, &Param::new("a", early), Collation::default()).is_err());
+        assert!(sp_executesql("x", &[Param::new("", 1i32)], 0, Collation::default()).is_err());
     }
 }

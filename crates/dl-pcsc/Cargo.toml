@@ -1,0 +1,16 @@
+[package]
+name = "dl-pcsc"
+description = "PC/SC smart card access through the OS library (winscard.dll, pcsc-lite, PCSC.framework): readers, card events, APDUs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+[lints]
+workspace = true

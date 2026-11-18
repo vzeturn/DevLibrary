@@ -1,0 +1,16 @@
+[package]
+name = "dl-winos"
+description = "Windows system access without dependencies: registry reads, RAW print spooler jobs, late-bound COM automation (IDispatch) and dynamic DLL loading; stubs elsewhere."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+[lints]
+workspace = true

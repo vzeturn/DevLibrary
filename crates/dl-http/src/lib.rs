@@ -12,7 +12,7 @@ mod url;
 
 pub use body::ChunkedDecoder;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub use client::{Client, ClientOptions};
+pub use client::{Client, ClientOptions, ShutdownHandle, Upgraded};
 pub use error::Error;
 pub use headers::Headers;
 pub use message::{
