@@ -1,0 +1,151 @@
+{
+  "protocol": 1,
+  "description": "Golden frames for agent protocol v1. direction is who sends the frame; valid=false frames must be refused by the receiver.",
+  "error_codes": [
+    "SITE_OFFLINE",
+    "AGENT_SUPERSEDED",
+    "OP_TIMEOUT",
+    "OP_REJECTED",
+    "CONTRACT_UNSUPPORTED",
+    "LEASE_EXPIRED",
+    "AGENT_BUSY"
+  ],
+  "schema_version_unknown": 0,
+  "fixtures": [
+    {
+      "file": "hello.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "hello-schema-unknown.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "op.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "op-read.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "result-applied.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "result-rejected.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "result-failed.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "result-failed-busy.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "result-failed-timeout.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "ping.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "pong.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "pong-status.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "cfg.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "update.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "migrate.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "migrate-dry-run.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "migrate-progress.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "migrate-result-applied.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "migrate-result-failed.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
+      "file": "invalid/hello-extra-key.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
+      "file": "invalid/op-missing-deadline.json",
+      "direction": "cloud_to_agent",
+      "valid": false
+    },
+    {
+      "file": "invalid/result-applied-with-error.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
+      "file": "invalid/result-rejected-without-error.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
+      "file": "invalid/update-http-url.json",
+      "direction": "cloud_to_agent",
+      "valid": false
+    },
+    {
+      "file": "invalid/migrate-result-refused-without-error.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
+      "file": "invalid/migrate-progress-sql-text.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
+      "file": "invalid/migrate-bundle-ref.json",
+      "direction": "cloud_to_agent",
+      "valid": false
+    }
+  ]
+}

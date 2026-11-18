@@ -1,0 +1,13 @@
+{
+  "type": "migrate_result",
+  "id": "0b8f2c51-6a3e-4d7a-9c1b-2e4f6a8b0c1d",
+  "status": "applied",
+  "bundle_id": "pms-0-5-bdb21d1d41262cfa",
+  "head": 5,
+  "applied": 5,
+  "adopted": 0,
+  "pending": 0,
+  "duration_ms": 812,
+  "drift": [{ "kind": "proc", "object": "dbo.usp_Widget_Get", "code": "DEFINITION_CHANGED" }],
+  "error": null
+}
