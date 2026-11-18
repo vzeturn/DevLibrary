@@ -16,7 +16,7 @@ use crate::config::ConfigStore;
 use crate::hub::{self, HttpTransport};
 use crate::identity::Identity;
 use crate::supervisor::Factory;
-use crate::{Error, agent_version, now};
+use crate::{Error, Version, agent_version, now};
 
 /// Exit code for usage and setup errors (`EX_CONFIG`).
 pub const EXIT_CONFIG: i32 = 78;
@@ -34,6 +34,10 @@ pub struct App {
     pub display: String,
     /// The product's modules (the built-in `sys` module is always added).
     pub modules: Vec<Factory>,
+    /// Release line on the hub (default `dl-agent`).
+    pub product: String,
+    /// Version of this binary on that line (default: the `dl-agent` crate version).
+    pub version: Version,
 }
 
 impl App {
@@ -43,7 +47,17 @@ impl App {
             service: service.into(),
             display: display.into(),
             modules: Vec::new(),
+            product: crate::agent::PRODUCT.into(),
+            version: agent_version(),
         }
+    }
+
+    /// Sets the release line and version a product binary follows, e.g.
+    /// `.release("azolo-agent", env!("CARGO_PKG_VERSION").parse().unwrap())`.
+    pub fn release(mut self, product: &str, version: Version) -> App {
+        self.product = product.into();
+        self.version = version;
+        self
     }
 
     /// Adds a module.
@@ -67,7 +81,7 @@ pub fn command(app: &App) -> Command {
             .help("State directory (default: %ProgramData%\\<service> or /var/lib/<service>)")
     };
     Command::new(app.service.clone())
-        .version(agent_version().to_string())
+        .version(app.version.to_string())
         .about(format!(
             "{}: shared on-prem agent (modules, signed self-update, reports)",
             app.display
@@ -131,7 +145,11 @@ pub fn main(app: App) -> i32 {
         "status" => {
             println!(
                 "{}",
-                dl_json::to_string_pretty(&crate::agent::local_status(&dir))
+                dl_json::to_string_pretty(&crate::agent::local_status(
+                    &dir,
+                    &app.product,
+                    &app.version
+                ))
             );
             Ok(())
         }
@@ -200,10 +218,11 @@ fn enroll(app: &App, dir: &Path, m: &Matches) -> Result<(), Error> {
     Ok(())
 }
 
-fn init_logging(dir: &Path, console: bool) {
+fn init_logging(app: &App, dir: &Path, console: bool) {
     let mut b = dl_log::Logger::builder()
         .level(dl_log::LevelFilter::Info)
-        .field("agent_version", agent_version().to_string());
+        .field("product", app.product.clone())
+        .field("version", app.version.to_string());
     if let Some(level) = ConfigStore::load(dir)
         .ok()
         .map(|c| c.current.log_level().to_string())
@@ -231,7 +250,7 @@ fn run(app: &App, dir: &Path) -> i32 {
         eprintln!("cannot create {}: {e}", dir.display());
         return EXIT_CONFIG;
     }
-    init_logging(dir, !as_service);
+    init_logging(app, dir, !as_service);
     if as_service {
         let (app, dir) = (app.clone(), dir.to_path_buf());
         let result = dl_winsvc::run_service_with_exit_code(&app.service.clone(), move |stop| {
@@ -267,7 +286,9 @@ fn run_agent(app: &App, dir: &Path, stop: &StopSignal) -> i32 {
             return EXIT_CONFIG;
         }
     };
-    let opts = Options::new(dir.to_path_buf(), exe);
+    let mut opts = Options::new(dir.to_path_buf(), exe);
+    opts.product = app.product.clone();
+    opts.version = app.version.clone();
     match Agent::new(
         opts,
         identity,

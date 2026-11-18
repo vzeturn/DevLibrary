@@ -58,6 +58,8 @@ impl Module for Einvoice {
 
 fn main() {
     let app = dl_agent::cli::App::new("azolo-agent", "Azolo Agent")
+        // Release line on the hub and the version this build reports.
+        .release("azolo-agent", env!("CARGO_PKG_VERSION").parse().unwrap())
         .module(Arc::new(|| Box::new(Einvoice)));
     std::process::exit(dl_agent::cli::main(app));
 }
@@ -71,6 +73,23 @@ fn main() {
 | `run` | run in the console, or as the service when the SCM started it |
 | `install` / `uninstall [--purge]` | system service |
 | `status` | local state as JSON (no hub call) |
+
+## Releasing
+
+Build with the trusted keys baked in and the version stamped, sign offline, upload, publish:
+
+```text
+cargo run -p dl-agent --example release -- keygen release.seed rel-2026   # once; prints id:public
+DL_AGENT_RELEASE_KEYS=rel-2026:<public> DL_AGENT_VERSION=1.2.0 cargo build --release -p dl-agent
+cargo run -p dl-agent --example release -- sign release.seed rel-2026 dl-agent canary 1.2.0 \
+    windows-x86_64 https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe \
+    target/release/dl-agent.exe > canary.json
+wrangler r2 object put agent-hub-artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe --file … --remote
+curl -X PUT https://agent.pms.id.vn/admin/releases/dl-agent/1.2.0 --data-binary @canary.json …
+```
+
+Demo tenants (canary) take it first; `GET /admin/releases/dl-agent/1.2.0/gate` must pass before
+`POST …/promote` with the same build signed for `stable`. Keep the seed off every server.
 
 `--data DIR` (or `DL_AGENT_DATA`) picks the state directory; the default is
 `%ProgramData%\dl-agent` or `/var/lib/dl-agent`.

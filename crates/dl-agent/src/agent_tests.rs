@@ -198,7 +198,7 @@ fn healthy_probation_commits() {
     let hub = FakeHub::default();
     let mut a = agent(&d, &hub, Vec::new());
     a.update.pending = Some(Pending {
-        version: agent_version(),
+        version: a.opts.version.clone(),
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 500,
         boots: 1,
@@ -238,7 +238,7 @@ fn unhealthy_probation_rolls_back() {
     std::fs::create_dir_all(d.0.join("bin/previous")).unwrap();
     std::fs::write(d.0.join("bin/previous/dl-agent"), b"good").unwrap();
     a.update.pending = Some(Pending {
-        version: agent_version(),
+        version: a.opts.version.clone(),
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 500,
         boots: 1,
@@ -252,7 +252,7 @@ fn unhealthy_probation_rolls_back() {
     }
     assert_eq!(a.watch_probation(now() + 1), Some(Exit::Restart));
     assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"good");
-    assert_eq!(a.update.failed, [agent_version()]);
+    assert_eq!(a.update.failed, [a.opts.version.clone()]);
     assert!(
         a.spool()
             .peek(50)
@@ -271,7 +271,7 @@ fn boot_rolls_back_after_too_many_probation_starts() {
     std::fs::create_dir_all(d.0.join("bin/previous")).unwrap();
     std::fs::write(d.0.join("bin/previous/dl-agent"), b"good").unwrap();
     a.update.pending = Some(Pending {
-        version: agent_version(),
+        version: a.opts.version.clone(),
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 0,
         boots: crate::update::MAX_PROBATION_BOOTS,
@@ -282,7 +282,7 @@ fn boot_rolls_back_after_too_many_probation_starts() {
         UpdateState::load(&a.opts.data_dir)
             .unwrap()
             .failed
-            .contains(&agent_version())
+            .contains(&a.opts.version.clone())
     );
 }
 
@@ -332,7 +332,7 @@ fn local_status_and_log_tail_work_offline() {
     let d = TestDir::new("agent-status");
     let hub = FakeHub::default();
     let a = agent(&d, &hub, Vec::new());
-    let s = local_status(&a.opts.data_dir);
+    let s = local_status(&a.opts.data_dir, &a.opts.product, &a.opts.version);
     assert_eq!(
         s.get("identity")
             .and_then(|i| i.get("agent_id"))
@@ -344,4 +344,27 @@ fn local_status_and_log_tail_work_offline() {
     std::fs::write(logs.join("agent.log"), "a\nb\nc\n").unwrap();
     assert_eq!(log_tail(&logs, 2), ["b", "c"]);
     assert!(log_tail(&d.0.join("none"), 2).is_empty());
+}
+
+#[test]
+fn product_agents_report_their_own_release_line() {
+    let d = TestDir::new("agent-product");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"server_time":0,"channel":"stable","heartbeat_seconds":60,"commands":[],"update_check":false}"#.into()));
+    let mut a = agent(&d, &hub, Vec::new());
+    a.opts.product = "azolo-agent".into();
+    a.opts.version = "3.1.0".parse().unwrap();
+    assert_eq!(a.step(1000), None);
+    let hb = dl_json::parse_slice(&hub.seen()[0].body).unwrap();
+    assert_eq!(
+        hb.get("product").and_then(Value::as_str),
+        Some("azolo-agent")
+    );
+    assert_eq!(hb.get("version").and_then(Value::as_str), Some("3.1.0"));
+    let s = local_status(&a.opts.data_dir, &a.opts.product, &a.opts.version);
+    assert_eq!(
+        s.get("product").and_then(Value::as_str),
+        Some("azolo-agent")
+    );
+    a.supervisor.stop_all(STOP_WAIT);
 }

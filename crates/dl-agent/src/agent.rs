@@ -15,7 +15,7 @@ use crate::manifest::{Manifest, TrustedKeys};
 use crate::report::{ProblemReport, Severity, Spool};
 use crate::supervisor::{Factory, Supervisor};
 use crate::update::{BootAction, Decision, Installer, Pending, UpdateState, on_boot, try_commit};
-use crate::{Error, agent_version, current_target, now};
+use crate::{Error, Version, agent_version, current_target, now};
 
 /// Product name of the agent binary on the hub.
 pub const PRODUCT: &str = "dl-agent";
@@ -54,8 +54,10 @@ pub struct Options {
     pub data_dir: PathBuf,
     /// The running executable (replaced by updates).
     pub exe: PathBuf,
-    /// Product name on the hub.
+    /// Product name on the hub: the release line this binary follows.
     pub product: String,
+    /// Version of this binary on that release line.
+    pub version: Version,
     /// Keys release manifests must be signed with.
     pub trusted: TrustedKeys,
     /// Probation after an update.
@@ -69,6 +71,7 @@ impl Options {
             data_dir,
             exe,
             product: PRODUCT.into(),
+            version: agent_version(),
             trusted: release_keys(),
             probation_seconds: PROBATION_SECONDS,
         }
@@ -134,7 +137,7 @@ impl Agent {
         }
         let config = ConfigStore::load(&opts.data_dir)?;
         let update = UpdateState::load(&opts.data_dir)?;
-        let current = agent_version().to_string();
+        let current = opts.version.to_string();
         let update_status = match (&update.pending, update.failed.last()) {
             (Some(p), _) => ("probation", p.version.to_string()),
             (None, Some(f)) => ("rolled_back", f.to_string()),
@@ -189,7 +192,7 @@ impl Agent {
     /// Start-up: counts a probation boot and rolls back after too many. Returns
     /// `Some(Exit::Restart)` when the previous binary was restored.
     pub fn boot(&mut self) -> Result<Option<Exit>, Error> {
-        let action = on_boot(&mut self.update, &agent_version());
+        let action = on_boot(&mut self.update, &self.opts.version);
         self.update.save(&self.opts.data_dir)?;
         match action {
             BootAction::RollBack => {
@@ -201,7 +204,7 @@ impl Agent {
                 Ok(Some(Exit::Restart))
             }
             BootAction::Probation => {
-                dl_log::info!("update on probation"; version = %agent_version());
+                dl_log::info!("update on probation"; version = %self.opts.version);
                 Ok(None)
             }
             BootAction::Normal => Ok(None),
@@ -355,8 +358,8 @@ impl Agent {
             if let Err(e) = self.update.save(&self.opts.data_dir) {
                 self.report(Severity::Error, "update_state_save_failed", &e.to_string());
             }
-            dl_log::info!("update committed"; version = %agent_version());
-            self.update_status = ("idle", agent_version().to_string());
+            dl_log::info!("update committed"; version = %self.opts.version);
+            self.update_status = ("idle", self.opts.version.to_string());
             return None;
         }
         if now >= until
@@ -381,7 +384,7 @@ impl Agent {
             .map(|s| s.to_json())
             .collect();
         json!({
-            "agent_id": id.agent_id, "product": self.opts.product, "version": agent_version().to_string(),
+            "agent_id": id.agent_id, "product": self.opts.product, "version": self.opts.version.to_string(),
             "channel": self.channel,
             "target": current_target(), "hostname": self.hostname, "started_at": self.started_at,
             "uptime_seconds": now.saturating_sub(self.started_at), "config_version": self.config.current.version,
@@ -452,7 +455,7 @@ impl Agent {
                 m.product, m.channel
             )));
         }
-        let current = agent_version();
+        let current = self.opts.version.clone();
         let agent_id = self.hub.identity().agent_id.clone();
         match self
             .update
@@ -618,7 +621,7 @@ impl Agent {
         let failed: Vec<String> = self.update.failed.iter().map(ToString::to_string).collect();
         json!({
             "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls.clone(),
-            "version": agent_version().to_string(), "target": current_target(), "hostname": self.hostname,
+            "product": self.opts.product, "version": self.opts.version.to_string(), "target": current_target(), "hostname": self.hostname,
             "channel": self.channel, "uptime_seconds": now.saturating_sub(self.started_at), "clock_skew": self.hub.skew(),
             "config_version": self.config.current.version, "config_on_trial": self.config.trial_since.is_some(),
             "update": {"pending": pending, "failed": failed}, "spooled_reports": self.spool.len() as u64,
@@ -716,7 +719,7 @@ pub fn log_tail(dir: &Path, lines: usize) -> Vec<String> {
 }
 
 /// What `dl-agent status` prints: local state only, no hub call.
-pub fn local_status(data_dir: &Path) -> Value {
+pub fn local_status(data_dir: &Path, product: &str, version: &Version) -> Value {
     let identity = match Identity::load(data_dir) {
         Ok(id) => {
             json!({"agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls})
@@ -724,7 +727,8 @@ pub fn local_status(data_dir: &Path) -> Value {
         Err(e) => json!({"error": e.to_string()}),
     };
     let mut out = Map::new();
-    out.insert("version", agent_version().to_string());
+    out.insert("product", product);
+    out.insert("version", version.to_string());
     out.insert("target", current_target());
     out.insert("data_dir", data_dir.display().to_string());
     out.insert("identity", identity);

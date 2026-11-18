@@ -20,10 +20,12 @@ pub mod version;
 pub use error::Error;
 pub use version::Version;
 
-/// The version of this build, from `Cargo.toml`.
+/// The version of this build: `DL_AGENT_VERSION` at compile time (release builds stamp it),
+/// otherwise the crate version from `Cargo.toml`.
 pub fn agent_version() -> Version {
-    // The package version is a valid SemVer string; fall back to 0.0.0 rather than panic.
-    env!("CARGO_PKG_VERSION")
+    // Both are SemVer strings; fall back to 0.0.0 rather than panic.
+    option_env!("DL_AGENT_VERSION")
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
         .parse()
         .unwrap_or_else(|_| Version::new(0, 0, 0))
 }

@@ -88,7 +88,7 @@ Manifest (signed with an offline Ed25519 release key; agents ship the trusted pu
  "key_id":"rel-2026","signature":"<b64>"}
 ```
 
-The signature covers the canonical JSON of every field except `signature`, in the order
+`min_version` is `null` when the release has no minimum. The signature covers the canonical JSON of every field except `signature`, in the order
 above, with artifacts in the order given. Agents refuse a manifest that is unsigned, signed
 by an unknown key, older (`published_at`) than the last one they accepted on that channel,
 or lower in version than the running one unless `allow_downgrade` is true.
