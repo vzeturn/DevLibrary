@@ -8,6 +8,13 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent`: signed SQL bundles `sql.install {bundle, dry_run?, force?}`: Ed25519-signed
+  procedures, functions, views and idempotent scripts installed all-or-nothing in one
+  transaction; syntax newer than the site's engine or compatibility level is refused before
+  any change, `CREATE OR ALTER` is rewritten for SQL Server 2005–2014, replaced definitions
+  are backed up, objects are stamped (`dl_bundle`) so re-sends only repair drift, and
+  `requires` is probed before commit. `release sign-sql` signs a bundle offline;
+  `install::with_repair` installs and retries once after `sql_missing_object`.
 - `dl-agent`: schema probe `sql.probe {requirement}` lists missing tables, columns,
   views, procedures, functions and configuration rows per database (SQL Server 2005+
   catalogs, values bound); the last result rides the site survey. SQL session errors carry

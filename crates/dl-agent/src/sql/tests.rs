@@ -78,8 +78,15 @@ impl Connection for Fake {
         self.timeout = timeout;
         Ok(())
     }
+    fn run(&mut self, _sql: &str, _params: &[(&str, &str)]) -> Result<(), Error> {
+        self.ping() // bundle installs: every statement succeeds
+    }
+
     fn query_json(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
         self.ping()?;
+        if sql.contains("OBJECT_DEFINITION") {
+            return Ok(vec![json!({"id": null, "def": null, "stamp": null})]);
+        }
         if sql.contains("SERVERPROPERTY") {
             return Ok(vec![json!({
                 "product_version": "10.50.1600.1", "edition": "Express Edition",

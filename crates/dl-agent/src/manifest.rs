@@ -74,7 +74,7 @@ impl TrustedKeys {
         Ok(self)
     }
 
-    fn get(&self, key_id: &str) -> Option<&VerifyingKey> {
+    pub(crate) fn get(&self, key_id: &str) -> Option<&VerifyingKey> {
         self.keys
             .iter()
             .find(|(id, _)| id == key_id)

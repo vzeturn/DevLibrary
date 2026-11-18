@@ -176,8 +176,10 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   stats (`open`, `idle`, `in_use`, `max`, `connects`, `connect_failures`, `acquires`, `waits`,
   `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`);
   `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
-  `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6). There is deliberately no command that runs arbitrary SQL sent by the hub: projects reach
-  their databases through their own modules.
+  `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6);
+  `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7). There is
+  deliberately no command that runs arbitrary SQL sent by the hub: a bundle must carry a
+  release signature, and projects otherwise reach their databases through their own modules.
 
 ### 9.5 Site survey
 
@@ -244,3 +246,48 @@ SQL errors from a session carry a code prefix the agent and modules act on:
 | `sql_deadlock` | 1205 | deadlock victim; retry |
 | `sql_access_denied` | 18456, 4060, 229, 230 | login, database or permission refused |
 | `sql_timeout` | (client) | request timed out and was cancelled |
+
+### 9.7 Signed SQL bundles
+
+The procedures, functions, views and idempotent scripts a product needs in a site database
+travel as one bundle signed offline with a release key (`release sign-sql <seed> <key-id>
+<bundle.json>`; an object may name a `file` instead of inline `sql`). The agent verifies it
+against its baked-in release keys, so neither the hub nor the network can push SQL.
+
+```json
+{"product": "einvoice", "version": "1.4.0", "published_at": 1763500000,
+ "objects": [
+   {"kind": "script", "name": "dbo.add_MaCQT",
+    "sql": "IF COL_LENGTH('dbo.HoaDon','MaCQT') IS NULL ALTER TABLE dbo.HoaDon ADD MaCQT varchar(50) NULL"},
+   {"kind": "procedure", "name": "dbo.usp_GetBill",
+    "sql": "CREATE OR ALTER PROCEDURE dbo.usp_GetBill @Id int AS …"}],
+ "requires": {"procedures": ["dbo.usp_GetBill"], "tables": {"dbo.HoaDon": ["MaCQT"]}},
+ "key_id": "rel-2026", "signature": "<base64 Ed25519 over the compact JSON of the rest>"}
+```
+
+- `kind` is `procedure`, `function`, `view` or `script`; an object's batch must create
+  exactly the entry's kind and name (checked when parsed). At most 500 objects.
+- **Old engines.** The site level is `min(engine major × 10, compatibility level)`. Before
+  any change, every batch is scanned (comments and strings skipped) for syntax above it:
+  2012 (`IIF`, `TRY_CONVERT`, `CONCAT`, `FORMAT`, `THROW`, `OFFSET … FETCH`, sequences…),
+  2016 (`STRING_SPLIT`, `OPENJSON`, `DROP … IF EXISTS`, `CREATE OR ALTER` inside a script),
+  2017 (`STRING_AGG`, `TRIM`, `CONCAT_WS`) and 2022 (`GREATEST`, `DATETRUNC`); the bundle is
+  refused (`refused: [{name, features}]`). An object's own `CREATE OR ALTER` header is
+  rewritten to `CREATE` (missing) or `ALTER` (present), so grants and properties survive.
+- **Backup.** Each object that will be replaced has its `OBJECT_DEFINITION` written to
+  `sql-backups/<database>/<product>-<version>-<time>/<schema>.<name>.sql` first. A
+  definition that cannot be read (`WITH ENCRYPTION`, no `VIEW DEFINITION`) refuses the
+  bundle (`unreadable`) unless `force`.
+- **All or nothing.** Scripts and objects run in order inside one transaction; then
+  `requires` is probed (§9.6) in the same transaction. Any failure (`failed: {kind, name,
+  code, error}`) or an unmet requirement rolls everything back. `dry_run` always rolls back
+  and reports what would have happened.
+- **Ledger.** Each installed object gets the extended property `dl_bundle =
+  "product@version sha256"`; an object already carrying the same stamp is `unchanged` and
+  skipped, so re-sending a bundle repairs drift without touching what is right. Real
+  installs are appended to `sql-installs.jsonl`, and the probe joins the survey.
+- Answer per database: `{"ok", "dry_run", "level", "applied": [{kind, name, action:
+  script|create|alter}], "unchanged": [name], "backups": [path], "failed"?, "refused"?,
+  "unreadable"?, "probe"?, "error"?}`.
+- Modules call `install::with_repair(conn, bundle, …, f)`: when `f` fails with
+  `sql_missing_object`, the bundle is verified and installed and `f` runs once more.
