@@ -17,6 +17,7 @@ use crate::config::ConfigStore;
 use crate::hub::{self, HttpTransport};
 use crate::identity::Identity;
 use crate::supervisor::Factory;
+use crate::tool::{SETUP_ARGS_ENV, Tool, ToolContext, with_setup_args};
 use crate::{Error, Version, agent_version, now};
 
 /// Exit code for usage and setup errors (`EX_CONFIG`).
@@ -35,6 +36,8 @@ pub struct App {
     pub display: String,
     /// The product's modules (the built-in `sys` module is always added).
     pub modules: Vec<Factory>,
+    /// Sub-commands the modules add (setup steps such as `einvoice-enroll`).
+    pub tools: Vec<Tool>,
     /// Release line on the hub (default `dl-agent`).
     pub product: String,
     /// Version of this binary on that line (default: the `dl-agent` crate version).
@@ -48,6 +51,7 @@ impl App {
             service: service.into(),
             display: display.into(),
             modules: Vec::new(),
+            tools: Vec::new(),
             product: crate::agent::PRODUCT.into(),
             version: agent_version(),
         }
@@ -67,6 +71,12 @@ impl App {
         self
     }
 
+    /// Adds a module sub-command. Its name must not clash with a built-in one.
+    pub fn tool(mut self, tool: Tool) -> App {
+        self.tools.push(tool);
+        self
+    }
+
     fn module_names(&self) -> Vec<String> {
         let mut names = vec!["sys".to_string()];
         names.extend(self.modules.iter().map(|f| f().name().to_string()));
@@ -81,7 +91,7 @@ pub fn command(app: &App) -> Command {
             .env("DL_AGENT_DATA")
             .help("State directory (default: %ProgramData%\\<service> or /var/lib/<service>)")
     };
-    Command::new(app.service.clone())
+    let cmd = Command::new(app.service.clone())
         .version(app.version.to_string())
         .about(format!(
             "{}: shared on-prem agent (modules, signed self-update, reports)",
@@ -156,12 +166,17 @@ pub fn command(app: &App) -> Command {
                 .about("Connects to every declared database (or one) and prints the result")
                 .arg(Arg::positional("name").help("Only this database"))
                 .arg(data()),
-        )
+        );
+    app.tools.iter().fold(cmd, |cmd, t| {
+        cmd.subcommand((t.grammar)(Command::new(t.name)).arg(data()))
+    })
 }
 
 /// Parses the process arguments and runs the chosen command; returns the exit code.
 pub fn main(app: App) -> i32 {
-    let m = command(&app).parse_env_or_exit();
+    let setup = std::env::var(SETUP_ARGS_ENV).ok();
+    let args = with_setup_args(std::env::args_os().collect(), &app.tools, setup.as_deref());
+    let m = command(&app).parse_from(args).unwrap_or_else(|e| e.exit());
     let Some((name, sub)) = m.subcommand() else {
         return EXIT_CONFIG;
     };
@@ -194,7 +209,17 @@ pub fn main(app: App) -> i32 {
             );
             Ok(())
         }
-        _ => return EXIT_CONFIG,
+        other => match app.tools.iter().find(|t| t.name == other) {
+            Some(t) => (t.run)(
+                &ToolContext {
+                    data_dir: &dir,
+                    product: &app.product,
+                    version: &app.version,
+                },
+                sub,
+            ),
+            None => return EXIT_CONFIG,
+        },
     };
     match result {
         Ok(()) => 0,
@@ -566,6 +591,33 @@ mod tests {
         );
         assert!(unit.contains("ExecStart=\"/opt/dl-agent\" run --data \"/var/lib/dl-agent\""));
         assert!(unit.contains("Restart=always"));
+    }
+
+    #[test]
+    fn module_tools_become_sub_commands_with_data() {
+        let app = App::new("x", "X").tool(Tool {
+            name: "demo-setup",
+            grammar: |c| {
+                c.about("Demo")
+                    .arg(Arg::option("token").required().help("Token"))
+            },
+            run: |_, _| Ok(()),
+        });
+        let cmd = command(&app);
+        cmd.debug_assert();
+        let m = cmd
+            .parse_from_with_env(["x", "demo-setup", "--token", "t", "--data", "/d"], |_| {
+                None
+            })
+            .unwrap();
+        let (name, sub) = m.subcommand().unwrap();
+        assert_eq!(name, "demo-setup");
+        assert_eq!(sub.value("token"), Some("t"));
+        assert_eq!(data_dir("x", sub), PathBuf::from("/d"));
+        assert!(
+            cmd.parse_from_with_env(["x", "demo-setup"], |_| None)
+                .is_err()
+        );
     }
 
     #[test]

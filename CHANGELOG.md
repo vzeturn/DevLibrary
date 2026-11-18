@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent`: modules add their own sub-commands (`App::tool`); words of `DL_AGENT_SETUP_ARGS` are
+  appended to such a sub-command's arguments (never to built-in ones), for `install.ps1 -Setup`.
 - `install.ps1`: `-Setup <sub-command>` runs a product's setup after enrolment (secrets through env
   `DL_AGENT_SETUP_ARGS`), and `-Replace <service pattern>` then removes that product's previous agent,
   keeping its files; a failure before that point leaves the old agent running.
