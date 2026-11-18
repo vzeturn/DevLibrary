@@ -29,6 +29,19 @@ dl-otp = { path = "crates/dl-otp" }
 dl-jwt = { path = "crates/dl-jwt" }
 dl-bench = { path = "crates/dl-bench" }
 dl-ffi = { path = "crates/dl-ffi" }
+dl-tls = { path = "crates/dl-tls" }
+dl-http = { path = "crates/dl-http" }
+dl-winsvc = { path = "crates/dl-winsvc" }
+dl-tds = { path = "crates/dl-tds" }
+dl-ws = { path = "crates/dl-ws" }
+dl-ed25519 = { path = "crates/dl-ed25519" }
+dl-flate = { path = "crates/dl-flate" }
+dl-sqlite = { path = "crates/dl-sqlite" }
+dl-zip = { path = "crates/dl-zip" }
+dl-winos = { path = "crates/dl-winos" }
+dl-signalr = { path = "crates/dl-signalr" }
+dl-serial = { path = "crates/dl-serial" }
+dl-pcsc = { path = "crates/dl-pcsc" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

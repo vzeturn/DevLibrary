@@ -1,0 +1,20 @@
+[package]
+name = "dl-ed25519"
+description = "Ed25519 signatures (RFC 8032): key from seed, sign, verify, matching Go's crypto/ed25519."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-hash.workspace = true
+
+[dev-dependencies]
+dl-encoding.workspace = true
+
+[lints]
+workspace = true

@@ -51,7 +51,21 @@ pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
 
 #[cfg(windows)]
 pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
-    #[link(name = "bcryptprimitives", kind = "raw-dylib")]
+    // bcryptprimitives.dll exports the undecorated name `ProcessPrng`; on x86 a raw-dylib
+    // import of an `extern "system"` function would otherwise ask for `_ProcessPrng@8`
+    // and the program would fail to load.
+    #[cfg_attr(
+        target_arch = "x86",
+        link(
+            name = "bcryptprimitives",
+            kind = "raw-dylib",
+            import_name_type = "undecorated"
+        )
+    )]
+    #[cfg_attr(
+        not(target_arch = "x86"),
+        link(name = "bcryptprimitives", kind = "raw-dylib")
+    )]
     unsafe extern "system" {
         fn ProcessPrng(data: *mut u8, len: usize) -> i32;
     }

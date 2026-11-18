@@ -1,0 +1,20 @@
+[package]
+name = "dl-flate"
+description = "DEFLATE (RFC 1951) compression and decompression with gzip (RFC 1952) and zlib (RFC 1950) containers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-hash.workspace = true
+
+[dev-dependencies]
+dl-encoding.workspace = true
+
+[lints]
+workspace = true

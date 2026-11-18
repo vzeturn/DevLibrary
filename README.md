@@ -39,9 +39,22 @@ helpers (amount in words, tax codes, VietQR).
 | [`dl-vn`](crates/dl-vn) | Vietnam: amount in words for e-invoices, diacritics, collation, MST, phone, CCCD, VietQR | ad-hoc helpers in every VN project | ✅ | [README](crates/dl-vn/README.md) |
 | [`dl-hash`](crates/dl-hash) | SHA-1/2, MD5, HMAC, PBKDF2, CRC-32, constant-time compare | System.Security.Cryptography hashes, Node `crypto`, hashlib | ✅ | [README](crates/dl-hash/README.md) |
 | [`dl-encoding`](crates/dl-encoding) | Strict Base64 / Base32 / hex (RFC 4648) | `Convert.ToBase64String`, Buffer, base64 crate | ✅ | [README](crates/dl-encoding/README.md) |
+| [`dl-ed25519`](crates/dl-ed25519) | Ed25519 signatures (RFC 8032): key from seed, sign, verify; constant-time signing, results identical to Go `crypto/ed25519` | Go `crypto/ed25519`, NSec, tweetnacl, ed25519-dalek | ✅ | [README](crates/dl-ed25519/README.md) |
+| [`dl-zip`](crates/dl-zip) | ZIP archives: read (stored, deflate, ZIP64, CP437/UTF-8 names), zip-slip-safe extraction with limits, streaming writer | `System.IO.Compression.ZipArchive`, Go `archive/zip`, zip | – | [README](crates/dl-zip/README.md) |
+| [`dl-sqlite`](crates/dl-sqlite) | SQLite through the OS library (winsqlite3.dll, libsqlite3 loaded at run time): connections, statements, transactions, typed values | Microsoft.Data.Sqlite, go-sqlite3, rusqlite | – | [README](crates/dl-sqlite/README.md) |
+| [`dl-signalr`](crates/dl-signalr) | ASP.NET Core SignalR client (JSON hub protocol over WebSocket): negotiate or direct, invoke, send, events, keepalive | Microsoft.AspNetCore.SignalR.Client, @microsoft/signalr | – | [README](crates/dl-signalr/README.md) |
+| [`dl-serial`](crates/dl-serial) | Serial ports on Windows, Linux and macOS: settings, timeouts, DTR/RTS, port list with USB ids | System.IO.Ports, go.bug.st/serial, serialport | – | [README](crates/dl-serial/README.md) |
+| [`dl-pcsc`](crates/dl-pcsc) | PC/SC smart cards through the OS library (winscard, pcsc-lite, PCSC.framework): readers, card events, APDUs, NFC UIDs | pcsc-sharp, ebfe/scard, pcsc | – | [README](crates/dl-pcsc/README.md) |
+| [`dl-winos`](crates/dl-winos) | Windows registry reads, RAW print spooler jobs, COM automation (IDispatch: SAPI, OPOS), dynamic DLL loading with architecture checks; stubs elsewhere | `Microsoft.Win32.Registry`, RawPrinterHelper, `dynamic` COM, `NativeLibrary`, x/sys/windows/registry, go-ole | – | [README](crates/dl-winos/README.md) |
+| [`dl-flate`](crates/dl-flate) | DEFLATE (RFC 1951) with gzip (RFC 1952) and zlib (RFC 1950) containers, compression levels, size limits on decompression | Go `compress/gzip`, `System.IO.Compression`, pako, flate2 | ✅ | [README](crates/dl-flate/README.md) |
 | [`dl-rand`](crates/dl-rand) | OS CSPRNG and fast xoshiro256** | RandomNumberGenerator, crypto.getRandomValues, rand | – | [README](crates/dl-rand/README.md) |
 | [`dl-bench`](crates/dl-bench) | Tiny benchmark harness used by the other crates | criterion | – | [README](crates/dl-bench/README.md) |
 | [`dl-ffi`](crates/dl-ffi) | C ABI for .NET, Go (cgo), Flutter and WebAssembly hosts: the rules stay in Rust | hand-ported rules in every language | – | [README](crates/dl-ffi/README.md) |
+| [`dl-tls`](crates/dl-tls) | TLS 1.2/1.3 client over the OS stack: SChannel on Windows, system OpenSSL (loaded at run time) on Linux | rustls, native-tls, Go `crypto/tls` client | – | [README](crates/dl-tls/README.md) |
+| [`dl-http`](crates/dl-http) | HTTP/1.1 client: URLs, keep-alive pool, deadlines, chunked bodies, `HTTP(S)_PROXY` and CONNECT; sans-I/O message layer | Go `net/http` client, `HttpClient`, axios, ureq | – | [README](crates/dl-http/README.md) |
+| [`dl-ws`](crates/dl-ws) | WebSocket (RFC 6455): `ws://`/`wss://` client over dl-http (TLS, proxies, deadlines), frame codec, server-side framing | nhooyr.io/websocket, coder/websocket, `ClientWebSocket`, ws, tungstenite | – | [README](crates/dl-ws/README.md) |
+| [`dl-tds`](crates/dl-tds) | SQL Server client (TDS 7.4/8): SQL login and Windows integrated authentication (SSPI), `sp_executesql` parameters, stored procedure calls with OUTPUT parameters and return status, every common type, collation code pages, login-only/required/strict TLS; conversions match go-mssqldb | go-mssqldb, Microsoft.Data.SqlClient, tedious, tiberius | – | [README](crates/dl-tds/README.md) |
+| [`dl-winsvc`](crates/dl-winsvc) | Windows services (dispatcher, exit codes, SCM install/start/stop/delete, recovery actions, delayed start), DPAPI with entropy, owner-only file ACLs; stubs elsewhere | `x/sys/windows/svc` + `mgr`, `ProtectedData`, windows-service | – | [README](crates/dl-winsvc/README.md) |
 
 ### Using the crates from other languages
 
@@ -58,6 +71,14 @@ dl-jwt ──► dl-json, dl-hash, dl-encoding
 dl-otp ──► dl-hash, dl-encoding, dl-rand
 dl-uuid ─► dl-hash, dl-rand
 dl-log ──► dl-time, dl-json
+dl-http ─► dl-tls, dl-encoding
+dl-ws ───► dl-http, dl-hash, dl-encoding, dl-rand
+dl-tds ──► dl-tls, dl-decimal, dl-time, dl-uuid
+dl-ed25519, dl-flate ─► dl-hash
+dl-zip ──► dl-flate, dl-hash
+dl-signalr ─► dl-ws, dl-http, dl-json
+dl-sqlite, dl-serial, dl-pcsc, dl-winos: OS libraries only (loaded at run time where optional)
+dl-tls, dl-winsvc: OS libraries only (secur32/crypt32/advapi32 on Windows, libssl at run time on Linux)
 dl-json, dl-decimal, dl-time, dl-qr, dl-vn, dl-cli, dl-hash, dl-encoding, dl-rand: no dependencies
 ```
 
@@ -161,11 +182,12 @@ The full list is in [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 ## Status and roadmap
 
 Version 0.1: APIs may still change before 1.0. Each crate's README lists what it does not
-do yet. Planned next: HTTP/1.1 client and server, deflate/gzip (and PNG output for
-`dl-qr`), SQL drivers (PostgreSQL, SQL Server), RS256/ES256 for `dl-jwt`, Argon2id,
-IANA time zones for `dl-time`, and bindings for C, .NET, Node.js and Python.
+do yet. Planned next: HTTP/1.1 server, macOS TLS (Security.framework), PostgreSQL driver
+(SCRAM-SHA-256), an embedded key-value store for agent outboxes, PNG output for `dl-qr`,
+RS256/ES256 for `dl-jwt`, Argon2id, IANA time zones for `dl-time`, and bindings for
+Node.js and Python.
 
-Cryptographic code here (`dl-hash`, `dl-jwt`, `dl-otp`) follows the standards and their
+Cryptographic code here (`dl-hash`, `dl-ed25519`, `dl-jwt`, `dl-otp`) follows the standards and their
 test vectors but **has not been independently audited**. See [SECURITY.md](SECURITY.md).
 
 ## License
