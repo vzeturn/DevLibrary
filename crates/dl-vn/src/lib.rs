@@ -8,6 +8,7 @@ extern crate std;
 pub mod cccd;
 pub mod phone;
 pub mod tax;
+pub mod tcvn3;
 pub mod text;
 pub mod vietqr;
 pub mod words;

@@ -8,6 +8,12 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-vn`: `tcvn3` module: TCVN3 (ABC) ⇄ Unicode for legacy SMILE `char`/`varchar` text.
+  `decode` takes the code page the driver decoded through (cp1252 or cp1258, where
+  `Vietnamese_*` collations turn TCVN3 bytes into combining marks and `Ư`/`ơ`), folds the
+  uppercase base-plus-tone pairs legacy screens store, and leaves Unicode text alone;
+  `decode_bytes` for `varbinary`, `encode` / `encode_for` to write TCVN3 back.
+  `text::trim_padding` removes `char(n)` padding the way SQL Server compares it.
 - `dl-agent`: signed SQL bundles `sql.install {bundle, dry_run?, force?}`: Ed25519-signed
   procedures, functions, views and idempotent scripts installed all-or-nothing in one
   transaction; syntax newer than the site's engine or compatibility level is refused before
