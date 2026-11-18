@@ -36,7 +36,7 @@ helpers (amount in words, tax codes, VietQR).
 | [`dl-otp`](crates/dl-otp) | HOTP/TOTP for MFA, `otpauth://` URIs, replay protection, recovery codes | Otp.NET, otplib, pyotp | ✅ | [README](crates/dl-otp/README.md) |
 | [`dl-qr`](crates/dl-qr) | QR Code encoder, versions 1–40, optimal segmentation, SVG and terminal output; bit-exact with segno | QRCoder, qrcode, qrcode.react | ✅ | [README](crates/dl-qr/README.md) |
 | [`dl-cli`](crates/dl-cli) | Command-line parser: subcommands, env fallbacks, typed values, suggestions, generated help | clap, commander, System.CommandLine, cobra | – | [README](crates/dl-cli/README.md) |
-| [`dl-vn`](crates/dl-vn) | Vietnam: amount in words for e-invoices, diacritics, collation, MST, phone, CCCD, VietQR | ad-hoc helpers in every VN project | ✅ | [README](crates/dl-vn/README.md) |
+| [`dl-vn`](crates/dl-vn) | Vietnam: amount in words for e-invoices, diacritics, collation, TCVN3, MST, phone, CCCD, VietQR | ad-hoc helpers in every VN project | ✅ | [README](crates/dl-vn/README.md) |
 | [`dl-hash`](crates/dl-hash) | SHA-1/2, MD5, HMAC, PBKDF2, CRC-32, constant-time compare | System.Security.Cryptography hashes, Node `crypto`, hashlib | ✅ | [README](crates/dl-hash/README.md) |
 | [`dl-encoding`](crates/dl-encoding) | Strict Base64 / Base32 / hex (RFC 4648) | `Convert.ToBase64String`, Buffer, base64 crate | ✅ | [README](crates/dl-encoding/README.md) |
 | [`dl-ed25519`](crates/dl-ed25519) | Ed25519 signatures (RFC 8032): key from seed, sign, verify; constant-time signing, results identical to Go `crypto/ed25519` | Go `crypto/ed25519`, NSec, tweetnacl, ed25519-dalek | ✅ | [README](crates/dl-ed25519/README.md) |

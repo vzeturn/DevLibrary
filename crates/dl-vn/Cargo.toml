@@ -1,6 +1,6 @@
 [package]
 name = "dl-vn"
-description = "Vietnam utilities: number to words, diacritics, MST, phone, CCCD, VietQR."
+description = "Vietnam utilities: number to words, diacritics, TCVN3, MST, phone, CCCD, VietQR."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

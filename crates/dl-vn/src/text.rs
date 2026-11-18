@@ -175,6 +175,21 @@ pub fn remove_diacritics(s: &str) -> String {
     out
 }
 
+/// Removes the trailing spaces (U+0020 only) SQL Server pads `char(n)` values with and
+/// ignores when comparing text, so `'100001'` and `'100001      '` stay one key once they leave
+/// the database. Leading and inner spaces, tabs and newlines are kept; an all-space value
+/// becomes empty.
+///
+/// ```
+/// assert_eq!(dl_vn::text::trim_padding("100001      "), "100001");
+/// assert_eq!(dl_vn::text::trim_padding("  a b\t "), "  a b\t");
+/// assert_eq!(dl_vn::text::trim_padding("   "), "");
+/// ```
+#[must_use]
+pub fn trim_padding(s: &str) -> &str {
+    s.trim_end_matches(' ')
+}
+
 /// Builds a URL slug: diacritics removed, ASCII lowercase, every run of other characters
 /// replaced by one `-`, no leading or trailing `-`. Characters that are still not ASCII
 /// letters or digits after [`remove_diacritics`] (other scripts, and precomposed Latin letters
@@ -205,7 +220,7 @@ pub fn slugify(s: &str) -> String {
 }
 
 /// Recomposes Vietnamese vowels written with combining marks into precomposed letters.
-fn compose(s: &str) -> String {
+pub(crate) fn compose(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut pending: Option<Vowel> = None;
     for c in s.chars() {

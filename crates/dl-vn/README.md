@@ -27,6 +27,12 @@ tend to copy from blog posts:
   check digit, 13-digit branch codes and the 12-digit personal codes used since July 2025.
 - **`phone`**: turning whatever a customer typed into one canonical form for SMS, Zalo or a
   CRM, and telling mobiles from landlines.
+- **`tcvn3`**: reading and writing the TCVN3 (ABC) text that legacy hotel and POS databases
+  keep in `varchar` columns. The same stored byte reaches the program as a different
+  character on a cp1252 database than on a `Vietnamese_CI_AS` (cp1258) one, where some
+  arrive as bare combining accents; `decode` is told the code page and gets both right.
+  Uppercase toned vowels stored as two bytes are folded, and `text::trim_padding` drops the
+  `char(n)` padding SQL Server ignores in comparisons.
 - **`cccd`**: reading the province, gender and birth year encoded in a citizen ID number,
   and rejecting numbers that cannot exist.
 - **`vietqr`**: generating the payload of a NAPAS247 transfer QR code for a hotel folio, a
@@ -42,6 +48,7 @@ tend to copy from blog posts:
 - MST validation (10, 13 and 12 digits) with the check digit, branch and parent access.
 - Phone parsing of national and international forms, E.164 output, carrier and area lookup.
 - CCCD parsing: province (63-province table), gender, century, birth year.
+- TCVN3 ⇄ Unicode through cp1252 or cp1258, raw bytes, uppercase pairs, `char(n)` padding.
 - VietQR build and parse (EMVCo MPM, NAPAS profile), CRC-16/CCITT-FALSE, 76-entry bank table.
 
 ## Installation
