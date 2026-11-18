@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-hub",
+  "account_id": "9e6167261f0c8f36dc41de20f0821c88",
+  // Owner chose the hub host on 2026-11-18 (RT-0164).
+  "routes": [{ "pattern": "agent.pms.id.vn", "custom_domain": true }],
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [
+    { "binding": "DB", "database_name": "agent-hub-db", "database_id": "81c8a571-9363-414b-bdcc-59944f0e961c", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agent-hub-artifacts" }],
+  // Prunes the nonce replay table.
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    "HEARTBEAT_SECONDS": "60",
+    "GATE_MIN_AGENTS": "1",
+    "GATE_SOAK_HOURS": "2"
+  },
+  // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`.
+  "observability": { "enabled": true }
+}
