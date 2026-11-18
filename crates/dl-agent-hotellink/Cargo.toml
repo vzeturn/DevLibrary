@@ -1,0 +1,27 @@
+[package]
+name = "dl-agent-hotellink"
+description = "SMILE Hotel Link module for dl-agent: long-polls the HL hub for OTA bookings, reconciles them into SMILE FO folios and pushes room-type mapping and availability (port of the Go smile-hl-agent)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-json.workspace = true
+dl-hash.workspace = true
+dl-encoding.workspace = true
+dl-time.workspace = true
+dl-tds.workspace = true
+dl-http.workspace = true
+dl-winsvc.workspace = true
+dl-log.workspace = true
+dl-cli.workspace = true
+dl-winos.workspace = true
+
+[lints]
+workspace = true

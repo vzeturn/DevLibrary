@@ -67,6 +67,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-agent-hotellink"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-cli",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-tds",
+ "dl-time",
+ "dl-winos",
+ "dl-winsvc",
+]
+
+[[package]]
 name = "dl-agent-pms"
 version = "0.2.1"
 dependencies = [
