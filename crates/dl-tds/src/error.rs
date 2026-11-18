@@ -100,9 +100,38 @@ pub enum Error {
     Broken,
     /// The SQL Server Browser (UDP 1434) did not return a TCP port for the instance.
     Browser(String),
-    /// A feature the server requested is not implemented (e.g. integrated authentication
-    /// continuation, COMPUTE BY rows).
+    /// A feature is not available: integrated authentication outside Windows, COMPUTE BY
+    /// rows, a server asking for integrated authentication on a SQL-authentication login.
     Unsupported(&'static str),
+    /// Windows integrated authentication failed in the SSPI layer (no credentials for the
+    /// target, unreachable domain controller, ...). The message never contains tokens.
+    Sspi {
+        /// The SSPI function that failed, e.g. `"InitializeSecurityContextW"`.
+        function: &'static str,
+        /// Its `SECURITY_STATUS` (an HRESULT such as `0x8009030C`).
+        status: i32,
+    },
+}
+
+/// Names of the SSPI status codes integrated authentication runs into most often.
+fn sspi_status_name(status: i32) -> Option<&'static str> {
+    Some(match status as u32 {
+        0x8009_0300 => "SEC_E_INSUFFICIENT_MEMORY",
+        0x8009_0301 => "SEC_E_INVALID_HANDLE",
+        0x8009_0304 => "SEC_E_INTERNAL_ERROR",
+        0x8009_0305 => "SEC_E_SECPKG_NOT_FOUND",
+        0x8009_0308 => "SEC_E_INVALID_TOKEN",
+        0x8009_030C => "SEC_E_LOGON_DENIED",
+        0x8009_030D => "SEC_E_UNKNOWN_CREDENTIALS",
+        0x8009_030E => "SEC_E_NO_CREDENTIALS",
+        0x8009_030F => "SEC_E_MESSAGE_ALTERED",
+        0x8009_0311 => "SEC_E_NO_AUTHENTICATING_AUTHORITY",
+        0x8009_0322 => "SEC_E_WRONG_PRINCIPAL",
+        0x8009_0324 => "SEC_E_TIME_SKEW",
+        0x8009_0350 => "SEC_E_DOWNGRADE_DETECTED",
+        0x8009_0363 => "SEC_E_MUTUAL_AUTH_FAILED",
+        _ => return None,
+    })
 }
 
 impl fmt::Display for Error {
@@ -175,6 +204,17 @@ impl fmt::Display for Error {
             Error::Broken => f.write_str("connection is broken"),
             Error::Browser(m) => write!(f, "SQL Server Browser: {m}"),
             Error::Unsupported(m) => write!(f, "not supported: {m}"),
+            Error::Sspi { function, status } => {
+                write!(
+                    f,
+                    "integrated authentication failed: {function} returned {:#010X}",
+                    *status as u32
+                )?;
+                if let Some(name) = sspi_status_name(*status) {
+                    write!(f, " ({name})")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -205,6 +245,14 @@ impl From<dl_tls::Error> for Error {
 }
 
 impl Error {
+    /// `true` for [`Error::Tls`]: the TLS handshake failed, including a connection the
+    /// server dropped or reset during the handshake (the usual answer of a server that
+    /// cannot speak the offered TLS versions). Callers use it to decide whether retrying
+    /// with an older TLS version or without encryption can help.
+    pub fn is_tls(&self) -> bool {
+        matches!(self, Error::Tls(_))
+    }
+
     /// `true` for [`Error::Server`].
     pub fn is_server(&self) -> bool {
         matches!(self, Error::Server { .. })

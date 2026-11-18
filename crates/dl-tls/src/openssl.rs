@@ -116,7 +116,13 @@ impl Session {
             .is_ok();
         let host = name.trim_matches(['[', ']']);
         let verify = cfg.verify_mode() == Verify::Full;
-        let mut ssl = sys::Ssl::new(host, is_ip, verify, &alpn_wire).ok_or_else(|| {
+        let min = match cfg.minimum_version() {
+            Version::Tls10 => sys::TLS1_VERSION,
+            Version::Tls11 => sys::TLS1_1_VERSION,
+            Version::Tls12 => sys::TLS1_2_VERSION,
+            Version::Tls13 => sys::TLS1_3_VERSION,
+        };
+        let mut ssl = sys::Ssl::new(host, is_ip, verify, &alpn_wire, min).ok_or_else(|| {
             let (code, message) = sys::error_string();
             Error::Handshake {
                 code: code as i64,
@@ -160,6 +166,8 @@ impl Session {
         let version = match ssl.version() {
             0x304 => Some(Version::Tls13),
             0x303 => Some(Version::Tls12),
+            0x302 => Some(Version::Tls11),
+            0x301 => Some(Version::Tls10),
             _ => None,
         };
         let alpn = ssl.alpn_selected();

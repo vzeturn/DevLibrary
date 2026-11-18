@@ -149,6 +149,19 @@ fn negotiate<S: Read + Write>(
     }
 }
 
+/// `SP_PROT_*_CLIENT` bits for `min` up to TLS 1.3.
+fn enabled_protocols(min: Version) -> u32 {
+    [
+        (Version::Tls10, sys::SP_PROT_TLS1_0_CLIENT),
+        (Version::Tls11, sys::SP_PROT_TLS1_1_CLIENT),
+        (Version::Tls12, sys::SP_PROT_TLS1_2_CLIENT),
+        (Version::Tls13, sys::SP_PROT_TLS1_3_CLIENT),
+    ]
+    .into_iter()
+    .filter(|&(v, _)| v >= min)
+    .fold(0, |acc, (_, bit)| acc | bit)
+}
+
 impl Session {
     pub(crate) fn connect<S: Read + Write>(cfg: &Config, s: &mut S) -> Result<Session, Error> {
         if cfg.server_name().contains('\0')
@@ -167,12 +180,14 @@ impl Session {
             Some(alpn::schannel_buffer(cfg.alpn_protocols())?)
         };
         let verify = cfg.verify_mode() == Verify::Full;
+        let enabled = enabled_protocols(cfg.minimum_version());
         // Modern credentials (TLS 1.3) first; fall back to the legacy structure on Windows
         // versions that reject it. Nothing has been sent when the fallback happens.
-        let (mut cred, mut ctx, first) = match Self::start(verify, true, &target, &alpn_buf) {
-            Ok(v) => v,
-            Err(_) => Self::start(verify, false, &target, &alpn_buf)?,
-        };
+        let (mut cred, mut ctx, first) =
+            match Self::start(verify, true, enabled, &target, &alpn_buf) {
+                Ok(v) => v,
+                Err(_) => Self::start(verify, false, enabled, &target, &alpn_buf)?,
+            };
         write_flight(s, &first)?;
         let mut recv = Vec::new();
         negotiate(&mut cred, &mut ctx, &target, s, &mut recv, true)?;
@@ -184,6 +199,8 @@ impl Session {
         let version = match sys::protocol(&mut ctx) {
             Some(p) if p & sys::SP_PROT_TLS1_3_CLIENT != 0 => Some(Version::Tls13),
             Some(p) if p & sys::SP_PROT_TLS1_2_CLIENT != 0 => Some(Version::Tls12),
+            Some(p) if p & sys::SP_PROT_TLS1_1_CLIENT != 0 => Some(Version::Tls11),
+            Some(p) if p & sys::SP_PROT_TLS1_0_CLIENT != 0 => Some(Version::Tls10),
             _ => None,
         };
         let alpn = if alpn_buf.is_some() {
@@ -211,10 +228,11 @@ impl Session {
     fn start(
         verify: bool,
         modern: bool,
+        enabled: u32,
         target: &[u16],
         alpn_buf: &Option<Vec<u8>>,
     ) -> Result<(sys::Cred, Option<sys::Ctx>, Vec<u8>), Error> {
-        let mut cred = sys::acquire(verify, modern).map_err(map_status)?;
+        let mut cred = sys::acquire(verify, modern, enabled).map_err(map_status)?;
         let mut ctx = None;
         let input = match alpn_buf {
             Some(b) => Input::Alpn(b),

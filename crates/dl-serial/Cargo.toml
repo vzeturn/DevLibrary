@@ -1,0 +1,16 @@
+[package]
+name = "dl-serial"
+description = "Serial ports without dependencies: open, configure, read and write COM ports (Windows) and ttys (Linux, macOS), list ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+[lints]
+workspace = true
