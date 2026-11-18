@@ -18,8 +18,12 @@ Notes:
   A failing gate answers `409 {"error":"gate_failed","checks":[…]}`; `force` needs a `reason`, both are recorded.
 - Canary gate (`src/domain/gate.ts`, pure): `min_agents`, `soak`, `modules_running` (`disabled` counts as
   healthy), `no_new_errors` (error/critical fingerprints not seen on the previous release), `no_rollback`.
-  Defaults come from `GATE_MIN_AGENTS` (1) and `GATE_SOAK_HOURS` (2). Version history is the agent
-  binary's (`dl-agent`) version from heartbeats.
+  Defaults come from `GATE_MIN_AGENTS` (1) and `GATE_SOAK_HOURS` (2). Version history and
+  `update_check` follow the `product` an agent sends in its heartbeat (default `dl-agent`), so product
+  agents built on the runtime (for example `azolo-agent`) have their own release line. The first release
+  of a product has no previous version: `no_new_errors` then means no error/critical report at all.
+- Revoking an agent makes every later signed call answer `401 revoked`; the agent wipes its identity and
+  stops on that answer, so no `revoke` command has to be queued first.
 - Enrolment codes are shown once; only `sha256(code)` is stored. Codes are case-insensitive.
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
@@ -39,3 +43,7 @@ Layering: `routes/` (HTTP, validation) → `services/` (rules) → `repo/` (D1 S
 1. `wrangler d1 create agent-hub-db` and `wrangler r2 bucket create agent-hub-artifacts`.
 2. Put `account_id`, the D1 `database_id` and the route in `wrangler.jsonc` (placeholders today).
 3. `wrangler secret put ADMIN_TOKEN`, then `pnpm db:migrate` and `pnpm deploy`.
+4. Put a Cloudflare Access application on `<hub host>/admin*` (owner e-mail only): browsers cannot send
+   the Bearer token, and Access adds a second factor in front of it. `/v1/*` stays public (signed).
+
+The hub domain and the production deploy need the owner's approval (RT-0164).

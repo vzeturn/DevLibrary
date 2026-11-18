@@ -19,6 +19,8 @@ export const moduleState = z.enum(['running', 'starting', 'degraded', 'stopped',
 
 export const heartbeatBody = z.object({
   agent_id: z.string(),
+  /** Release line the agent follows; product agents built on dl-agent send their own name. */
+  product: name.default('dl-agent'),
   version: versionString,
   channel: z.string().optional(),
   target: z.string().max(100).optional(),

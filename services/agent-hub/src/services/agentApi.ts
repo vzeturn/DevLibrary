@@ -1,4 +1,4 @@
-import { AGENT_PRODUCT, type AgentRow, type Channel, type Env } from '../env';
+import { type AgentRow, type Channel, type Env } from '../env';
 import { resolveChannel } from '../domain/channel';
 import type { HeartbeatBody, ProblemReport } from '../domain/schemas';
 import { compareVersions } from '../domain/version';
@@ -45,7 +45,7 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
     expires_at: c.expires_at,
   }));
   const config = await getConfig(env.DB, agent.id);
-  const release = await latestRelease(env.DB, AGENT_PRODUCT, channel);
+  const release = await latestRelease(env.DB, hb.product, channel);
 
   return {
     server_time: now,

@@ -92,6 +92,15 @@ describe('POST /v1/heartbeat', () => {
     expect((await beat({}, '1.1.0')).update_check).toBe(false);
   });
 
+  it('follows the release line of the product named in the heartbeat', async () => {
+    await admin(env, 'PUT', `/admin/agents/${agent.id}/channel`, { channel: 'canary' });
+    await admin(env, 'PUT', '/admin/releases/azolo-agent/1.1.0', manifestText('1.1.0', 'canary', T0, 'azolo-agent'));
+    expect((await beat()).update_check).toBe(false); // default product dl-agent has no release
+    expect((await beat({ product: 'azolo-agent' })).update_check).toBe(true);
+    const versions = env.DB.raw.prepare('SELECT DISTINCT product FROM agent_versions ORDER BY product').all();
+    expect(versions).toEqual([{ product: 'azolo-agent' }, { product: 'dl-agent' }]);
+  });
+
   it('rejects a heartbeat naming another agent', async () => {
     const res = await signed(env, agent, 'POST', '/v1/heartbeat', { ...heartbeatBody(agent), agent_id: 'someone-else' });
     expect(res.status).toBe(400);

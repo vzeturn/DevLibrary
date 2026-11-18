@@ -33,8 +33,6 @@ export interface AppVars {
 
 export type AppEnv = { Bindings: Env; Variables: AppVars };
 
-export const AGENT_PRODUCT = 'dl-agent';
-
 export function intVar(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
