@@ -169,13 +169,14 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   the local values.
 - **`sql` module** (present only when databases are declared): checks every database each
   30 s, is `degraded` while one fails (so the canary gate blocks a build that breaks SQL),
-  files `sql_unreachable` once per outage and `sql_recovered` on recovery (context
-  `{"database"}`), and publishes pool stats as the `databases` metric.
+  files `sql_unreachable` once per outage (`sql_access_denied` when the login or database is
+  refused) and `sql_recovered` on recovery (context `{"database"}`), and publishes pool
+  stats as the `databases` metric.
 - **Commands**: `sql.ping {database?}` → `{"<name>":{"ok":true,"ms":3}}`; `sql.status` → pool
   stats (`open`, `idle`, `in_use`, `max`, `connects`, `connect_failures`, `acquires`, `waits`,
   `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`);
-  `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now).
-  There is deliberately no command that runs arbitrary SQL sent by the hub: projects reach
+  `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
+  `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6). There is deliberately no command that runs arbitrary SQL sent by the hub: projects reach
   their databases through their own modules.
 
 ### 9.5 Site survey
@@ -208,3 +209,38 @@ describes its host and every declared database. Facts only, no data and no secre
   | `unencrypted_transport` | reached on the unencrypted rung |
 
   A failed survey files `sql_survey_failed` (warning) and is retried the next day.
+
+### 9.6 Schema probe and SQL error codes
+
+A product names what it needs from a database; `sql.probe` answers what is missing, so a
+site is fixed (or its install bundle runs) before a sync fails on "Invalid column
+name" in production.
+
+```json
+{"requirement": {
+  "tables": {"dbo.HoaDon": ["Id", "SoHD", "MaCQT"], "dbo.Config": []},
+  "views": ["dbo.vw_Bill"], "procedures": ["dbo.usp_GetBill"], "functions": ["dbo.fn_Tcvn3"],
+  "rows": [{"table": "dbo.Config", "column": "Key", "values": ["EINV_URL"]}]},
+ "database": "SMILE_FO"}
+```
+
+- Names are `name` (schema `dbo`) or `schema.name`, brackets allowed, compared
+  case-insensitively; a synonym satisfies any kind; at most 1000 items.
+- Answer per database: `{"ok", "checked": n, "missing": [{kind, name, found?, value?}]}`
+  with `kind` `table` / `view` / `procedure` / `function` / `column` / `row`; `found` names
+  the kind that exists instead (a table where a view is expected). Columns of a missing
+  table and rows of a missing table or column are not listed twice.
+- Catalog queries use `sys.objects`, `sys.columns` and `OBJECT_ID` only (SQL Server 2005+);
+  names and row values are bound as parameters, never spliced.
+- The last answer is kept as `probe` inside that database's survey, so the next heartbeat
+  carries it to the hub gate.
+
+SQL errors from a session carry a code prefix the agent and modules act on:
+
+| code | SQL error | meaning |
+|------|-----------|---------|
+| `sql_missing_object` | 207, 208, 2812, 4121 | schema differs from what the code expects |
+| `sql_locked` | 1222 | lock wait exceeded `LOCK_TIMEOUT`; retry later |
+| `sql_deadlock` | 1205 | deadlock victim; retry |
+| `sql_access_denied` | 18456, 4060, 229, 230 | login, database or permission refused |
+| `sql_timeout` | (client) | request timed out and was cancelled |

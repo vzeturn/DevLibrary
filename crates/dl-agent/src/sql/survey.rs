@@ -51,7 +51,7 @@ const GRANTS: [&str; 9] = [
 /// # Errors
 /// The SQL error when the query fails.
 pub fn survey(conn: &mut impl Connection, rung: Option<&str>) -> Result<Value, Error> {
-    let rows = conn.query_json(SURVEY_SQL)?;
+    let rows = conn.query_json(SURVEY_SQL, &[])?;
     let raw = rows
         .into_iter()
         .next()
