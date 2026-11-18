@@ -12,11 +12,13 @@ pub mod hub;
 pub mod identity;
 pub mod manifest;
 pub mod report;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod service_watch;
 pub mod sql;
 pub mod store;
 pub mod supervisor;
 pub mod sys_module;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod tool;
 pub mod update;
 pub mod version;

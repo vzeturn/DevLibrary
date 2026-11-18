@@ -20,6 +20,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-agent-bin"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-agent-einvoice",
+]
+
+[[package]]
+name = "dl-agent-einvoice"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-tds",
+ "dl-time",
+ "dl-uuid",
+ "dl-winsvc",
+]
+
+[[package]]
 name = "dl-bench"
 version = "0.2.1"
 

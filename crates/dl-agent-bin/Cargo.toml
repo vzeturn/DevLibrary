@@ -1,0 +1,21 @@
+[package]
+name = "dl-agent-bin"
+description = "The dl-agent executable: the shared agent runtime with every product module registered (each runs only where its remote config enables it)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dl-agent"
+path = "src/main.rs"
+
+[dependencies]
+dl-agent.workspace = true
+dl-agent-einvoice.workspace = true
+
+[lints]
+workspace = true

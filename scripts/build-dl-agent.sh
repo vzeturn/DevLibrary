@@ -34,7 +34,7 @@ for t in "${targets[@]}"; do
   esac
   docker run --rm -v "$root:/src" -e DL_AGENT_VERSION="$version" -e DL_AGENT_RELEASE_KEYS="$keys" \
     -e CARGO_TARGET_DIR=/src/target/xbuild -e RUSTFLAGS="-C target-feature=+crt-static" "$image" \
-    cargo $tc build -q --release -p dl-agent --bin dl-agent --target "$triple" $std
+    cargo $tc build -q --release -p dl-agent-bin --bin dl-agent --target "$triple" $std
   mkdir -p "$root/$out/$t"
   cp "$root/target/xbuild/$triple/release/dl-agent$exe" "$root/$out/$t/dl-agent$exe"
   if [ -n "$exe" ]; then

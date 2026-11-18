@@ -36,6 +36,13 @@ pub trait Module: Send {
     /// Runs until `ctx.stop()` is signalled. Call [`ModuleContext::set_running`] once ready.
     /// Returning `Err` (or panicking) makes the supervisor restart the module with backoff.
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error>;
+
+    /// Whether the module runs when the remote config does not set
+    /// `modules.<name>.enabled`. Product modules that ship in the shared binary but only
+    /// belong on some sites return `false` (opt-in: they need `"enabled": true`).
+    fn enabled_by_default(&self) -> bool {
+        true
+    }
 }
 
 /// Builds a fresh module instance for every (re)start.
@@ -240,6 +247,7 @@ impl ModuleContext {
 struct Slot {
     factory: Factory,
     name: String,
+    enabled_by_default: bool,
     status: Arc<Mutex<ModuleStatus>>,
     inbox: Arc<Mutex<VecDeque<Command>>>,
     stop: StopSignal,
@@ -286,10 +294,14 @@ impl Supervisor {
 
     /// Registers a module (not started until [`Supervisor::tick`]).
     pub fn add(&mut self, factory: Factory) {
-        let name = factory().name().to_string();
+        let probe = factory();
+        let name = probe.name().to_string();
+        let enabled_by_default = probe.enabled_by_default();
+        drop(probe);
         self.slots.push(Slot {
             status: Arc::new(Mutex::new(ModuleStatus::new(&name))),
             name,
+            enabled_by_default,
             factory,
             inbox: Arc::default(),
             stop: StopSignal::new(),
@@ -310,7 +322,8 @@ impl Supervisor {
     pub fn tick(&mut self, config: &RemoteConfig) {
         for i in 0..self.slots.len() {
             self.reap(i);
-            let enabled = config.module_enabled(&self.slots[i].name);
+            let enabled =
+                config.module_enabled_or(&self.slots[i].name, self.slots[i].enabled_by_default);
             let slot = &mut self.slots[i];
             if !enabled {
                 if slot.thread.is_some() {

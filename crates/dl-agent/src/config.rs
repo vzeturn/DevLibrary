@@ -58,10 +58,16 @@ impl RemoteConfig {
 
     /// Modules run unless their section says `"enabled": false`.
     pub fn module_enabled(&self, name: &str) -> bool {
+        self.module_enabled_or(name, true)
+    }
+
+    /// The section's `enabled` flag, or `default` when the section does not set it
+    /// (opt-in modules pass `false`, see [`crate::supervisor::Module::enabled_by_default`]).
+    pub fn module_enabled_or(&self, name: &str, default: bool) -> bool {
         self.module(name)
             .get("enabled")
             .and_then(Value::as_bool)
-            .unwrap_or(true)
+            .unwrap_or(default)
     }
 
     /// Log level, default `info`.
@@ -238,5 +244,19 @@ mod tests {
         let c = cfg(1, json!({"modules": {"off": {"enabled": false}}}));
         assert!(c.module_enabled("anything"));
         assert!(!c.module_enabled("off"));
+    }
+
+    #[test]
+    fn opt_in_modules_need_enabled_true() {
+        let c = cfg(
+            1,
+            json!({"modules": {"on": {"enabled": true}, "off": {"enabled": false},
+                                          "bare": {"x": 1}}}),
+        );
+        assert!(!c.module_enabled_or("absent", false));
+        assert!(!c.module_enabled_or("bare", false));
+        assert!(!c.module_enabled_or("off", false));
+        assert!(c.module_enabled_or("on", false));
+        assert!(c.module_enabled_or("bare", true));
     }
 }

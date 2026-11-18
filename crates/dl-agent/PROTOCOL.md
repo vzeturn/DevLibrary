@@ -181,6 +181,11 @@ whose section changed, and keeps the previous version as last-known-good: if a r
 module fails within 2 minutes the agent restores last-known-good and reports
 `config_reverted`.
 
+A module runs when its section says `"enabled": true`. Without an `enabled` key, built-in
+modules (`sys`, `sql`) run and opt-in product modules (`Module::enabled_by_default` false,
+e.g. `einvoice`) stay `disabled`, so one binary can carry every product module and each site
+turns on only its own.
+
 ## 9. SQL Server bridge (on-prem)
 
 The agent is the one bridge between hub-side projects and the site's SQL Server databases.
