@@ -1,0 +1,550 @@
+{
+  "name": "pos.checkVersion.get: real procedure columns; `in_process` is the value tedious gives the in-process handler ($date = Date)",
+  "op": {
+    "type": "op",
+    "id": "5c2d7e4a-1b3f-4c6d-8e9f-0a1b2c3d4e5f",
+    "op": "pos.checkVersion.get",
+    "contract_ver": 1,
+    "args": {
+      "rvcNo": 3,
+      "checkNo": 200017
+    },
+    "request_key": null,
+    "deadline_ms": 15000
+  },
+  "db": {
+    "calls": [
+      {
+        "proc": "MM_Pos_GetBillDetail",
+        "binds": {
+          "CheckNo": 200017,
+          "RVCNo": 3
+        },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              {
+                "name": "CheckNo",
+                "type": "BIGINT"
+              },
+              {
+                "name": "RvcNo",
+                "type": "INT"
+              },
+              {
+                "name": "TableNo",
+                "type": "VARCHAR"
+              },
+              {
+                "name": "OpenBy",
+                "type": "NVARCHAR"
+              },
+              {
+                "name": "NumGuest",
+                "type": "INT"
+              },
+              {
+                "name": "NumChild",
+                "type": "INT"
+              },
+              {
+                "name": "SubTotal",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Discount",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "ServiceCharge",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Tax",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Total",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Paid",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Outstanding",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "SpecialTax",
+                "type": "BIGINT"
+              },
+              {
+                "name": "FolioNum",
+                "type": "BIGINT"
+              },
+              {
+                "name": "OpenTime",
+                "type": "DATETIME"
+              },
+              {
+                "name": "RoomCode",
+                "type": "VARCHAR"
+              },
+              {
+                "name": "Notes",
+                "type": "VARCHAR"
+              }
+            ],
+            "rows": [
+              [
+                200017,
+                3,
+                "T05",
+                "Thu ngân 2",
+                4,
+                1,
+                "1250000",
+                "0",
+                "62500",
+                "131250",
+                "1443750",
+                "500000",
+                "943750",
+                0,
+                "88001",
+                "2026-11-04T11:20:05.497Z",
+                "0712",
+                null
+              ]
+            ]
+          },
+          {
+            "columns": [
+              {
+                "name": "TrnSeq",
+                "type": "BIGINT"
+              },
+              {
+                "name": "CheckNo",
+                "type": "BIGINT"
+              },
+              {
+                "name": "ItemName",
+                "type": "NVARCHAR"
+              },
+              {
+                "name": "Qty",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Price",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Amount",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "Tax",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "ServiceCharge",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "LineTotal",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "SeatNo",
+                "type": "INT"
+              },
+              {
+                "name": "OrderNo",
+                "type": "INT"
+              },
+              {
+                "name": "ClassCode",
+                "type": "INT"
+              },
+              {
+                "name": "TrnTime",
+                "type": "DATETIME"
+              }
+            ],
+            "rows": [
+              [
+                1,
+                200017,
+                "Phở bò",
+                "2.00",
+                "95000",
+                "190000",
+                "19000",
+                "9500",
+                "218500",
+                1,
+                1,
+                10,
+                "2026-11-04T11:21:00.000Z"
+              ],
+              [
+                2,
+                200017,
+                "Cà phê sữa",
+                "1.50",
+                "45000",
+                "67500",
+                "6750",
+                "3375",
+                "77625",
+                null,
+                1,
+                20,
+                "2026-11-04T11:22:30.120Z"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "proc": "MM_Pos_GetCheckOpenHistory",
+        "binds": {
+          "CheckNo": 200017,
+          "MaxRows": 500
+        },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              {
+                "name": "nSeq",
+                "type": "BIGINT"
+              },
+              {
+                "name": "RVC",
+                "type": "INT"
+              },
+              {
+                "name": "CheckNo",
+                "type": "BIGINT"
+              },
+              {
+                "name": "OpenTime",
+                "type": "DATETIME"
+              },
+              {
+                "name": "CloseTime",
+                "type": "DATETIME"
+              },
+              {
+                "name": "LastAction",
+                "type": "DATETIME"
+              },
+              {
+                "name": "OverrideTime",
+                "type": "DATETIME"
+              },
+              {
+                "name": "isOpen",
+                "type": "BIT"
+              },
+              {
+                "name": "OpenBy",
+                "type": "VARCHAR"
+              },
+              {
+                "name": "IsStateConsistent",
+                "type": "INT"
+              }
+            ],
+            "rows": [
+              [
+                9007199254740993,
+                3,
+                200017,
+                "2026-11-04T11:20:05.497Z",
+                null,
+                "2026-11-04T11:22:30.120Z",
+                null,
+                true,
+                "TN2",
+                1
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "proc": "MM_Pos_GetTenderVersion",
+        "binds": {
+          "RVCNo": 3,
+          "CheckNo": 200017
+        },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              {
+                "name": "PaymentNo",
+                "type": "INT"
+              },
+              {
+                "name": "AmountBase",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "PmtApp",
+                "type": "INT"
+              }
+            ],
+            "rows": [
+              [
+                1,
+                "500000",
+                2
+              ]
+            ]
+          },
+          {
+            "columns": [
+              {
+                "name": "RefId",
+                "type": "BIGINT"
+              },
+              {
+                "name": "Kind",
+                "type": "VARCHAR"
+              },
+              {
+                "name": "PaymentNo",
+                "type": "INT"
+              },
+              {
+                "name": "Amount",
+                "type": "NUMERIC"
+              },
+              {
+                "name": "ClientCode",
+                "type": "INT"
+              }
+            ],
+            "rows": [
+              [
+                77,
+                "DEP",
+                1,
+                "500000",
+                null
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "result": {
+    "type": "result",
+    "id": "5c2d7e4a-1b3f-4c6d-8e9f-0a1b2c3d4e5f",
+    "status": "applied",
+    "sets": [
+      [
+        {
+          "CheckNo": "200017",
+          "RvcNo": 3,
+          "TableNo": "T05",
+          "OpenBy": "Thu ngân 2",
+          "NumGuest": 4,
+          "NumChild": 1,
+          "SubTotal": "1250000",
+          "Discount": "0",
+          "ServiceCharge": "62500",
+          "Tax": "131250",
+          "Total": "1443750",
+          "Paid": "500000",
+          "Outstanding": "943750",
+          "SpecialTax": "0",
+          "FolioNum": "88001",
+          "OpenTime": "2026-11-04T11:20:05.497Z",
+          "RoomCode": "0712",
+          "Notes": null
+        }
+      ],
+      [
+        {
+          "TrnSeq": "1",
+          "CheckNo": "200017",
+          "ItemName": "Phở bò",
+          "Qty": "2.00",
+          "Price": "95000",
+          "Amount": "190000",
+          "Tax": "19000",
+          "ServiceCharge": "9500",
+          "LineTotal": "218500",
+          "SeatNo": 1,
+          "OrderNo": 1,
+          "ClassCode": 10,
+          "TrnTime": "2026-11-04T11:21:00.000Z"
+        },
+        {
+          "TrnSeq": "2",
+          "CheckNo": "200017",
+          "ItemName": "Cà phê sữa",
+          "Qty": "1.50",
+          "Price": "45000",
+          "Amount": "67500",
+          "Tax": "6750",
+          "ServiceCharge": "3375",
+          "LineTotal": "77625",
+          "SeatNo": null,
+          "OrderNo": 1,
+          "ClassCode": 20,
+          "TrnTime": "2026-11-04T11:22:30.120Z"
+        }
+      ],
+      [
+        {
+          "nSeq": "9007199254740993",
+          "RVC": 3,
+          "CheckNo": "200017",
+          "OpenTime": "2026-11-04T11:20:05.497Z",
+          "CloseTime": null,
+          "LastAction": "2026-11-04T11:22:30.120Z",
+          "OverrideTime": null,
+          "isOpen": true,
+          "OpenBy": "TN2",
+          "IsStateConsistent": 1
+        }
+      ],
+      [
+        {
+          "PaymentNo": 1,
+          "AmountBase": "500000",
+          "PmtApp": 2
+        }
+      ],
+      [
+        {
+          "RefId": "77",
+          "Kind": "DEP",
+          "PaymentNo": 1,
+          "Amount": "500000",
+          "ClientCode": null
+        }
+      ]
+    ],
+    "rowcounts": [
+      1,
+      2,
+      1,
+      1,
+      1
+    ],
+    "outputs": {
+      "ReturnValue": 0
+    },
+    "error": null,
+    "replayed": false
+  },
+  "in_process": {
+    "bill": {
+      "header": {
+        "CheckNo": "200017",
+        "RvcNo": 3,
+        "TableNo": "T05",
+        "OpenBy": "Thu ngân 2",
+        "NumGuest": 4,
+        "NumChild": 1,
+        "SubTotal": 1250000,
+        "Discount": 0,
+        "ServiceCharge": 62500,
+        "Tax": 131250,
+        "Total": 1443750,
+        "Paid": 500000,
+        "Outstanding": 943750,
+        "SpecialTax": "0",
+        "FolioNum": "88001",
+        "OpenTime": {
+          "$date": "2026-11-04T11:20:05.497Z"
+        },
+        "RoomCode": "0712",
+        "Notes": null
+      },
+      "lines": [
+        {
+          "TrnSeq": "1",
+          "CheckNo": "200017",
+          "ItemName": "Phở bò",
+          "Qty": 2,
+          "Price": 95000,
+          "Amount": 190000,
+          "Tax": 19000,
+          "ServiceCharge": 9500,
+          "LineTotal": 218500,
+          "SeatNo": 1,
+          "OrderNo": 1,
+          "ClassCode": 10,
+          "TrnTime": {
+            "$date": "2026-11-04T11:21:00.000Z"
+          }
+        },
+        {
+          "TrnSeq": "2",
+          "CheckNo": "200017",
+          "ItemName": "Cà phê sữa",
+          "Qty": 1.5,
+          "Price": 45000,
+          "Amount": 67500,
+          "Tax": 6750,
+          "ServiceCharge": 3375,
+          "LineTotal": 77625,
+          "SeatNo": null,
+          "OrderNo": 1,
+          "ClassCode": 20,
+          "TrnTime": {
+            "$date": "2026-11-04T11:22:30.120Z"
+          }
+        }
+      ]
+    },
+    "openLog": [
+      {
+        "nSeq": "9007199254740993",
+        "RVC": 3,
+        "CheckNo": "200017",
+        "OpenTime": {
+          "$date": "2026-11-04T11:20:05.497Z"
+        },
+        "CloseTime": null,
+        "LastAction": {
+          "$date": "2026-11-04T11:22:30.120Z"
+        },
+        "OverrideTime": null,
+        "isOpen": true,
+        "OpenBy": "TN2",
+        "IsStateConsistent": 1
+      }
+    ],
+    "tender": {
+      "payments": [
+        {
+          "PaymentNo": 1,
+          "AmountBase": 500000,
+          "PmtApp": 2
+        }
+      ],
+      "refs": [
+        {
+          "RefId": 77,
+          "Kind": "DEP",
+          "PaymentNo": 1,
+          "Amount": 500000,
+          "ClientCode": null
+        }
+      ]
+    }
+  }
+}

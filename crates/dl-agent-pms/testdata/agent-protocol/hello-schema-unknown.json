@@ -1,0 +1,7 @@
+{
+  "type": "hello",
+  "protocol": 1,
+  "agent_version": "1.0.0",
+  "schema_version": 0,
+  "contract_max": 1
+}

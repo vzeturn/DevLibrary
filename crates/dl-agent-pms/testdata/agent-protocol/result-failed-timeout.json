@@ -1,0 +1,13 @@
+{
+  "type": "result",
+  "id": "6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f",
+  "status": "failed",
+  "sets": [],
+  "rowcounts": [],
+  "outputs": {},
+  "error": {
+    "code": "OP_TIMEOUT",
+    "sqlNumber": null,
+    "message": "deadline passed before the op finished"
+  }
+}

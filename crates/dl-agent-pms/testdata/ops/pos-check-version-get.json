@@ -1,0 +1,146 @@
+{
+  "name": "pos.checkVersion.get: open check, every column type the encoder maps",
+  "op": {
+    "type": "op",
+    "id": "0b8f2a6e-4c1d-4e7a-9a3b-5d6e7f809a1b",
+    "op": "pos.checkVersion.get",
+    "contract_ver": 1,
+    "args": { "rvcNo": 2, "checkNo": 100045 },
+    "request_key": null,
+    "deadline_ms": 15000
+  },
+  "db": {
+    "calls": [
+      {
+        "proc": "MM_Pos_GetBillDetail",
+        "binds": { "CheckNo": 100045, "RVCNo": 2 },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              { "name": "CheckNo", "type": "BIGINT" },
+              { "name": "RVCNo", "type": "INT" },
+              { "name": "TableNo", "type": "NVARCHAR" },
+              { "name": "Cashier", "type": "VARCHAR" },
+              { "name": "SubTotal", "type": "DECIMAL" },
+              { "name": "OpenTime", "type": "DATETIME" },
+              { "name": "BizDate", "type": "DATE" },
+              { "name": "Stamp", "type": "TIMESTAMP" },
+              { "name": "IsClosed", "type": "BIT" },
+              { "name": "Rate", "type": "FLOAT" },
+              { "name": "RowGuid", "type": "UNIQUEIDENTIFIER" },
+              { "name": "Note", "type": "NVARCHAR" }
+            ],
+            "rows": [
+              [
+                100045,
+                2,
+                "Bàn 12",
+                "Ph¥m µn",
+                "125000.50",
+                "2026-11-04T10:15:30.123Z",
+                "2026-11-04T00:00:00Z",
+                "AAAAAAAAB9E=",
+                false,
+                0.25,
+                "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+                null
+              ]
+            ]
+          },
+          {
+            "columns": [
+              { "name": "LineNo", "type": "INT" },
+              { "name": "Qty", "type": "DECIMAL" },
+              { "name": "Price", "type": "MONEY" }
+            ],
+            "rows": [
+              [1, "2.000", "62500.2500"],
+              [2, "1.000", "0.0000"]
+            ]
+          }
+        ]
+      },
+      {
+        "proc": "MM_Pos_GetCheckOpenHistory",
+        "binds": { "CheckNo": 100045, "MaxRows": 500 },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              { "name": "LogId", "type": "BIGINT" },
+              { "name": "Action", "type": "VARCHAR" },
+              { "name": "AtUtc", "type": "DATETIME2" },
+              { "name": "AtLocal", "type": "DATETIMEOFFSET" }
+            ],
+            "rows": [["9007199254740993", "OPEN", "2026-11-04T10:15:30.1234567Z", "2026-11-04T17:15:30+07:00"]]
+          }
+        ]
+      },
+      {
+        "proc": "MM_Pos_GetTenderVersion",
+        "binds": { "RVCNo": 2, "CheckNo": 100045 },
+        "return_status": 0,
+        "sets": [
+          {
+            "columns": [
+              { "name": "PaymentNo", "type": "INT" },
+              { "name": "AmountBase", "type": "DECIMAL" },
+              { "name": "PmtApp", "type": "INT" }
+            ],
+            "rows": [[1, "125000.50", null]]
+          },
+          {
+            "columns": [
+              { "name": "RefId", "type": "BIGINT" },
+              { "name": "Kind", "type": "VARCHAR" },
+              { "name": "Amount", "type": "DECIMAL" }
+            ],
+            "rows": []
+          }
+        ]
+      }
+    ]
+  },
+  "result": {
+    "type": "result",
+    "id": "0b8f2a6e-4c1d-4e7a-9a3b-5d6e7f809a1b",
+    "status": "applied",
+    "sets": [
+      [
+        {
+          "CheckNo": "100045",
+          "RVCNo": 2,
+          "TableNo": "Bàn 12",
+          "Cashier": "Ph¥m µn",
+          "SubTotal": "125000.50",
+          "OpenTime": "2026-11-04T10:15:30.123Z",
+          "BizDate": "2026-11-04T00:00:00.000Z",
+          "Stamp": "AAAAAAAAB9E=",
+          "IsClosed": false,
+          "Rate": 0.25,
+          "RowGuid": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+          "Note": null
+        }
+      ],
+      [
+        { "LineNo": 1, "Qty": "2.000", "Price": "62500.2500" },
+        { "LineNo": 2, "Qty": "1.000", "Price": "0.0000" }
+      ],
+      [
+        {
+          "LogId": "9007199254740993",
+          "Action": "OPEN",
+          "AtUtc": "2026-11-04T10:15:30.1234567Z",
+          "AtLocal": "2026-11-04T17:15:30.000+07:00"
+        }
+      ],
+      [{ "PaymentNo": 1, "AmountBase": "125000.50", "PmtApp": null }],
+      []
+    ],
+    "rowcounts": [1, 2, 1, 1, 0],
+    "outputs": { "ReturnValue": 0 },
+    "error": null,
+    "replayed": false
+  }
+}

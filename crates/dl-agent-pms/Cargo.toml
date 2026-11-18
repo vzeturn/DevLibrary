@@ -1,0 +1,32 @@
+[package]
+name = "dl-agent-pms"
+description = "SMILE PMS site module for dl-agent: the outbound-only bridge between a site's MM_PMS database and SMILE PMS cloud (port of the Go site agent)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-cli.workspace = true
+dl-log.workspace = true
+dl-json.workspace = true
+dl-encoding.workspace = true
+dl-hash.workspace = true
+dl-rand.workspace = true
+dl-time.workspace = true
+dl-decimal.workspace = true
+dl-uuid.workspace = true
+dl-ed25519.workspace = true
+dl-flate.workspace = true
+dl-http.workspace = true
+dl-ws.workspace = true
+dl-tds.workspace = true
+dl-winsvc.workspace = true
+
+[lints]
+workspace = true

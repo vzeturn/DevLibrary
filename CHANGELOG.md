@@ -13,6 +13,17 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-pms`: the SMILE PMS site agent (`SmilePmsAgent`) as an opt-in dl-agent module
+  (`modules.pms-site.enabled = true`; optional `config_path`, `state_dir`). It reads and writes the
+  old agent's config file, `agent.key`, `identity.json` and `databases.json` where they are, so a
+  live site switches without re-enrolling. Enroll, signed token, the `/agent/v1/stream` loop
+  (`hello` reports `dl-agent-<version>`), allow-listed SQL ops, signed migrations and op-log
+  retention; `degraded` while not enrolled or reconnecting longer than one back-off cycle; stop
+  gives in-flight ops 5 s and closes with 1000. Metrics (ops in flight / ok / rejected / failed,
+  last op, reconnects, migrations applied), rate-limited reports `pms_stream_failed`,
+  `pms_auth_failed`, `pms_sql_failed`, `pms_migration_failed`, `pms_op_rejected`,
+  `pms_config_invalid`; commands `pms.status`, `pms.reconnect`; sub-commands `dl-agent pms-enroll`
+  and `dl-agent pms-migrate`. Cloud `update` frames are ignored.
 - `dl-agent-einvoice`: `dl-agent einvoice-enroll` sub-command (port of `mmei-agent -enroll`: token exchange,
   prompted or scripted SQL connection, TLS fallback, sealed `config.enc`); skips when already enrolled,
   `--force` to redo. `scripts/build-dl-agent.sh` passes `MMEI_BUILD_DEFAULT_SQL_PASSWORD` (by name) to the build.

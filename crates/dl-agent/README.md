@@ -96,6 +96,7 @@ each product module is opt-in and stays `disabled` until the hub's remote config
 |---|---|---|
 | `sys`, `sql` | `dl-agent` | Built in, on by default: host facts, SQL Server bridge. |
 | `einvoice` | `dl-agent-einvoice` | Azolo E-Invoice: collects SMILE_FO / SMILE_POS bills, pushes them to the platform, writes invoice numbers back, relays VNPT portal calls. Reads the Go agent's `config.enc`; see its README. |
+| `pms-site` | `dl-agent-pms` | SMILE PMS site agent: enrolls, holds the stream to the PMS cloud, runs allow-listed ops and signed migrations on the hotel's SQL Server. Uses `SmilePmsAgent`'s config and state, so a site switches without re-enrolling; sub-commands `pms-enroll`, `pms-migrate`. See its README. |
 
 The executable lives in its own package because product modules depend on this library.
 

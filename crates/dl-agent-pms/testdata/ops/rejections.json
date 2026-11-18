@@ -1,0 +1,109 @@
+{
+  "name": "refused before any database call: the executor answers rejected and touches nothing",
+  "cases": [
+    {
+      "name": "unknown op",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+        "op": "pos.check.drop",
+        "contract_ver": 1,
+        "args": {},
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "unknown_op" }
+    },
+    {
+      "name": "in-process-only op (bound statements, no agent calls)",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e60",
+        "op": "fo.folioLogDef.list",
+        "contract_ver": 1,
+        "args": {},
+        "request_key": null,
+        "deadline_ms": 30000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "in_process_only" }
+    },
+    {
+      "name": "contract version above the manifest",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e61",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 2,
+        "args": { "rvcNo": 2, "checkNo": 100045 },
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "CONTRACT_UNSUPPORTED", "message": "contract_ver 2 > 1" }
+    },
+    {
+      "name": "arg of the wrong type",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e62",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 1,
+        "args": { "rvcNo": 2, "checkNo": "100045" },
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "invalid_args: checkNo: bigint expects an integer" }
+    },
+    {
+      "name": "int arg out of range",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e63",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 1,
+        "args": { "rvcNo": 2147483648, "checkNo": 100045 },
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "invalid_args: rvcNo: int out of range" }
+    },
+    {
+      "name": "missing arg",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e64",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 1,
+        "args": { "rvcNo": 2 },
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "invalid_args: checkNo: required" }
+    },
+    {
+      "name": "arg no call binds",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e65",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 1,
+        "args": { "rvcNo": 2, "checkNo": 100045, "sql": "DROP TABLE x" },
+        "request_key": null,
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "invalid_args: sql: not an argument of this op" }
+    },
+    {
+      "name": "request key on a read",
+      "op": {
+        "type": "op",
+        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e66",
+        "op": "pos.checkVersion.get",
+        "contract_ver": 1,
+        "args": { "rvcNo": 2, "checkNo": 100045 },
+        "request_key": "req-read-1",
+        "deadline_ms": 15000
+      },
+      "error": { "status": "rejected", "code": "OP_REJECTED", "message": "request_key_on_read" }
+    }
+  ]
+}

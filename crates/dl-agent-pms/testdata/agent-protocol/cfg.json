@@ -1,0 +1,14 @@
+{
+  "type": "cfg",
+  "protocol": 1,
+  "poll": {
+    "interval_ms": 2000
+  },
+  "limits": {
+    "max_frame_bytes": 8388608,
+    "gzip_threshold_bytes": 65536,
+    "inflight_cap": 8,
+    "heartbeat_ms": 10000
+  },
+  "allowlist_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+}
