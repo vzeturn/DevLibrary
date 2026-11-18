@@ -21,6 +21,8 @@ dl-tds.workspace = true
 dl-http.workspace = true
 dl-winsvc.workspace = true
 dl-log.workspace = true
+dl-cli.workspace = true
+dl-winos.workspace = true
 
 [lints]
 workspace = true

@@ -14,6 +14,7 @@ pub mod agent_config;
 pub mod config;
 pub mod domain;
 pub mod dsn;
+pub mod enroll;
 pub mod fo;
 pub mod gojson;
 pub mod install;
@@ -30,6 +31,7 @@ pub mod sql;
 pub mod stats;
 pub mod tcvn3;
 
+pub use enroll::einvoice_enroll_tool;
 pub use module::{EinvoiceModule, einvoice_module};
 
 use domain::{CollectedInvoice, PushItem};

@@ -37,7 +37,28 @@ it stays `disabled` until the hub's remote config enables it for the site.
 The platform URL, API key, device id and SQL connection strings come from `config.enc`
 (DPAPI LocalMachine on Windows), written by the Go agent's enroll. A site that already
 runs the Go agent switches over without enrolling again: stop the Go service, enable the
-module. Enrolling a new site is not part of this module yet.
+module.
+
+## Enrolling a new site
+
+`dl-agent einvoice-enroll --token T --platform-url URL [--sql-host H] [--sql-user U]
+[--sql-password P | --sql-prompt] [--collect-from YYYY-MM-DD] [--config-dir DIR] [--force]`
+is the port of `mmei-agent -enroll` (`src/enroll/`): it exchanges the one-time token, tests the
+FO and POS databases (falling back to TLS 1.0, then no encryption, for old SQL Servers),
+installs the collection procedures and seals `config.enc`. `install.ps1 -Setup einvoice-enroll`
+runs it after the dl-agent enrolment, with the arguments from `DL_AGENT_SETUP_ARGS`.
+
+- **Already enrolled**: when `config.enc` in the config dir opens, it prints one line and exits
+  0 without spending the token; a present but unreadable one is an error and is never
+  overwritten. `--force` enrolls again.
+- `--config-dir` defaults to the module's own default; pass it when the remote config sets a
+  custom `config_dir`.
+- **SQL password**: `--sql-password`, `MMEI_SQL_PASSWORD`, then the build default compiled in from
+  `MMEI_BUILD_DEFAULT_SQL_PASSWORD` (set by the release build, never in source). Without any of
+  them and without `--sql-prompt` it refuses before the exchange.
+- The exchange reports `dl-agent-<version>` in the `X-Agent-Version` header; no secret appears in
+  any output.
+- No service step: dl-agent installs its own service.
 
 ## Behaviour
 
