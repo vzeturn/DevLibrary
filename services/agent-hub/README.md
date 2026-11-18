@@ -38,12 +38,19 @@ pnpm dev                        # wrangler dev
 Layering: `routes/` (HTTP, validation) → `services/` (rules) → `repo/` (D1 SQL, parameterised);
 `domain/` holds pure logic (gate, channel, schemas, version compare).
 
-## Deploy (not done yet)
+## Production
 
-1. `wrangler d1 create agent-hub-db` and `wrangler r2 bucket create agent-hub-artifacts`.
-2. Put `account_id`, the D1 `database_id` and the route in `wrangler.jsonc` (placeholders today).
-3. `wrangler secret put ADMIN_TOKEN`, then `pnpm db:migrate` and `pnpm deploy`.
-4. Put a Cloudflare Access application on `<hub host>/admin*` (owner e-mail only): browsers cannot send
-   the Bearer token, and Access adds a second factor in front of it. `/v1/*` stays public (signed).
+Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0164): Worker
+`agent-hub`, D1 `agent-hub-db`, R2 `agent-hub-artifacts`, account and IDs in `wrangler.jsonc`.
 
-The hub domain and the production deploy need the owner's approval (RT-0164).
+- `/v1/*` is public; every call is Ed25519-signed by the agent.
+- `/admin*` sits behind Cloudflare Access (app "DevLibrary agent hub admin", service-token policy)
+  *and* the `ADMIN_TOKEN` Bearer. Admin calls send both: `Authorization: Bearer …`,
+  `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
+- Operator secrets live outside git on the owner's iMac: `~/.config/devlibrary-agent-hub/admin.env`
+  (admin token, Access service token) and `release.seed` (offline release signing key,
+  public half `rel-2026:jz7z7AVXs8ArKexwiZimYtGICV9cXrie6v7Cuulw3CI=` baked into builds with
+  `DL_AGENT_RELEASE_KEYS`).
+- Redeploy: `pnpm typecheck && pnpm test`, then `pnpm db:migrate` (remote) and `pnpm deploy`.
+- Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,
+  served to agents at `/v1/artifacts/<key>`.
