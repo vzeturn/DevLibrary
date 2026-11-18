@@ -8,3 +8,4 @@
 /bindings/dotnet/runtimes/
 bin/
 obj/
+/dist

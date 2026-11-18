@@ -102,6 +102,14 @@ wrangler r2 object put agent-hub-artifacts/dl-agent/1.2.0/windows-x86_64/dl-agen
 curl -X PUT https://agent.pms.id.vn/admin/releases/dl-agent/1.2.0 --data-binary @canary.json …
 ```
 
+Site binaries come from `scripts/build-dl-agent.sh <version>` (Docker, image from
+`scripts/xbuild/`): `linux-x86_64`, `windows-x86_64` and `windows-x86` (Windows 10 / Server
+2016+), `windows7-x86_64` and `windows7-x86` (Windows 7, Server 2008 R2 and 2012; tier-3
+`*-win7-windows-gnu` targets on nightly with `build-std`). Windows builds are static and may
+import only system DLLs (the script fails otherwise); the Win7 builds must not import
+`bcryptprimitives.dll`, and the Win7 x64 build is run under wine. A Win7 build reports the
+target `windows7-<arch>`, so the hub hands it only Win7 artifacts. Publish one artifact per target.
+
 Demo tenants (canary) take it first; `GET /admin/releases/dl-agent/1.2.0/gate` must pass before
 `POST …/promote` with the same build signed for `stable`. Keep the seed off every server.
 
