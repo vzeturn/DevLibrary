@@ -11,6 +11,7 @@ pub mod hub;
 pub mod identity;
 pub mod manifest;
 pub mod report;
+pub mod sql;
 pub mod store;
 pub mod supervisor;
 pub mod sys_module;

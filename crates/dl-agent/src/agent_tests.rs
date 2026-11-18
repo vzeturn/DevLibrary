@@ -368,3 +368,47 @@ fn product_agents_report_their_own_release_line() {
     );
     a.supervisor.stop_all(STOP_WAIT);
 }
+
+#[test]
+fn declared_databases_start_the_sql_module_and_a_bad_file_is_reported() {
+    let d = TestDir::new("agent-sql");
+    let hub = FakeHub::default();
+    std::fs::create_dir_all(d.0.join("data")).unwrap();
+    // Port 1 refuses at once: the module comes up degraded, the agent keeps running.
+    let sql = r#"{"databases": {"SMILE_FO": {"connection": "Server=127.0.0.1,1;Database=SMILE_FO;User Id=u;Password=p;Encrypt=disable"}}}"#;
+    std::fs::write(d.0.join("data").join(crate::sql::SQL_FILE), sql).unwrap();
+    let mut a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.supervisor.names(), ["sys", "sql"]);
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    let sql_state = |a: &Agent| {
+        let st = a.supervisor.statuses();
+        st.iter()
+            .find(|s| s.name == "sql")
+            .map(|s| s.state.as_str())
+    };
+    while sql_state(&a) != Some("degraded") && std::time::Instant::now() < end {
+        a.supervisor.tick(&a.config.current);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(sql_state(&a), Some("degraded"));
+    assert!(
+        a.supervisor
+            .statuses()
+            .iter()
+            .any(|s| s.detail.contains("SMILE_FO"))
+    );
+    a.supervisor.stop_all(Duration::from_secs(2));
+
+    std::fs::write(
+        d.0.join("data").join(crate::sql::SQL_FILE),
+        "{\"databases\": {\"X\": {}}}",
+    )
+    .unwrap();
+    let a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.supervisor.names(), ["sys"]);
+    let codes: Vec<String> = a.spool().peek(10).into_iter().map(|r| r.code).collect();
+    assert!(
+        codes.contains(&"sql_config_invalid".to_string()),
+        "{codes:?}"
+    );
+}

@@ -13,6 +13,7 @@ use crate::hub::{self, HubClient, Transport};
 use crate::identity::Identity;
 use crate::manifest::{Manifest, TrustedKeys};
 use crate::report::{ProblemReport, Severity, Spool};
+use crate::sql::Site;
 use crate::supervisor::{Factory, Supervisor};
 use crate::update::{BootAction, Decision, Installer, Pending, UpdateState, on_boot, try_commit};
 use crate::{Error, Version, agent_version, current_target, now};
@@ -117,6 +118,7 @@ pub struct Agent {
     last_update_check: u64,
     update_status: (&'static str, String),
     trial_restarts: Vec<(String, u64)>,
+    sql: Site,
 }
 
 impl Agent {
@@ -132,6 +134,11 @@ impl Agent {
         let outbox = Outbox::default();
         let mut supervisor = Supervisor::new(opts.data_dir.clone(), outbox.clone(), spool.clone());
         supervisor.add(crate::sys_module::factory());
+        let sql = Site::load(&opts.data_dir);
+        supervisor.set_sql(sql.pools.clone());
+        if !sql.pools.is_empty() {
+            supervisor.add(crate::sql::module::factory(sql.pools.clone()));
+        }
         for m in modules {
             supervisor.add(m);
         }
@@ -159,7 +166,13 @@ impl Agent {
             last_update_check: 0,
             update_status,
             trial_restarts: Vec::new(),
+            sql,
             opts,
+        })
+        .inspect(|agent| {
+            if let Some(e) = &agent.sql.load_error {
+                agent.report(Severity::Critical, "sql_config_invalid", e);
+            }
         })
     }
 
@@ -177,6 +190,11 @@ impl Agent {
         Installer {
             exe: self.opts.exe.clone(),
         }
+    }
+
+    /// Applies the hub's `sql` section whenever the config version changes.
+    fn tune_sql(&mut self) {
+        self.sql.tune(&self.config.current);
     }
 
     fn report(&self, severity: Severity, code: &str, message: &str) {
@@ -271,6 +289,7 @@ impl Agent {
 
     /// One loop iteration at `now`.
     pub fn step(&mut self, now: u64) -> Option<Exit> {
+        self.tune_sql();
         self.supervisor.tick(&self.config.current);
         self.watch_config(now);
         if let Some(exit) = self.watch_probation(now) {
