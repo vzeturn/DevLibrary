@@ -1,6 +1,6 @@
 // Canary gate (PROTOCOL §5) as a pure function: the repo gathers facts, this decides.
 
-export type GateCheckName = 'min_agents' | 'soak' | 'modules_running' | 'no_new_errors' | 'no_rollback';
+export type GateCheckName = 'min_agents' | 'soak' | 'modules_running' | 'no_new_errors' | 'no_rollback' | 'site_eligible';
 
 export interface GateAgent {
   agent_id: string;
@@ -23,6 +23,11 @@ export interface GateInput {
   /** Every fingerprint seen on the previous version (null when there is none). */
   previousVersion: string | null;
   previousFingerprints: ReadonlyArray<string>;
+  /**
+   * Canary sites that do not meet the product's site requirements (§9.5), each with its
+   * reasons; `null` when the product has none. A canary on an unready site proves nothing.
+   */
+  unreadySites?: ReadonlyArray<{ agent_id: string; reasons: ReadonlyArray<string> }> | null;
 }
 
 export interface GateCheck {
@@ -80,6 +85,16 @@ export function evaluateGate(input: GateInput): GateResult {
       name: 'no_rollback',
       ok: rolledBack.length === 0,
       detail: rolledBack.length === 0 ? 'no rollbacks' : `rolled back on: ${rolledBack.join(', ')}`,
+    },
+    {
+      name: 'site_eligible',
+      ok: !input.unreadySites?.length,
+      detail:
+        input.unreadySites == null
+          ? 'no site requirements for this product'
+          : input.unreadySites.length === 0
+            ? 'every canary site meets the site requirements'
+            : `not ready: ${input.unreadySites.map((s) => `${s.agent_id} (${s.reasons.join('; ')})`).join(', ')}`,
     },
   ];
   return { pass: checks.every((c) => c.ok), checks };

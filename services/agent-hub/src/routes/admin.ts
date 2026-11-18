@@ -11,6 +11,7 @@ import { listReports } from '../repo/reports';
 import { listTenants, upsertTenant } from '../repo/tenants';
 import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
+import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { renderStatusPage } from './statusPage';
 
@@ -74,6 +75,7 @@ adminRoutes.post('/agents/:id/revoke', async (c) => {
   await revoke(c.env, c.req.param('id'), nowSeconds());
   return c.json({});
 });
+adminRoutes.get('/agents/:id/survey', async (c) => c.json(await surveyOf(c.env, c.req.param('id'))));
 adminRoutes.put('/agents/:id/config', async (c) => {
   const body = validate(configBody, await jsonBody(c.req));
   return c.json(await setConfig(c.env.DB, c.req.param('id'), body.body, nowSeconds()));
@@ -92,13 +94,37 @@ adminRoutes.put('/releases/:product/:version', async (c) => {
 });
 adminRoutes.get('/releases/:product/:version/gate', async (c) => {
   const { product, version } = c.req.param();
-  const gate = await gateStatus(c.env, product, version);
+  const gate = await gateStatus(c.env, product, version, nowSeconds());
   return c.json({ ...gate, promotions: await listPromotions(c.env.DB, product, version) });
 });
 adminRoutes.post('/releases/:product/:version/promote', async (c) => {
   const body = validate(promoteBody, await jsonBody(c.req));
   const { product, version } = c.req.param();
   return c.json(await promote(c.env, product, version, body, nowSeconds()));
+});
+
+adminRoutes.get('/products/:product/site-requirements', async (c) => {
+  const product = validate(id, c.req.param('product'));
+  const req = await requirementOf(c.env, product);
+  if (!req) throw new HttpError(404, 'no_site_requirement');
+  return c.json(req);
+});
+adminRoutes.put('/products/:product/site-requirements', async (c) => {
+  const product = validate(id, c.req.param('product'));
+  return c.json(await setRequirement(c.env, product, await jsonBody(c.req), nowSeconds()));
+});
+adminRoutes.delete('/products/:product/site-requirements', async (c) => {
+  await removeRequirement(c.env, validate(id, c.req.param('product')));
+  return c.json({});
+});
+/** Which sites are ready for a product, before moving them onto it. */
+adminRoutes.get('/products/:product/sites', async (c) => {
+  const product = validate(id, c.req.param('product'));
+  const req = await requirementOf(c.env, product);
+  if (!req) throw new HttpError(404, 'no_site_requirement');
+  const tenantId = c.req.query('tenant_id');
+  const sites = await siteReadiness(c.env, req, tenantId ? { tenantId } : {}, nowSeconds());
+  return c.json({ product, requirement: req, ready: sites.filter((s) => s.eligible).length, sites });
 });
 
 adminRoutes.get('/reports', async (c) => {

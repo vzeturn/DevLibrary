@@ -8,6 +8,10 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `agent-hub`: stores each agent's last site survey (malformed or oversized ones are dropped,
+  never the heartbeat), per-product site requirements (Windows version, SQL Server engine,
+  compat level, grants, forbidden warnings, clean schema probe), a ready / not-ready list
+  per site with reasons, a `site_eligible` canary gate check, and a readiness table on `/admin`.
 - `agent-hub`: Windows installer `GET /install.ps1` (PowerShell 2.0+) with public
   `/install/info` and `/install/download` routes: OS gate to the `windows7-*` build on NT < 10,
   clock check against the hub, Defender exclusion, size + SHA-256 check, removal of older

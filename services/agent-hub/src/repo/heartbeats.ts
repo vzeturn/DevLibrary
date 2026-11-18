@@ -1,5 +1,21 @@
 import type { Channel } from '../env';
 import type { HeartbeatBody } from '../domain/schemas';
+import { MAX_SURVEY_BYTES } from '../domain/schemas';
+import { surveyStatement } from './sites';
+
+type SurveyText = { ok: true; text: string } | { ok: false; reason: string | null };
+
+/** The survey to store: an object with `host` and `databases` objects, at most MAX_SURVEY_BYTES. */
+export function surveyText(survey: unknown): SurveyText {
+  if (survey === undefined) return { ok: false, reason: null };
+  const isObj = (v: unknown): boolean => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!isObj(survey)) return { ok: false, reason: 'not an object' };
+  const s = survey as Record<string, unknown>;
+  if (!isObj(s.host) || !isObj(s.databases)) return { ok: false, reason: 'host and databases must be objects' };
+  const text = JSON.stringify(survey);
+  if (text.length > MAX_SURVEY_BYTES) return { ok: false, reason: `too large (${text.length} bytes)` };
+  return { ok: true, text };
+}
 
 /** Stores the latest heartbeat, module states and version history in one transaction. */
 export async function saveHeartbeat(
@@ -37,6 +53,9 @@ export async function saveHeartbeat(
       .prepare('UPDATE agents SET version = ?2, last_seen_at = ?3, hostname = COALESCE(?4, hostname) WHERE id = ?1')
       .bind(agentId, hb.version, now, hb.hostname ?? null),
   ];
+  const survey = surveyText(hb.survey);
+  if (survey.ok) stmts.push(surveyStatement(db, agentId, survey.text, now));
+  else if (survey.reason) console.warn(JSON.stringify({ event: 'survey_dropped', agent_id: agentId, reason: survey.reason }));
   if (hb.update?.state === 'rolled_back' && hb.update.version && hb.update.version !== hb.version) {
     stmts.push(
       db
