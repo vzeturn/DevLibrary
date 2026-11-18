@@ -12,12 +12,14 @@ pub mod hub;
 pub mod identity;
 pub mod manifest;
 pub mod report;
+pub mod service_watch;
 pub mod sql;
 pub mod store;
 pub mod supervisor;
 pub mod sys_module;
 pub mod update;
 pub mod version;
+pub mod watchdog;
 
 pub use error::Error;
 pub use version::Version;

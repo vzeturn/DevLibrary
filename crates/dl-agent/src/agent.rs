@@ -12,11 +12,12 @@ use crate::command::{Command, CommandResult, Outbox};
 use crate::config::{ConfigStore, RemoteConfig};
 use crate::hub::{self, HubClient, Transport};
 use crate::identity::Identity;
-use crate::manifest::{Manifest, TrustedKeys};
+use crate::manifest::TrustedKeys;
 use crate::report::{ProblemReport, Severity, Spool};
 use crate::sql::Site;
 use crate::supervisor::{Factory, Supervisor};
-use crate::update::{BootAction, Decision, Installer, Pending, UpdateState, on_boot, try_commit};
+use crate::update::{BootAction, Installer, UpdateState, on_boot, try_commit};
+use crate::watchdog::{self, Beat};
 use crate::{Error, Version, agent_version, current_target, now};
 
 /// Product name of the agent binary on the hub.
@@ -124,6 +125,8 @@ pub struct Agent {
     sql: Site,
     host: Value,
     survey_sent: Option<(String, u64)>,
+    hub_ok_at: u64,
+    beat_at: u64,
 }
 
 impl Agent {
@@ -150,7 +153,7 @@ impl Agent {
         let config = ConfigStore::load(&opts.data_dir)?;
         let update = UpdateState::load(&opts.data_dir)?;
         let current = opts.version.to_string();
-        let update_status = match (&update.pending, update.failed.last()) {
+        let update_status = match (&update.pending, update.failed_versions().last()) {
             (Some(p), _) => ("probation", p.version.to_string()),
             (None, Some(f)) => ("rolled_back", f.to_string()),
             (None, None) => ("idle", current),
@@ -174,6 +177,8 @@ impl Agent {
             sql,
             host: crate::host::info(),
             survey_sent: None,
+            hub_ok_at: 0,
+            beat_at: 0,
             opts,
         })
         .inspect(|agent| {
@@ -217,6 +222,15 @@ impl Agent {
     /// Start-up: counts a probation boot and rolls back after too many. Returns
     /// `Some(Exit::Restart)` when the previous binary was restored.
     pub fn boot(&mut self) -> Result<Option<Exit>, Error> {
+        match watchdog::drain_reports(&self.opts.data_dir, &self.spool) {
+            Ok(0) => {}
+            Ok(n) => dl_log::info!("watchdog reports queued"; count = n),
+            Err(e) => self.report(
+                Severity::Warning,
+                "watchdog_reports_unreadable",
+                &e.to_string(),
+            ),
+        }
         let action = on_boot(&mut self.update, &self.opts.version);
         self.update.save(&self.opts.data_dir)?;
         match action {
@@ -234,40 +248,6 @@ impl Agent {
             }
             BootAction::Normal => Ok(None),
         }
-    }
-
-    fn roll_back(&mut self, reason: &str) -> Result<(), Error> {
-        let Some(p) = self.update.pending.take() else {
-            return Ok(());
-        };
-        if let Err(e) = self.installer().rollback() {
-            self.report(
-                Severity::Critical,
-                "rollback_failed",
-                &format!("cannot restore {}: {e}", p.previous_version),
-            );
-        }
-        if !self.update.failed.contains(&p.version) {
-            self.update.failed.push(p.version.clone());
-        }
-        self.update.save(&self.opts.data_dir)?;
-        let msg = format!(
-            "rolled back {} to {}: {reason}",
-            p.version, p.previous_version
-        );
-        dl_log::error!("{}", msg);
-        let r = ProblemReport::new(
-            Severity::Critical,
-            "agent",
-            "update_rolled_back",
-            &msg,
-            now(),
-        )
-        .with("version", p.version.to_string())
-        .with("previous_version", p.previous_version.to_string());
-        self.report_with(r);
-        self.update_status = ("rolled_back", p.version.to_string());
-        Ok(())
     }
 
     /// Runs until stopped, revoked or a restart is needed. Modules are stopped on return.
@@ -296,6 +276,7 @@ impl Agent {
 
     /// One loop iteration at `now`.
     pub fn step(&mut self, now: u64) -> Option<Exit> {
+        self.write_beat(now);
         self.tune_sql();
         self.supervisor.tick(&self.config.current);
         self.watch_config(now);
@@ -306,6 +287,27 @@ impl Agent {
             return self.heartbeat(now);
         }
         None
+    }
+
+    /// Liveness for the external watchdog, once a minute.
+    fn write_beat(&mut self, now: u64) {
+        if now < self.beat_at + watchdog::BEAT_EVERY_SECONDS && now >= self.beat_at {
+            return;
+        }
+        self.put_beat(now);
+    }
+
+    fn put_beat(&mut self, now: u64) {
+        self.beat_at = now;
+        let beat = Beat {
+            at: now,
+            hub_at: self.hub_ok_at,
+            version: self.opts.version.to_string(),
+            pid: std::process::id(),
+        };
+        if let Err(e) = watchdog::write_beat(&self.opts.data_dir, &beat) {
+            dl_log::warn!("cannot write the heartbeat file"; error = %e);
+        }
     }
 
     fn watch_config(&mut self, now: u64) {
@@ -447,6 +449,10 @@ impl Agent {
             }
         };
         self.hub_ok = true;
+        if self.hub_ok_at < now {
+            self.hub_ok_at = now;
+            self.put_beat(now); // tell the watchdog at once
+        }
         if let Some((_, hash)) = survey {
             self.survey_sent = Some((hash, now));
         }
@@ -464,9 +470,9 @@ impl Agent {
         }
         if answer.update_check && now >= self.last_update_check + UPDATE_CHECK_SECONDS {
             self.last_update_check = now;
-            match self.try_update(now) {
-                Ok(Some(exit)) => return Some(exit),
-                Ok(None) => {}
+            match self.try_update(now, false) {
+                Ok(update_flow::Checked::Installed) => return Some(Exit::Restart),
+                Ok(_) => {}
                 Err(e) => self.report(Severity::Error, "update_failed", &e.to_string()),
             }
         }
@@ -481,65 +487,6 @@ impl Agent {
             dl_log::error!("cannot wipe identity"; error = %e);
         }
         Exit::Revoked
-    }
-
-    /// Fetches, verifies and installs the release for this agent's channel.
-    fn try_update(&mut self, now: u64) -> Result<Option<Exit>, Error> {
-        if self.update.pending.is_some() {
-            return Ok(None);
-        }
-        let Some(text) = self.hub.manifest(&self.opts.product, &self.channel)? else {
-            return Ok(None);
-        };
-        let m = Manifest::parse(&text)?;
-        m.verify(&self.opts.trusted)?;
-        if m.product != self.opts.product || m.channel.as_str() != self.channel {
-            return Err(Error::Manifest(format!(
-                "manifest is for {}/{}",
-                m.product, m.channel
-            )));
-        }
-        let current = self.opts.version.clone();
-        let agent_id = self.hub.identity().agent_id.clone();
-        match self
-            .update
-            .decide(&m, &current, &agent_id, &current_target())
-        {
-            Decision::UpToDate | Decision::NotInRollout => {
-                self.update.accept(&m);
-                self.update.save(&self.opts.data_dir)?;
-                Ok(None)
-            }
-            Decision::Refused(reason) => Err(Error::Manifest(reason)),
-            Decision::Install(artifact, version) => {
-                let bytes = self.hub.download(&artifact.url)?;
-                // Record the probation before the swap: a crash in between then rolls back
-                // or (if the swap never happened) is forgotten at the next boot.
-                self.update.accept(&m);
-                self.update.pending = Some(Pending {
-                    version: version.clone(),
-                    previous_version: current.clone(),
-                    probation_until: now + self.opts.probation_seconds,
-                    boots: 0,
-                });
-                self.update.save(&self.opts.data_dir)?;
-                if let Err(e) = self.installer().install(&bytes, &artifact) {
-                    self.update.pending = None;
-                    self.update.save(&self.opts.data_dir)?;
-                    return Err(e);
-                }
-                let msg = format!("installed {version} over {current}, restarting");
-                dl_log::info!("{}", msg);
-                self.report_with(ProblemReport::new(
-                    Severity::Info,
-                    "agent",
-                    "update_installed",
-                    &msg,
-                    now,
-                ));
-                Ok(Some(Exit::Restart))
-            }
-        }
     }
 
     fn answer(&self, id: &str, ok: bool, output: impl Into<String>) {
@@ -586,25 +533,14 @@ impl Agent {
                 None
             }
             "update_now" => {
-                self.last_update_check = now;
-                match self.try_update(now) {
-                    Ok(Some(exit)) => {
-                        self.answer(&cmd.id, true, "update installed, restarting");
-                        Some(exit)
-                    }
-                    Ok(None) if self.update.pending.is_some() => {
-                        self.answer(&cmd.id, false, "an update is still on probation");
-                        None
-                    }
-                    Ok(None) => {
-                        self.answer(&cmd.id, true, "no update to install");
-                        None
-                    }
-                    Err(e) => {
-                        self.answer(&cmd.id, false, e.to_string());
-                        None
-                    }
-                }
+                let (ok, out, exit) = self.update_now(now);
+                self.answer(&cmd.id, ok, out);
+                exit
+            }
+            "retry_update" => {
+                let (ok, out) = self.retry_update(arg("version").as_deref());
+                self.answer(&cmd.id, ok, out);
+                None
             }
             "set_log_level" => {
                 let level = arg("level").unwrap_or_default();
@@ -662,13 +598,18 @@ impl Agent {
             .map(|s| s.to_json())
             .collect();
         let pending = self.update.pending.as_ref().map(|p| json!({"version": p.version.to_string(), "previous_version": p.previous_version.to_string(), "probation_until": p.probation_until, "boots": u64::from(p.boots)}));
-        let failed: Vec<String> = self.update.failed.iter().map(ToString::to_string).collect();
+        let failed: Vec<Value> = self
+            .update
+            .failures
+            .iter()
+            .map(|(v, at)| json!({"version": v.to_string(), "at": *at}))
+            .collect();
         json!({
             "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls.clone(),
             "product": self.opts.product, "version": self.opts.version.to_string(), "target": current_target(), "hostname": self.hostname,
             "channel": self.channel, "uptime_seconds": now.saturating_sub(self.started_at), "clock_skew": self.hub.skew(),
             "config_version": self.config.current.version, "config_on_trial": self.config.trial_since.is_some(),
-            "update": {"pending": pending, "failed": failed}, "spooled_reports": self.spool.len() as u64,
+            "update": {"pending": pending, "failures": failed}, "spooled_reports": self.spool.len() as u64,
             "modules": modules, "log_tail": log_tail(&self.opts.data_dir.join("logs"), 100),
         })
     }
@@ -791,7 +732,12 @@ pub fn local_status(data_dir: &Path, product: &str, version: &Version) -> Value 
     out.insert(
         "failed_versions",
         update
-            .map(|u| u.failed.iter().map(ToString::to_string).collect::<Vec<_>>())
+            .map(|u| {
+                u.failed_versions()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default(),
     );
     out.insert(
@@ -800,6 +746,9 @@ pub fn local_status(data_dir: &Path, product: &str, version: &Version) -> Value 
     );
     Value::Object(out)
 }
+
+#[path = "agent_update.rs"]
+mod update_flow;
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]

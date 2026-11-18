@@ -33,13 +33,13 @@ shared by every module on the site.
 |---|---|---|
 | Service host + SCM recovery + failureflag + delayed start | site-agent, SRBackup | `dl-winsvc` scm; re-applied each start |
 | In-process watchdog per job loop, panic recovery, backoff | HL `supervise.go`, PDA `ResilientService` | `supervisor.rs` (thread per module, catch_unwind, 1 s → 5 min) |
-| External watchdog (hung service, stale heartbeat) | Arrival scheduled task | built-in `watchdog` sub-command + scheduled task |
+| External watchdog (hung service, stale heartbeat) | Arrival scheduled task | `watchdog.rs` + `service_watch.rs`: heartbeat file, `watchdog` sub-command every 5 min (schtasks / systemd timer), backoff 1 → 12 h |
 | Enrollment: one-time code, Ed25519 key, proof of possession | PDA, site-agent, Membership (ADR-0037) | PROTOCOL §1–2 |
 | Secrets: DPAPI LocalMachine + entropy, ACL-locked data dir, secrets via stdin only | site-agent, Arrival, Membership | `identity.rs` SecretStore |
 | Single-active / superseded agent stops cleanly | EINVOICE `device_replaced`, HL 403, site-agent 4409 | `revoke` command + 401 `superseded` |
 | Signed manifest, key rotation, anti-replay, never downgrade, `min_version` | Membership ADR-0044, HL keys | `manifest.rs`, `update.rs` |
-| Staged swap, previous kept, probation, rollback after 3 boots, failed-version blacklist | EINVOICE ADR-0017, Arrival ADR-001 | `update.rs` |
-| Drain in-flight work before swap; maintenance window; urgent flag | Arrival LinkGate, Membership window | module `drain()` + manifest `urgent` (todo) |
+| Staged swap, previous kept, probation, rollback after 3 boots, failed-version blacklist | EINVOICE ADR-0017, Arrival ADR-001 | `update.rs`; failure cap 3 per 24 h, 9 for good, `retry_update` (PROTOCOL §6.2) |
+| Drain in-flight work before swap; maintenance window; urgent flag | Arrival LinkGate, Membership window | module `drain()`; site `update.window` / `update.auto`; signed manifest `urgent` / `required` (PROTOCOL §6.1) |
 | Canary channel for demo tenants, gate, staged rollout % | Membership PILOT/GENERAL, HL rollout % | `channel.rs` + hub gate |
 | Kill switch / pause / hold tenant | Membership ADR-0046, Arrival HoldTenants | hub release `paused`, agent override |
 | Local opt-out | PDA `AutoUpdate=false`, EINVOICE `no-update` | `no-update` file |

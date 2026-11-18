@@ -218,7 +218,10 @@ fn download_signs_hub_urls_only() {
     assert_eq!(c.download("https://cdn.example/k1").unwrap(), b"cdn");
     let seen = hub.seen();
     assert!(verify(&id, &seen[0]));
-    assert!(seen[1].headers.is_empty());
+    assert_eq!(
+        seen[1].headers,
+        [("Cache-Control".to_string(), "no-cache".to_string())]
+    );
 }
 
 #[test]

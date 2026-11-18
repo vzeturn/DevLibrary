@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run -p dl-agent --example release -- keygen <seed-file> <key-id>
 //! cargo run -p dl-agent --example release -- sign <seed-file> <key-id> <product> <channel> \
-//!     <version> <target> <artifact-url> <binary> [rollout_percent] [notes]
+//!     <version> <target> <artifact-url> <binary> [rollout_percent] [notes] [--urgent] [--required]
 //! cargo run -p dl-agent --example release -- sign-sql <seed-file> <key-id> <bundle.json>
 //! ```
 //!
@@ -11,6 +11,8 @@
 //! `key-id:public-key` pair to bake into agents with `DL_AGENT_RELEASE_KEYS`.
 //! `sign` prints a signed manifest (PROTOCOL §5) for one binary; publish it on the hub
 //! with `PUT /admin/releases/<product>/<version>` (canary) or `POST …/promote` (stable).
+//! `--urgent` installs outside the sites' update windows; `--required` also installs where a
+//! site turned automatic updates off (PROTOCOL §6).
 //! `sign-sql` prints a signed SQL bundle (PROTOCOL §9.7); an object may name a `file`
 //! (relative to the bundle) instead of carrying `sql` inline.
 
@@ -23,10 +25,24 @@ use dl_encoding::base64::STANDARD as B64;
 use dl_hash::{Digest, Sha256};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    let flags: Vec<&str> = all
+        .iter()
+        .map(String::as_str)
+        .filter(|a| a.starts_with("--"))
+        .collect();
+    let (urgent, required) = (flags.contains(&"--urgent"), flags.contains(&"--required"));
+    if let Some(bad) = flags
+        .iter()
+        .find(|f| !["--urgent", "--required"].contains(f))
+    {
+        eprintln!("unknown option {bad}");
+        return ExitCode::from(2);
+    }
+    let args: Vec<String> = all.into_iter().filter(|a| !a.starts_with("--")).collect();
     let result = match args.first().map(String::as_str) {
         Some("keygen") if args.len() == 3 => keygen(&args[1], &args[2]),
-        Some("sign") if (9..=11).contains(&args.len()) => sign(&args[1..]),
+        Some("sign") if (9..=11).contains(&args.len()) => sign(&args[1..], urgent, required),
         Some("sign-sql") if args.len() == 4 => sign_sql(&args[1], &args[2], &args[3]),
         _ => Err("usage: release keygen <seed-file> <key-id> | release sign <seed-file> <key-id> <product> <channel> <version> <target> <url> <binary> [rollout] [notes] | release sign-sql <seed-file> <key-id> <bundle.json>".into()),
     };
@@ -107,7 +123,7 @@ fn sign_sql(seed_path: &str, key_id: &str, bundle_path: &str) -> Result<String, 
     Ok(dl_json::to_string(&b.to_json()))
 }
 
-fn sign(a: &[String]) -> Result<String, String> {
+fn sign(a: &[String], urgent: bool, required: bool) -> Result<String, String> {
     let seed = read_seed(&a[0])?;
     let binary = std::fs::read(&a[7]).map_err(|e| format!("{}: {e}", a[7]))?;
     let mut m = Manifest {
@@ -121,6 +137,8 @@ fn sign(a: &[String]) -> Result<String, String> {
         },
         min_version: None,
         allow_downgrade: false,
+        urgent,
+        required,
         notes: a.get(9).cloned().unwrap_or_default(),
         artifacts: vec![Artifact {
             target: a[5].clone(),

@@ -8,6 +8,17 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent`: update hardening. A version that fails 3 times in 24 h (bad download, failed
+  swap or rollback) waits a day and is dropped after 9 failures; `retry_update {version?}`
+  clears the count (replaces the "never again after one rollback" rule). Site policy
+  `update.auto` / `update.window` holds releases unless the signed manifest says `urgent`
+  (ignores the window) or `required` (ignores `auto: false`); `update_now` ignores both and
+  says why nothing was installed. External watchdog: the agent writes `heartbeat.json`, and
+  `install` registers `watchdog` every 5 min (Windows scheduled task as SYSTEM, systemd
+  timer) that starts a stopped service, kills one stuck starting/stopping, and restarts one
+  whose loop or hub link went stale while the hub answers, backing off 1 → 12 h; its reports
+  reach the hub through the agent. Off-hub artifact downloads send `Cache-Control: no-cache`.
+  Hub manifest schema accepts `urgent` / `required`.
 - `dl-vn`: `tcvn3` module: TCVN3 (ABC) ⇄ Unicode for legacy SMILE `char`/`varchar` text.
   `decode` takes the code page the driver decoded through (cp1252 or cp1258, where
   `Vietnamese_*` collations turn TCVN3 bytes into combining marks and `Ư`/`ơ`), folds the

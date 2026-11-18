@@ -63,8 +63,10 @@ built on the runtime send their own name. The hub stores the latest heartbeat pe
 ## 4. Commands (hub → agent)
 
 `{id, kind, module?, args:{…}, expires_at}`. Built-in kinds handled by the runtime:
-`restart`, `restart_module`, `update_now`, `set_log_level`, `collect_diagnostics`,
-`reload_config`, `revoke` (wipe identity and stop). Any other kind with a `module` is
+`restart`, `restart_module`, `update_now` (ignores the site's window and `auto: false`, not
+the failure cap; the output says why nothing was installed), `retry_update {version?}`
+(forgets failed attempts of one version or all, §6.2), `set_log_level`,
+`collect_diagnostics`, `reload_config`, `revoke` (wipe identity and stop). Any other kind with a `module` is
 passed to that module. Expired commands are answered `{ok:false, output:"expired"}`.
 Every command gets exactly one result.
 
@@ -93,7 +95,11 @@ Manifest (signed with an offline Ed25519 release key; agents ship the trusted pu
  "key_id":"rel-2026","signature":"<b64>"}
 ```
 
-`min_version` is `null` when the release has no minimum. The signature covers the canonical JSON of every field except `signature`, in the order
+`min_version` is `null` when the release has no minimum. Two optional flags, written only
+when `true` so older signatures stay valid: `"urgent":true` installs outside the site's
+update window (a fix that cannot wait for the night), `"required":true` installs even where
+the site turned automatic updates off. Sign with `release sign … --urgent --required`.
+The signature covers the canonical JSON of every field except `signature`, in the order
 above, with artifacts in the order given. Agents refuse a manifest that is unsigned, signed
 by an unknown key, older (`published_at`) than the last one they accepted on that channel,
 or lower in version than the running one unless `allow_downgrade` is true.
@@ -107,8 +113,50 @@ or lower in version than the running one unless `allow_downgrade` is true.
 3. On each start during probation the agent counts the boot. If it reaches the probation end
    with all modules running and one successful heartbeat, the update is committed.
 4. If the process starts 3 times without committing, or a module stays degraded through
-   probation, the agent restores `previous`, marks the version as failed (it will not be
-   tried again), sends a `critical` report `update_rolled_back`, and restarts.
+   probation, the agent restores `previous`, counts a failure of that version, sends a
+   `critical` report `update_rolled_back`, and restarts.
+
+### 6.1 Site update policy
+
+The remote configuration (§8) may carry
+`"update": {"auto": true, "window": {"from": "01:00", "to": "05:00", "utc_offset_minutes": 420}}`.
+`auto: false` holds every release that is not `required`; outside the window (local time,
+`from == to` means all day, may cross midnight; offset defaults to UTC+7) every release that
+is not `urgent` waits. A held release sets the update status `deferred` with the reason and
+is checked again at the next update check. An invalid section is reported once
+(`update_policy_invalid`, warning) and treated as "no window".
+
+### 6.2 Failure cap
+
+A failure is a bad download (size or SHA-256 mismatch: a stale CDN copy, a truncated file),
+a failed swap, or a rollback. Network errors are not failures, so a hub outage never holds
+an urgent fix. After 3 failures of one version in 24 h the agent waits until the oldest of
+them is a day old (`deferred`); after 9 it stops trying that version for good (`update_failed`
+with "send retry_update"). `retry_update` clears the count. Downloads from a URL outside
+the hub send `Cache-Control: no-cache`; the hub serves artifacts with `no-store`.
+
+### 6.3 External watchdog
+
+The agent rewrites `heartbeat.json` (`{at, hub_at, version, pid}`) once a minute and at
+once after each successful hub heartbeat. `install` registers `<binary> watchdog`, run every
+5 minutes: a scheduled task `"<display name> Watchdog"` as SYSTEM on Windows (put back and
+service recovery re-applied at each service start), a `<service>-watchdog.timer` on Linux.
+Each run takes at most one action:
+
+| Service | Condition | Action |
+|---|---|---|
+| missing or disabled | | none (someone turned it off) |
+| stopped | | start |
+| starting/stopping | for 10 min | kill the pid from `heartbeat.json`, start |
+| running | an update is on probation | none (the agent rolls back itself) |
+| running | loop beat ≥ 20 min old | restart |
+| running | hub beat ≥ 20 min old **and** the hub `/healthz` answers | restart |
+
+Restarts back off 1 h, 2 h, 4 h … 12 h, reset by a healthy run. Every action leaves a report
+(`watchdog_started` warning, `watchdog_killed` / `watchdog_restarted` error,
+`watchdog_action_failed` critical) in `watchdog-reports.json`; the agent sends them after
+its next start. The watchdog logs to `logs/watchdog.log`; `uninstall` removes the task or
+timer first.
 
 ## 7. Problem reports
 
