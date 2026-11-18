@@ -7,6 +7,7 @@ pub mod cli;
 pub mod command;
 pub mod config;
 mod error;
+pub mod host;
 pub mod hub;
 pub mod identity;
 pub mod manifest;

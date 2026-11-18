@@ -1,29 +1,34 @@
-//! The built-in `sql` module: watches every declared database and answers `sql.ping` and
-//! `sql.status`.
+//! The built-in `sql` module: watches every declared database and answers `sql.ping`,
+//! `sql.status` and `sql.survey`.
 //!
 //! It is added only when the site declares databases. A database that stops answering
 //! turns the module `degraded` (so the canary gate sees it) and files one `sql_unreachable`
-//! report per outage; recovery files `sql_recovered`.
+//! report per outage; recovery files `sql_recovered`. Each reachable database is surveyed
+//! (engine, compat level, collations, grants) on first contact and daily; `sql.survey`
+//! forces one.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dl_json::{Map, Value, json};
 
-use super::{Connector, Pools, SqlPools};
+use super::{Connector, Pools, SqlPools, survey};
 use crate::Error;
 use crate::report::Severity;
 use crate::supervisor::{Factory, Module, ModuleContext};
 
 /// How often every database is checked.
 pub const CHECK_EVERY: Duration = Duration::from_secs(30);
+/// How often a reachable database is surveyed again (grants and compat levels change).
+pub const SURVEY_EVERY: Duration = Duration::from_secs(24 * 3600);
 
 /// The `sql` module.
 pub struct SqlModule<C: Connector> {
     pools: Pools<C>,
     down: BTreeSet<String>,
     unencrypted: BTreeSet<String>,
+    surveyed: BTreeMap<String, Instant>,
 }
 
 /// Factory for the module over the site's pools.
@@ -38,6 +43,7 @@ impl<C: Connector> SqlModule<C> {
             pools,
             down: BTreeSet::new(),
             unencrypted: BTreeSet::new(),
+            surveyed: BTreeMap::new(),
         }
     }
 
@@ -73,6 +79,14 @@ impl<C: Connector> SqlModule<C> {
                             db_context(&name),
                         );
                     }
+                    if self
+                        .surveyed
+                        .get(&name)
+                        .is_none_or(|at| at.elapsed() >= SURVEY_EVERY)
+                    {
+                        // A failure is already filed as `sql_survey_failed`; retried tomorrow.
+                        let _ = self.survey_one(ctx, &name);
+                    }
                 }
                 Err(e) => {
                     let msg = e.to_string();
@@ -90,6 +104,65 @@ impl<C: Connector> SqlModule<C> {
         } else {
             ctx.set_degraded(&failing.join("; "));
         }
+    }
+
+    /// Surveys `name` and stores the result; a failure is reported once per day, never fatal.
+    fn survey_one(&mut self, ctx: &ModuleContext, name: &str) -> Result<Value, Error> {
+        self.surveyed.insert(name.to_string(), Instant::now());
+        let pool = self.pools.get(name)?;
+        let rung = pool
+            .stats()
+            .get("transport")
+            .and_then(|t| t.get("rung"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let result = pool
+            .get()
+            .and_then(|mut conn| survey::survey(&mut *conn, rung.as_deref()));
+        match result {
+            Ok(s) => {
+                self.pools.set_survey(name, s.clone());
+                Ok(s)
+            }
+            Err(e) => {
+                let msg = format!("{name}: site survey failed: {e}");
+                ctx.report(
+                    Severity::Warning,
+                    "sql_survey_failed",
+                    &msg,
+                    db_context(name),
+                );
+                Err(e)
+            }
+        }
+    }
+
+    /// `sql.survey`: surveys every (or one) database now and answers the results.
+    fn survey_now(&mut self, ctx: &ModuleContext, args: &Value) -> (bool, String) {
+        let only = args.get("database").and_then(Value::as_str);
+        let mut out = Map::new();
+        let mut ok = true;
+        for name in self.pools.names() {
+            if only.is_some_and(|o| o != name) {
+                continue;
+            }
+            let answer = match self.survey_one(ctx, &name) {
+                Ok(s) => s,
+                Err(e) => {
+                    ok = false;
+                    json!({"error": e.to_string()})
+                }
+            };
+            out.insert(name, answer);
+        }
+        if out.is_empty() {
+            return (
+                false,
+                format!("sql: no database {}", only.unwrap_or("declared")),
+            );
+        }
+        let body = json!({"host": crate::host::info(), "databases": Value::Object(out)});
+        (ok, dl_json::to_string(&body))
     }
 
     fn ping(&self, args: &Value) -> (bool, String) {
@@ -118,11 +191,12 @@ impl<C: Connector> SqlModule<C> {
         (ok, dl_json::to_string(&Value::Object(out)))
     }
 
-    fn handle_commands(&self, ctx: &ModuleContext) {
+    fn handle_commands(&mut self, ctx: &ModuleContext) {
         while let Some(cmd) = ctx.next_command() {
             let (ok, output) = match cmd.kind.as_str() {
                 "sql.ping" => self.ping(&cmd.args),
                 "sql.status" => (true, dl_json::to_string(&self.pools.stats())),
+                "sql.survey" => self.survey_now(ctx, &cmd.args),
                 other => (false, format!("sql: unknown command {other}")),
             };
             ctx.complete(&cmd.id, ok, &output);
@@ -186,6 +260,35 @@ mod tests {
         assert!(ok, "{out}");
         assert!(out.contains("\"ok\":true"));
         let (ok, out) = m.ping(&json!({"database": "NOPE"}));
+        assert!(!ok && out.contains("NOPE"));
+    }
+
+    #[test]
+    fn first_reachable_check_surveys_and_the_command_refreshes() {
+        let d = TestDir::new("sql-survey");
+        let (pools, server) = fake_pools(&["SMILE_FO"]);
+        let ctx = ModuleContext::standalone("sql", Value::Null, d.0.clone());
+        let mut m = SqlModule::new(pools.clone());
+        server.set_up(false);
+        m.check(&ctx);
+        assert_eq!(pools.surveys().as_object().map(|o| o.len()), Some(0));
+
+        server.set_up(true);
+        std::thread::sleep(Duration::from_millis(20));
+        m.check(&ctx);
+        let s = &pools.surveys()["SMILE_FO"];
+        assert_eq!(s["engine"]["name"].as_str(), Some("SQL Server 2008 R2"));
+        assert_eq!(s["syntax_2012"].as_bool(), Some(false));
+
+        let (ok, out) = m.survey_now(&ctx, &json!({}));
+        assert!(ok, "{out}");
+        let v = dl_json::parse(&out).unwrap();
+        assert!(v["host"]["target"].is_string());
+        assert_eq!(
+            v["databases"]["SMILE_FO"]["database"]["compatibility_level"].as_u64(),
+            Some(100)
+        );
+        let (ok, out) = m.survey_now(&ctx, &json!({"database": "NOPE"}));
         assert!(!ok && out.contains("NOPE"));
     }
 }

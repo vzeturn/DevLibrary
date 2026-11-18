@@ -412,3 +412,42 @@ fn declared_databases_start_the_sql_module_and_a_bad_file_is_reported() {
         "{codes:?}"
     );
 }
+
+#[test]
+fn heartbeat_carries_the_survey_only_when_it_changed_or_is_a_day_old() {
+    let d = TestDir::new("agent-survey");
+    let hub = FakeHub::default();
+    let mut a = agent(&d, &hub, vec![]);
+    let bodies = |hub: &FakeHub| -> Vec<Value> {
+        hub.seen()
+            .into_iter()
+            .filter(|s| s.url.ends_with("/heartbeat"))
+            .map(|s| dl_json::parse_slice(&s.body).unwrap())
+            .collect()
+    };
+    for t in [1000, 1060, 1000 + SURVEY_RESEND_SECONDS] {
+        hub.push(200, HB_OK);
+        assert!(a.heartbeat(t).is_none());
+    }
+    let sent: Vec<bool> = bodies(&hub)
+        .iter()
+        .map(|b| b.get("survey").is_some())
+        .collect();
+    assert_eq!(sent, [true, false, true]);
+    let first = &bodies(&hub)[0]["survey"];
+    assert_eq!(
+        first["host"]["target"].as_str(),
+        Some(current_target().as_str())
+    );
+
+    // A new database survey is sent at once; a failed heartbeat does not count as sent.
+    a.sql
+        .pools
+        .set_survey("SMILE_FO", json!({"warnings": ["engine_pre_2012"]}));
+    hub.push(503, "{}");
+    let _ = a.heartbeat(1000 + SURVEY_RESEND_SECONDS + 60);
+    hub.push(200, HB_OK);
+    assert!(a.heartbeat(1000 + SURVEY_RESEND_SECONDS + 120).is_none());
+    let b = bodies(&hub);
+    assert!(b[4]["survey"]["databases"]["SMILE_FO"].is_object());
+}

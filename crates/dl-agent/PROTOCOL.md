@@ -48,8 +48,13 @@ does not verify.
  "hostname":"FO-SERVER","started_at":1763460000,"uptime_seconds":3600,
  "config_version":7,"update":{"state":"idle|probation|rolled_back","version":"1.4.0"},
  "modules":[{"name":"pda-sync","state":"running|starting|degraded|stopped|disabled",
-             "detail":"…","restarts":0,"last_error":"…","metrics":{"rows_out":120}}]}
+             "detail":"…","restarts":0,"last_error":"…","metrics":{"rows_out":120}}],
+ "survey":{"host":{…},"databases":{"SMILE_FO":{…}}}}
 ```
+
+`survey` (§9.5) is present on the first heartbeat after start, whenever it changes (a
+database answered for the first time, a daily re-survey found new grants) and at least
+once a day; the hub keeps the last one it received.
 
 `product` names the release line the agent follows (default `dl-agent`); product agents
 built on the runtime send their own name. The hub stores the latest heartbeat per agent; an agent with no heartbeat for
@@ -168,6 +173,38 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `{"database"}`), and publishes pool stats as the `databases` metric.
 - **Commands**: `sql.ping {database?}` → `{"<name>":{"ok":true,"ms":3}}`; `sql.status` → pool
   stats (`open`, `idle`, `in_use`, `max`, `connects`, `connect_failures`, `acquires`, `waits`,
-  `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`). There is deliberately no command that
-  runs arbitrary SQL sent by the hub: projects reach their databases through their own
-  modules.
+  `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`);
+  `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now).
+  There is deliberately no command that runs arbitrary SQL sent by the hub: projects reach
+  their databases through their own modules.
+
+### 9.5 Site survey
+
+So the hub can tell a site that cannot run a product before it is moved, the agent
+describes its host and every declared database. Facts only, no data and no secrets.
+
+- **`host`** (taken once at start): `family`, `target`, `version` (`ver` output on Windows,
+  `PRETTY_NAME (kernel …)` on Linux), `nt_version` (`6.1.7601`), `legacy_windows` (NT < 10:
+  needs a `windows7-*` build), `process_arch`, `os_arch` (differs when a 32-bit build runs
+  on 64-bit Windows), `win7_build`.
+- **Per database** (on the first successful check, then every 24 h; one parameterless query
+  using built-ins that exist on SQL Server 2005+): `engine {version, major, name ("SQL
+  Server 2008 R2"), level, edition, engine_edition, host_os}`, `database {name,
+  compatibility_level, collation, code_page, read_only}`, `server_collation`, `login`,
+  `user`, `grants {sysadmin, db_owner, create_procedure, create_function, create_table,
+  alter_dbo, execute, view_definition, backup_database}`, `syntax_2012` (engine ≥ 11 and
+  compat ≥ 110: `THROW`, `OFFSET`, `IIF`, … accepted), `transport` (rung) and `warnings`:
+
+  | warning | meaning |
+  |---------|---------|
+  | `engine_pre_2012` | SQL Server 2008 R2 or older: T-SQL 2008 only |
+  | `compat_below_2012` | newer engine, but compat < 110 still refuses 2012 syntax |
+  | `collation_differs_from_server` | `#temp` joins need `COLLATE DATABASE_DEFAULT` |
+  | `non_vietnamese_code_page` | `varchar` holds ANSI / TCVN3 bytes, not CP1258 |
+  | `cannot_install_procedures` | neither owner nor CREATE PROCEDURE + ALTER on dbo |
+  | `no_execute_grant` | neither owner nor EXECUTE |
+  | `database_read_only` | database is read-only |
+  | `express_edition` | 10 GB data cap, no SQL Agent |
+  | `unencrypted_transport` | reached on the unencrypted rung |
+
+  A failed survey files `sql_survey_failed` (warning) and is retried the next day.

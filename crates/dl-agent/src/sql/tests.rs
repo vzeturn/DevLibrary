@@ -78,6 +78,15 @@ impl Connection for Fake {
         self.timeout = timeout;
         Ok(())
     }
+    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
+        self.ping()?;
+        assert!(sql.contains("SERVERPROPERTY"), "only the survey is faked");
+        Ok(vec![json!({
+            "product_version": "10.50.1600.1", "edition": "Express Edition",
+            "server_collation": "Vietnamese_CI_AS", "database_collation": "Vietnamese_CI_AS",
+            "code_page": "1258", "compatibility_level": "100", "db_owner": "1", "execute": "1"
+        })])
+    }
 }
 
 fn fast() -> PoolOptions {
@@ -335,4 +344,10 @@ fn live_sql_connects_on_a_rung_and_caps_lock_waits() {
     let r = s.query("SELECT @@LOCK_TIMEOUT AS t", &[]).unwrap();
     let t: i32 = r.first().unwrap().rows()[0].get("t").unwrap();
     assert_eq!(t, 8000);
+    // The survey query must run as written on a real engine (2017+ in docker here).
+    let sv = survey::survey(&mut s, Some(&want)).unwrap();
+    eprintln!("{}", dl_json::to_string_pretty(&sv));
+    assert!(sv["engine"]["major"].as_u64().unwrap() >= 10);
+    assert!(sv["database"]["compatibility_level"].as_u64().unwrap() >= 100);
+    assert!(sv["grants"]["sysadmin"].is_boolean());
 }

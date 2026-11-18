@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use dl_hash::{Digest, Sha256};
 use dl_json::{Map, Value, json};
 use dl_winsvc::StopSignal;
 
@@ -24,6 +25,8 @@ pub const PRODUCT: &str = "dl-agent";
 pub const PROBATION_SECONDS: u64 = 600;
 /// Retry interval while the hub is unreachable, in seconds.
 pub const RETRY_SECONDS: u64 = 30;
+/// An unchanged site survey is sent again after this long (PROTOCOL.md §3).
+pub const SURVEY_RESEND_SECONDS: u64 = 24 * 3600;
 /// Least time between two update checks the hub asked for, in seconds.
 pub const UPDATE_CHECK_SECONDS: u64 = 300;
 /// How long a module gets to stop on restart or shutdown.
@@ -119,6 +122,8 @@ pub struct Agent {
     update_status: (&'static str, String),
     trial_restarts: Vec<(String, u64)>,
     sql: Site,
+    host: Value,
+    survey_sent: Option<(String, u64)>,
 }
 
 impl Agent {
@@ -167,6 +172,8 @@ impl Agent {
             update_status,
             trial_restarts: Vec::new(),
             sql,
+            host: crate::host::info(),
+            survey_sent: None,
             opts,
         })
         .inspect(|agent| {
@@ -411,8 +418,23 @@ impl Agent {
         })
     }
 
+    /// The site survey and its hash when it changed or is due again, else `None`.
+    fn survey_due(&self, now: u64) -> Option<(Value, String)> {
+        let survey = json!({"host": self.host, "databases": self.sql.pools.surveys()});
+        let hash = dl_encoding::hex::encode(Sha256::digest(dl_json::to_string(&survey).as_bytes()));
+        match &self.survey_sent {
+            Some((h, at)) if *h == hash && now < at + SURVEY_RESEND_SECONDS => None,
+            _ => Some((survey, hash)),
+        }
+    }
+
     fn heartbeat(&mut self, now: u64) -> Option<Exit> {
-        let answer = match self.hub.heartbeat(&self.heartbeat_body(now)) {
+        let mut body = self.heartbeat_body(now);
+        let survey = self.survey_due(now);
+        if let (Some((s, _)), Some(o)) = (&survey, body.as_object_mut()) {
+            o.insert("survey", s.clone());
+        }
+        let answer = match self.hub.heartbeat(&body) {
             Ok(a) => a,
             Err(e) => {
                 if hub::error_code(&e).as_deref() == Some("revoked") {
@@ -425,6 +447,9 @@ impl Agent {
             }
         };
         self.hub_ok = true;
+        if let Some((_, hash)) = survey {
+            self.survey_sent = Some((hash, now));
+        }
         self.channel = answer.channel;
         self.heartbeat_seconds = answer.heartbeat_seconds;
         self.next_heartbeat = now + answer.heartbeat_seconds;

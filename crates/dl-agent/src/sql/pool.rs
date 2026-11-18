@@ -42,6 +42,14 @@ pub trait Connection: Send + 'static {
     fn in_transaction(&self) -> bool;
     /// Sets the per-request timeout (`None` = wait forever).
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error>;
+    /// Runs a parameterless, read-only statement written by the agent itself (survey, schema
+    /// probe) and returns the first result set as `[{column: value}]`.
+    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
+        let _ = sql;
+        Err(Error::Sql(
+            "this connection cannot run introspection queries".into(),
+        ))
+    }
 }
 
 /// Pool limits and timeouts.
