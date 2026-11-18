@@ -26,6 +26,7 @@ dependencies = [
  "dl-agent",
  "dl-agent-einvoice",
  "dl-agent-pms",
+ "dl-agent-pms-device",
 ]
 
 [[package]]
@@ -66,6 +67,23 @@ dependencies = [
  "dl-uuid",
  "dl-winsvc",
  "dl-ws",
+]
+
+[[package]]
+name = "dl-agent-pms-device"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-pcsc",
+ "dl-serial",
+ "dl-time",
+ "dl-uuid",
+ "dl-winos",
 ]
 
 [[package]]

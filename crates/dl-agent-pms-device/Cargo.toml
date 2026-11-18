@@ -1,0 +1,27 @@
+[package]
+name = "dl-agent-pms-device"
+description = "SMILE PMS device module for dl-agent: claims door-lock and POS hardware commands from the PMS API and runs them on the workstation (port of SmilePmsDeviceAgent)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-log.workspace = true
+dl-json.workspace = true
+dl-http.workspace = true
+dl-uuid.workspace = true
+dl-time.workspace = true
+dl-encoding.workspace = true
+dl-hash.workspace = true
+dl-serial.workspace = true
+dl-pcsc.workspace = true
+dl-winos.workspace = true
+
+[lints]
+workspace = true
