@@ -12,6 +12,9 @@
 # DL_AGENT_RELEASE_KEYS defaults to ~/.config/devlibrary-agent-hub/release.pub.
 # Windows binaries are linked statically and may import only system DLLs (checked);
 # the Win7 x64 build is smoke-tested under wine.
+# The Linux binary links glibc dynamically (needs glibc >= 2.36, Debian 12 / Ubuntu 23.04+):
+# dl-tls loads the system libssl with dlopen, and a static glibc next to the libc that
+# libssl pulls in crashed in OpenSSL when two threads opened TLS at once (1.2.0 canary).
 set -euo pipefail
 version=${1:?usage: build-dl-agent.sh <version> [out-dir] [targets...]}
 out=${2:-dist/dl-agent/$version}
@@ -30,16 +33,16 @@ docker image inspect "$image" >/dev/null 2>&1 || docker build -q -t "$image" "$r
 mkdir -p "$root/$out"
 for t in "${targets[@]}"; do
   case $t in
-    linux-x86_64) triple=x86_64-unknown-linux-gnu; tc=+stable; std=; exe= ;;
-    windows-x86_64) triple=x86_64-pc-windows-gnu; tc=+stable; std=; exe=.exe ;;
-    windows-x86) triple=i686-pc-windows-gnu; tc=+stable; std=; exe=.exe ;;
-    windows7-x86_64) triple=x86_64-win7-windows-gnu; tc=+nightly; std="-Zbuild-std=std,panic_abort"; exe=.exe ;;
-    windows7-x86) triple=i686-win7-windows-gnu; tc=+nightly; std="-Zbuild-std=std,panic_abort"; exe=.exe ;;
+    linux-x86_64) triple=x86_64-unknown-linux-gnu; tc=+stable; std=; exe=; rf= ;;
+    windows-x86_64) triple=x86_64-pc-windows-gnu; tc=+stable; std=; exe=.exe; rf="-C target-feature=+crt-static" ;;
+    windows-x86) triple=i686-pc-windows-gnu; tc=+stable; std=; exe=.exe; rf="-C target-feature=+crt-static" ;;
+    windows7-x86_64) triple=x86_64-win7-windows-gnu; tc=+nightly; std="-Zbuild-std=std,panic_abort"; exe=.exe; rf="-C target-feature=+crt-static" ;;
+    windows7-x86) triple=i686-win7-windows-gnu; tc=+nightly; std="-Zbuild-std=std,panic_abort"; exe=.exe; rf="-C target-feature=+crt-static" ;;
     *) echo "unknown target $t" >&2; exit 2 ;;
   esac
   docker run --rm -v "$root:/src" -e DL_AGENT_VERSION="$version" -e DL_AGENT_RELEASE_KEYS="$keys" \
     -e MMEI_BUILD_DEFAULT_SQL_PASSWORD \
-    -e CARGO_TARGET_DIR=/src/target/xbuild -e RUSTFLAGS="-C target-feature=+crt-static" "$image" \
+    -e CARGO_TARGET_DIR=/src/target/xbuild -e RUSTFLAGS="$rf" "$image" \
     cargo $tc build -q --release -p dl-agent-bin --bin dl-agent --target "$triple" $std
   mkdir -p "$root/$out/$t"
   cp "$root/target/xbuild/$triple/release/dl-agent$exe" "$root/$out/$t/dl-agent$exe"
@@ -55,6 +58,13 @@ for t in "${targets[@]}"; do
       esac
     done
     echo "$t imports: $dlls"
+  fi
+  if [ -z "$exe" ]; then
+    # Must stay dynamically linked (see above) and start in the build image.
+    docker run --rm -v "$root/$out/$t:/b" "$image" readelf -l /b/dl-agent | grep -q 'program interpreter' \
+      || { echo "$t is statically linked; dl-tls needs the dynamic glibc" >&2; exit 1; }
+    got=$(docker run --rm -v "$root/$out/$t:/b" "$image" /b/dl-agent --version 2>&1 || true)
+    case $got in *"$version"*) echo "$t smoke: $got" ;; *) echo "smoke failed for $t: $got" >&2; exit 1 ;; esac
   fi
   if [ "$t" = windows7-x86_64 ]; then
     # wine 8 lacks bcryptprimitives.dll, so only the Win7 build can run under it.

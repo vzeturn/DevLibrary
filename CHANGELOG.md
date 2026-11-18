@@ -10,6 +10,10 @@ All notable changes are listed here. The format follows
 
 - `dl-agent-einvoice`: `config.enc` and the outbox are written owner-only (0600) on Unix, where
   `config.enc` is not encrypted.
+- `scripts/build-dl-agent.sh`: the Linux binary links glibc dynamically (glibc >= 2.36). The static
+  build crashed (SIGSEGV in OpenSSL) when the einvoice collector and the hub heartbeat opened TLS
+  at the same time: dl-tls `dlopen`s the system libssl, which brings in a second libc next to the
+  static one. The script now fails if the Linux binary is static and smoke-runs it.
 
 ### Added
 
