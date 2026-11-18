@@ -42,6 +42,8 @@ dl-winos = { path = "crates/dl-winos" }
 dl-signalr = { path = "crates/dl-signalr" }
 dl-serial = { path = "crates/dl-serial" }
 dl-pcsc = { path = "crates/dl-pcsc" }
+dl-agent = { path = "crates/dl-agent" }
+dl-agent-einvoice = { path = "crates/dl-agent-einvoice" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -1,0 +1,26 @@
+[package]
+name = "dl-agent-einvoice"
+description = "Azolo E-Invoice module for dl-agent: collects SMILE FO/POS bills, pushes them to the platform, writes invoice numbers back and relays provider calls (ADR 0016)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-json.workspace = true
+dl-hash.workspace = true
+dl-encoding.workspace = true
+dl-time.workspace = true
+dl-uuid.workspace = true
+dl-tds.workspace = true
+dl-http.workspace = true
+dl-winsvc.workspace = true
+dl-log.workspace = true
+
+[lints]
+workspace = true

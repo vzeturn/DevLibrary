@@ -85,6 +85,20 @@ grammar, run })`); `--data` is added to it. `install.ps1 -Setup <name>` runs it 
 with secrets passed in env `DL_AGENT_SETUP_ARGS` (appended to that sub-command's arguments only,
 then removed), and `-Replace '<service pattern>'` removes the product's previous agent after it.
 
+## Modules
+
+The released `dl-agent` executable (package `dl-agent-bin`) registers every product module;
+each product module is opt-in and stays `disabled` until the hub's remote config sets
+`modules.<name>.enabled = true` (PROTOCOL.md §8). A module opts in by returning `false` from
+`Module::enabled_by_default`.
+
+| Module | Crate | What it does |
+|---|---|---|
+| `sys`, `sql` | `dl-agent` | Built in, on by default: host facts, SQL Server bridge. |
+| `einvoice` | `dl-agent-einvoice` | Azolo E-Invoice: collects SMILE_FO / SMILE_POS bills, pushes them to the platform, writes invoice numbers back, relays VNPT portal calls. Reads the Go agent's `config.enc`; see its README. |
+
+The executable lives in its own package because product modules depend on this library.
+
 ## Installing on Windows
 
 Create an enrolment code on the hub (`POST /admin/enroll-codes` answers `install_command`), then
@@ -115,7 +129,7 @@ Build with the trusted keys baked in and the version stamped, sign offline, uplo
 
 ```text
 cargo run -p dl-agent --example release -- keygen release.seed rel-2026   # once; prints id:public
-DL_AGENT_RELEASE_KEYS=rel-2026:<public> DL_AGENT_VERSION=1.2.0 cargo build --release -p dl-agent
+DL_AGENT_RELEASE_KEYS=rel-2026:<public> DL_AGENT_VERSION=1.2.0 cargo build --release -p dl-agent-bin
 cargo run -p dl-agent --example release -- sign release.seed rel-2026 dl-agent canary 1.2.0 \
     windows-x86_64,windows7-x86_64 \
     https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe,https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows7-x86_64/dl-agent.exe \

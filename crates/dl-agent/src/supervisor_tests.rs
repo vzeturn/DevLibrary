@@ -137,6 +137,42 @@ fn disabled_module_stops_and_does_not_count_against() {
     assert!(!sup.any_unhealthy_for(0, u64::MAX));
 }
 
+/// Runs until stopped; only on sites whose config says `"enabled": true`.
+struct OptIn;
+
+impl Module for OptIn {
+    fn name(&self) -> &str {
+        "optin"
+    }
+
+    fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
+        ctx.set_running("ok");
+        ctx.stop().wait();
+        Ok(())
+    }
+
+    fn enabled_by_default(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn opt_in_module_waits_for_enabled_true() {
+    let d = TestDir::new("sup-optin");
+    let mut sup = Supervisor::new(d.0.clone(), Outbox::default(), Spool::in_memory());
+    sup.add(Arc::new(|| Box::new(OptIn)));
+    let unset = RemoteConfig::default();
+    sup.tick(&unset);
+    assert_eq!(state(&sup), ModuleState::Disabled);
+    let on = RemoteConfig::from_json(
+        &dl_json::json!({"version": 2, "body": {"modules": {"optin": {"enabled": true}}}}),
+    )
+    .unwrap();
+    assert!(tick_until(&mut sup, &on, 2000, |s| state(s) == ModuleState::Running));
+    assert!(tick_until(&mut sup, &unset, 2000, |s| state(s)
+        == ModuleState::Disabled));
+}
+
 #[test]
 fn commands_reach_running_modules_only() {
     let d = TestDir::new("sup-cmd");

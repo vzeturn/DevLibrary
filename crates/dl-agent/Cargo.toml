@@ -25,10 +25,5 @@ dl-tls.workspace = true
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 dl-cli.workspace = true
 
-[[bin]]
-name = "dl-agent"
-path = "src/main.rs"
-
-
 [lints]
 workspace = true

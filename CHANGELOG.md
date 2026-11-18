@@ -16,6 +16,21 @@ All notable changes are listed here. The format follows
 - `agent-hub`: product keys. A product platform mints dl-agent enrolment codes for its own tenants
   (`POST /products/:product/enroll-codes`) without the admin token; the enrolled agent starts with that
   product's module enabled. Admin enrolment codes can carry an initial `config` too (migration 0003).
+- `dl-agent-einvoice`: the Azolo E-Invoice agent as an opt-in dl-agent module
+  (`modules.einvoice.enabled = true`). It runs the collect / push / write-back loop and the
+  provider egress relay (ADR 0016: VNPT hosts only, https on 443, POST/GET, three forwarded
+  headers, 60 s timeout cap, no redirects) on their own threads, reads the Go agent's sealed
+  `config.enc` (`config_dir`, default the Go agent's directory) and stays `degraded`
+  ("not enrolled") without it. Metrics: pending outbox, pushed total, last push time, relay
+  calls / failures; reports `einvoice_push_failed`, `einvoice_sql_failed`,
+  `einvoice_outbox_failed`, `einvoice_relay_refused`, `einvoice_device_replaced`, …;
+  commands `einvoice.status` and `einvoice.collect_now`. Push items stay byte-identical to the
+  Go agent's (golden vectors).
+- `dl-agent`: opt-in modules. `Module::enabled_by_default` (default `true`); a module that
+  returns `false` runs only where its remote-config section sets `"enabled": true`.
+- `dl-agent-bin`: the `dl-agent` executable moved to its own package so it can register
+  product modules (`cargo build -p dl-agent-bin`; `scripts/build-dl-agent.sh` updated).
+
 - `agent-hub`: stores each agent's last site survey (malformed or oversized ones are dropped,
   never the heartbeat), per-product site requirements (Windows version, SQL Server engine,
   compat level, grants, forbidden warnings, clean schema probe), a ready / not-ready list
