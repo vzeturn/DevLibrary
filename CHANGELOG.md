@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `install.ps1`: `-Setup <sub-command>` runs a product's setup after enrolment (secrets through env
+  `DL_AGENT_SETUP_ARGS`), and `-Replace <service pattern>` then removes that product's previous agent,
+  keeping its files; a failure before that point leaves the old agent running.
 - `agent-hub`: product keys. A product platform mints dl-agent enrolment codes for its own tenants
   (`POST /products/:product/enroll-codes`) without the admin token; the enrolled agent starts with that
   product's module enabled. Admin enrolment codes can carry an initial `config` too (migration 0003).

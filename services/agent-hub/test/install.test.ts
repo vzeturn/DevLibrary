@@ -29,6 +29,21 @@ describe('install script', () => {
     expect(text).not.toContain('__HUB__');
   });
 
+  it('runs product setup and replaces the old agent only after enrolment, before the service install', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("[string]$Setup = ''");
+    expect(text).toContain('[string[]]$Replace = @()');
+    const enroll = text.indexOf("@('enroll', '--hub'");
+    const setup = text.indexOf('Invoke-Agent @($Setup, ');
+    const replace = text.lastIndexOf('Remove-Replaced');
+    const install = text.indexOf("Invoke-Agent @('install'");
+    expect(enroll).toBeGreaterThan(0);
+    expect(setup).toBeGreaterThan(enroll);
+    expect(replace).toBeGreaterThan(setup);
+    expect(install).toBeGreaterThan(replace);
+    expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
+  });
+
   it('enrolment codes come with the one-line install command', async () => {
     await createTenant(env, 'demo', true);
     const res = await admin(env, 'POST', '/admin/enroll-codes', { tenant_id: 'demo', site_id: 'hq' });

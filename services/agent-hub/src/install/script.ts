@@ -8,13 +8,18 @@
  * the hub → Defender exclusion → download + size + SHA-256 → stop and remove older copies
  * (the old exe uninstalls itself, other services are deleted) → optional SQL Server prompt,
  * tested before the code is spent → enroll unless already enrolled (re-run keeps the identity)
- * → install the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
+ * → optional product setup sub-command (`-Setup`) → remove the product's previous agent
+ * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
+ * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
  */
 const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Administrator):
 #   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 #   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
 # Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
-#          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>.
+#          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
+#          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
+#          removed afterwards), -Replace <service name pattern> (an older per-product agent: its
+#          services are stopped and deleted and its processes ended; its files and config stay).
 param(
   [string]$Code = $env:DL_AGENT_ENROLL_CODE,
   [string]$Hub = '__HUB__',
@@ -25,7 +30,9 @@ param(
   [switch]$SqlPrompt,
   [switch]$Reenroll,
   [switch]$NoDefender,
-  [int]$LinkTimeout = 120
+  [int]$LinkTimeout = 120,
+  [string]$Setup = '',
+  [string[]]$Replace = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,6 +143,23 @@ function Remove-OldCopies {
   foreach ($f in @(($Exe + '.new'), ($Exe + '.download'))) { if (Test-Path $f) { Remove-Item $f -Force } }
 }
 
+function Remove-Replaced {
+  foreach ($pattern in $Replace) {
+    if (-not $pattern) { continue }
+    foreach ($s in @(Get-WmiObject Win32_Service | Where-Object { ($_.Name -like $pattern -or $_.DisplayName -like $pattern) -and $_.PathName -notlike ('*' + $Exe + '*') })) {
+      Warn ('Replacing ' + $s.Name + ' (' + $s.PathName + '); its files are kept.')
+      if ($s.State -ne 'Stopped') { $s.StopService() | Out-Null; Start-Sleep -Seconds 3 }
+      & sc.exe delete $s.Name | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw ('Could not delete service ' + $s.Name + ' (sc.exe exit ' + $LASTEXITCODE + ').') }
+      if ($s.PathName -match '^\s*"([^"]+)"') { $path = $matches[1] } else { $path = ($s.PathName -split ' ')[0] }
+      foreach ($p in @(Get-WmiObject Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -eq $path })) {
+        Warn ('Ending process ' + $p.ProcessId + ' (' + $p.ExecutablePath + ')')
+        $p.Terminate() | Out-Null
+      }
+    }
+  }
+}
+
 function Wait-Link([long]$since) {
   $beat = Join-Path $Data 'heartbeat.json'
   $deadline = (UnixNow) + $LinkTimeout
@@ -217,6 +241,13 @@ try {
     try { $ok = Invoke-Agent $argv } finally { Remove-Item Env:DL_AGENT_ENROLL_CODE -ErrorAction SilentlyContinue }
     if (-not $ok) { throw 'Enrolment failed (see above). The code may be used, expired or revoked.' }
   }
+
+  if ($Setup) {
+    Say ('Running setup: ' + $Setup)
+    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally { Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue }
+    if (-not $ok) { throw ('Setup ' + $Setup + ' failed (see above). The previous agent, if any, is still running.') }
+  }
+  Remove-Replaced
 
   $since = (UnixNow) - 5
   if (-not (Invoke-Agent @('install', '--data', $Data))) { throw 'Service install failed (see above).' }
