@@ -80,6 +80,19 @@ fn main() {
 }
 ```
 
+## Installing on Windows
+
+Create an enrolment code on the hub (`POST /admin/enroll-codes` answers `install_command`), then
+on the site run in PowerShell as Administrator (PowerShell 2.0 / Windows 7 included):
+
+```text
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('https://agent.pms.id.vn/install.ps1'))) -Code 'XXXX-XXXX'
+```
+
+Add `-SqlPrompt` when SQL Server is on another machine (asked and tested before the code is
+spent), `-Channel canary` for demo sites. Re-running the same line upgrades or repairs the
+install and keeps the identity. See `services/agent-hub/README.md` for every step.
+
 ## Commands
 
 | Command | Meaning |
@@ -99,8 +112,9 @@ Build with the trusted keys baked in and the version stamped, sign offline, uplo
 cargo run -p dl-agent --example release -- keygen release.seed rel-2026   # once; prints id:public
 DL_AGENT_RELEASE_KEYS=rel-2026:<public> DL_AGENT_VERSION=1.2.0 cargo build --release -p dl-agent
 cargo run -p dl-agent --example release -- sign release.seed rel-2026 dl-agent canary 1.2.0 \
-    windows-x86_64 https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe \
-    target/release/dl-agent.exe > canary.json
+    windows-x86_64,windows7-x86_64 \
+    https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe,https://agent.pms.id.vn/v1/artifacts/dl-agent/1.2.0/windows7-x86_64/dl-agent.exe \
+    dist/windows-x86_64/dl-agent.exe,dist/windows7-x86_64/dl-agent.exe > canary.json
 wrangler r2 object put agent-hub-artifacts/dl-agent/1.2.0/windows-x86_64/dl-agent.exe --file … --remote
 curl -X PUT https://agent.pms.id.vn/admin/releases/dl-agent/1.2.0 --data-binary @canary.json …
 ```

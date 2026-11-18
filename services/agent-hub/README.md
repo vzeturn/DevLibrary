@@ -9,6 +9,7 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 |---|---|
 | Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`) |
 | Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version` |
+| Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
 | Status | `GET /admin` — read-only HTML (Vietnamese) of agents and canary releases with gate status |
 
 Notes:
@@ -25,6 +26,15 @@ Notes:
 - Revoking an agent makes every later signed call answer `401 revoked`; the agent wipes its identity and
   stops on that answer, so no `revoke` command has to be queued first.
 - Enrolment codes are shown once; only `sha256(code)` is stored. Codes are case-insensitive.
+  `POST /admin/enroll-codes` also answers `install_command`, the PowerShell one-liner for the site.
+- `install.ps1` (PowerShell 2.0+, run as Administrator): picks `windows7-*` on NT < 10 and x86/x64,
+  refuses a clock more than 4 min off the hub (after one `w32tm /resync`), excludes the agent folders in
+  Defender, checks size + SHA-256, removes older copies (other services running the same exe, leftover
+  processes, a service pointing elsewhere), optionally declares and tests SQL Server first (`-SqlPrompt`
+  for a server on another machine, or `-SqlName`/`-SqlConnection`) so the code is not spent on a site that
+  cannot reach its database, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
+  replaces it), installs the service + watchdog, prints Kaspersky allow-list guidance with the exe hash, and
+  waits for `heartbeat.json` to show a hub contact (`Connected`, or the last log lines and `status`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
 ## Develop

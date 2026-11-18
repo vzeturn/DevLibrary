@@ -8,6 +8,13 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `agent-hub`: Windows installer `GET /install.ps1` (PowerShell 2.0+) with public
+  `/install/info` and `/install/download` routes: OS gate to the `windows7-*` build on NT < 10,
+  clock check against the hub, Defender exclusion, size + SHA-256 check, removal of older
+  copies, optional SQL Server prompt tested before the code is spent, re-runs keep the
+  identity, Kaspersky guidance, and a wait for the first hub contact. Enrolment codes answer
+  the one-line `install_command`. `release sign` takes comma-separated target/url/binary
+  lists for one manifest carrying every build.
 - `dl-agent`: update hardening. A version that fails 3 times in 24 h (bad download, failed
   swap or rollback) waits a day and is dropped after 9 failures; `retry_update {version?}`
   clears the count (replaces the "never again after one rollback" rule). Site policy
