@@ -3,6 +3,21 @@
 version = 4
 
 [[package]]
+name = "dl-agent"
+version = "0.2.1"
+dependencies = [
+ "dl-cli",
+ "dl-ed25519",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-rand",
+ "dl-winsvc",
+]
+
+[[package]]
 name = "dl-bench"
 version = "0.2.1"
 
