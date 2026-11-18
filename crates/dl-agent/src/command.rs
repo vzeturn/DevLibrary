@@ -9,6 +9,7 @@ pub const BUILT_IN: &[&str] = &[
     "restart",
     "restart_module",
     "update_now",
+    "retry_update",
     "set_log_level",
     "collect_diagnostics",
     "reload_config",

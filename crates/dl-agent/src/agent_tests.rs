@@ -5,8 +5,10 @@ use dl_hash::{Digest, Sha256};
 
 use super::*;
 use crate::hub::tests_support::{FakeHub, identity};
+use crate::manifest::Manifest;
 use crate::store::testdir::TestDir;
 use crate::supervisor::{Module, ModuleContext};
+use crate::update::Pending;
 
 const HB_OK: &str = r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "commands": [], "update_check": false}"#;
 
@@ -252,7 +254,7 @@ fn unhealthy_probation_rolls_back() {
     }
     assert_eq!(a.watch_probation(now() + 1), Some(Exit::Restart));
     assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"good");
-    assert_eq!(a.update.failed, [a.opts.version.clone()]);
+    assert_eq!(a.update.failed_versions(), [a.opts.version.clone()]);
     assert!(
         a.spool()
             .peek(50)
@@ -281,7 +283,7 @@ fn boot_rolls_back_after_too_many_probation_starts() {
     assert!(
         UpdateState::load(&a.opts.data_dir)
             .unwrap()
-            .failed
+            .failed_versions()
             .contains(&a.opts.version.clone())
     );
 }
@@ -450,4 +452,124 @@ fn heartbeat_carries_the_survey_only_when_it_changed_or_is_a_day_old() {
     assert!(a.heartbeat(1000 + SURVEY_RESEND_SECONDS + 120).is_none());
     let b = bodies(&hub);
     assert!(b[4]["survey"]["databases"]["SMILE_FO"].is_object());
+}
+
+const HB_UPDATE: &str = r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "commands": [], "update_check": true}"#;
+
+#[test]
+fn update_window_holds_the_check_and_update_now_overrides_it() {
+    let d = TestDir::new("agent-window");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
+    let new = b"new binary";
+    hub.push(200, HB_UPDATE)
+        .push(200, &signed_manifest("99.0.0", new, 7));
+    let mut a = agent(&d, &hub, Vec::new());
+    // 1000 s after the epoch is 07:16 in UTC+7, outside 22:00–05:00.
+    a.config.current.body =
+        json!({"modules": {}, "update": {"window": {"from": "22:00", "to": "05:00"}}});
+    assert_eq!(a.step(1000), None);
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"old");
+    assert_eq!(a.update_status.0, "deferred");
+    assert!(a.update_status.1.contains("22:00–05:00"));
+    assert!(!urls(&hub).iter().any(|u| u.contains("/artifacts/")));
+
+    hub.push(
+        200,
+        r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "update_check": false,
+        "commands": [{"id": "u1", "kind": "update_now"}]}"#,
+    )
+    .push(200, &signed_manifest("99.0.0", new, 7))
+    .push(200, std::str::from_utf8(new).unwrap());
+    assert_eq!(a.step(1060), Some(Exit::Restart));
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), new);
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn corrupt_downloads_count_towards_the_cap_and_retry_update_clears_it() {
+    let d = TestDir::new("agent-cap");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
+    let mut a = agent(&d, &hub, Vec::new());
+    for i in 0..3 {
+        hub.push(200, HB_UPDATE)
+            .push(200, &signed_manifest("99.0.0", b"real", 7))
+            .push(200, "stale cdn copy");
+        let at = 1000 + i * 400;
+        assert_eq!(a.step(at), None, "attempt {i}");
+        a.next_heartbeat = 0;
+    }
+    assert_eq!(
+        a.update.failures_of(&"99.0.0".parse().unwrap(), 2000),
+        (3, 3)
+    );
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"old");
+    // The fourth check inside 24 h does not download at all.
+    let downloads = |h: &FakeHub| urls(h).iter().filter(|u| u.contains("/artifacts/")).count();
+    let before = downloads(&hub);
+    hub.push(200, HB_UPDATE)
+        .push(200, &signed_manifest("99.0.0", b"real", 7));
+    assert_eq!(a.step(2400), None);
+    assert_eq!(downloads(&hub), before);
+    assert_eq!(a.update_status.0, "deferred");
+
+    hub.push(
+        200,
+        r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "update_check": false,
+        "commands": [{"id": "r1", "kind": "retry_update", "args": {"version": "99.0.0"}}]}"#,
+    );
+    a.next_heartbeat = 0;
+    assert_eq!(a.step(2500), None);
+    assert!(a.update.failures.is_empty());
+    assert_eq!(a.update_status.0, "idle");
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn heartbeat_file_tracks_the_loop_and_the_hub_link() {
+    let d = TestDir::new("agent-beat");
+    let hub = FakeHub::default();
+    hub.push_down();
+    let mut a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.step(1000), None);
+    let b = watchdog::read_beat(&a.opts.data_dir).unwrap();
+    assert_eq!((b.at, b.hub_at, b.pid), (1000, 0, std::process::id()));
+    // Rewritten once a minute, not every second.
+    a.step(1030);
+    assert_eq!(watchdog::read_beat(&a.opts.data_dir).unwrap().at, 1000);
+    hub.push(200, HB_OK);
+    a.next_heartbeat = 0;
+    a.step(1031);
+    let b = watchdog::read_beat(&a.opts.data_dir).unwrap();
+    assert_eq!(b.hub_at, 1031, "a hub success is written at once");
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn update_checks_resume_once_probation_commits() {
+    let d = TestDir::new("agent-resume");
+    let hub = FakeHub::default();
+    let mut a = agent(&d, &hub, Vec::new());
+    a.update.pending = Some(Pending {
+        version: a.opts.version.clone(),
+        previous_version: "0.0.1".parse().unwrap(),
+        probation_until: 500,
+        boots: 1,
+    });
+    assert!(matches!(
+        a.try_update(400, false),
+        Ok(update_flow::Checked::Held(_))
+    ));
+    assert!(urls(&hub).is_empty(), "no manifest fetch during probation");
+    wait_running(&mut a);
+    a.hub_ok = true;
+    assert_eq!(a.watch_probation(1000), None);
+    hub.push(404, r#"{"error":"no_release"}"#);
+    assert!(matches!(
+        a.try_update(1001, false),
+        Ok(update_flow::Checked::Nothing(_))
+    ));
+    assert_eq!(urls(&hub), ["https://hub/v1/releases/dl-agent/stable"]);
+    a.supervisor.stop_all(STOP_WAIT);
 }

@@ -38,6 +38,10 @@ pub struct Manifest {
     pub min_version: Option<Version>,
     /// Allows installing a lower version than the running one (emergency rollback releases).
     pub allow_downgrade: bool,
+    /// Installs at once, outside the site's update window (a fix that cannot wait).
+    pub urgent: bool,
+    /// Installs even where the site turned automatic updates off.
+    pub required: bool,
     /// Release notes.
     pub notes: String,
     /// Builds per target.
@@ -94,7 +98,7 @@ impl Manifest {
             .as_ref()
             .map(|v| Value::String(v.to_string()))
             .unwrap_or(Value::Null);
-        json!({
+        let mut body = json!({
             "product": self.product,
             "channel": self.channel.as_str(),
             "version": self.version.to_string(),
@@ -105,7 +109,17 @@ impl Manifest {
             "notes": self.notes,
             "artifacts": artifacts,
             "key_id": self.key_id,
-        })
+        });
+        // Written only when set, so manifests signed before these flags still verify.
+        if let Some(o) = body.as_object_mut() {
+            if self.urgent {
+                o.insert("urgent", true);
+            }
+            if self.required {
+                o.insert("required", true);
+            }
+        }
+        body
     }
 
     /// The canonical bytes the signature covers: compact JSON of every field but `signature`.
@@ -150,6 +164,7 @@ impl Manifest {
                 .and_then(Value::as_u64)
                 .ok_or_else(|| Error::Manifest(format!("missing {k}")))
         };
+        let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
         let channel: Channel = s("channel")?.parse()?;
         let rollout = n("rollout_percent")?;
         if rollout > 100 {
@@ -200,6 +215,8 @@ impl Manifest {
                 .get("allow_downgrade")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            urgent: flag("urgent"),
+            required: flag("required"),
             notes: v.get("notes").and_then(Value::as_str).unwrap_or("").into(),
             artifacts,
             key_id: s("key_id")?.into(),
@@ -226,6 +243,8 @@ mod tests {
             rollout_percent: 100,
             min_version: None,
             allow_downgrade: false,
+            urgent: false,
+            required: false,
             notes: "Bản thử".into(),
             artifacts: vec![Artifact {
                 target: "windows-x86_64".into(),
@@ -269,5 +288,27 @@ mod tests {
         assert!(other.verify(&t).is_err());
         let unsigned = sample(Channel::Stable, "1.4.0", 100);
         assert!(unsigned.verify(&t).is_err());
+    }
+
+    #[test]
+    fn urgent_and_required_are_signed_and_absent_when_off() {
+        let (k, t) = keys();
+        let plain = sample(Channel::Stable, "1.4.0", 100);
+        let text = dl_json::to_string(&plain.body());
+        assert!(!text.contains("urgent") && !text.contains("required"));
+
+        let mut m = sample(Channel::Stable, "1.4.1", 100);
+        m.urgent = true;
+        m.required = true;
+        m.sign("rel-1", &k);
+        let back = Manifest::parse(&m.to_json()).unwrap();
+        assert!(back.urgent && back.required);
+        back.verify(&t).unwrap();
+        let mut stripped = back.clone();
+        stripped.urgent = false;
+        assert!(
+            stripped.verify(&t).is_err(),
+            "the flag is covered by the signature"
+        );
     }
 }

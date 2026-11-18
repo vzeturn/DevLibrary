@@ -125,6 +125,11 @@ pub fn command(app: &App) -> Command {
                 .arg(data()),
         )
         .subcommand(
+            Command::new("watchdog")
+                .about("Checks the service once and starts, kills or restarts it when stuck (run by the scheduler)")
+                .arg(data()),
+        )
+        .subcommand(
             Command::new("status")
                 .about("Prints the local state as JSON")
                 .arg(data()),
@@ -166,6 +171,16 @@ pub fn main(app: App) -> i32 {
         "run" => return run(&app, &dir),
         "install" => install(&app, &dir),
         "uninstall" => uninstall(&app, &dir, sub.flag("purge")),
+        "watchdog" => {
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("cannot create {}: {e}", dir.display());
+                return EXIT_CONFIG;
+            }
+            init_logging(&app, &dir, true, "watchdog.log");
+            let code = crate::service_watch::run(&app, &dir);
+            dl_log::shutdown();
+            return code;
+        }
         "sql-add" => sql_add(&dir, sub),
         "sql-test" => return sql_test(&dir, sub.value("name")),
         "status" => {
@@ -303,7 +318,7 @@ fn enroll(app: &App, dir: &Path, m: &Matches) -> Result<(), Error> {
     Ok(())
 }
 
-fn init_logging(app: &App, dir: &Path, console: bool) {
+fn init_logging(app: &App, dir: &Path, console: bool, file: &str) {
     let mut b = dl_log::Logger::builder()
         .level(dl_log::LevelFilter::Info)
         .field("product", app.product.clone())
@@ -315,7 +330,7 @@ fn init_logging(app: &App, dir: &Path, console: bool) {
     {
         b = b.level(l);
     }
-    match dl_log::FileSink::builder(dir.join("logs").join("agent.log"))
+    match dl_log::FileSink::builder(dir.join("logs").join(file))
         .max_size(LOG_MAX_BYTES)
         .keep(LOG_KEEP)
         .build()
@@ -335,9 +350,10 @@ fn run(app: &App, dir: &Path) -> i32 {
         eprintln!("cannot create {}: {e}", dir.display());
         return EXIT_CONFIG;
     }
-    init_logging(app, dir, !as_service);
+    init_logging(app, dir, !as_service, "agent.log");
     if as_service {
         let (app, dir) = (app.clone(), dir.to_path_buf());
+        crate::service_watch::ensure(&app, &dir);
         let result = dl_winsvc::run_service_with_exit_code(&app.service.clone(), move |stop| {
             run_agent(&app, &dir, &stop) as u32
         });
@@ -413,32 +429,26 @@ fn install(app: &App, dir: &Path) -> Result<(), Error> {
     }
 }
 
-fn svc(e: dl_winsvc::Error) -> Error {
+pub(crate) fn svc(e: dl_winsvc::Error) -> Error {
     Error::Config(format!("service manager: {e}"))
 }
 
 fn install_windows(app: &App, exe: &str, data: &str) -> Result<(), Error> {
-    use dl_winsvc::scm::{Manager, RecoveryAction, ServiceConfig, StartType};
+    use dl_winsvc::scm::{Manager, ServiceConfig, StartType};
     let bin = dl_winsvc::command_line(exe, &["run", "--data", data]);
     let manager = Manager::connect().map_err(svc)?;
     let cfg = ServiceConfig::new(&app.display, StartType::Automatic, &bin)
         .with_description("DevLibrary shared agent: runs product modules, self-updates from the hub and reports problems.");
     let service = manager.create(&app.service, &cfg).map_err(svc)?;
     // Exit 75 (update installed, restart requested) and crashes both restart the service.
-    let restart = [
-        RecoveryAction::Restart(Duration::from_secs(5)),
-        RecoveryAction::Restart(Duration::from_secs(10)),
-        RecoveryAction::Restart(Duration::from_secs(60)),
-    ];
-    service
-        .set_recovery_actions(&restart, Duration::from_secs(86_400))
-        .map_err(svc)?;
-    service
-        .set_recovery_on_non_crash_failures(true)
-        .map_err(svc)?;
+    crate::service_watch::set_recovery(&service)?;
     service.set_delayed_auto_start(true).map_err(svc)?;
     service.start(&[]).map_err(svc)?;
-    println!("service {} installed and started", app.service);
+    crate::service_watch::register(app, exe, data)?;
+    println!(
+        "service {} installed and started, watchdog task registered",
+        app.service
+    );
     Ok(())
 }
 
@@ -467,7 +477,7 @@ fn systemctl(args: &[&str]) -> Result<(), Error> {
     }
 }
 
-fn unit_path(app: &App) -> PathBuf {
+pub(crate) fn unit_path(app: &App) -> PathBuf {
     PathBuf::from("/etc/systemd/system").join(format!("{}.service", app.service))
 }
 
@@ -475,11 +485,17 @@ fn install_systemd(app: &App, exe: &str, data: &str) -> Result<(), Error> {
     crate::store::write_bytes(&unit_path(app), systemd_unit(app, exe, data).as_bytes())?;
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", "--now", &app.service])?;
-    println!("unit {} installed and started", app.service);
+    crate::service_watch::register(app, exe, data)?;
+    println!(
+        "unit {} installed and started, watchdog timer enabled",
+        app.service
+    );
     Ok(())
 }
 
 fn uninstall(app: &App, dir: &Path, purge: bool) -> Result<(), Error> {
+    // First, so the watchdog does not start the service again while it is removed.
+    crate::service_watch::unregister(app);
     if cfg!(windows) {
         let manager = dl_winsvc::scm::Manager::connect().map_err(svc)?;
         let service = manager.open(&app.service).map_err(svc)?;

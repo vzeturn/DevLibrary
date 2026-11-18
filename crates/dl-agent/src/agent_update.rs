@@ -1,0 +1,166 @@
+//! The agent's self-update flow (PROTOCOL.md §6): fetch and verify the manifest, apply the
+//! site policy (window, auto off) and the failure cap, install, and roll back.
+
+use super::{Agent, Exit, now};
+use crate::Error;
+use crate::current_target;
+use crate::manifest::Manifest;
+use crate::report::{ProblemReport, Severity};
+use crate::update::{Decision, Pending, Policy};
+
+/// How an update check ended when it did not fail.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Checked {
+    /// An update was installed: restart into it.
+    Installed,
+    /// Nothing to install, with the reason.
+    Nothing(String),
+    /// An update is due but waits (probation, window, failure cap), with the reason.
+    Held(String),
+}
+
+impl Agent {
+    /// Fetches, verifies and installs the release for this agent's channel. `forced` (the
+    /// `update_now` command) skips the site's window and `auto: false`, not the failure cap.
+    pub(super) fn try_update(&mut self, now: u64, forced: bool) -> Result<Checked, Error> {
+        if self.update.pending.is_some() {
+            return Ok(Checked::Held("an update is still on probation".into()));
+        }
+        let Some(text) = self.hub.manifest(&self.opts.product, &self.channel)? else {
+            return Ok(Checked::Nothing("no release on this channel".into()));
+        };
+        let m = Manifest::parse(&text)?;
+        m.verify(&self.opts.trusted)?;
+        if m.product != self.opts.product || m.channel.as_str() != self.channel {
+            return Err(Error::Manifest(format!(
+                "manifest is for {}/{}",
+                m.product, m.channel
+            )));
+        }
+        let current = self.opts.version.clone();
+        let agent_id = self.hub.identity().agent_id.clone();
+        let (artifact, version) =
+            match self
+                .update
+                .decide(&m, &current, &agent_id, &current_target(), now)
+            {
+                Decision::UpToDate | Decision::NotInRollout => {
+                    self.update.accept(&m);
+                    self.update.save(&self.opts.data_dir)?;
+                    return Ok(Checked::Nothing("no update to install".into()));
+                }
+                Decision::Deferred(reason) => return Ok(self.defer(reason)),
+                Decision::Refused(reason) => return Err(Error::Manifest(reason)),
+                Decision::Install(artifact, version) => (artifact, version),
+            };
+        let (policy, bad) = Policy::from_config(&self.config.current.body);
+        if let Some(e) = bad {
+            self.report(Severity::Warning, "update_policy_invalid", &e.to_string());
+        }
+        if let Some(reason) = policy.hold(&m, now, forced) {
+            return Ok(self.defer(format!("{version} waits: {reason}")));
+        }
+        let bytes = self.hub.download(&artifact.url)?;
+        // Record the probation before the swap: a crash in between then rolls back
+        // or (if the swap never happened) is forgotten at the next boot.
+        self.update.accept(&m);
+        self.update.pending = Some(Pending {
+            version: version.clone(),
+            previous_version: current.clone(),
+            probation_until: now + self.opts.probation_seconds,
+            boots: 0,
+        });
+        self.update.save(&self.opts.data_dir)?;
+        if let Err(e) = self.installer().install(&bytes, &artifact) {
+            // A bad download (stale CDN copy, truncated file) or a failed swap counts
+            // towards the failure cap; network errors above do not.
+            self.update.pending = None;
+            self.update.record_failure(&version, now);
+            self.update.save(&self.opts.data_dir)?;
+            return Err(e);
+        }
+        let msg = format!("installed {version} over {current}, restarting");
+        dl_log::info!("{}", msg);
+        self.report_with(ProblemReport::new(
+            Severity::Info,
+            "agent",
+            "update_installed",
+            &msg,
+            now,
+        ));
+        Ok(Checked::Installed)
+    }
+
+    fn defer(&mut self, reason: String) -> Checked {
+        dl_log::info!("update deferred"; reason = reason.as_str());
+        self.update_status = ("deferred", reason.clone());
+        Checked::Held(reason)
+    }
+
+    /// Restores the previous binary and counts the failure.
+    pub(super) fn roll_back(&mut self, reason: &str) -> Result<(), Error> {
+        let Some(p) = self.update.pending.take() else {
+            return Ok(());
+        };
+        if let Err(e) = self.installer().rollback() {
+            self.report(
+                Severity::Critical,
+                "rollback_failed",
+                &format!("cannot restore {}: {e}", p.previous_version),
+            );
+        }
+        self.update.record_failure(&p.version, now());
+        self.update.save(&self.opts.data_dir)?;
+        let msg = format!(
+            "rolled back {} to {}: {reason}",
+            p.version, p.previous_version
+        );
+        dl_log::error!("{}", msg);
+        let r = ProblemReport::new(
+            Severity::Critical,
+            "agent",
+            "update_rolled_back",
+            &msg,
+            now(),
+        )
+        .with("version", p.version.to_string())
+        .with("previous_version", p.previous_version.to_string());
+        self.report_with(r);
+        self.update_status = ("rolled_back", p.version.to_string());
+        Ok(())
+    }
+
+    /// The `update_now` command: `(ok, output, exit)`.
+    pub(super) fn update_now(&mut self, now: u64) -> (bool, String, Option<Exit>) {
+        self.last_update_check = now;
+        match self.try_update(now, true) {
+            Ok(Checked::Installed) => (
+                true,
+                "update installed, restarting".into(),
+                Some(Exit::Restart),
+            ),
+            Ok(Checked::Nothing(why)) => (true, why, None),
+            Ok(Checked::Held(why)) => (false, why, None),
+            Err(e) => (false, e.to_string(), None),
+        }
+    }
+
+    /// The `retry_update` command: forgets failed attempts (of `version`, or all).
+    pub(super) fn retry_update(&mut self, version: Option<&str>) -> (bool, String) {
+        let before = self.update.failures.len();
+        match version {
+            Some(v) => self.update.failures.retain(|(f, _)| f.to_string() != v),
+            None => self.update.failures.clear(),
+        }
+        let cleared = before - self.update.failures.len();
+        match self.update.save(&self.opts.data_dir) {
+            Ok(()) => {
+                if self.update_status.0 != "probation" {
+                    self.update_status = ("idle", self.opts.version.to_string());
+                }
+                (true, format!("{cleared} failed attempts forgotten"))
+            }
+            Err(e) => (false, e.to_string()),
+        }
+    }
+}

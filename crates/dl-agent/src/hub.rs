@@ -323,7 +323,8 @@ impl HubClient {
 
     /// Downloads an artifact. URLs on one of the agent's hubs are signed (the hub serves
     /// artifacts to enrolled agents only); other URLs are fetched as they are. Integrity
-    /// comes from the signed manifest either way.
+    /// comes from the signed manifest either way; `no-cache` keeps a CDN from serving a stale
+    /// copy that would then fail the hash check.
     pub fn download(&self, url: &str) -> Result<Vec<u8>, Error> {
         let on_hub = self
             .identity
@@ -333,7 +334,8 @@ impl HubClient {
         if on_hub {
             return self.signed_url("GET", url, b"");
         }
-        let (code, body) = self.transport.send("GET", url, &[], b"")?;
+        let headers = [("Cache-Control", "no-cache".to_string())];
+        let (code, body) = self.transport.send("GET", url, &headers, b"")?;
         if (200..300).contains(&code) {
             Ok(body)
         } else {

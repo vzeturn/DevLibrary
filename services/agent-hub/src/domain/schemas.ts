@@ -83,6 +83,10 @@ export const manifest = z.object({
   rollout_percent: z.number().int().min(0).max(100),
   min_version: versionString.nullable(),
   allow_downgrade: z.boolean(),
+  /** Installs outside the site's update window. Signed; written only when true. */
+  urgent: z.boolean().optional(),
+  /** Installs even where the site set `update.auto: false`. Signed; written only when true. */
+  required: z.boolean().optional(),
   notes: z.string().optional(),
   artifacts: z
     .array(
