@@ -69,6 +69,7 @@ impl Agent {
             previous_version: current.clone(),
             probation_until: now + self.opts.probation_seconds,
             boots: 0,
+            unhealthy_before: self.supervisor.unhealthy_names(),
         });
         self.update.save(&self.opts.data_dir)?;
         if let Err(e) = self.installer().install(&bytes, &artifact) {

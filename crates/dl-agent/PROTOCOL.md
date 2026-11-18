@@ -110,8 +110,10 @@ or lower in version than the running one unless `allow_downgrade` is true.
 
 1. Download the artifact for the agent's target, check size and SHA-256, stage it.
 2. Keep the running binary as `previous`, put the new one in place, record
-   `pending = {version, previous, probation_until}` and exit with code 75; the service
-   manager restarts the agent.
+   `pending = {version, previous, probation_until, unhealthy_before}` and exit with code 75;
+   the service manager restarts the agent. `unhealthy_before` names the modules already
+   degraded or stopped at install time: probation ignores them (a site problem must not
+   block every release, including the one that fixes it).
 3. On each start during probation the agent counts the boot. If it reaches the probation end
    with all modules running and one successful heartbeat, the update is committed.
 4. If the process starts 3 times without committing, or a module stays degraded through

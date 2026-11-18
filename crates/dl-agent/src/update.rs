@@ -35,6 +35,11 @@ pub struct Pending {
     pub probation_until: u64,
     /// Starts since the swap.
     pub boots: u32,
+    /// Modules already degraded or stopped when the update was installed. Probation does
+    /// not hold them against the new version: a site problem (not enrolled, SQL down, a
+    /// revoked key) must not roll back every release, or the site could never receive the
+    /// release that fixes it.
+    pub unhealthy_before: Vec<String>,
 }
 
 /// Persistent update state (`update.json`).
@@ -208,6 +213,16 @@ impl UpdateState {
                     .and_then(Value::as_u64)
                     .unwrap_or(0),
                 boots: p.get("boots").and_then(Value::as_u64).unwrap_or(0) as u32,
+                unhealthy_before: p
+                    .get("unhealthy_before")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             });
         }
         Ok(s)
@@ -227,7 +242,8 @@ impl UpdateState {
         let pending = match &self.pending {
             Some(p) => {
                 json!({"version": p.version.to_string(), "previous_version": p.previous_version.to_string(),
-                              "probation_until": p.probation_until, "boots": u64::from(p.boots)})
+                              "probation_until": p.probation_until, "boots": u64::from(p.boots),
+                              "unhealthy_before": p.unhealthy_before.clone()})
             }
             None => Value::Null,
         };

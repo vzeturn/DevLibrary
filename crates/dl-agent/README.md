@@ -25,7 +25,8 @@ No dependencies outside DevLibrary, no `unsafe`.
   binary (`DL_AGENT_RELEASE_KEYS="id:base64"` at compile time), the artifact against its
   SHA-256; the new build runs on probation and is committed only when every module runs
   and the hub answers. Three boots without commit, or a module unhealthy through the whole
-  probation, restore the previous binary and blacklist the version.
+  probation, restore the previous binary and blacklist the version. Modules already
+  unhealthy when the update was installed do not count.
 - **Canary channel**: the hub puts demo tenants on `canary`; a build reaches `stable`
   only after the canary gate passes on the hub.
 - **Self-healing**: each module runs on its own thread, panics are caught, restarts back
