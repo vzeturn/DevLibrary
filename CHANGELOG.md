@@ -8,6 +8,16 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent`: release builds for every site OS from `scripts/build-dl-agent.sh`: Windows
+  10+ x64/x86 and Windows 7 / Server 2008 R2 / 2012 x64/x86, static, system-DLL-only
+  import check, wine smoke. Win7 builds report the `windows7-<arch>` target.
+
+### Fixed
+
+- `dl-rand`: Windows 7 builds (`*-win7-windows-*`) take entropy from `RtlGenRandom`;
+  `ProcessPrng` (bcryptprimitives.dll) does not exist before Windows 8, so the agent
+  could not start there.
+
 - `dl-agent`: one on-prem agent for every project (RT-0164). Windows service and systemd
   install, enrolment and Ed25519-signed hub calls with clock-skew correction and hub
   fallback, signed self-update with probation, automatic rollback and version blacklist,

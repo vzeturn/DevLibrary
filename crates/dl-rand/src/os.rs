@@ -49,7 +49,7 @@ pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(target_vendor = "win7")))]
 pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
     // bcryptprimitives.dll exports the undecorated name `ProcessPrng`; on x86 a raw-dylib
     // import of an `extern "system"` function would otherwise ask for `_ProcessPrng@8`
@@ -73,6 +73,29 @@ pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
     // is documented to always succeed on Windows 10 and later.
     let ok = unsafe { ProcessPrng(buf.as_mut_ptr(), buf.len()) };
     if ok == 0 { Err(Error::Os(0)) } else { Ok(()) }
+}
+
+/// Windows 7 / Server 2008 R2 builds (`*-win7-windows-*`): `ProcessPrng` only exists from
+/// Windows 8, so use `RtlGenRandom` (advapi32 `SystemFunction036`) as Rust's own std does
+/// on these targets.
+#[cfg(all(windows, target_vendor = "win7"))]
+pub(crate) fn fill(buf: &mut [u8]) -> Result<(), Error> {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        #[link_name = "SystemFunction036"]
+        fn RtlGenRandom(data: *mut u8, len: u32) -> u8;
+    }
+    for chunk in buf.chunks_mut(u32::MAX as usize) {
+        // The chunk length fits in u32 by construction.
+        let len = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
+        // SAFETY: `chunk` is a valid, writable slice of `len` bytes.
+        if unsafe { RtlGenRandom(chunk.as_mut_ptr(), len) } == 0 {
+            return Err(Error::Os(
+                std::io::Error::last_os_error().raw_os_error().unwrap_or(-1),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]

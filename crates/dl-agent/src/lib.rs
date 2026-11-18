@@ -32,8 +32,25 @@ pub fn agent_version() -> Version {
 }
 
 /// The release target of this build: `"<os>-<arch>"`, e.g. `"windows-x86_64"`.
+///
+/// Builds for the Windows 7 / Server 2008 R2 targets (`*-win7-windows-*`) report
+/// `"windows7-<arch>"`, so the hub serves them the legacy artifact and never a build that
+/// needs Windows 10. 32-bit builds report `"x86"`.
 pub fn current_target() -> String {
-    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+    target_name(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        cfg!(target_vendor = "win7"),
+    )
+}
+
+fn target_name(os: &str, arch: &str, win7: bool) -> String {
+    let os = if win7 && os == "windows" {
+        "windows7"
+    } else {
+        os
+    };
+    format!("{os}-{arch}")
 }
 
 /// Current Unix time in seconds (0 if the clock is before 1970).
@@ -41,4 +58,16 @@ pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::target_name;
+
+    #[test]
+    fn win7_builds_get_their_own_target() {
+        assert_eq!(target_name("windows", "x86_64", false), "windows-x86_64");
+        assert_eq!(target_name("windows", "x86", true), "windows7-x86");
+        assert_eq!(target_name("linux", "x86_64", true), "linux-x86_64");
+    }
 }
