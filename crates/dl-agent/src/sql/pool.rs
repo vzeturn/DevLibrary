@@ -42,10 +42,11 @@ pub trait Connection: Send + 'static {
     fn in_transaction(&self) -> bool;
     /// Sets the per-request timeout (`None` = wait forever).
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error>;
-    /// Runs a parameterless, read-only statement written by the agent itself (survey, schema
-    /// probe) and returns the first result set as `[{column: value}]`.
-    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
-        let _ = sql;
+    /// Runs a read-only statement written by the agent itself (survey, schema probe), with
+    /// `(name, text)` parameters bound as `nvarchar`, and returns the first result set as
+    /// `[{column: value}]`. Values a site or the hub supplies always go in `params`.
+    fn query_json(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
+        let _ = (sql, params);
         Err(Error::Sql(
             "this connection cannot run introspection queries".into(),
         ))

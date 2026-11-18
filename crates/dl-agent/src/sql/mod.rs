@@ -15,6 +15,7 @@
 
 pub mod module;
 pub mod pool;
+pub mod probe;
 pub mod survey;
 pub mod transport;
 
@@ -107,8 +108,32 @@ impl TdsConnector {
     }
 }
 
+/// A session error, prefixed with its [`probe::Problem`] code when it is one the agent acts
+/// on (`sql_missing_object: Invalid column name 'MaCQT'.`); see [`problem_code`].
 fn tds(e: dl_tds::Error) -> Error {
-    Error::Sql(e.to_string())
+    match probe::classify(&e) {
+        probe::Problem::Other => Error::Sql(e.to_string()),
+        p => Error::Sql(format!("{}: {e}", p.code())),
+    }
+}
+
+/// The problem code of an [`Error::Sql`] (`sql_missing_object`, `sql_locked`, …), or
+/// `fallback` for any other error.
+pub fn problem_code<'a>(e: &Error, fallback: &'a str) -> &'a str {
+    const CODES: [&str; 5] = [
+        "sql_missing_object",
+        "sql_locked",
+        "sql_deadlock",
+        "sql_access_denied",
+        "sql_timeout",
+    ];
+    match e {
+        Error::Sql(m) => CODES
+            .into_iter()
+            .find(|c| m.strip_prefix(c).is_some_and(|r| r.starts_with(':')))
+            .unwrap_or(fallback),
+        _ => fallback,
+    }
 }
 
 impl Connector for TdsConnector {
@@ -143,8 +168,12 @@ impl Connection for dl_tds::Client {
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
         self.set_timeout(timeout).map_err(tds)
     }
-    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
-        let results = self.query(sql, &[]).map_err(tds)?;
+    fn query_json(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
+        let params: Vec<dl_tds::Param> = params
+            .iter()
+            .map(|(k, v)| dl_tds::Param::new(k, *v))
+            .collect();
+        let results = self.query(sql, &params).map_err(tds)?;
         let Some(set) = results.first() else {
             return Ok(Vec::new());
         };
@@ -281,11 +310,28 @@ impl<C: Connector> Pools<C> {
     }
 
     /// Stores the latest survey of `database` (PROTOCOL.md §9.5).
-    pub fn set_survey(&self, database: &str, survey: Value) {
-        self.surveys
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(database.to_string(), survey);
+    pub fn set_survey(&self, database: &str, mut survey: Value) {
+        let mut s = self.surveys.lock().unwrap_or_else(PoisonError::into_inner);
+        // A fresh survey keeps the last schema probe until the next probe replaces it.
+        if let (Some(old), Some(new)) = (
+            s.get(database).and_then(|o| o.get("probe")).cloned(),
+            survey.as_object_mut(),
+        ) {
+            new.insert("probe", old);
+        }
+        s.insert(database.to_string(), survey);
+    }
+
+    /// Records the last schema probe of `database` inside its survey (sent with the next
+    /// heartbeat, so the hub gate sees what a product still lacks).
+    pub fn set_probe(&self, database: &str, probe: Value) {
+        let mut s = self.surveys.lock().unwrap_or_else(PoisonError::into_inner);
+        let entry = s
+            .entry(database.to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Some(m) = entry.as_object_mut() {
+            m.insert("probe", probe);
+        }
     }
 
     /// `{"<db>": survey}` for every database surveyed so far.

@@ -78,14 +78,48 @@ impl Connection for Fake {
         self.timeout = timeout;
         Ok(())
     }
-    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
+    fn query_json(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
         self.ping()?;
-        assert!(sql.contains("SERVERPROPERTY"), "only the survey is faked");
-        Ok(vec![json!({
-            "product_version": "10.50.1600.1", "edition": "Express Edition",
-            "server_collation": "Vietnamese_CI_AS", "database_collation": "Vietnamese_CI_AS",
-            "code_page": "1258", "compatibility_level": "100", "db_owner": "1", "execute": "1"
-        })])
+        if sql.contains("SERVERPROPERTY") {
+            return Ok(vec![json!({
+                "product_version": "10.50.1600.1", "edition": "Express Edition",
+                "server_collation": "Vietnamese_CI_AS", "database_collation": "Vietnamese_CI_AS",
+                "code_page": "1258", "compatibility_level": "100", "db_owner": "1", "execute": "1"
+            })]);
+        }
+        // Schema probe: dbo.HoaDon(Id, SoHD), dbo.Config(Key = EINV_URL), dbo.usp_GetBill.
+        if sql.contains("FROM sys.objects") {
+            return Ok(vec![
+                json!({"s": "dbo", "n": "HoaDon", "t": "U "}),
+                json!({"s": "dbo", "n": "Config", "t": "U "}),
+                json!({"s": "dbo", "n": "usp_GetBill", "t": "P "}),
+            ]);
+        }
+        if sql.contains("FROM sys.columns") {
+            let mut rows = Vec::new();
+            for (_, v) in params {
+                if *v == "[dbo].[HoaDon]" {
+                    rows.push(json!({"s": "dbo", "n": "HoaDon", "c": "Id"}));
+                    rows.push(json!({"s": "dbo", "n": "HoaDon", "c": "SoHD"}));
+                }
+                if *v == "[dbo].[Config]" {
+                    rows.push(json!({"s": "dbo", "n": "Config", "c": "Key"}));
+                }
+            }
+            return Ok(rows);
+        }
+        if sql.contains("FROM [dbo].[Config]") {
+            assert!(
+                !sql.contains("EINV"),
+                "values must be bound, not spliced: {sql}"
+            );
+            return Ok(params
+                .iter()
+                .filter(|(_, v)| *v == "EINV_URL")
+                .map(|(_, v)| json!({"v": v}))
+                .collect());
+        }
+        panic!("unexpected query: {sql}");
     }
 }
 
@@ -350,4 +384,42 @@ fn live_sql_connects_on_a_rung_and_caps_lock_waits() {
     assert!(sv["engine"]["major"].as_u64().unwrap() >= 10);
     assert!(sv["database"]["compatibility_level"].as_u64().unwrap() >= 100);
     assert!(sv["grants"]["sysadmin"].is_boolean());
+
+    // Schema probe on real catalogs, with a value that would break if it were spliced.
+    s.execute(
+        "IF OBJECT_ID('dbo.dl_probe_cfg') IS NOT NULL DROP TABLE dbo.dl_probe_cfg; \
+         CREATE TABLE dbo.dl_probe_cfg ([Key] varchar(20) NOT NULL, Val nvarchar(50)); \
+         INSERT dbo.dl_probe_cfg VALUES ('EINV_URL', N'x'), ('O''Brien', N'y');",
+        &[],
+    )
+    .unwrap();
+    let req = probe::Requirement::from_json(&json!({
+        "tables": {"dbo.dl_probe_cfg": ["Key", "Val", "MaCQT"]},
+        "procedures": ["dbo.dl_probe_missing"],
+        "rows": [{"table": "dbo.dl_probe_cfg", "column": "Key",
+                  "values": ["EINV_URL", "O'Brien", "EINV_KEY"]}]
+    }))
+    .unwrap();
+    let result = probe::probe(&mut s, &req);
+    let missing_col = s.query_json("SELECT MaCQT FROM dbo.dl_probe_cfg", &[]);
+    s.execute("DROP TABLE dbo.dl_probe_cfg", &[]).unwrap();
+    let pr = result.unwrap();
+    eprintln!("{}", dl_json::to_string_pretty(&pr));
+    let names: Vec<&str> = pr["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "dbo.dl_probe_missing",
+            "dbo.dl_probe_cfg.MaCQT",
+            "dbo.dl_probe_cfg.Key"
+        ]
+    );
+    assert_eq!(pr["missing"][2]["value"].as_str(), Some("EINV_KEY"));
+    let e = missing_col.unwrap_err();
+    assert_eq!(problem_code(&e, "x"), "sql_missing_object", "{e}");
 }

@@ -1,5 +1,5 @@
 //! The built-in `sql` module: watches every declared database and answers `sql.ping`,
-//! `sql.status` and `sql.survey`.
+//! `sql.status`, `sql.survey` and `sql.probe`.
 //!
 //! It is added only when the site declares databases. A database that stops answering
 //! turns the module `degraded` (so the canary gate sees it) and files one `sql_unreachable`
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use dl_json::{Map, Value, json};
 
-use super::{Connector, Pools, SqlPools, survey};
+use super::{Connector, Pools, SqlPools, probe, survey};
 use crate::Error;
 use crate::report::Severity;
 use crate::supervisor::{Factory, Module, ModuleContext};
@@ -91,7 +91,9 @@ impl<C: Connector> SqlModule<C> {
                 Err(e) => {
                     let msg = e.to_string();
                     if self.down.insert(name.clone()) {
-                        ctx.report(Severity::Error, "sql_unreachable", &msg, db_context(&name));
+                        // A wrong password reads as `sql_access_denied`, not as a dead server.
+                        let code = super::problem_code(&e, "sql_unreachable");
+                        ctx.report(Severity::Error, code, &msg, db_context(&name));
                     }
                     failing.push(msg);
                 }
@@ -165,6 +167,51 @@ impl<C: Connector> SqlModule<C> {
         (ok, dl_json::to_string(&body))
     }
 
+    /// `sql.probe {requirement, database?}`: which tables, columns, views, procedures,
+    /// functions and configuration rows the requirement names are missing (§9.6). The result
+    /// is kept in the database's survey for the hub gate.
+    fn probe_now(&self, args: &Value) -> (bool, String) {
+        let req = match args
+            .get("requirement")
+            .ok_or_else(|| Error::Config("probe: requirement is required".into()))
+            .and_then(probe::Requirement::from_json)
+        {
+            Ok(r) => r,
+            Err(e) => return (false, format!("sql: {e}")),
+        };
+        let only = args.get("database").and_then(Value::as_str);
+        let mut out = Map::new();
+        let mut ok = true;
+        for name in self.pools.names() {
+            if only.is_some_and(|o| o != name) {
+                continue;
+            }
+            let answer = match self
+                .pools
+                .get(&name)
+                .and_then(|p| p.with(|conn| probe::probe(conn, &req)))
+            {
+                Ok(r) => {
+                    ok &= r["ok"].as_bool() == Some(true);
+                    self.pools.set_probe(&name, r.clone());
+                    r
+                }
+                Err(e) => {
+                    ok = false;
+                    json!({"ok": false, "code": super::problem_code(&e, "sql_error"), "error": e.to_string()})
+                }
+            };
+            out.insert(name, answer);
+        }
+        if out.is_empty() {
+            return (
+                false,
+                format!("sql: no database {}", only.unwrap_or("declared")),
+            );
+        }
+        (ok, dl_json::to_string(&Value::Object(out)))
+    }
+
     fn ping(&self, args: &Value) -> (bool, String) {
         let only = args.get("database").and_then(Value::as_str);
         let mut out = Map::new();
@@ -197,6 +244,7 @@ impl<C: Connector> SqlModule<C> {
                 "sql.ping" => self.ping(&cmd.args),
                 "sql.status" => (true, dl_json::to_string(&self.pools.stats())),
                 "sql.survey" => self.survey_now(ctx, &cmd.args),
+                "sql.probe" => self.probe_now(&cmd.args),
                 other => (false, format!("sql: unknown command {other}")),
             };
             ctx.complete(&cmd.id, ok, &output);
@@ -290,5 +338,60 @@ mod tests {
         );
         let (ok, out) = m.survey_now(&ctx, &json!({"database": "NOPE"}));
         assert!(!ok && out.contains("NOPE"));
+    }
+
+    #[test]
+    fn probe_command_lists_what_is_missing_and_keeps_it_in_the_survey() {
+        let d = TestDir::new("sql-probe");
+        let (pools, _server) = fake_pools(&["SMILE_FO"]);
+        let ctx = ModuleContext::standalone("sql", Value::Null, d.0.clone());
+        let mut m = SqlModule::new(pools.clone());
+        m.check(&ctx);
+        let req = json!({
+            "tables": {"dbo.HoaDon": ["Id", "SoHD", "MaCQT"], "dbo.Config": ["Key"]},
+            "procedures": ["dbo.usp_GetBill", "dbo.usp_IssueInvoice"],
+            "rows": [{"table": "dbo.Config", "column": "Key", "values": ["EINV_URL", "EINV_KEY"]}]
+        });
+        let (ok, out) = m.probe_now(&json!({"requirement": req}));
+        assert!(!ok, "{out}");
+        let v = dl_json::parse(&out).unwrap();
+        let missing: Vec<String> = v["SMILE_FO"]["missing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            missing,
+            ["dbo.usp_IssueInvoice", "dbo.HoaDon.MaCQT", "dbo.Config.Key"]
+        );
+        assert_eq!(v["SMILE_FO"]["checked"].as_u64(), Some(10));
+        // Kept in the survey for the heartbeat, and a later survey does not drop it.
+        assert_eq!(
+            pools.surveys()["SMILE_FO"]["probe"]["ok"].as_bool(),
+            Some(false)
+        );
+        m.survey_now(&ctx, &json!({}));
+        assert!(pools.surveys()["SMILE_FO"]["probe"]["missing"].is_array());
+        assert!(pools.surveys()["SMILE_FO"]["engine"].is_object());
+
+        let (ok, out) = m.probe_now(&json!({"requirement": {"tables": {"dbo.HoaDon": ["Id"]}}}));
+        assert!(ok, "{out}");
+        let (ok, out) = m.probe_now(&json!({}));
+        assert!(!ok && out.contains("requirement"), "{out}");
+    }
+
+    #[test]
+    fn problem_codes_come_from_tagged_sql_errors() {
+        let e = Error::Sql("sql_access_denied: Login failed for user 'smile'.".into());
+        assert_eq!(
+            super::super::problem_code(&e, "sql_unreachable"),
+            "sql_access_denied"
+        );
+        let e = Error::Sql("connection refused".into());
+        assert_eq!(
+            super::super::problem_code(&e, "sql_unreachable"),
+            "sql_unreachable"
+        );
     }
 }

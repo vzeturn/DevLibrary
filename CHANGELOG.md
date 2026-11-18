@@ -8,6 +8,11 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent`: schema probe `sql.probe {requirement}` lists missing tables, columns,
+  views, procedures, functions and configuration rows per database (SQL Server 2005+
+  catalogs, values bound); the last result rides the site survey. SQL session errors carry
+  `sql_missing_object` / `sql_locked` / `sql_deadlock` / `sql_access_denied` /
+  `sql_timeout` codes, and a refused login reports `sql_access_denied`.
 - `dl-agent`: release builds for every site OS from `scripts/build-dl-agent.sh`: Windows
   10+ x64/x86 and Windows 7 / Server 2008 R2 / 2012 x64/x86, static, system-DLL-only
   import check, wine smoke. Win7 builds report the `windows7-<arch>` target.
