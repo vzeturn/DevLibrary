@@ -13,6 +13,8 @@
 //! (`{"sql": {"SMILE_FO": {"max_connections": 8}}}`); a `connection` key from the hub is
 //! ignored. `transport` (see [`transport`]) and `lock_timeout_seconds` are local only.
 
+pub mod bundle;
+pub mod install;
 pub mod module;
 pub mod pool;
 pub mod probe;
@@ -168,6 +170,14 @@ impl Connection for dl_tds::Client {
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
         self.set_timeout(timeout).map_err(tds)
     }
+    fn run(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<(), Error> {
+        let params: Vec<dl_tds::Param> = params
+            .iter()
+            .map(|(k, v)| dl_tds::Param::new(k, *v))
+            .collect();
+        self.execute(sql, &params).map(|_| ()).map_err(tds)
+    }
+
     fn query_json(&mut self, sql: &str, params: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
         let params: Vec<dl_tds::Param> = params
             .iter()
