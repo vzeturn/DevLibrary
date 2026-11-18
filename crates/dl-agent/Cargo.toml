@@ -1,0 +1,27 @@
+[package]
+name = "dl-agent"
+description = "Shared on-prem agent runtime: modules under a supervisor, signed self-update with canary channel and rollback, problem reports, remote config and commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-json.workspace = true
+dl-hash.workspace = true
+dl-encoding.workspace = true
+dl-ed25519.workspace = true
+dl-rand.workspace = true
+dl-http.workspace = true
+dl-winsvc.workspace = true
+
+[[bin]]
+name = "dl-agent"
+path = "src/main.rs"
+
+[lints]
+workspace = true
