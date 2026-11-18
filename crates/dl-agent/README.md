@@ -80,6 +80,11 @@ fn main() {
 }
 ```
 
+A module can also add a sub-command for a setup step (`App::tool(dl_agent::tool::Tool { name,
+grammar, run })`); `--data` is added to it. `install.ps1 -Setup <name>` runs it after enrolment,
+with secrets passed in env `DL_AGENT_SETUP_ARGS` (appended to that sub-command's arguments only,
+then removed), and `-Replace '<service pattern>'` removes the product's previous agent after it.
+
 ## Installing on Windows
 
 Create an enrolment code on the hub (`POST /admin/enroll-codes` answers `install_command`), then

@@ -17,6 +17,7 @@ pub mod sql;
 pub mod store;
 pub mod supervisor;
 pub mod sys_module;
+pub mod tool;
 pub mod update;
 pub mod version;
 pub mod watchdog;
