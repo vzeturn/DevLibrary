@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `dl-agent-einvoice`: `config.enc` and the outbox are written owner-only (0600) on Unix, where
+  `config.enc` is not encrypted.
+
 ### Added
 
 - `dl-agent-einvoice`: `dl-agent einvoice-enroll` sub-command (port of `mmei-agent -enroll`: token exchange,

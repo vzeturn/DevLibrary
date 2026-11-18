@@ -353,12 +353,27 @@ impl AgentConfig {
     }
 }
 
-/// Writes through a temporary file and renames it over `path`.
+/// Writes through a temporary file and renames it over `path`. On Unix the file is
+/// owner-only (0600): off Windows `config.enc` is not encrypted and holds the API key and
+/// the SQL password, and the outbox holds invoice data.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let tmp = path.with_extension("tmp");
     {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            // An older tmp file keeps its mode through `create`; tighten it explicitly.
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
         f.write_all(data)?;
         f.sync_all()?;
     }
@@ -506,6 +521,12 @@ mod tests {
             ..Default::default()
         };
         c.save().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(c.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "config.enc is owner-only");
+        }
         let back = AgentConfig::load(&dir).unwrap().expect("saved");
         assert_eq!(back.api_key, "k");
         std::fs::write(c.path(), b"\x00\x00").unwrap();
