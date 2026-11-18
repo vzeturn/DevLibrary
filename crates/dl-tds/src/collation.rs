@@ -40,7 +40,6 @@ impl Collation {
     }
 
     /// The 5-byte wire form.
-    #[cfg(test)]
     pub(crate) fn to_bytes(self) -> [u8; 5] {
         let l = self.lcid_and_flags.to_le_bytes();
         [l[0], l[1], l[2], l[3], self.sort_id]
@@ -141,6 +140,35 @@ impl Collation {
             Charset::Single(_, table) => Ok(decode_single(table, bytes)),
             Charset::Double(code_page) => Err(Error::UnsupportedCodePage { code_page }),
             Charset::Utf8 => Ok(String::from_utf8_lossy(bytes).into_owned()),
+        }
+    }
+}
+
+impl Collation {
+    /// Encodes text for a CHAR/VARCHAR parameter of this collation: the code page's byte
+    /// for each character, `?` where it has none; UTF-8 for `_UTF8` collations.
+    ///
+    /// # Errors
+    /// [`Error::UnsupportedCodePage`] for the double-byte code pages 932/936/949/950.
+    pub fn encode(self, s: &str) -> Result<Vec<u8>, Error> {
+        match self.charset() {
+            Charset::Single(_, table) => Ok(s
+                .chars()
+                .map(|c| {
+                    if c.is_ascii() {
+                        return c as u8;
+                    }
+                    let u = c as u32;
+                    if u == 0xFFFD {
+                        return b'?'; // the tables use U+FFFD for unassigned bytes
+                    }
+                    (0x80..=0xFF)
+                        .find(|&b| u32::from(table[b as usize]) == u)
+                        .map_or(b'?', |b| b as u8)
+                })
+                .collect()),
+            Charset::Double(code_page) => Err(Error::UnsupportedCodePage { code_page }),
+            Charset::Utf8 => Ok(s.as_bytes().to_vec()),
         }
     }
 }

@@ -1092,3 +1092,89 @@ fn encrypted_connections() {
     assert_eq!(cfg.encrypt(), Encrypt::Off);
     assert!(cfg.trust_server_certificate());
 }
+
+#[test]
+fn stored_procedure_calls_with_output_params_and_return_status() {
+    let Some(mut c) = conn() else { return };
+    c.batch("USE dltds_test").unwrap();
+    c.batch(
+        "CREATE OR ALTER PROCEDURE dbo.dltds_proc
+             @Key varchar(100), @N int, @Total bigint OUTPUT, @Label nvarchar(50) OUTPUT
+         AS
+         BEGIN
+             SET NOCOUNT ON;
+             SELECT @Key AS k, @N AS n;
+             SELECT v FROM (VALUES (1), (2), (3)) t(v) WHERE v <= @N;
+             SET @Total = CAST(@N AS bigint) * 1000000000;
+             SET @Label = N'Phòng ' + CAST(@N AS nvarchar(10));
+             RETURN 42;
+         END",
+    )
+    .unwrap();
+    let r = c
+        .call(
+            "dbo.dltds_proc",
+            &[
+                Param::new("Key", ParamValue::VarChar(Some("req-1:é".into()))),
+                Param::new("N", 2i32),
+                Param::output("Total", Option::<i64>::None),
+                Param::output("Label", Option::<String>::None),
+            ],
+        )
+        .unwrap();
+    assert_eq!(r.sets().len(), 2);
+    assert_eq!(r.sets()[0].rows()[0].get::<String>(0).unwrap(), "req-1:é");
+    assert_eq!(r.sets()[1].len(), 2);
+    assert_eq!(r.return_status(), Some(42));
+    let outs = r.output_params();
+    assert_eq!(outs.len(), 2);
+    assert_eq!(outs[0].0, "Total");
+    assert_eq!(outs[0].1, Value::I64(2_000_000_000));
+    assert_eq!(outs[1].1, Value::String("Phòng 2".into()));
+    // A refused call reports the server error with its number.
+    let err = c.call("dbo.dltds_missing", &[]).unwrap_err();
+    assert_eq!(err.number(), Some(2812));
+    // Calls run inside an explicit transaction and roll back.
+    c.batch("IF OBJECT_ID('dbo.dltds_tx') IS NULL CREATE TABLE dbo.dltds_tx (v int)")
+        .unwrap();
+    c.batch("CREATE OR ALTER PROCEDURE dbo.dltds_ins @V int AS INSERT dbo.dltds_tx VALUES (@V)")
+        .unwrap();
+    c.batch("DELETE dbo.dltds_tx; BEGIN TRANSACTION").unwrap();
+    assert!(c.in_transaction());
+    c.call("dbo.dltds_ins", &[Param::new("V", 5i32)]).unwrap();
+    c.batch("ROLLBACK").unwrap();
+    assert!(!c.in_transaction());
+    assert_eq!(
+        one(&mut c, "SELECT COUNT(*) FROM dbo.dltds_tx"),
+        Value::I32(0)
+    );
+}
+
+#[test]
+fn varchar_params_use_the_collation_code_page() {
+    // conn() creates the test databases.
+    let Some(first) = conn() else { return };
+    first.close();
+    let Some(cfg) = config() else { return };
+    let mut c = Client::connect(&cfg.with_database("dltds_vn")).expect("connect");
+    let r = c
+        .query(
+            "SELECT @v AS v, DATALENGTH(@v) AS n",
+            &[Param::new(
+                "v",
+                ParamValue::VarChar(Some("Đăng ơn Ư".into())),
+            )],
+        )
+        .unwrap();
+    assert_eq!(r.rows()[0].get::<String>(0).unwrap(), "Đăng ơn Ư");
+    assert_eq!(r.rows()[0].get::<i32>(1).unwrap(), 9);
+    // Code page 1258 has no precomposed "ý" (it uses y + combining acute), so the
+    // character is unmappable and becomes '?'.
+    let r = c
+        .query(
+            "SELECT @v AS v",
+            &[Param::new("v", ParamValue::VarChar(Some("ký".into())))],
+        )
+        .unwrap();
+    assert_eq!(r.rows()[0].get::<String>(0).unwrap(), "k?");
+}

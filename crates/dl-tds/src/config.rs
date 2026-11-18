@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::Error;
+use crate::{Error, TlsVersion};
 
 /// Encryption mode, the `encrypt` connection-string key.
 ///
@@ -41,10 +41,17 @@ pub enum Encrypt {
 ///   ignored).
 ///
 /// Recognised keys: `server`, `port`, `user id`, `password`, `database`, `encrypt`,
+/// `tlsmin` (`1.0`, `1.1`, `1.2`, `1.3`; default 1.2; any other value is an error),
 /// `trustservercertificate`, `hostnameincertificate`, `packet size`, `connection timeout`
 /// (seconds, per read/write like go-mssqldb; 0 = none), `dial timeout` (seconds,
-/// default 15), `app name`, `workstation id`, `applicationintent`. Other keys go-mssqldb
-/// knows (`log`, `keepalive`, `protocol`, ...) are accepted and ignored.
+/// default 15), `app name`, `workstation id`, `applicationintent`, `integrated security`
+/// and `trusted_connection` (`SSPI`/`true`/`yes` or `false`/`no`), `serverspn` (also
+/// `server spn`). Other keys go-mssqldb knows (`log`, `keepalive`, `protocol`, ...) are
+/// accepted and ignored.
+///
+/// Windows integrated authentication ([`integrated_auth`](Config::integrated_auth)) is on
+/// with `Integrated Security=SSPI` or `Trusted_Connection=yes`, and in the URL form also
+/// when the URL has no user name (`sqlserver://host?database=x`, as in go-mssqldb).
 ///
 /// When `encrypt` is absent, `TrustServerCertificate` defaults to `true` (go-mssqldb does
 /// the same), so an on-premises server with a self-signed certificate works out of the box.
@@ -69,12 +76,15 @@ pub struct Config {
     pub(crate) workstation: String,
     pub(crate) language: String,
     pub(crate) encrypt: Encrypt,
+    pub(crate) tls_min: dl_tls::Version,
     pub(crate) trust_server_certificate: bool,
     pub(crate) host_name_in_certificate: Option<String>,
     pub(crate) packet_size: u16,
     pub(crate) connect_timeout: Duration,
     pub(crate) timeout: Option<Duration>,
     pub(crate) read_only_intent: bool,
+    pub(crate) integrated_auth: bool,
+    pub(crate) server_spn: Option<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -85,10 +95,13 @@ impl std::fmt::Debug for Config {
             .field("port", &self.port)
             .field("user", &self.user)
             .field("password", &"<redacted>")
+            .field("integrated_auth", &self.integrated_auth)
+            .field("server_spn", &self.server_spn)
             .field("database", &self.database)
             .field("app_name", &self.app_name)
             .field("workstation", &self.workstation)
             .field("encrypt", &self.encrypt)
+            .field("tls_min", &self.tls_min)
             .field("trust_server_certificate", &self.trust_server_certificate)
             .field("packet_size", &self.packet_size)
             .field("connect_timeout", &self.connect_timeout)
@@ -133,13 +146,32 @@ impl Config {
             workstation: local_hostname(),
             language: String::new(),
             encrypt: Encrypt::Off,
+            tls_min: dl_tls::Version::Tls12,
             trust_server_certificate: true,
             host_name_in_certificate: None,
             packet_size: 4096,
             connect_timeout: Duration::from_secs(15),
             timeout: None,
             read_only_intent: false,
+            integrated_auth: false,
+            server_spn: None,
         }
+    }
+
+    /// Logs in with the current Windows account through SSPI (Negotiate: Kerberos, or NTLM
+    /// when Kerberos is not available), like `Integrated Security=SSPI`. The user name and
+    /// password are then not sent. Windows only: on other platforms
+    /// [`Client::connect`](crate::Client::connect) returns [`Error::Unsupported`].
+    pub fn with_integrated_auth(mut self) -> Config {
+        self.integrated_auth = true;
+        self
+    }
+
+    /// Sets the service principal name used for integrated authentication (`ServerSPN`),
+    /// instead of the derived `MSSQLSvc/<fqdn>:<port or instance>`.
+    pub fn with_server_spn(mut self, spn: &str) -> Config {
+        self.server_spn = (!spn.is_empty()).then(|| spn.to_string());
+        self
     }
 
     /// Sets SQL Server authentication credentials.
@@ -165,6 +197,14 @@ impl Config {
     /// unless a port is set.
     pub fn with_instance(mut self, instance: &str) -> Config {
         self.instance = (!instance.is_empty()).then(|| instance.to_string());
+        self
+    }
+
+    /// Sets the oldest TLS version offered (the `tlsmin` key: `1.0`, `1.1`, `1.2`, `1.3`;
+    /// default TLS 1.2). TLS 1.0 is what SQL Server 2008 without the TLS 1.2 update
+    /// speaks; see [`dl_tls::Config::min_version`] for the caveats.
+    pub fn with_tls_min(mut self, version: TlsVersion) -> Config {
+        self.tls_min = version;
         self
     }
 
@@ -244,6 +284,11 @@ impl Config {
     pub fn encrypt(&self) -> Encrypt {
         self.encrypt
     }
+
+    /// Oldest TLS version offered.
+    pub fn tls_min(&self) -> TlsVersion {
+        self.tls_min
+    }
     /// Whether any server certificate is accepted.
     pub fn trust_server_certificate(&self) -> bool {
         self.trust_server_certificate
@@ -270,9 +315,34 @@ impl Config {
     pub fn read_only_intent(&self) -> bool {
         self.read_only_intent
     }
+    /// `true` for Windows integrated authentication (SSPI) instead of a SQL login.
+    pub fn integrated_auth(&self) -> bool {
+        self.integrated_auth
+    }
+    /// The `ServerSPN` override, if any.
+    pub fn server_spn(&self) -> Option<&str> {
+        self.server_spn.as_deref()
+    }
+
+    /// The service principal name integrated authentication asks a ticket for:
+    /// the `ServerSPN` override, else `MSSQLSvc/<host>:<port>` with the explicit port,
+    /// `MSSQLSvc/<host>:<instance>` for a named instance without a port, and
+    /// `MSSQLSvc/<host>:1433` otherwise (the rules of Microsoft.Data.SqlClient). `host` is
+    /// the name to put in the SPN (the caller resolves local aliases and the FQDN).
+    pub(crate) fn spn_for(&self, host: &str) -> String {
+        if let Some(s) = &self.server_spn {
+            return s.clone();
+        }
+        let suffix = match (self.port.filter(|&p| p != 0), self.instance.as_deref()) {
+            (Some(p), _) => p.to_string(),
+            (None, Some(i)) => i.to_string(),
+            (None, None) => "1433".to_string(),
+        };
+        format!("MSSQLSvc/{host}:{suffix}")
+    }
 
     /// Builds a config from go-mssqldb's key/value parameter map (lower-case keys).
-    fn from_params(params: &HashMap<String, String>) -> Result<Config, Error> {
+    fn from_params(params: &HashMap<String, String>, url_form: bool) -> Result<Config, Error> {
         let get = |k: &str| params.get(k).map(String::as_str);
         let server = get("server").unwrap_or("");
         let (host, instance) = match server.split_once('\\') {
@@ -335,6 +405,20 @@ impl Config {
         if let Some(h) = get("hostnameincertificate") {
             c.host_name_in_certificate = Some(h.to_string());
         }
+        // Integrated authentication: an explicit key wins; a URL without a user name means
+        // integrated authentication, as in go-mssqldb.
+        let mut integrated = None;
+        for key in ["integrated security", "trusted_connection"] {
+            if let Some(v) = get(key) {
+                integrated = Some(parse_integrated(key, v)?);
+            }
+        }
+        c.integrated_auth = integrated.unwrap_or(url_form && c.user.is_empty());
+        for key in ["serverspn", "server spn"] {
+            if let Some(s) = get(key) {
+                c.server_spn = (!s.is_empty()).then(|| s.to_string());
+            }
+        }
 
         let mut trust = false;
         let encrypt_raw = get("encrypt").map(str::to_ascii_lowercase);
@@ -354,6 +438,9 @@ impl Config {
                 ));
             }
         };
+        if let Some(v) = get("tlsmin") {
+            c.tls_min = parse_tls_min(v)?;
+        }
         if let Some(t) = get("trustservercertificate") {
             trust = go_parse_bool(t).ok_or_else(|| {
                 Error::config(
@@ -367,6 +454,35 @@ impl Config {
         }
         c.trust_server_certificate = trust;
         Ok(c)
+    }
+}
+
+/// `tlsmin` values, as go-mssqldb names them. go-mssqldb silently keeps its default for
+/// any other value; here that is an error, so a connection string never asks for a
+/// transport it does not get.
+fn parse_tls_min(v: &str) -> Result<dl_tls::Version, Error> {
+    match v.trim() {
+        "1.0" => Ok(dl_tls::Version::Tls10),
+        "1.1" => Ok(dl_tls::Version::Tls11),
+        "1.2" => Ok(dl_tls::Version::Tls12),
+        "1.3" => Ok(dl_tls::Version::Tls13),
+        other => Err(Error::config(
+            "tlsmin",
+            format!("invalid tlsmin '{other}' (expected 1.0, 1.1, 1.2 or 1.3)"),
+        )),
+    }
+}
+
+/// `Integrated Security` / `Trusted_Connection` values, as Microsoft.Data.SqlClient
+/// accepts them (case-insensitive): `SSPI`, `true`, `yes` or `false`, `no`.
+fn parse_integrated(key: &str, v: &str) -> Result<bool, Error> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "sspi" | "true" | "yes" => Ok(true),
+        "false" | "no" => Ok(false),
+        _ => Err(Error::config(
+            key,
+            format!("invalid value '{v}' (expected SSPI, true, yes, false or no)"),
+        )),
     }
 }
 
@@ -399,7 +515,8 @@ impl FromStr for Config {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Config, Error> {
-        let params = if s.starts_with("sqlserver://") {
+        let url_form = s.starts_with("sqlserver://");
+        let params = if url_form {
             split_url(s)?
         } else if s.starts_with("odbc:") {
             return Err(Error::config(
@@ -409,7 +526,7 @@ impl FromStr for Config {
         } else {
             split_ado(s)
         };
-        Config::from_params(&params)
+        Config::from_params(&params, url_form)
     }
 }
 
@@ -681,6 +798,37 @@ mod tests {
     }
 
     #[test]
+    fn tls_min_key() {
+        assert_eq!(p("sqlserver://h").tls_min(), TlsVersion::Tls12);
+        // The DSN form the e-invoice agent seals for SQL Server 2008 sites.
+        let c = p("sqlserver://u:p@h:1433/SQL2008?database=FO&encrypt=disable&tlsmin=1.0");
+        assert_eq!(c.tls_min(), TlsVersion::Tls10);
+        assert_eq!(c.encrypt(), Encrypt::Disabled);
+        assert_eq!((c.port(), c.instance()), (Some(1433), Some("SQL2008")));
+        for (v, want) in [
+            ("1.1", TlsVersion::Tls11),
+            ("1.2", TlsVersion::Tls12),
+            ("1.3", TlsVersion::Tls13),
+        ] {
+            assert_eq!(p(&format!("sqlserver://h?tlsmin={v}")).tls_min(), want);
+        }
+        assert_eq!(p("Server=h;TLSMin=1.0").tls_min(), TlsVersion::Tls10);
+        for bad in ["1", "tls1.0", "1.4", ""] {
+            let e = format!("sqlserver://h?tlsmin={bad}")
+                .parse::<Config>()
+                .unwrap_err();
+            assert!(
+                matches!(e, Error::Config { ref key, .. } if key == "tlsmin"),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            Config::new("h").with_tls_min(TlsVersion::Tls10).tls_min(),
+            TlsVersion::Tls10
+        );
+    }
+
+    #[test]
     fn url_encrypt_and_trust() {
         let c = p("sqlserver://h?encrypt=true");
         assert_eq!(c.encrypt(), Encrypt::Required);
@@ -797,6 +945,93 @@ mod tests {
         let c = p("Server=h;connection timeout=0;dial timeout=2;log=63;keepalive=30");
         assert_eq!(c.timeout(), None);
         assert_eq!(c.connect_timeout(), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn integrated_auth_spellings() {
+        for s in [
+            "Server=.;Integrated Security=SSPI",
+            "Server=.;integrated security=sspi",
+            "Server=.;Integrated Security=true",
+            "Server=.;Integrated Security=True",
+            "Server=.;Integrated Security=yes",
+            "Server=.;Trusted_Connection=yes",
+            "Server=.;Trusted_Connection=True",
+            "Server=.;trusted_connection=SSPI",
+            "Server=h;User Id=sa;Password=x;Integrated Security=SSPI",
+            "sqlserver://localhost?trusted_connection=true",
+            "sqlserver://localhost?Trusted_Connection=yes",
+            "sqlserver://localhost?integrated+security=SSPI",
+            "sqlserver://localhost?database=master",
+            "sqlserver://localhost/SQLEXPRESS",
+            "sqlserver://:@localhost",
+            "sqlserver://sa:pw@localhost?trusted_connection=true",
+        ] {
+            assert!(p(s).integrated_auth(), "{s}");
+        }
+        for s in [
+            "Server=.;User Id=sa;Password=x",
+            "Server=.",
+            "Server=.;Integrated Security=false",
+            "Server=.;Integrated Security=no",
+            "Server=.;Trusted_Connection=No",
+            "sqlserver://sa:pw@localhost",
+            "sqlserver://sa@localhost",
+            "sqlserver://localhost?trusted_connection=false",
+        ] {
+            assert!(!p(s).integrated_auth(), "{s}");
+        }
+        for bad in [
+            "Server=.;Integrated Security=maybe",
+            "Server=.;Trusted_Connection=1",
+            "sqlserver://h?trusted_connection=",
+        ] {
+            let e = bad.parse::<Config>().unwrap_err();
+            assert!(matches!(e, Error::Config { .. }), "{bad}");
+        }
+        assert!(Config::new("h").with_integrated_auth().integrated_auth());
+        assert!(!Config::new("h").integrated_auth());
+    }
+
+    #[test]
+    fn spn_derivation() {
+        let spn = |s: &str| p(s).spn_for("srv.corp.example");
+        assert_eq!(spn("Server=srv"), "MSSQLSvc/srv.corp.example:1433");
+        assert_eq!(spn("Server=srv,1500"), "MSSQLSvc/srv.corp.example:1500");
+        assert_eq!(
+            spn("Server=srv\\SQLEXPRESS"),
+            "MSSQLSvc/srv.corp.example:SQLEXPRESS"
+        );
+        // An explicit port wins over the instance name (no Browser lookup happens).
+        assert_eq!(
+            spn("Server=srv\\SQLEXPRESS,49170"),
+            "MSSQLSvc/srv.corp.example:49170"
+        );
+        assert_eq!(
+            spn("sqlserver://srv/INST?trusted_connection=true"),
+            "MSSQLSvc/srv.corp.example:INST"
+        );
+        assert_eq!(
+            spn("sqlserver://srv:1444"),
+            "MSSQLSvc/srv.corp.example:1444"
+        );
+        // Override, both spellings and both forms.
+        for s in [
+            "Server=srv;Integrated Security=SSPI;ServerSPN=MSSQLSvc/db.example:1433",
+            "Server=srv;Integrated Security=SSPI;Server SPN=MSSQLSvc/db.example:1433",
+            "sqlserver://srv?ServerSPN=MSSQLSvc%2Fdb.example%3A1433",
+        ] {
+            let c = p(s);
+            assert_eq!(c.server_spn(), Some("MSSQLSvc/db.example:1433"), "{s}");
+            assert_eq!(c.spn_for("ignored"), "MSSQLSvc/db.example:1433");
+        }
+        assert_eq!(p("Server=srv;ServerSPN=").server_spn(), None);
+        let c = Config::new("h").with_server_spn("MSSQLSvc/x:1");
+        assert_eq!(c.spn_for("h"), "MSSQLSvc/x:1");
+        assert_eq!(
+            Config::new("h").with_port(0).spn_for("h"),
+            "MSSQLSvc/h:1433"
+        );
     }
 
     #[test]

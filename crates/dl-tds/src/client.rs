@@ -14,11 +14,14 @@ use crate::packet::{self, MessageReader};
 use crate::params::{self, Param};
 use crate::prelogin::{self, ENCRYPT_NOT_SUP, ENCRYPT_OFF, ENCRYPT_ON};
 use crate::results::{Message, Results};
+use crate::sspi::{self, Negotiate};
 use crate::tls::TdsTlsTransport;
 use crate::token::{self, DONE, DONE_ATTN, LoginAck, Session};
 
 /// How long to wait for the server to acknowledge an ATTENTION (go-mssqldb uses 5 s).
 const CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Most SSPI round trips after LOGIN7 (NTLM needs 1, Kerberos 0 or 1).
+const MAX_SSPI_ROUNDS: usize = 8;
 
 type Tls = TlsStream<TdsTlsTransport<TcpStream>>;
 
@@ -149,6 +152,13 @@ fn prelogin_exchange<S: Read + Write>(
     prelogin::decode(&reply)
 }
 
+/// Every failure of the TLS handshake, I/O included, is [`Error::Tls`]: a server that
+/// cannot speak the offered versions often just closes or resets the connection, and
+/// callers must be able to tell that from a failure before or after the handshake.
+fn handshake_error(e: dl_tls::Error) -> Error {
+    Error::Tls(e)
+}
+
 fn dial(cfg: &Config) -> Result<TcpStream, Error> {
     let host = cfg.host();
     let dial_host = if host == "."
@@ -189,8 +199,17 @@ impl Client {
     /// # Errors
     /// [`Error::Io`] (network), [`Error::Tls`], [`Error::EncryptionNotSupported`],
     /// [`Error::Server`] (login failed, e.g. error 18456), [`Error::Browser`] (named
-    /// instance not found), [`Error::Routing`], [`Error::Malformed`].
+    /// instance not found), [`Error::Routing`], [`Error::Malformed`]. With
+    /// [`Config::integrated_auth`]: [`Error::Sspi`] when Windows cannot authenticate, and
+    /// [`Error::Unsupported`] outside Windows.
     pub fn connect(cfg: &Config) -> Result<Client, Error> {
+        // Integrated authentication: get the user's credentials before touching the
+        // network, so a platform without SSPI fails fast.
+        let mut negotiate = if cfg.integrated_auth() {
+            Some(Negotiate::acquire()?)
+        } else {
+            None
+        };
         let tcp = dial(cfg)?;
         tcp.set_nodelay(true)?;
         // Bound the handshake even without a configured timeout.
@@ -201,13 +220,13 @@ impl Client {
         tcp.set_write_timeout(login_timeout)?;
 
         let tls_config = || {
-            dl_tls::Config::new(cfg.host_name_in_certificate()).verify(
-                if cfg.trust_server_certificate() {
+            dl_tls::Config::new(cfg.host_name_in_certificate())
+                .verify(if cfg.trust_server_certificate() {
                     Verify::None
                 } else {
                     Verify::Full
-                },
-            )
+                })
+                .min_version(cfg.tls_min())
         };
         let strict = cfg.encrypt() == Encrypt::Strict;
         let mut reader = MessageReader::new();
@@ -227,7 +246,8 @@ impl Client {
         let (stream, login_only) = if strict {
             // TDS 8: TLS directly on the socket, then PRELOGIN inside it.
             let t = TdsTlsTransport::new(tcp, false, packet::DEFAULT_PACKET_SIZE);
-            let tls = TlsStream::connect(&tls_config().alpn(&[b"tds/8.0"]), t)?;
+            let tls = TlsStream::connect(&tls_config().alpn(&[b"tds/8.0"]), t)
+                .map_err(handshake_error)?;
             let mut s = Stream::Tls(Box::new(tls));
             prelogin_exchange(&mut s, &mut reader, &pl)?;
             (s, false)
@@ -243,8 +263,10 @@ impl Client {
             // server did not answer NOT_SUP. Answer OFF means "encrypt the login only".
             if server.encryption != ENCRYPT_NOT_SUP {
                 let t = TdsTlsTransport::new(tcp, true, packet::DEFAULT_PACKET_SIZE);
-                let mut tls = TlsStream::connect(&tls_config(), t)?;
-                tls.get_mut().finish_handshake()?;
+                let mut tls = TlsStream::connect(&tls_config(), t).map_err(handshake_error)?;
+                tls.get_mut()
+                    .finish_handshake()
+                    .map_err(|e| handshake_error(dl_tls::Error::Io(e)))?;
                 debug_assert!(!tls.get_ref().in_handshake());
                 (Stream::Tls(Box::new(tls)), server.encryption == ENCRYPT_OFF)
             } else {
@@ -257,6 +279,18 @@ impl Client {
         let server_name = match cfg.instance() {
             Some(i) => format!("{}\\{}", cfg.host(), i),
             None => cfg.host().to_string(),
+        };
+        let sspi_token = match negotiate.as_mut() {
+            Some(n) => {
+                let t = n.initialize(&sspi::target_name(cfg))?;
+                if t.is_empty() {
+                    return Err(Error::Unsupported(
+                        "the SSPI package produced no initial token",
+                    ));
+                }
+                t
+            }
+            None => Vec::new(),
         };
         let login = Login {
             tds_version: if strict { TDS_80 } else { TDS_74 },
@@ -272,6 +306,7 @@ impl Client {
             library_name: "dl-tds".into(),
             language: cfg.language.clone(),
             database: cfg.database().to_string(),
+            sspi: sspi_token,
             ..Login::default()
         };
         let payload = login.encode();
@@ -313,36 +348,89 @@ impl Client {
             login_ack: LoginAck::default(),
             encrypted,
         };
-        let (ptype, msg) = client.reader.read_message(&mut client.stream)?;
-        if ptype != packet::REPLY {
-            return Err(Error::Malformed {
-                token: 0,
-                offset: 0,
-                what: "login response is not a REPLY packet",
-            });
-        }
-        let resp = token::parse(&msg, &mut client.session)?;
-        client.messages.extend(resp.messages);
-        if let Some(e) = resp.error {
-            return Err(e);
-        }
-        if let Some((server, port)) = client.session.routing.take() {
-            return Err(Error::Routing { server, port });
-        }
-        let Some(ack) = resp.login_ack else {
-            if resp.sspi {
-                return Err(Error::Unsupported("integrated (SSPI) authentication"));
-            }
-            return Err(Error::Malformed {
-                token: 0,
-                offset: msg.len(),
-                what: "login response has no LOGINACK",
-            });
-        };
+        let ack = client.finish_login(negotiate.as_mut())?;
         client.login_ack = ack;
         client.apply_packet_size();
         client.set_timeout(cfg.timeout())?;
         Ok(client)
+    }
+
+    /// Reads the login response(s) until LOGINACK. With integrated authentication each
+    /// SSPI token the server sends is answered with an SSPI message.
+    fn finish_login(&mut self, mut negotiate: Option<&mut Negotiate>) -> Result<LoginAck, Error> {
+        let mut rounds = 0;
+        loop {
+            let (ptype, msg) = self.reader.read_message(&mut self.stream)?;
+            if ptype != packet::REPLY {
+                return Err(Error::Malformed {
+                    token: 0,
+                    offset: 0,
+                    what: "login response is not a REPLY packet",
+                });
+            }
+            let resp = token::parse(&msg, &mut self.session)?;
+            self.messages.extend(resp.messages);
+            if let Some(e) = resp.error {
+                return Err(e);
+            }
+            if let Some((server, port)) = self.session.routing.take() {
+                return Err(Error::Routing { server, port });
+            }
+            match (resp.login_ack, resp.sspi, negotiate.as_deref_mut()) {
+                (Some(ack), challenge, neg) => {
+                    // Kerberos mutual authentication: the server's last token (AP-REP)
+                    // comes with LOGINACK; SSPI verifies it, nothing is sent back.
+                    if let (Some(tok), Some(neg)) = (challenge, neg)
+                        && !neg.is_done()
+                    {
+                        neg.next(&tok)?;
+                    }
+                    return Ok(ack);
+                }
+                (None, Some(challenge), Some(neg)) => {
+                    rounds += 1;
+                    if rounds > MAX_SSPI_ROUNDS {
+                        return Err(Error::Malformed {
+                            token: token::SSPI,
+                            offset: 0,
+                            what: "too many SSPI round trips during login",
+                        });
+                    }
+                    let answer = if neg.is_done() {
+                        Vec::new()
+                    } else {
+                        neg.next(&challenge)?
+                    };
+                    // SPNEGO's last server token (accept-completed + mechListMIC) arrives
+                    // in a message of its own and needs no answer: LOGINACK follows. An
+                    // empty SSPI message here would be read by the server as a request
+                    // and shift every later response by one.
+                    if !answer.is_empty() {
+                        let mut framed = Vec::new();
+                        packet::frame(
+                            packet::SSPI,
+                            &answer,
+                            packet::DEFAULT_PACKET_SIZE,
+                            &mut framed,
+                        );
+                        write_packets(&mut self.stream, &framed)?;
+                        self.stream.flush()?;
+                    }
+                }
+                (None, Some(_), None) => {
+                    return Err(Error::Unsupported(
+                        "the server asked for integrated (SSPI) authentication; set Integrated Security=SSPI",
+                    ));
+                }
+                (None, None, _) => {
+                    return Err(Error::Malformed {
+                        token: 0,
+                        offset: msg.len(),
+                        what: "login response has no LOGINACK",
+                    });
+                }
+            }
+        }
     }
 
     fn apply_packet_size(&mut self) {
@@ -375,7 +463,31 @@ impl Client {
         if params.is_empty() {
             return self.batch(sql);
         }
-        let payload = params::sp_executesql(sql, params, self.session.transaction)?;
+        let payload = params::sp_executesql(
+            sql,
+            params,
+            self.session.transaction,
+            self.session.collation.unwrap_or_default(),
+        )?;
+        self.request(packet::RPC, &payload)
+    }
+
+    /// Calls the stored procedure `procedure` (e.g. `dbo.MM_Op_GetLog`) as an RPC request
+    /// with named parameters, the way go-mssqldb runs a query text that is a bare
+    /// procedure name. Every result set, the procedure's return status
+    /// ([`Results::return_status`]) and the values of [`Param::output`] parameters
+    /// ([`Results::output_params`]) are returned. No SQL text is built from the
+    /// parameters.
+    ///
+    /// # Errors
+    /// As [`query`](Self::query); [`Error::Param`] for an empty procedure name.
+    pub fn call(&mut self, procedure: &str, params: &[Param]) -> Result<Results, Error> {
+        let payload = params::rpc_call(
+            procedure,
+            params,
+            self.session.transaction,
+            self.session.collation.unwrap_or_default(),
+        )?;
         self.request(packet::RPC, &payload)
     }
 

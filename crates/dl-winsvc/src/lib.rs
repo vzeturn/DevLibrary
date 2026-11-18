@@ -13,9 +13,10 @@ mod sys;
 #[path = "sys_stub.rs"]
 mod sys;
 
+pub mod acl;
 pub mod dpapi;
 pub mod scm;
 
 pub use error::{Error, codes};
-pub use runtime::{StopSignal, is_service_process, run_service};
+pub use runtime::{StopSignal, is_service_process, run_service, run_service_with_exit_code};
 pub use wide::{command_line, escape_arg};

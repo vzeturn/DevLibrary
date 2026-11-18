@@ -44,21 +44,38 @@ pub struct Config {
     server_name: String,
     verify: Verify,
     alpn: Vec<Vec<u8>>,
+    min_version: Version,
 }
 
 impl Config {
-    /// A configuration that verifies the certificate for `server_name` (SNI and host check).
+    /// A configuration that verifies the certificate for `server_name` (SNI and host check)
+    /// and accepts TLS 1.2 and 1.3.
     pub fn new(server_name: impl Into<String>) -> Config {
         Config {
             server_name: server_name.into(),
             verify: Verify::Full,
             alpn: Vec::new(),
+            min_version: Version::Tls12,
         }
     }
 
     /// Sets the verification mode.
     pub fn verify(mut self, verify: Verify) -> Config {
         self.verify = verify;
+        self
+    }
+
+    /// Sets the oldest protocol version offered (default [`Version::Tls12`]).
+    ///
+    /// [`Version::Tls10`] and [`Version::Tls11`] exist for old servers that cannot do
+    /// TLS 1.2, such as an unpatched SQL Server 2008. They are weak: use them only as a
+    /// fallback after a TLS 1.2 handshake failed. On OpenSSL 3 this also lowers the
+    /// security level to 0 for the connection, because level 1 and above refuse
+    /// TLS 1.0/1.1. The OS may still refuse them: Windows lets administrators disable
+    /// old protocols for every process (SChannel registry keys), and such a handshake
+    /// fails with [`Error::Handshake`].
+    pub fn min_version(mut self, version: Version) -> Config {
+        self.min_version = version;
         self
     }
 
@@ -82,11 +99,20 @@ impl Config {
     pub fn alpn_protocols(&self) -> &[Vec<u8>] {
         &self.alpn
     }
+
+    /// The oldest protocol version offered.
+    pub fn minimum_version(&self) -> Version {
+        self.min_version
+    }
 }
 
-/// TLS protocol version negotiated.
+/// A TLS protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Version {
+    /// TLS 1.0 (RFC 2246). Only as a fallback for old servers.
+    Tls10,
+    /// TLS 1.1 (RFC 4346). Only as a fallback for old servers.
+    Tls11,
     /// TLS 1.2.
     Tls12,
     /// TLS 1.3.
@@ -262,11 +288,16 @@ mod tests {
         assert_eq!(c.server_name(), "example.com");
         assert_eq!(c.verify_mode(), Verify::None);
         assert_eq!(c.alpn_protocols(), &[b"h2".to_vec(), b"http/1.1".to_vec()]);
+        assert_eq!(c.minimum_version(), Version::Tls12);
+        let c = c.min_version(Version::Tls10);
+        assert_eq!(c.minimum_version(), Version::Tls10);
     }
 
     #[test]
     fn version_order() {
         assert!(Version::Tls13 > Version::Tls12);
+        assert!(Version::Tls12 > Version::Tls11);
+        assert!(Version::Tls11 > Version::Tls10);
     }
 
     #[test]
