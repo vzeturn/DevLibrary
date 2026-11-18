@@ -39,7 +39,10 @@ Notes:
   processes, a service pointing elsewhere), optionally declares and tests SQL Server first (`-SqlPrompt`
   for a server on another machine, or `-SqlName`/`-SqlConnection`) so the code is not spent on a site that
   cannot reach its database, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
-  replaces it), installs the service + watchdog, prints Kaspersky allow-list guidance with the exe hash, and
+  replaces it), runs an optional product setup sub-command (`-Setup`, secrets through env
+  `DL_AGENT_SETUP_ARGS`, removed afterwards), only then removes a product's previous agent (`-Replace
+  '<service pattern>'`: services stopped and deleted, their processes ended, files kept, so any failure
+  earlier leaves the old agent running), installs the service + watchdog, prints Kaspersky allow-list guidance with the exe hash, and
   waits for `heartbeat.json` to show a hub contact (`Connected`, or the last log lines and `status`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
