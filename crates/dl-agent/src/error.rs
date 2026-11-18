@@ -28,6 +28,8 @@ pub enum Error {
     NotEnrolled,
     /// A module returned an error.
     Module(String),
+    /// An on-prem SQL Server database could not be used (connect, pool, query).
+    Sql(String),
 }
 
 impl fmt::Display for Error {
@@ -43,6 +45,7 @@ impl fmt::Display for Error {
             Error::Config(m) => write!(f, "configuration: {m}"),
             Error::NotEnrolled => f.write_str("agent is not enrolled"),
             Error::Module(m) => write!(f, "module: {m}"),
+            Error::Sql(m) => write!(f, "sql: {m}"),
         }
     }
 }

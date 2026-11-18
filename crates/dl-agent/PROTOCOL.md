@@ -125,3 +125,36 @@ unreachable and sent oldest first.
 whose section changed, and keeps the previous version as last-known-good: if a restarted
 module fails within 2 minutes the agent restores last-known-good and reports
 `config_reverted`.
+
+## 9. SQL Server bridge (on-prem)
+
+The agent is the one bridge between hub-side projects and the site's SQL Server databases.
+
+- **Declaration stays local.** `<data>/sql.json` = `{"databases":{"<name>":{"connection":"…",
+  "max_connections":4,"query_timeout_seconds":30,"acquire_timeout_seconds":10,
+  "idle_timeout_seconds":300,"max_lifetime_seconds":1800}}}`. Names are 1–64 of
+  `[A-Za-z0-9_-]`; connection strings use the ADO (`Server=…;Database=…`) or `sqlserver://`
+  form and never leave the machine (file mode 0600 / service-account ACL). `dl-agent sql-add
+  <name> --connection …` (or env `DL_AGENT_SQL_CONNECTION`) writes an entry after validating
+  it; `dl-agent sql-test [name]` checks connectivity; changes apply on the next restart.
+- **Invalid file**: the agent runs without SQL and files one `sql_config_invalid` (critical)
+  report; error texts never echo the connection string.
+- **Pools**: one per database, shared by every module (`ModuleContext::sql(name)`). Idle
+  sessions are reused newest first and pinged when idle ≥ 30 s; a session that is broken,
+  still inside a transaction, or past its lifetime is closed instead of reused; callers wait
+  up to `acquire_timeout` for a free session. A database that refuses connections trips a
+  breaker: callers fail fast with "database unavailable" and one caller probes after a
+  backoff (1 s doubling to 60 s). Each query carries `query_timeout` (0 = none); a timeout
+  cancels the request with an attention and keeps the session.
+- **Hub tuning**: remote config `body.sql = {"<name>": {"max_connections": 8, …}}` overrides
+  the limits per database; a `connection` key there is ignored. Removing the override restores
+  the local values.
+- **`sql` module** (present only when databases are declared): checks every database each
+  30 s, is `degraded` while one fails (so the canary gate blocks a build that breaks SQL),
+  files `sql_unreachable` once per outage and `sql_recovered` on recovery (context
+  `{"database"}`), and publishes pool stats as the `databases` metric.
+- **Commands**: `sql.ping {database?}` → `{"<name>":{"ok":true,"ms":3}}`; `sql.status` → pool
+  stats (`open`, `idle`, `in_use`, `max`, `connects`, `connect_failures`, `acquires`, `waits`,
+  `timeouts`, `discarded`, `down_since`, `last_error`). There is deliberately no command that
+  runs arbitrary SQL sent by the hub: projects reach their databases through their own
+  modules.

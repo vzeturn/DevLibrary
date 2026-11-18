@@ -11,7 +11,12 @@
   passes without force when canary is clean, revoke via `401 revoked` (agent wipes identity),
   Cloudflare Access for `/admin` documented in its README.
 
+- Hub in production at https://agent.pms.id.vn (PR #6); release key offline under
+  `~/.config/devlibrary-agent-hub/`; dl-agent 1.0.1 on canary, promoted after the soak.
+- SQL Server bridge (task 577, PROTOCOL §9): pools per database from `sql.json`, `sql` module,
+  `ctx.sql(name)`, `sql-add`/`sql-test`. Live tests: `DL_AGENT_SQL_LIVE=… cargo test -p dl-agent
+  --test sql_live -- --test-threads=1` against `mcr.microsoft.com/mssql/server:2022-latest`
+  (macOS has no TLS backend: use `Encrypt=disable` locally).
+
 ## Remaining
-1. Owner: hub domain + production deploy (D1, R2, Access, secrets) — see `services/agent-hub/README.md`.
-2. Release signing key (offline Ed25519) and `DL_AGENT_RELEASE_KEYS` build setting.
-3. Module migrations per `INVENTORY.md` §5 — tasks of RT-0164 (task 557), each on a demo tenant first.
+1. Module migrations per `INVENTORY.md` §5 — tasks of RT-0164 (task 557), each on a demo tenant first.

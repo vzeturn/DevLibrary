@@ -18,6 +18,7 @@ use dl_winsvc::StopSignal;
 use crate::command::{Command, CommandResult, Outbox};
 use crate::config::RemoteConfig;
 use crate::report::{ProblemReport, Severity, Spool};
+use crate::sql::{SqlPool, SqlPools};
 use crate::{Error, now};
 
 /// First restart delay.
@@ -136,6 +137,7 @@ pub struct ModuleContext {
     inbox: Arc<Mutex<VecDeque<Command>>>,
     outbox: Outbox,
     reports: Spool,
+    sql: SqlPools,
 }
 
 impl ModuleContext {
@@ -150,7 +152,27 @@ impl ModuleContext {
             inbox: Arc::default(),
             outbox: Outbox::default(),
             reports: Spool::in_memory(),
+            sql: SqlPools::default(),
         }
+    }
+
+    /// The same context with access to `pools` (tests and tools).
+    pub fn with_sql(mut self, pools: SqlPools) -> ModuleContext {
+        self.sql = pools;
+        self
+    }
+
+    /// The site's shared connection pool for `database` (declared in `sql.json`).
+    ///
+    /// ```ignore
+    /// let fo = ctx.sql("SMILE_FO")?;
+    /// let rows = fo.with(|c| Ok(c.query("SELECT TOP 10 * FROM Room", &[])?))?;
+    /// ```
+    ///
+    /// # Errors
+    /// [`Error::Sql`] when the site does not declare that database.
+    pub fn sql(&self, database: &str) -> Result<std::sync::Arc<SqlPool>, Error> {
+        self.sql.get(database)
     }
 
     /// The stop signal; use `stop().wait_timeout(d)` as the loop sleep.
@@ -242,6 +264,7 @@ pub struct Supervisor {
     data_dir: PathBuf,
     outbox: Outbox,
     reports: Spool,
+    sql: SqlPools,
 }
 
 impl Supervisor {
@@ -252,7 +275,13 @@ impl Supervisor {
             data_dir,
             outbox,
             reports,
+            sql: SqlPools::default(),
         }
+    }
+
+    /// Gives every module access to the site's SQL pools.
+    pub fn set_sql(&mut self, pools: SqlPools) {
+        self.sql = pools;
     }
 
     /// Registers a module (not started until [`Supervisor::tick`]).
@@ -360,6 +389,7 @@ impl Supervisor {
             inbox: slot.inbox.clone(),
             outbox: self.outbox.clone(),
             reports: self.reports.clone(),
+            sql: self.sql.clone(),
         };
         let factory = slot.factory.clone();
         let spawned = std::thread::Builder::new()

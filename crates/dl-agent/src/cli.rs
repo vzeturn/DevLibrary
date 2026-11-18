@@ -128,6 +128,29 @@ pub fn command(app: &App) -> Command {
                 .about("Prints the local state as JSON")
                 .arg(data()),
         )
+        .subcommand(
+            Command::new("sql-add")
+                .about("Declares an on-prem SQL Server database in sql.json (restart to apply)")
+                .arg(
+                    Arg::positional("name")
+                        .required()
+                        .help("Database key, e.g. SMILE_FO"),
+                )
+                .arg(
+                    Arg::option("connection")
+                        .required()
+                        .env("DL_AGENT_SQL_CONNECTION")
+                        .help("Connection string (ADO or sqlserver:// URL)"),
+                )
+                .arg(Arg::option("max").help("Most connections at once (default 4)"))
+                .arg(data()),
+        )
+        .subcommand(
+            Command::new("sql-test")
+                .about("Connects to every declared database (or one) and prints the result")
+                .arg(Arg::positional("name").help("Only this database"))
+                .arg(data()),
+        )
 }
 
 /// Parses the process arguments and runs the chosen command; returns the exit code.
@@ -142,6 +165,8 @@ pub fn main(app: App) -> i32 {
         "run" => return run(&app, &dir),
         "install" => install(&app, &dir),
         "uninstall" => uninstall(&app, &dir, sub.flag("purge")),
+        "sql-add" => sql_add(&dir, sub),
+        "sql-test" => return sql_test(&dir, sub.value("name")),
         "status" => {
             println!(
                 "{}",
@@ -162,6 +187,53 @@ pub fn main(app: App) -> i32 {
             EXIT_CONFIG
         }
     }
+}
+
+fn sql_add(dir: &Path, m: &Matches) -> Result<(), Error> {
+    let name = m.value("name").unwrap_or_default();
+    let connection = m.value("connection").unwrap_or_default();
+    let max = match m.value("max") {
+        None => 4,
+        Some(v) => v
+            .parse()
+            .map_err(|_| Error::Config("--max must be a number".into()))?,
+    };
+    crate::sql::declare(dir, name, connection, max)?;
+    println!("declared {name}; restart the agent to apply");
+    Ok(())
+}
+
+/// Checks the declared databases; exit 0 only when every checked one answers.
+fn sql_test(dir: &Path, only: Option<&str>) -> i32 {
+    let site = crate::sql::Site::load(dir);
+    if let Some(e) = site.load_error {
+        eprintln!("{e}");
+        return EXIT_CONFIG;
+    }
+    let mut all_ok = true;
+    let mut checked = 0;
+    for pool in site.pools.all() {
+        if only.is_some_and(|o| o != pool.name()) {
+            continue;
+        }
+        checked += 1;
+        match pool.check() {
+            Ok(d) => println!("{}: ok ({} ms)", pool.name(), d.as_millis()),
+            Err(e) => {
+                all_ok = false;
+                println!("{}: FAILED {e}", pool.name());
+            }
+        }
+    }
+    if checked == 0 {
+        eprintln!(
+            "no database {} in {}",
+            only.unwrap_or("declared"),
+            crate::sql::SQL_FILE
+        );
+        return EXIT_CONFIG;
+    }
+    if all_ok { 0 } else { 1 }
 }
 
 /// The state directory: `--data`, `DL_AGENT_DATA`, or the platform default.

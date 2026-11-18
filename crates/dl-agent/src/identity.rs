@@ -200,8 +200,9 @@ fn unseal(blob: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 #[cfg(windows)]
-fn restrict_file(path: &Path) -> Result<(), Error> {
-    dl_winsvc::acl::restrict(path).map_err(|e| Error::Config(format!("lock identity key: {e}")))
+pub(crate) fn restrict_file(path: &Path) -> Result<(), Error> {
+    dl_winsvc::acl::restrict(path)
+        .map_err(|e| Error::Config(format!("restrict {}: {e}", path.display())))
 }
 
 // Outside Windows the seed is stored as-is with mode 0600 (the data dir is root-owned).
@@ -217,14 +218,14 @@ fn unseal(blob: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 #[cfg(unix)]
-fn restrict_file(path: &Path) -> Result<(), Error> {
+pub(crate) fn restrict_file(path: &Path) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| Error::Io("lock identity key", e))
+        .map_err(|e| Error::Io("restrict private file", e))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn restrict_file(_path: &Path) -> Result<(), Error> {
+pub(crate) fn restrict_file(_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 

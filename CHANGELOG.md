@@ -15,6 +15,12 @@ All notable changes are listed here. The format follows
   built-in `sys` module), fingerprinted problem reports spooled on disk, remote config
   with last-known-good revert, remote commands and diagnostics. Wire contract in
   `crates/dl-agent/PROTOCOL.md`, inventory of the agents it replaces in `INVENTORY.md`.
+- `dl-agent`: shared SQL Server bridge for every project on the site. Per-database pools
+  declared locally in `sql.json` (0600, connection never sent to or taken from the hub),
+  session reuse with ping-after-idle, discard of broken or mid-transaction sessions,
+  acquire and query timeouts, a breaker with backoff for a down database, hub tuning of
+  limits, a built-in `sql` module (`sql_unreachable` / `sql_recovered` reports, `sql.ping`,
+  `sql.status`), `ModuleContext::sql`, and `sql-add` / `sql-test` commands. PROTOCOL.md §9.
 - `services/agent-hub`: Cloudflare Worker control plane for `dl-agent` (D1, R2):
   enrolment codes, heartbeats, commands, per-product release lines, canary gate before
   promotion to stable, problem reports and a read-only status page.

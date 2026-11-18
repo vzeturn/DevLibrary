@@ -35,6 +35,13 @@ No dependencies outside DevLibrary, no `unsafe`.
 - **Remote config**: applied per module with last-known-good; a module that fails within
   two minutes of a change reverts the config and reports `config_reverted`.
 
+- **SQL Server bridge**: one pool per database declared in `<data>/sql.json` (connection
+  strings stay on the machine, mode 0600), shared by every module through
+  `ctx.sql("SMILE_FO")`. Sessions are reused and health-checked, a down database trips a
+  breaker with backoff instead of hammering it, every query has a timeout, and a built-in
+  `sql` module reports outages and answers `sql.ping` / `sql.status`. The hub may tune the
+  limits (`body.sql`) but never the connection. See PROTOCOL.md §9.
+
 ## Building a product agent
 
 ```rust,no_run
@@ -46,8 +53,13 @@ struct Einvoice;
 impl Module for Einvoice {
     fn name(&self) -> &str { "einvoice" }
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), dl_agent::Error> {
+        // Shared pool for a database declared on the site (`dl-agent sql-add SMILE_FO …`).
+        let fo = ctx.sql("SMILE_FO")?;
         ctx.set_running("polling");
         while !ctx.stop().wait_timeout(std::time::Duration::from_secs(5)) {
+            let mut c = fo.get()?; // returned to the pool when dropped
+            let _rows = c.query("SELECT TOP 1 1 AS one", &[]);
+            drop(c);
             while let Some(cmd) = ctx.next_command() {
                 ctx.complete(&cmd.id, true, "done");
             }
@@ -73,6 +85,8 @@ fn main() {
 | `run` | run in the console, or as the service when the SCM started it |
 | `install` / `uninstall [--purge]` | system service |
 | `status` | local state as JSON (no hub call) |
+| `sql-add NAME --connection CS [--max N]` | declare a database (or env `DL_AGENT_SQL_CONNECTION`); restart to apply |
+| `sql-test [NAME]` | connect to every (or one) declared database; exit 1 if any fails |
 
 ## Releasing
 

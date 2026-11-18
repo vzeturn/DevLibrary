@@ -14,6 +14,7 @@ dependencies = [
  "dl-json",
  "dl-log",
  "dl-rand",
+ "dl-tds",
  "dl-winsvc",
 ]
 
