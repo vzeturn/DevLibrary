@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { nowSeconds, type AppEnv } from '../env';
 import { severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
+import { installCommand } from '../install/script';
 import { requireAdmin } from '../middleware/adminAuth';
 import { listCodes, revokeCode } from '../repo/enrollCodes';
 import { listReleases, listPromotions } from '../repo/releases';
@@ -54,7 +55,8 @@ adminRoutes.put('/tenants/:id', async (c) => {
 
 adminRoutes.post('/enroll-codes', async (c) => {
   const body = validate(codeBody, await jsonBody(c.req));
-  return c.json(await createEnrollCode(c.env, body, nowSeconds()), 201);
+  const created = await createEnrollCode(c.env, body, nowSeconds());
+  return c.json({ ...created, install_command: installCommand(new URL(c.req.url).origin, created.code) }, 201);
 });
 adminRoutes.get('/enroll-codes', async (c) => c.json({ codes: await listCodes(c.env.DB, c.req.query('tenant_id')) }));
 adminRoutes.delete('/enroll-codes/:id', async (c) => {

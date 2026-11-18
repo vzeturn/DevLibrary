@@ -5,10 +5,13 @@ import { NONCE_TTL_SECONDS } from './middleware/signature';
 import { pruneNonces } from './repo/agents';
 import { adminRoutes } from './routes/admin';
 import { agentRoutes } from './routes/agent';
+import { installRoutes, installScriptResponse } from './routes/install';
 
 export const app = new Hono<AppEnv>();
 
 app.get('/healthz', (c) => c.json({ ok: true }));
+app.get('/install.ps1', (c) => installScriptResponse(c.req.url));
+app.route('/install', installRoutes);
 app.route('/v1', agentRoutes);
 app.route('/admin', adminRoutes);
 

@@ -9,7 +9,9 @@
 //!
 //! `keygen` writes a new Ed25519 seed (base64) to `<seed-file>` and prints the
 //! `key-id:public-key` pair to bake into agents with `DL_AGENT_RELEASE_KEYS`.
-//! `sign` prints a signed manifest (PROTOCOL §5) for one binary; publish it on the hub
+//! `sign` prints a signed manifest (PROTOCOL §5); `<target>`, `<artifact-url>` and `<binary>`
+//! may be comma-separated lists of the same length to ship every build in one release
+//! (the hub's `install.ps1` picks `windows7-*` on Windows 7 – 8.1). Publish it on the hub
 //! with `PUT /admin/releases/<product>/<version>` (canary) or `POST …/promote` (stable).
 //! `--urgent` installs outside the sites' update windows; `--required` also installs where a
 //! site turned automatic updates off (PROTOCOL §6).
@@ -125,7 +127,22 @@ fn sign_sql(seed_path: &str, key_id: &str, bundle_path: &str) -> Result<String, 
 
 fn sign(a: &[String], urgent: bool, required: bool) -> Result<String, String> {
     let seed = read_seed(&a[0])?;
-    let binary = std::fs::read(&a[7]).map_err(|e| format!("{}: {e}", a[7]))?;
+    let targets: Vec<&str> = a[5].split(',').collect();
+    let urls: Vec<&str> = a[6].split(',').collect();
+    let binaries: Vec<&str> = a[7].split(',').collect();
+    if urls.len() != targets.len() || binaries.len() != targets.len() {
+        return Err("targets, urls and binaries must list the same number of items".into());
+    }
+    let mut artifacts = Vec::new();
+    for ((target, url), path) in targets.iter().zip(&urls).zip(&binaries) {
+        let binary = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+        artifacts.push(Artifact {
+            target: target.to_string(),
+            url: url.to_string(),
+            sha256: Sha256::digest(&binary),
+            size: binary.len() as u64,
+        });
+    }
     let mut m = Manifest {
         product: a[2].clone(),
         channel: a[3].parse().map_err(|e: dl_agent::Error| e.to_string())?,
@@ -140,12 +157,7 @@ fn sign(a: &[String], urgent: bool, required: bool) -> Result<String, String> {
         urgent,
         required,
         notes: a.get(9).cloned().unwrap_or_default(),
-        artifacts: vec![Artifact {
-            target: a[5].clone(),
-            url: a[6].clone(),
-            sha256: Sha256::digest(&binary),
-            size: binary.len() as u64,
-        }],
+        artifacts,
         key_id: String::new(),
         signature: [0; 64],
     };
