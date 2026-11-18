@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `agent-hub`: product keys. A product platform mints dl-agent enrolment codes for its own tenants
+  (`POST /products/:product/enroll-codes`) without the admin token; the enrolled agent starts with that
+  product's module enabled. Admin enrolment codes can carry an initial `config` too (migration 0003).
 - `agent-hub`: stores each agent's last site survey (malformed or oversized ones are dropped,
   never the heartbeat), per-product site requirements (Windows version, SQL Server engine,
   compat level, grants, forbidden warnings, clean schema probe), a ready / not-ready list

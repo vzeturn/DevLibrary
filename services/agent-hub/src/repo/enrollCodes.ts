@@ -8,6 +8,10 @@ export interface EnrollCodeRow {
   used_at: number | null;
   used_by_agent: string | null;
   revoked_at: number | null;
+  /** Initial remote config (JSON) for the agent enrolled with this code; null = built-in default. */
+  config: string | null;
+  /** Product whose key minted the code; null = admin. */
+  minted_by: string | null;
 }
 
 export interface NewAgent {
@@ -24,10 +28,10 @@ export interface NewAgent {
 export async function insertCode(db: D1Database, row: Omit<EnrollCodeRow, 'used_at' | 'used_by_agent' | 'revoked_at'>): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO enroll_codes (id, code_hash, tenant_id, site_id, created_at, expires_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+      `INSERT INTO enroll_codes (id, code_hash, tenant_id, site_id, created_at, expires_at, config, minted_by)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
     )
-    .bind(row.id, row.code_hash, row.tenant_id, row.site_id, row.created_at, row.expires_at)
+    .bind(row.id, row.code_hash, row.tenant_id, row.site_id, row.created_at, row.expires_at, row.config, row.minted_by)
     .run();
 }
 
@@ -35,7 +39,10 @@ export async function findCodeByHash(db: D1Database, hash: string): Promise<Enro
   return db.prepare('SELECT * FROM enroll_codes WHERE code_hash = ?1').bind(hash).first<EnrollCodeRow>();
 }
 
-/** Claims the code and creates the agent in one transaction; false when the code was taken meanwhile. */
+/**
+ * Claims the code, creates the agent and seeds its config from the code (when the code carries
+ * one) in one transaction; false when the code was taken meanwhile.
+ */
 export async function claimCodeAndCreateAgent(db: D1Database, codeId: string, agent: NewAgent, now: number): Promise<boolean> {
   const [claim] = await db.batch([
     db
@@ -63,14 +70,22 @@ export async function claimCodeAndCreateAgent(db: D1Database, codeId: string, ag
         now,
         codeId,
       ),
+    db
+      .prepare(
+        `INSERT INTO configs (agent_id, version, body, updated_at)
+         SELECT ?1, 1, config, ?2 FROM enroll_codes WHERE id = ?3 AND used_by_agent = ?1 AND config IS NOT NULL`,
+      )
+      .bind(agent.id, now, codeId),
   ]);
   return (claim?.meta.changes ?? 0) === 1;
 }
 
-export async function listCodes(db: D1Database, tenantId: string | undefined): Promise<Omit<EnrollCodeRow, 'code_hash'>[]> {
-  const sql = `SELECT id, tenant_id, site_id, created_at, expires_at, used_at, used_by_agent, revoked_at
+export type CodeView = Omit<EnrollCodeRow, 'code_hash' | 'config'>;
+
+export async function listCodes(db: D1Database, tenantId: string | undefined): Promise<CodeView[]> {
+  const sql = `SELECT id, tenant_id, site_id, created_at, expires_at, used_at, used_by_agent, revoked_at, minted_by
                FROM enroll_codes WHERE (?1 IS NULL OR tenant_id = ?1) ORDER BY created_at DESC LIMIT 500`;
-  return (await db.prepare(sql).bind(tenantId ?? null).all<Omit<EnrollCodeRow, 'code_hash'>>()).results;
+  return (await db.prepare(sql).bind(tenantId ?? null).all<CodeView>()).results;
 }
 
 export async function revokeCode(db: D1Database, id: string, now: number): Promise<boolean> {

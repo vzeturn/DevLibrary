@@ -4,6 +4,9 @@ const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 export const versionString = z.string().regex(VERSION, 'expected x.y.z');
 const name = z.string().min(1).max(100);
 /** Largest site survey the hub stores (a few databases, each with its last schema probe). */
+/** A product (module) name: also the `modules.<name>` key and the tenant id prefix of its key. */
+export const productName = z.string().regex(/^[a-z][a-z0-9-]{1,31}$/, 'lowercase letters, digits and - only');
+
 export const MAX_SURVEY_BYTES = 256 * 1024;
 
 export const enrollBody = z.object({

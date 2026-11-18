@@ -49,9 +49,19 @@ export async function agentsView(env: Env, tenantId: string | undefined, now: nu
   }));
 }
 
+export interface NewCode {
+  tenant_id: string;
+  site_id: string;
+  ttl_seconds: number;
+  /** Initial remote config for the agent that enrols with the code. */
+  config?: Record<string, unknown>;
+  /** Product whose key mints the code (absent: admin). */
+  minted_by?: string;
+}
+
 export async function createEnrollCode(
   env: Env,
-  req: { tenant_id: string; site_id: string; ttl_seconds: number },
+  req: NewCode,
   now: number,
 ): Promise<{ id: string; code: string; tenant_id: string; site_id: string; expires_at: number }> {
   if (!(await getTenant(env.DB, req.tenant_id))) throw new HttpError(404, 'tenant_not_found');
@@ -66,6 +76,8 @@ export async function createEnrollCode(
     site_id: req.site_id,
     created_at: now,
     expires_at,
+    config: req.config ? JSON.stringify(req.config) : null,
+    minted_by: req.minted_by ?? null,
   });
   return { id, code, tenant_id: req.tenant_id, site_id: req.site_id, expires_at };
 }
