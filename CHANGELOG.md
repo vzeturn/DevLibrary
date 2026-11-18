@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `dl-agent-einvoice`: a running module reloads `config.enc` when it is re-sealed. Before,
+  `einvoice-enroll --force` left it pushing with the revoked key (HTTP 401) until the service
+  restarted.
 - `dl-agent-einvoice`: `config.enc` and the outbox are written owner-only (0600) on Unix, where
   `config.enc` is not encrypted.
 - `scripts/build-dl-agent.sh`: the Linux binary links glibc dynamically (glibc >= 2.36). The static
