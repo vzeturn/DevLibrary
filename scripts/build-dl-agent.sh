@@ -21,6 +21,11 @@ targets=("$@")
 root=$(cd "$(dirname "$0")/.." && pwd)
 keys=${DL_AGENT_RELEASE_KEYS:-$(cat "$HOME/.config/devlibrary-agent-hub/release.pub")}
 image=dl-agent-xbuild:local
+# The zero-prompt `einvoice-enroll` default SQL password is compiled in from this variable.
+# Passed by name only, so docker takes the host value and nothing is echoed.
+if [ -z "${MMEI_BUILD_DEFAULT_SQL_PASSWORD:-}" ]; then
+  echo "warning: MMEI_BUILD_DEFAULT_SQL_PASSWORD is unset; einvoice-enroll then needs --sql-password (or --sql-prompt)" >&2
+fi
 docker image inspect "$image" >/dev/null 2>&1 || docker build -q -t "$image" "$root/scripts/xbuild" >/dev/null
 mkdir -p "$root/$out"
 for t in "${targets[@]}"; do
@@ -33,6 +38,7 @@ for t in "${targets[@]}"; do
     *) echo "unknown target $t" >&2; exit 2 ;;
   esac
   docker run --rm -v "$root:/src" -e DL_AGENT_VERSION="$version" -e DL_AGENT_RELEASE_KEYS="$keys" \
+    -e MMEI_BUILD_DEFAULT_SQL_PASSWORD \
     -e CARGO_TARGET_DIR=/src/target/xbuild -e RUSTFLAGS="-C target-feature=+crt-static" "$image" \
     cargo $tc build -q --release -p dl-agent-bin --bin dl-agent --target "$triple" $std
   mkdir -p "$root/$out/$t"

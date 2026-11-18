@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-einvoice`: `dl-agent einvoice-enroll` sub-command (port of `mmei-agent -enroll`: token exchange,
+  prompted or scripted SQL connection, TLS fallback, sealed `config.enc`); skips when already enrolled,
+  `--force` to redo. `scripts/build-dl-agent.sh` passes `MMEI_BUILD_DEFAULT_SQL_PASSWORD` (by name) to the build.
 - `dl-agent`: modules add their own sub-commands (`App::tool`); words of `DL_AGENT_SETUP_ARGS` are
   appended to such a sub-command's arguments (never to built-in ones), for `install.ps1 -Setup`.
 - `install.ps1`: `-Setup <sub-command>` runs a product's setup after enrolment (secrets through env
