@@ -376,11 +376,13 @@ impl Agent {
     }
 
     fn watch_probation(&mut self, now: u64) -> Option<Exit> {
-        let until = self.update.pending.as_ref()?.probation_until;
+        let pending = self.update.pending.as_ref()?;
+        let until = pending.probation_until;
+        let skip = pending.unhealthy_before.clone();
         if try_commit(
             &mut self.update,
             now,
-            self.supervisor.all_running(),
+            self.supervisor.all_running_except(&skip),
             self.hub_ok,
         ) {
             if let Err(e) = self.update.save(&self.opts.data_dir) {
@@ -393,7 +395,7 @@ impl Agent {
         if now >= until
             && self
                 .supervisor
-                .any_unhealthy_for(self.opts.probation_seconds, now)
+                .any_unhealthy_for_except(self.opts.probation_seconds, now, &skip)
         {
             if let Err(e) = self.roll_back("a module stayed unhealthy through probation") {
                 self.report(Severity::Critical, "rollback_failed", &e.to_string());

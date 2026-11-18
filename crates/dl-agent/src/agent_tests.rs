@@ -204,6 +204,7 @@ fn healthy_probation_commits() {
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 500,
         boots: 1,
+        unhealthy_before: Vec::new(),
     });
     wait_running(&mut a);
     a.hub_ok = true;
@@ -244,6 +245,7 @@ fn unhealthy_probation_rolls_back() {
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 500,
         boots: 1,
+        unhealthy_before: Vec::new(),
     });
     let end = std::time::Instant::now() + Duration::from_secs(3);
     while a.supervisor.restart_counts().iter().all(|(_, n)| *n == 0)
@@ -266,6 +268,40 @@ fn unhealthy_probation_rolls_back() {
 }
 
 #[test]
+fn module_unhealthy_before_the_update_does_not_roll_it_back() {
+    let d = TestDir::new("agent-baseline");
+    let hub = FakeHub::default();
+    let mut a = agent(&d, &hub, vec![Arc::new(|| Box::new(Broken))]);
+    a.opts.probation_seconds = 0;
+    std::fs::create_dir_all(d.0.join("bin/previous")).unwrap();
+    std::fs::write(d.0.join("bin/previous/dl-agent"), b"good").unwrap();
+    let exe = std::fs::read(&a.opts.exe).unwrap();
+    a.update.pending = Some(Pending {
+        version: a.opts.version.clone(),
+        previous_version: "0.0.1".parse().unwrap(),
+        probation_until: 500,
+        boots: 1,
+        unhealthy_before: vec!["broken".into()],
+    });
+    let end = std::time::Instant::now() + Duration::from_secs(3);
+    while a.supervisor.restart_counts().iter().all(|(_, n)| *n == 0)
+        && std::time::Instant::now() < end
+    {
+        a.supervisor.tick(&a.config.current);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    a.hub_ok = true;
+    assert_eq!(a.watch_probation(now() + 1), None);
+    assert!(
+        a.update.pending.is_none(),
+        "committed despite the known-bad module"
+    );
+    assert!(a.update.failed_versions().is_empty());
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), exe);
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
 fn boot_rolls_back_after_too_many_probation_starts() {
     let d = TestDir::new("agent-boot");
     let hub = FakeHub::default();
@@ -277,6 +313,7 @@ fn boot_rolls_back_after_too_many_probation_starts() {
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 0,
         boots: crate::update::MAX_PROBATION_BOOTS,
+        unhealthy_before: Vec::new(),
     });
     assert_eq!(a.boot().unwrap(), Some(Exit::Restart));
     assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"good");
@@ -556,6 +593,7 @@ fn update_checks_resume_once_probation_commits() {
         previous_version: "0.0.1".parse().unwrap(),
         probation_until: 500,
         boots: 1,
+        unhealthy_before: Vec::new(),
     });
     assert!(matches!(
         a.try_update(400, false),

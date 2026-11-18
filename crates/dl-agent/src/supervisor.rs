@@ -496,15 +496,36 @@ impl Supervisor {
 
     /// Whether every enabled module is running (disabled modules do not count against).
     pub fn all_running(&self) -> bool {
+        self.all_running_except(&[])
+    }
+
+    /// [`Self::all_running`], ignoring the modules named in `skip`.
+    pub fn all_running_except(&self, skip: &[String]) -> bool {
+        self.statuses().iter().all(|s| {
+            skip.contains(&s.name)
+                || matches!(s.state, ModuleState::Running | ModuleState::Disabled)
+        })
+    }
+
+    /// Enabled modules that are degraded or stopped right now.
+    pub fn unhealthy_names(&self) -> Vec<String> {
         self.statuses()
-            .iter()
-            .all(|s| matches!(s.state, ModuleState::Running | ModuleState::Disabled))
+            .into_iter()
+            .filter(|s| matches!(s.state, ModuleState::Degraded | ModuleState::Stopped))
+            .map(|s| s.name)
+            .collect()
     }
 
     /// Whether an enabled module has been degraded or failing for at least `secs`.
     pub fn any_unhealthy_for(&self, secs: u64, now: u64) -> bool {
+        self.any_unhealthy_for_except(secs, now, &[])
+    }
+
+    /// [`Self::any_unhealthy_for`], ignoring the modules named in `skip`.
+    pub fn any_unhealthy_for_except(&self, secs: u64, now: u64, skip: &[String]) -> bool {
         self.statuses().iter().any(|s| {
             s.state != ModuleState::Disabled
+                && !skip.contains(&s.name)
                 && s.degraded_since > 0
                 && now.saturating_sub(s.degraded_since) >= secs
         })

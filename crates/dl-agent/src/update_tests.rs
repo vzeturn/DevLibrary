@@ -208,6 +208,7 @@ fn state_round_trips_through_disk() {
         previous_version: v("1.0.0"),
         probation_until: 99,
         boots: 2,
+        unhealthy_before: vec!["einvoice".into()],
     });
     s.save(&d.0).unwrap();
     assert_eq!(UpdateState::load(&d.0).unwrap(), s);
@@ -247,6 +248,7 @@ fn probation_counts_boots_then_rolls_back() {
             previous_version: v("1.1.0"),
             probation_until: 100,
             boots: 0,
+            unhealthy_before: Vec::new(),
         }),
         ..UpdateState::default()
     };
@@ -263,6 +265,7 @@ fn commit_needs_time_health_and_hub() {
         previous_version: v("1.1.0"),
         probation_until: 100,
         boots: 1,
+        unhealthy_before: Vec::new(),
     };
     let mut s = UpdateState {
         pending: Some(p),
@@ -282,6 +285,7 @@ fn boot_on_unexpected_version_forgets_pending() {
         previous_version: v("1.1.0"),
         probation_until: 100,
         boots: 0,
+        unhealthy_before: Vec::new(),
     };
     let mut s = UpdateState {
         pending: Some(p),
