@@ -47,12 +47,13 @@ for t in "${targets[@]}"; do
   mkdir -p "$root/$out/$t"
   cp "$root/target/xbuild/$triple/release/dl-agent$exe" "$root/$out/$t/dl-agent$exe"
   if [ -n "$exe" ]; then
-    # Only Windows system DLLs may be imported (no MinGW runtime DLLs to ship), and the
+    # Only Windows system DLLs may be imported (no MinGW runtime DLLs to ship; winspool.drv
+    # is the print spooler the pms-device module prints through, present since NT), and the
     # Win7 builds must not need bcryptprimitives.dll (Windows 8+).
     dlls=$(docker run --rm -v "$root/$out/$t:/b" "$image" x86_64-w64-mingw32-objdump -p /b/dl-agent.exe \
       | awk '/DLL Name:/ {print tolower($3)}' | sort -u | tr '\n' ' ')
     for d in $dlls; do
-      case $d in kernel32.dll|advapi32.dll|ws2_32.dll|ntdll.dll|userenv.dll|secur32.dll|crypt32.dll|bcrypt.dll|api-ms-win-core-synch-l1-2-0.dll|msvcrt.dll|shell32.dll|ole32.dll|oleaut32.dll|user32.dll|iphlpapi.dll|netapi32.dll|version.dll|wtsapi32.dll) ;;
+      case $d in kernel32.dll|advapi32.dll|ws2_32.dll|ntdll.dll|userenv.dll|secur32.dll|crypt32.dll|bcrypt.dll|api-ms-win-core-synch-l1-2-0.dll|msvcrt.dll|shell32.dll|ole32.dll|oleaut32.dll|user32.dll|iphlpapi.dll|netapi32.dll|version.dll|wtsapi32.dll|winspool.drv) ;;
         bcryptprimitives.dll) case $t in windows7-*) echo "$t imports $d (Windows 8+)" >&2; exit 1 ;; esac ;;
         *) echo "$t imports non-system DLL $d" >&2; exit 1 ;;
       esac
