@@ -1,0 +1,1 @@
+{"target":{"transport":"serial","endpoint":"COM3","baudRate":9600},"pin":2,"onMs":50,"offMs":500}

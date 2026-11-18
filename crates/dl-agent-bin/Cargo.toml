@@ -17,6 +17,7 @@ path = "src/main.rs"
 dl-agent.workspace = true
 dl-agent-einvoice.workspace = true
 dl-agent-pms.workspace = true
+dl-agent-pms-device.workspace = true
 
 [lints]
 workspace = true

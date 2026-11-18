@@ -12,7 +12,8 @@ fn main() {
         .tool(dl_agent_einvoice::einvoice_enroll_tool())
         .module(dl_agent_pms::pms_site_module())
         .tool(dl_agent_pms::pms_migrate_tool())
-        .tool(dl_agent_pms::pms_enroll_tool());
+        .tool(dl_agent_pms::pms_enroll_tool())
+        .module(dl_agent_pms_device::pms_device_module());
     std::process::exit(dl_agent::cli::main(app));
 }
 

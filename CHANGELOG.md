@@ -17,6 +17,18 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-pms-device`: the SMILE PMS device agent (`SmilePmsDeviceAgent`) as an opt-in dl-agent
+  module (`modules.pms-device.enabled = true`; optional `appsettings_dir`, `overrides`). It reads the
+  old service's `appsettings.json` / `appsettings.{env}.json` from its install folder and keeps
+  `Agent:TokenFile` and `Agent:DataDirectory\outbox`, so results the old service left are sent.
+  Claim / run / result against the PMS API with the 204 / 404 / 409 rules, `none`,
+  `simulated-lock` and `smile-lock` adapters (LockSDK through the crate's only `unsafe` code, x86
+  builds) and the POS transports; `degraded` without a token, with invalid settings or while the
+  API keeps failing; stop gives the worker 5 s and leaves a blocked device call on its own thread
+  with its result in the outbox. Metrics (claimed / ok / failed by kind, outbox pending, last
+  command), rate-limited reports `pms_device_api_failed`, `pms_device_auth_failed`,
+  `pms_device_adapter_failed`, `pms_device_sdk_missing`; commands `pms-device.status`,
+  `pms-device.flush_outbox`. The crate is left out of `cargo wasm`.
 - `dl-agent-pms`: the SMILE PMS site agent (`SmilePmsAgent`) as an opt-in dl-agent module
   (`modules.pms-site.enabled = true`; optional `config_path`, `state_dir`). It reads and writes the
   old agent's config file, `agent.key`, `identity.json` and `databases.json` where they are, so a
