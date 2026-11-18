@@ -1,16 +1,18 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { nowSeconds, type AppEnv } from '../env';
-import { severity } from '../domain/schemas';
+import { productName, severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
 import { requireAdmin } from '../middleware/adminAuth';
 import { listCodes, revokeCode } from '../repo/enrollCodes';
+import { listProductKeys, revokeProductKey } from '../repo/productKeys';
 import { listReleases, listPromotions } from '../repo/releases';
 import { listReports } from '../repo/reports';
 import { listTenants, upsertTenant } from '../repo/tenants';
 import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
+import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { renderStatusPage } from './statusPage';
@@ -18,7 +20,13 @@ import { renderStatusPage } from './statusPage';
 const id = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'letters, digits, . _ - only');
 
 const tenantBody = z.object({ name: z.string().min(1).max(200), demo: z.boolean().default(false) });
-const codeBody = z.object({ tenant_id: id, site_id: id, ttl_seconds: z.number().int().min(60).max(30 * 86400).default(86400) });
+const codeBody = z.object({
+  tenant_id: id,
+  site_id: id,
+  ttl_seconds: z.number().int().min(60).max(30 * 86400).default(86400),
+  config: z.record(z.string(), z.unknown()).optional(),
+});
+const productKeyBody = z.object({ product: productName, label: z.string().min(1).max(200) });
 const channelBody = z.object({ channel: z.enum(['canary', 'stable']).nullable() });
 const commandBody = z.object({
   agent_id: z.string().min(1),
@@ -62,6 +70,16 @@ adminRoutes.post('/enroll-codes', async (c) => {
 adminRoutes.get('/enroll-codes', async (c) => c.json({ codes: await listCodes(c.env.DB, c.req.query('tenant_id')) }));
 adminRoutes.delete('/enroll-codes/:id', async (c) => {
   if (!(await revokeCode(c.env.DB, c.req.param('id'), nowSeconds()))) throw new HttpError(404, 'code_not_revocable');
+  return c.json({});
+});
+
+adminRoutes.post('/product-keys', async (c) => {
+  const body = validate(productKeyBody, await jsonBody(c.req));
+  return c.json(await createProductKey(c.env, body.product, body.label, nowSeconds()), 201);
+});
+adminRoutes.get('/product-keys', async (c) => c.json({ keys: await listProductKeys(c.env.DB) }));
+adminRoutes.delete('/product-keys/:id', async (c) => {
+  if (!(await revokeProductKey(c.env.DB, c.req.param('id'), nowSeconds()))) throw new HttpError(404, 'product_key_not_found');
   return c.json({});
 });
 
