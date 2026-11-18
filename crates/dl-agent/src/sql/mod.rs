@@ -11,13 +11,15 @@
 //!
 //! The hub may tune the limits per database through remote config
 //! (`{"sql": {"SMILE_FO": {"max_connections": 8}}}`); a `connection` key from the hub is
-//! ignored.
+//! ignored. `transport` (see [`transport`]) and `lock_timeout_seconds` are local only.
 
 pub mod module;
 pub mod pool;
+pub mod transport;
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -29,9 +31,17 @@ pub use pool::{Connection, Connector, Pool, PoolOptions, Pooled};
 /// File in the data directory that declares the site's databases.
 pub const SQL_FILE: &str = "sql.json";
 
-/// Opens `dl_tds` sessions.
+/// Default `SET LOCK_TIMEOUT`: a row locked elsewhere in the product fails fast with SQL
+/// error 1222 instead of holding a pool slot until the query timeout (Check-In 2026-11-18).
+pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Opens `dl_tds` sessions, walking the [`transport`] ladder until one rung connects.
 pub struct TdsConnector {
     config: dl_tds::Config,
+    rungs: Vec<transport::Rung>,
+    at: AtomicUsize,
+    settled: AtomicBool,
+    lock_timeout: Option<Duration>,
 }
 
 impl TdsConnector {
@@ -46,12 +56,53 @@ impl TdsConnector {
         if config.app_name() == "dl-tds" {
             config = config.with_app_name("dl-agent");
         }
-        Ok(TdsConnector { config })
+        Ok(TdsConnector {
+            rungs: transport::rungs(&config, None),
+            config,
+            at: AtomicUsize::new(0),
+            settled: AtomicBool::new(false),
+            lock_timeout: Some(DEFAULT_LOCK_TIMEOUT),
+        })
+    }
+
+    /// Fixes the transport rung (`None` = walk the ladder).
+    pub fn with_transport(mut self, pin: Option<transport::Rung>) -> TdsConnector {
+        self.rungs = transport::rungs(&self.config, pin);
+        self
+    }
+
+    /// `SET LOCK_TIMEOUT` on every new session (`None` = wait forever).
+    pub fn with_lock_timeout(mut self, t: Option<Duration>) -> TdsConnector {
+        self.lock_timeout = t;
+        self
     }
 
     /// The parsed settings.
     pub fn config(&self) -> &dl_tds::Config {
         &self.config
+    }
+
+    /// The rung that connected, once one has.
+    pub fn rung(&self) -> Option<transport::Rung> {
+        self.settled
+            .load(Ordering::Acquire)
+            .then(|| self.rungs[self.at.load(Ordering::Acquire)])
+    }
+
+    fn open(&self) -> Result<dl_tds::Client, dl_tds::Error> {
+        let start = self.at.load(Ordering::Acquire);
+        if self.settled.load(Ordering::Acquire) {
+            // Once a rung worked, a later drop is an outage, not a reason to lower security.
+            return dl_tds::Client::connect(&self.rungs[start].apply(&self.config));
+        }
+        let (r, at) = transport::walk(&self.rungs, start, |rung| {
+            dl_tds::Client::connect(&rung.apply(&self.config))
+        });
+        if r.is_ok() {
+            self.at.store(at, Ordering::Release);
+            self.settled.store(true, Ordering::Release);
+        }
+        r
     }
 }
 
@@ -62,7 +113,19 @@ fn tds(e: dl_tds::Error) -> Error {
 impl Connector for TdsConnector {
     type Conn = dl_tds::Client;
     fn connect(&self) -> Result<dl_tds::Client, Error> {
-        dl_tds::Client::connect(&self.config).map_err(tds)
+        let mut client = self.open().map_err(tds)?;
+        if let Some(t) = self.lock_timeout {
+            client
+                .execute(&format!("SET LOCK_TIMEOUT {}", t.as_millis()), &[])
+                .map_err(tds)?;
+        }
+        Ok(client)
+    }
+    fn describe(&self) -> Value {
+        json!({
+            "rung": self.rung().map(transport::Rung::name),
+            "lock_timeout_ms": self.lock_timeout.map(|t| t.as_millis() as u64),
+        })
     }
 }
 
@@ -206,7 +269,21 @@ impl SqlPools {
                 .get("connection")
                 .and_then(Value::as_str)
                 .ok_or_else(|| bad("missing \"connection\""))?;
-            let connector = TdsConnector::parse(connection).map_err(|e| bad(&e.to_string()))?;
+            let pin = match entry.get("transport") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let s = v
+                        .as_str()
+                        .ok_or_else(|| bad("transport must be a string"))?;
+                    transport::Rung::parse(s).map_err(|m| bad(&m))?
+                }
+            };
+            let lock = seconds(entry, "lock_timeout_seconds", Some(DEFAULT_LOCK_TIMEOUT))
+                .map_err(|e| bad(&e.to_string()))?;
+            let connector = TdsConnector::parse(connection)
+                .map_err(|e| bad(&e.to_string()))?
+                .with_transport(pin)
+                .with_lock_timeout(lock);
             let opts = options_from(entry).map_err(|e| bad(&e.to_string()))?;
             pools.insert(Pool::new(name, connector, opts));
         }
