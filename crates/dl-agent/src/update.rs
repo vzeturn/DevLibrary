@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use dl_hash::{Digest, Sha256};
 use dl_json::{Value, json};
 
+use crate::Error;
 use crate::channel::in_rollout;
 use crate::error::io;
 use crate::manifest::{Artifact, Manifest};
 use crate::store;
 use crate::version::Version;
-use crate::Error;
 
 /// Exit code that tells the service wrapper "restart me, I installed an update".
 pub const RESTART_EXIT_CODE: i32 = 75;
@@ -57,7 +57,10 @@ pub enum Decision {
 
 impl UpdateState {
     fn last_for(&self, channel: &str) -> u64 {
-        self.last_published.iter().find(|(c, _)| c == channel).map_or(0, |(_, t)| *t)
+        self.last_published
+            .iter()
+            .find(|(c, _)| c == channel)
+            .map_or(0, |(_, t)| *t)
     }
 
     /// Remembers that a manifest was accepted.
@@ -70,9 +73,18 @@ impl UpdateState {
     }
 
     /// Decides about a manifest that already passed signature verification.
-    pub fn decide(&self, m: &Manifest, current: &Version, agent_id: &str, target: &str) -> Decision {
+    pub fn decide(
+        &self,
+        m: &Manifest,
+        current: &Version,
+        agent_id: &str,
+        target: &str,
+    ) -> Decision {
         if m.published_at < self.last_for(m.channel.as_str()) {
-            return Decision::Refused(format!("manifest {} is older than one already accepted", m.version));
+            return Decision::Refused(format!(
+                "manifest {} is older than one already accepted",
+                m.version
+            ));
         }
         if self.failed.contains(&m.version) {
             return Decision::Refused(format!("{} was rolled back on this machine", m.version));
@@ -80,12 +92,20 @@ impl UpdateState {
         if m.version == *current || (m.version < *current && !m.allow_downgrade) {
             return Decision::UpToDate;
         }
-        if let Some(min) = &m.min_version {
-            if current < min {
-                return Decision::Refused(format!("{current} is below the minimum {min} for {}", m.version));
-            }
+        if let Some(min) = &m.min_version
+            && current < min
+        {
+            return Decision::Refused(format!(
+                "{current} is below the minimum {min} for {}",
+                m.version
+            ));
         }
-        if !in_rollout(agent_id, &m.product, &m.version.to_string(), m.rollout_percent) {
+        if !in_rollout(
+            agent_id,
+            &m.product,
+            &m.version.to_string(),
+            m.rollout_percent,
+        ) {
             return Decision::NotInRollout;
         }
         match m.artifact_for(target) {
@@ -96,22 +116,37 @@ impl UpdateState {
 
     /// Loads `update.json` (missing → default).
     pub fn load(dir: &Path) -> Result<UpdateState, Error> {
-        let Some(v) = store::read_json(&dir.join("update.json"))? else { return Ok(UpdateState::default()) };
+        let Some(v) = store::read_json(&dir.join("update.json"))? else {
+            return Ok(UpdateState::default());
+        };
         let mut s = UpdateState::default();
         if let Some(o) = v.get("last_published").and_then(Value::as_object) {
             for (k, t) in o.iter() {
-                s.last_published.push((k.to_string(), t.as_u64().unwrap_or(0)));
+                s.last_published
+                    .push((k.to_string(), t.as_u64().unwrap_or(0)));
             }
         }
         if let Some(f) = v.get("failed").and_then(Value::as_array) {
-            s.failed = f.iter().filter_map(Value::as_str).filter_map(|x| x.parse().ok()).collect();
+            s.failed = f
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(|x| x.parse().ok())
+                .collect();
         }
         if let Some(p) = v.get("pending").filter(|p| p.is_object()) {
-            let ver = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").parse::<Version>();
+            let ver = |k: &str| {
+                p.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .parse::<Version>()
+            };
             s.pending = Some(Pending {
                 version: ver("version")?,
                 previous_version: ver("previous_version")?,
-                probation_until: p.get("probation_until").and_then(Value::as_u64).unwrap_or(0),
+                probation_until: p
+                    .get("probation_until")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
                 boots: p.get("boots").and_then(Value::as_u64).unwrap_or(0) as u32,
             });
         }
@@ -126,11 +161,14 @@ impl UpdateState {
         }
         let failed: Vec<String> = self.failed.iter().map(Version::to_string).collect();
         let pending = match &self.pending {
-            Some(p) => json!({"version": p.version.to_string(), "previous_version": p.previous_version.to_string(),
-                              "probation_until": p.probation_until, "boots": u64::from(p.boots)}),
+            Some(p) => {
+                json!({"version": p.version.to_string(), "previous_version": p.previous_version.to_string(),
+                              "probation_until": p.probation_until, "boots": u64::from(p.boots)})
+            }
             None => Value::Null,
         };
-        let v = json!({"last_published": Value::Object(last), "failed": failed, "pending": pending});
+        let v =
+            json!({"last_published": Value::Object(last), "failed": failed, "pending": pending});
         store::write_json(&dir.join("update.json"), &v)
     }
 }
@@ -138,7 +176,11 @@ impl UpdateState {
 /// Checks a downloaded artifact against its manifest entry.
 pub fn verify_artifact(bytes: &[u8], a: &Artifact) -> Result<(), Error> {
     if bytes.len() as u64 != a.size {
-        return Err(Error::Integrity(format!("size {} ≠ {}", bytes.len(), a.size)));
+        return Err(Error::Integrity(format!(
+            "size {} ≠ {}",
+            bytes.len(),
+            a.size
+        )));
     }
     if !dl_hash::ct_eq(&Sha256::digest(bytes), &a.sha256) {
         return Err(Error::Integrity("SHA-256 mismatch".into()));
@@ -174,7 +216,10 @@ impl Installer {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            io("mark update executable", fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)))?;
+            io(
+                "mark update executable",
+                fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)),
+            )?;
         }
         let prev = self.previous();
         if let Some(d) = prev.parent() {
@@ -215,14 +260,20 @@ pub enum BootAction {
 
 /// Called once at every start, before modules run; persists the boot count.
 pub fn on_boot(state: &mut UpdateState, current: &Version) -> BootAction {
-    let Some(p) = state.pending.as_mut() else { return BootAction::Normal };
+    let Some(p) = state.pending.as_mut() else {
+        return BootAction::Normal;
+    };
     if p.version != *current {
         // The swap did not take (or someone replaced the binary): forget it.
         state.pending = None;
         return BootAction::Normal;
     }
     p.boots += 1;
-    if p.boots > MAX_PROBATION_BOOTS { BootAction::RollBack } else { BootAction::Probation }
+    if p.boots > MAX_PROBATION_BOOTS {
+        BootAction::RollBack
+    } else {
+        BootAction::Probation
+    }
 }
 
 /// Commits the pending update once probation has passed with a healthy agent.

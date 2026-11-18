@@ -44,14 +44,15 @@ does not verify.
 ## 3. Heartbeat
 
 ```json
-{"agent_id":"…","version":"1.4.0","channel":"canary","target":"windows-x86_64",
+{"agent_id":"…","product":"dl-agent","version":"1.4.0","channel":"canary","target":"windows-x86_64",
  "hostname":"FO-SERVER","started_at":1763460000,"uptime_seconds":3600,
  "config_version":7,"update":{"state":"idle|probation|rolled_back","version":"1.4.0"},
  "modules":[{"name":"pda-sync","state":"running|starting|degraded|stopped|disabled",
              "detail":"…","restarts":0,"last_error":"…","metrics":{"rows_out":120}}]}
 ```
 
-The hub stores the latest heartbeat per agent; an agent with no heartbeat for
+`product` names the release line the agent follows (default `dl-agent`); product agents
+built on the runtime send their own name. The hub stores the latest heartbeat per agent; an agent with no heartbeat for
 3 × `heartbeat_seconds` is shown as offline.
 
 ## 4. Commands (hub → agent)
@@ -71,7 +72,8 @@ Channels: `canary` and `stable`. The hub decides an agent's channel:
 
 A release is published to `canary` first. It may be promoted to `stable` only when the
 **canary gate** passes: at least `min_agents` canary agents (default 1) have reported that
-version for at least `soak_hours` (default 2), every module on them is `running`, no
+version for at least `soak_hours` (default 2), every module on them is `running` (or
+`disabled` by config, an operator choice rather than a fault), no
 problem report with severity `error`/`critical` and a fingerprint not seen on the previous
 version arrived during the soak, and no agent rolled the version back. Stable releases
 carry `rollout_percent`; an agent installs only when

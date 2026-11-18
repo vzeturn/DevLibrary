@@ -22,7 +22,12 @@ pub struct Version {
 impl Version {
     /// A release version without pre-release identifiers.
     pub fn new(major: u64, minor: u64, patch: u64) -> Version {
-        Version { major, minor, patch, pre: Vec::new() }
+        Version {
+            major,
+            minor,
+            patch,
+            pre: Vec::new(),
+        }
     }
 }
 
@@ -40,7 +45,10 @@ impl FromStr for Version {
         let mut parts = core.split('.');
         let mut num = || -> Result<u64, Error> {
             let p = parts.next().ok_or_else(bad)?;
-            if p.is_empty() || (p.len() > 1 && p.starts_with('0')) || !p.bytes().all(|b| b.is_ascii_digit()) {
+            if p.is_empty()
+                || (p.len() > 1 && p.starts_with('0'))
+                || !p.bytes().all(|b| b.is_ascii_digit())
+            {
                 return Err(bad());
             }
             p.parse().map_err(|_| bad())
@@ -53,13 +61,20 @@ impl FromStr for Version {
             None => Vec::new(),
             Some(p) => {
                 let ids: Vec<String> = p.split('.').map(str::to_string).collect();
-                if ids.iter().any(|i| i.is_empty() || !i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
+                if ids.iter().any(|i| {
+                    i.is_empty() || !i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                }) {
                     return Err(bad());
                 }
                 ids
             }
         };
-        Ok(Version { major, minor, patch, pre })
+        Ok(Version {
+            major,
+            minor,
+            patch,
+            pre,
+        })
     }
 }
 
@@ -121,8 +136,17 @@ mod tests {
     fn semver_precedence() {
         // The example chain from semver.org §11.
         let chain = [
-            "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2",
-            "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0", "1.0.1", "1.1.0", "2.0.0",
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0",
+            "1.0.1",
+            "1.1.0",
+            "2.0.0",
         ];
         for w in chain.windows(2) {
             assert!(v(w[0]) < v(w[1]), "{} < {}", w[0], w[1]);
@@ -133,7 +157,16 @@ mod tests {
     fn parse_and_display() {
         assert_eq!(v("v1.2.3+build.5").to_string(), "1.2.3");
         assert_eq!(v("1.4.0-canary.3").to_string(), "1.4.0-canary.3");
-        for bad in ["", "1", "1.2", "1.2.3.4", "01.2.3", "1.2.x", "1.2.3-", "1.2.3-a..b"] {
+        for bad in [
+            "",
+            "1",
+            "1.2",
+            "1.2.3.4",
+            "01.2.3",
+            "1.2.x",
+            "1.2.3-",
+            "1.2.3-a..b",
+        ] {
             assert!(bad.parse::<Version>().is_err(), "{bad}");
         }
     }

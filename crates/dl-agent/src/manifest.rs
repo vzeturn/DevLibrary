@@ -4,9 +4,9 @@ use dl_ed25519::{SIGNATURE_LEN, SigningKey, VerifyingKey};
 use dl_encoding::base64::STANDARD as B64;
 use dl_json::{Value, json};
 
+use crate::Error;
 use crate::channel::Channel;
 use crate::version::Version;
-use crate::Error;
 
 /// One downloadable build for one target.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,15 +62,23 @@ impl TrustedKeys {
 
     /// Adds a key from its base64 form.
     pub fn with_key(mut self, key_id: &str, public_key_b64: &str) -> Result<TrustedKeys, Error> {
-        let raw = B64.decode(public_key_b64).map_err(|e| Error::Config(format!("release key {key_id}: {e}")))?;
-        let arr: [u8; 32] = raw.try_into().map_err(|_| Error::Config(format!("release key {key_id}: not 32 bytes")))?;
-        let key = VerifyingKey::from_bytes(&arr).map_err(|e| Error::Config(format!("release key {key_id}: {e}")))?;
+        let raw = B64
+            .decode(public_key_b64)
+            .map_err(|e| Error::Config(format!("release key {key_id}: {e}")))?;
+        let arr: [u8; 32] = raw
+            .try_into()
+            .map_err(|_| Error::Config(format!("release key {key_id}: not 32 bytes")))?;
+        let key = VerifyingKey::from_bytes(&arr)
+            .map_err(|e| Error::Config(format!("release key {key_id}: {e}")))?;
         self.keys.push((key_id.to_string(), key));
         Ok(self)
     }
 
     fn get(&self, key_id: &str) -> Option<&VerifyingKey> {
-        self.keys.iter().find(|(id, _)| id == key_id).map(|(_, k)| k)
+        self.keys
+            .iter()
+            .find(|(id, _)| id == key_id)
+            .map(|(_, k)| k)
     }
 }
 
@@ -81,7 +89,11 @@ impl Manifest {
             .iter()
             .map(|a| json!({"target": a.target, "url": a.url, "sha256": dl_encoding::hex::encode(a.sha256), "size": a.size}))
             .collect();
-        let min = self.min_version.as_ref().map(|v| Value::String(v.to_string())).unwrap_or(Value::Null);
+        let min = self
+            .min_version
+            .as_ref()
+            .map(|v| Value::String(v.to_string()))
+            .unwrap_or(Value::Null);
         json!({
             "product": self.product,
             "channel": self.channel.as_str(),
@@ -128,8 +140,16 @@ impl Manifest {
     /// Parses a manifest. Does not verify it; call [`Manifest::verify`].
     pub fn parse(text: &str) -> Result<Manifest, Error> {
         let v = dl_json::parse(text)?;
-        let s = |k: &str| v.get(k).and_then(Value::as_str).ok_or_else(|| Error::Manifest(format!("missing {k}")));
-        let n = |k: &str| v.get(k).and_then(Value::as_u64).ok_or_else(|| Error::Manifest(format!("missing {k}")));
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .ok_or_else(|| Error::Manifest(format!("missing {k}")))
+        };
+        let n = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_u64)
+                .ok_or_else(|| Error::Manifest(format!("missing {k}")))
+        };
         let channel: Channel = s("channel")?.parse()?;
         let rollout = n("rollout_percent")?;
         if rollout > 100 {
@@ -140,14 +160,35 @@ impl Manifest {
             None => None,
         };
         let mut artifacts = Vec::new();
-        for a in v.get("artifacts").and_then(Value::as_array).ok_or_else(|| Error::Manifest("missing artifacts".into()))? {
-            let f = |k: &str| a.get(k).and_then(Value::as_str).ok_or_else(|| Error::Manifest(format!("artifact missing {k}")));
-            let sha = dl_encoding::hex::decode_array::<32>(f("sha256")?).map_err(|_| Error::Manifest("artifact sha256".into()))?;
-            let size = a.get("size").and_then(Value::as_u64).ok_or_else(|| Error::Manifest("artifact missing size".into()))?;
-            artifacts.push(Artifact { target: f("target")?.into(), url: f("url")?.into(), sha256: sha, size });
+        for a in v
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| Error::Manifest("missing artifacts".into()))?
+        {
+            let f = |k: &str| {
+                a.get(k)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| Error::Manifest(format!("artifact missing {k}")))
+            };
+            let sha = dl_encoding::hex::decode_array::<32>(f("sha256")?)
+                .map_err(|_| Error::Manifest("artifact sha256".into()))?;
+            let size = a
+                .get("size")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| Error::Manifest("artifact missing size".into()))?;
+            artifacts.push(Artifact {
+                target: f("target")?.into(),
+                url: f("url")?.into(),
+                sha256: sha,
+                size,
+            });
         }
-        let sig = B64.decode(s("signature")?).map_err(|_| Error::Manifest("signature is not base64".into()))?;
-        let signature: [u8; SIGNATURE_LEN] = sig.try_into().map_err(|_| Error::Manifest("signature length".into()))?;
+        let sig = B64
+            .decode(s("signature")?)
+            .map_err(|_| Error::Manifest("signature is not base64".into()))?;
+        let signature: [u8; SIGNATURE_LEN] = sig
+            .try_into()
+            .map_err(|_| Error::Manifest("signature length".into()))?;
         Ok(Manifest {
             product: s("product")?.into(),
             channel,
@@ -155,7 +196,10 @@ impl Manifest {
             published_at: n("published_at")?,
             rollout_percent: rollout as u8, // checked ≤ 100 above
             min_version,
-            allow_downgrade: v.get("allow_downgrade").and_then(Value::as_bool).unwrap_or(false),
+            allow_downgrade: v
+                .get("allow_downgrade")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             notes: v.get("notes").and_then(Value::as_str).unwrap_or("").into(),
             artifacts,
             key_id: s("key_id")?.into(),
@@ -196,7 +240,9 @@ mod tests {
 
     fn keys() -> (SigningKey, TrustedKeys) {
         let k = SigningKey::from_seed(&[9; 32]);
-        let t = TrustedKeys::new().with_key("rel-1", &B64.encode(k.verifying_key().as_bytes())).unwrap();
+        let t = TrustedKeys::new()
+            .with_key("rel-1", &B64.encode(k.verifying_key().as_bytes()))
+            .unwrap();
         (k, t)
     }
 

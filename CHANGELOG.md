@@ -4,6 +4,21 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/); before 1.0, minor versions may change APIs.
 
+## [Unreleased]
+
+### Added
+
+- `dl-agent`: one on-prem agent for every project (RT-0164). Windows service and systemd
+  install, enrolment and Ed25519-signed hub calls with clock-skew correction and hub
+  fallback, signed self-update with probation, automatic rollback and version blacklist,
+  canary and stable channels, supervised modules (panic capture, restart backoff, a
+  built-in `sys` module), fingerprinted problem reports spooled on disk, remote config
+  with last-known-good revert, remote commands and diagnostics. Wire contract in
+  `crates/dl-agent/PROTOCOL.md`, inventory of the agents it replaces in `INVENTORY.md`.
+- `services/agent-hub`: Cloudflare Worker control plane for `dl-agent` (D1, R2):
+  enrolment codes, heartbeats, commands, per-product release lines, canary gate before
+  promotion to stable, problem reports and a read-only status page.
+
 ## [0.2.1] - 2026-11-15
 
 ### Fixed

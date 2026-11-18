@@ -80,7 +80,11 @@ mod tests {
     #[test]
     fn rollout_is_monotonic_and_spread() {
         let ids: Vec<String> = (0..1000).map(|i| format!("agent-{i}")).collect();
-        let count = |p: u8| ids.iter().filter(|id| in_rollout(id, "dl-agent", "1.4.0", p)).count();
+        let count = |p: u8| {
+            ids.iter()
+                .filter(|id| in_rollout(id, "dl-agent", "1.4.0", p))
+                .count()
+        };
         assert_eq!(count(0), 0);
         assert_eq!(count(100), 1000);
         let ten = count(10);
