@@ -41,7 +41,8 @@ No dependencies outside DevLibrary, no `unsafe`.
   breaker with backoff instead of hammering it, every query has a timeout (15 s) and lock waits
   are capped (8 s), old servers are reached by stepping down TLS 1.2 → TLS 1.0 → unencrypted
   (reported), and a built-in
-  `sql` module reports outages and answers `sql.ping` / `sql.status`. The hub may tune the
+  `sql` module reports outages, surveys each database (engine, compat level, collations,
+  grants; PROTOCOL.md §9.5) and answers `sql.ping` / `sql.status` / `sql.survey`. The hub may tune the
   limits (`body.sql`) but never the connection. See PROTOCOL.md §9.
 
 ## Building a product agent

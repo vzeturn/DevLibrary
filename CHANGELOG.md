@@ -33,6 +33,13 @@ All notable changes are listed here. The format follows
   RTM does; kept until restart, pinnable with `transport`, `sql_unencrypted` report, rung in
   stats and `sql-test`), `SET LOCK_TIMEOUT` on every session (`lock_timeout_seconds`,
   default 8 s); default query timeout 15 s (was 30), below the hub's 20 s wait.
+- `dl-agent` site survey: the agent host (OS version, NT build, OS vs process arch,
+  `legacy_windows`, Win7 build) and, per database, engine version/name/edition, compat
+  level, server and database collations, code page, login, grants (sysadmin, db_owner,
+  CREATE PROCEDURE/FUNCTION/TABLE, ALTER dbo, EXECUTE, VIEW DEFINITION, BACKUP) and
+  warnings such as `engine_pre_2012`, `compat_below_2012`, `cannot_install_procedures`.
+  Taken on first contact and daily, forced by `sql.survey`, sent in the heartbeat
+  `survey` field when it changes or is a day old. The query runs on SQL Server 2005+.
 
 ### Fixed
 

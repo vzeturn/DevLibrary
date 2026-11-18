@@ -15,6 +15,7 @@
 
 pub mod module;
 pub mod pool;
+pub mod survey;
 pub mod transport;
 
 use std::collections::BTreeMap;
@@ -142,6 +143,47 @@ impl Connection for dl_tds::Client {
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
         self.set_timeout(timeout).map_err(tds)
     }
+    fn query_json(&mut self, sql: &str) -> Result<Vec<Value>, Error> {
+        let results = self.query(sql, &[]).map_err(tds)?;
+        let Some(set) = results.first() else {
+            return Ok(Vec::new());
+        };
+        Ok(set
+            .rows()
+            .iter()
+            .map(|row| {
+                let mut m = Map::new();
+                for (col, v) in set.columns().iter().zip(row.values()) {
+                    m.insert(col.name(), tds_to_json(v));
+                }
+                Value::Object(m)
+            })
+            .collect())
+    }
+}
+
+/// A TDS value as JSON: numbers stay numbers, decimals and dates become their text form.
+fn tds_to_json(v: &dl_tds::Value) -> Value {
+    use dl_tds::Value as T;
+    match v {
+        T::Null => Value::Null,
+        T::Bool(b) => Value::from(*b),
+        T::I8(n) => json!(u64::from(*n)),
+        T::I16(n) => json!(i64::from(*n)),
+        T::I32(n) => json!(i64::from(*n)),
+        T::I64(n) => json!(*n),
+        T::F32(f) => Value::from(f64::from(*f)),
+        T::F64(f) => Value::from(*f),
+        T::String(s) => Value::from(s.as_str()),
+        T::Bytes(b) => Value::from(dl_encoding::hex::encode(b)),
+        T::Decimal(d) => Value::from(d.to_string()),
+        T::Uuid(u) => Value::from(u.to_string()),
+        T::Date(d) => Value::from(d.to_string()),
+        T::Time(t) => Value::from(t.to_string()),
+        T::DateTime(d) => Value::from(d.to_string()),
+        T::DateTimeOffset(d) => Value::from(d.to_string()),
+        other => Value::from(format!("{other:?}")),
+    }
 }
 
 /// The pool type modules use.
@@ -152,12 +194,14 @@ pub type SqlPools = Pools<TdsConnector>;
 /// The site's pools by database name.
 pub struct Pools<C: Connector> {
     inner: Arc<Mutex<BTreeMap<String, Arc<Pool<C>>>>>,
+    surveys: Arc<Mutex<BTreeMap<String, Value>>>,
 }
 
 impl<C: Connector> Clone for Pools<C> {
     fn clone(&self) -> Pools<C> {
         Pools {
             inner: Arc::clone(&self.inner),
+            surveys: Arc::clone(&self.surveys),
         }
     }
 }
@@ -166,6 +210,7 @@ impl<C: Connector> Default for Pools<C> {
     fn default() -> Pools<C> {
         Pools {
             inner: Arc::default(),
+            surveys: Arc::default(),
         }
     }
 }
@@ -231,6 +276,24 @@ impl<C: Connector> Pools<C> {
         let mut m = Map::new();
         for pool in self.all() {
             m.insert(pool.name(), pool.stats());
+        }
+        Value::Object(m)
+    }
+
+    /// Stores the latest survey of `database` (PROTOCOL.md §9.5).
+    pub fn set_survey(&self, database: &str, survey: Value) {
+        self.surveys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(database.to_string(), survey);
+    }
+
+    /// `{"<db>": survey}` for every database surveyed so far.
+    pub fn surveys(&self) -> Value {
+        let s = self.surveys.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut m = Map::new();
+        for (k, v) in s.iter() {
+            m.insert(k.as_str(), v.clone());
         }
         Value::Object(m)
     }
