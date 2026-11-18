@@ -64,6 +64,12 @@ describe('POST /v1/heartbeat', () => {
     );
   });
 
+  it('accepts dotted module command kinds such as sys.ping', async () => {
+    const res = await admin(env, 'POST', '/admin/commands', { agent_id: agent.id, kind: 'sys.ping', module: 'sys' });
+    expect(res.status).toBe(201);
+    expect((await beat()).commands.map((c) => [c.kind, c.module])).toEqual([['sys.ping', 'sys']]);
+  });
+
   it('answers 404 for a result on another agent’s command', async () => {
     const other = await enrollAgent(env, 'other');
     const res = await admin(env, 'POST', '/admin/commands', { agent_id: other.id, kind: 'restart' });

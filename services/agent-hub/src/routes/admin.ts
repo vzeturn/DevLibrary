@@ -20,7 +20,7 @@ const codeBody = z.object({ tenant_id: id, site_id: id, ttl_seconds: z.number().
 const channelBody = z.object({ channel: z.enum(['canary', 'stable']).nullable() });
 const commandBody = z.object({
   agent_id: z.string().min(1),
-  kind: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  kind: z.string().regex(/^[a-z][a-z0-9_.]{0,63}$/),
   module: z.string().min(1).max(100).optional(),
   args: z.record(z.string(), z.unknown()).default({}),
   ttl_seconds: z.number().int().min(10).max(7 * 86400).default(3600),

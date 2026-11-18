@@ -81,7 +81,7 @@ export const manifest = z.object({
   version: versionString,
   published_at: z.number().int().positive(),
   rollout_percent: z.number().int().min(0).max(100),
-  min_version: versionString,
+  min_version: versionString.nullable(),
   allow_downgrade: z.boolean(),
   notes: z.string().optional(),
   artifacts: z

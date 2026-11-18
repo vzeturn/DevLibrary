@@ -51,6 +51,13 @@ describe('releases', () => {
     expect((await signed(env, canary, 'GET', '/v1/releases/other/stable')).status).toBe(404);
   });
 
+  it('accepts a manifest without a minimum version (min_version null, as dl-agent signs it)', async () => {
+    const text = manifestText('1.2.0', 'canary', T0 + 1).replace('"min_version":"1.0.0"', '"min_version":null');
+    expect((await admin(env, 'PUT', '/admin/releases/dl-agent/1.2.0', text)).status).toBe(200);
+    const served = await signed(env, canary, 'GET', '/v1/releases/dl-agent/canary');
+    expect(await served.text()).toBe(text);
+  });
+
   it('rejects a canary upload with the wrong shape, channel or version', async () => {
     expect((await admin(env, 'PUT', '/admin/releases/dl-agent/1.2.0', '{"product":"dl-agent"}')).status).toBe(400);
     expect((await admin(env, 'PUT', '/admin/releases/dl-agent/1.2.0', manifestText('1.2.0', 'stable', T0))).status).toBe(400);
