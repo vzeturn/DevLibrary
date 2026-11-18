@@ -26,7 +26,7 @@ describe('evaluateGate', () => {
   it('passes when every check holds', () => {
     const r = evaluateGate(input());
     expect(r.pass).toBe(true);
-    expect(r.checks.map((c) => c.name)).toEqual(['min_agents', 'soak', 'modules_running', 'no_new_errors', 'no_rollback']);
+    expect(r.checks.map((c) => c.name)).toEqual(['min_agents', 'soak', 'modules_running', 'no_new_errors', 'no_rollback', 'site_eligible']);
   });
 
   it('fails min_agents when too few canary agents run the version', () => {

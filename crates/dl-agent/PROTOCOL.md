@@ -54,7 +54,8 @@ does not verify.
 
 `survey` (§9.5) is present on the first heartbeat after start, whenever it changes (a
 database answered for the first time, a daily re-survey found new grants) and at least
-once a day; the hub keeps the last one it received.
+once a day; the hub keeps the last one it received. A malformed or oversized (> 256 KiB)
+survey is dropped and logged; the heartbeat itself is still accepted.
 
 `product` names the release line the agent follows (default `dl-agent`); product agents
 built on the runtime send their own name. The hub stores the latest heartbeat per agent; an agent with no heartbeat for
@@ -82,7 +83,8 @@ A release is published to `canary` first. It may be promoted to `stable` only wh
 version for at least `soak_hours` (default 2), every module on them is `running` (or
 `disabled` by config, an operator choice rather than a fault), no
 problem report with severity `error`/`critical` and a fingerprint not seen on the previous
-version arrived during the soak, and no agent rolled the version back. Stable releases
+version arrived during the soak, no agent rolled the version back, and, when the product has
+site requirements (§9.5), every canary site running the version meets them (`site_eligible`). Stable releases
 carry `rollout_percent`; an agent installs only when
 `sha256(agent_id + "|" + product + "|" + version)[0..2] as u16 % 100 < rollout_percent`.
 
@@ -259,6 +261,14 @@ describes its host and every declared database. Facts only, no data and no secre
   | `unencrypted_transport` | reached on the unencrypted rung |
 
   A failed survey files `sql_survey_failed` (warning) and is retried the next day.
+
+- **Site requirements** (hub, per product): `{"host": {"min_nt_version": "6.1", "families":
+  ["windows"]}, "databases": {"SMILE_FO": {"min_engine_major": 10, "min_compatibility": 100,
+  "grants": ["execute", "create_procedure"], "forbid_warnings": ["database_read_only"],
+  "probe_ok": true}}}`. A site is ready when its last survey (at most 3 days old) meets every
+  item; `sysadmin` or `db_owner` satisfies any grant, `probe_ok` needs the database's last
+  `probe` (§9.6) to have nothing missing. The hub lists ready and unready sites before a site
+  is moved onto a product, and the canary gate refuses a release whose canary sites are not ready.
 
 ### 9.6 Schema probe and SQL error codes
 

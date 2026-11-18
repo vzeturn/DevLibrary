@@ -12,6 +12,7 @@ import {
   previousVersion,
   putRelease,
 } from '../repo/releases';
+import { requirementOf, siteReadiness } from './sites';
 
 export interface GateStatus extends GateResult {
   product: string;
@@ -50,7 +51,7 @@ export async function manifestText(env: Env, product: string, channel: Channel):
   return row.manifest;
 }
 
-export async function gateStatus(env: Env, product: string, version: string): Promise<GateStatus> {
+export async function gateStatus(env: Env, product: string, version: string, now: number): Promise<GateStatus> {
   const canary = await getRelease(env.DB, product, version, 'canary');
   if (!canary) throw new HttpError(404, 'release_not_found');
   const minAgents = intVar(env.GATE_MIN_AGENTS, 1);
@@ -61,7 +62,22 @@ export async function gateStatus(env: Env, product: string, version: string): Pr
     fingerprintsFor(env.DB, version, true),
     previous ? fingerprintsFor(env.DB, previous, false) : Promise.resolve([]),
   ]);
-  const result = evaluateGate({ minAgents, soakHours, agents, errorFingerprints, previousVersion: previous, previousFingerprints });
+  const requirement = await requirementOf(env, product);
+  const live = agents.filter((a) => a.on_version && !a.rolled_back).map((a) => a.agent_id);
+  const unreadySites = requirement
+    ? (await siteReadiness(env, requirement, { agentIds: live }, now))
+        .filter((s) => !s.eligible)
+        .map((s) => ({ agent_id: s.agent_id, reasons: s.reasons.map((r) => r.detail) }))
+    : null;
+  const result = evaluateGate({
+    minAgents,
+    soakHours,
+    agents,
+    errorFingerprints,
+    previousVersion: previous,
+    previousFingerprints,
+    unreadySites,
+  });
   return { product, version, previous_version: previous, min_agents: minAgents, soak_hours: soakHours, ...result };
 }
 
@@ -73,7 +89,7 @@ export interface PromoteAnswer {
 
 export async function promote(env: Env, product: string, version: string, req: PromoteRequest, now: number): Promise<PromoteAnswer> {
   const stable = checkManifest(req.manifest, product, version, 'stable');
-  const gate = await gateStatus(env, product, version);
+  const gate = await gateStatus(env, product, version, now);
   const forced = !gate.pass;
   if (forced) {
     if (!req.force) throw new HttpError(409, 'gate_failed', { checks: gate.checks.filter((c) => !c.ok) });

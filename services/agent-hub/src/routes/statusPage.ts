@@ -1,7 +1,9 @@
 import type { Env } from '../env';
 import { listReleases } from '../repo/releases';
 import { agentsView } from '../services/admin';
+import { listRequirements } from '../repo/sites';
 import { gateStatus } from '../services/releases';
+import { requirementOf, siteReadiness } from '../services/sites';
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export function esc(value: unknown): string {
@@ -56,12 +58,25 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
     if (stable.has(`${r.product}@${r.version}`)) {
       gate = '<span class="ok">Đã lên stable</span>';
     } else {
-      const g = await gateStatus(env, r.product, r.version);
+      const g = await gateStatus(env, r.product, r.version, now);
       const failing = g.checks.filter((c) => !c.ok).map((c) => esc(c.detail));
       gate = g.pass ? '<span class="ok">Đạt — có thể lên stable</span>' : `<span class="bad">Chưa đạt:</span> ${failing.join('; ')}`;
     }
     releaseRows.push(`<tr><td>${esc(r.product)}</td><td>${esc(r.version)}</td>
       <td>${esc(when(r.published_at, now))}</td><td class="wrapcell">${gate}</td></tr>`);
+  }
+
+  const siteRows: string[] = [];
+  for (const { product } of await listRequirements(env.DB)) {
+    const req = await requirementOf(env, product);
+    if (!req) continue;
+    for (const s of await siteReadiness(env, req, {}, now)) {
+      const verdict = s.eligible
+        ? '<span class="ok">Sẵn sàng</span>'
+        : `<span class="bad">Chưa sẵn sàng:</span> ${s.reasons.map((x) => esc(x.detail)).join('; ')}`;
+      siteRows.push(`<tr><td>${esc(product)}</td><td>${esc(s.tenant_id)}</td><td>${esc(s.site_id)}</td>
+        <td>${esc(s.hostname)}</td><td>${esc(when(s.survey_at, now))}</td><td class="wrapcell">${verdict}</td></tr>`);
+    }
   }
 
   const empty = (cols: number, text: string): string => `<tr><td colspan="${cols}" class="muted">${text}</td></tr>`;
@@ -74,5 +89,8 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
 <tbody>${agentRows || empty(8, 'Chưa có agent nào.')}</tbody></table></div>
 <h2>Bản phát hành (canary)</h2><div class="wrap"><table><thead><tr><th>Sản phẩm</th><th>Phiên bản</th><th>Phát hành</th>
 <th>Cổng canary</th></tr></thead><tbody>${releaseRows.join('') || empty(4, 'Chưa có bản phát hành nào.')}</tbody></table></div>
+<h2>Site sẵn sàng cho sản phẩm</h2><div class="wrap"><table><thead><tr><th>Sản phẩm</th><th>Khách hàng</th><th>Chi nhánh</th>
+<th>Máy</th><th>Khảo sát</th><th>Kết quả</th></tr></thead>
+<tbody>${siteRows.join('') || empty(6, 'Chưa sản phẩm nào đặt yêu cầu cho site.')}</tbody></table></div>
 </main></body></html>`;
 }

@@ -15,7 +15,7 @@ PMS, Arrival, Membership, HL, SRBackup) and INVENTORY.md §2–4. Each slice = o
 | C6 | `dl-vn` TCVN3 ⇄ Unicode, CHAR padding trim helper | SMILE text (EINVOICE tcvn3.rs), padding (PDA ADR 0123) | done (cp1252 + cp1258 decode, uppercase pairs from PDA fnPda_TCVN2Unicode, encode for write-back) |
 | C7 | Update hardening: failure cap per 24 h + lifetime 9, `urgent` bypasses window, hub-required build, heartbeat file + `watchdog` sub-command, no-cache on artifacts | Membership 309e72114, Arrival 364aad38/7882b43e, PDA d2d2656f | done |
 | C8 | `install.ps1` from the hub: `irm | iex`, SHA-256, re-run keeps identity, removes old copies, clock check, waits for the link, Defender exclusion + Kaspersky note, OS gate → win7 artifact, remote SQL prompt | PDA da7402e9/d2d2656f, Arrival 02aed898/587d0ee7, EINVOICE 544e419 | done (PS 2.0-safe script; pwsh parse + helper checks; real Windows run pending) |
-| C9 | Hub: store survey, `site_eligible` gate check per product requirements, admin view | gate blocks sites not ready | todo |
+| C9 | Hub: store survey, `site_eligible` gate check per product requirements, admin view | gate blocks sites not ready | done (hub stores survey, requirements per product, `/admin/products/:p/sites`, gate check; 64 hub tests) |
 
 Not testable here (say so in deliver): real Windows 7 / Server 2008 R2 hosts and SQL Server
 2008/2012 engines (docker has 2017+ only); wine smoke and TDS unit tests stand in.

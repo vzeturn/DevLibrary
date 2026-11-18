@@ -3,6 +3,8 @@ import { z } from 'zod';
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 export const versionString = z.string().regex(VERSION, 'expected x.y.z');
 const name = z.string().min(1).max(100);
+/** Largest site survey the hub stores (a few databases, each with its last schema probe). */
+export const MAX_SURVEY_BYTES = 256 * 1024;
 
 export const enrollBody = z.object({
   code: z.string().min(4).max(64),
@@ -44,6 +46,11 @@ export const heartbeatBody = z.object({
     )
     .max(100)
     .default([]),
+  /**
+   * Site survey (§9.5): sent when it changed and at least daily; the hub keeps the last one.
+   * Loosely typed on purpose: a malformed or oversized survey is dropped, never the heartbeat.
+   */
+  survey: z.unknown().optional(),
 });
 export type HeartbeatBody = z.infer<typeof heartbeatBody>;
 
