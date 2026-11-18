@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-hub",
+  // Fill in before the first deploy (kept out of git on purpose):
+  //   "account_id": "<cloudflare account id>",
+  //   "routes": [{ "pattern": "<hub host>", "custom_domain": true }],
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [
+    // database_id comes from `wrangler d1 create agent-hub-db`.
+    { "binding": "DB", "database_name": "agent-hub-db", "database_id": "<d1 database id>", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "agent-hub-artifacts" }],
+  // Prunes the nonce replay table.
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    "HEARTBEAT_SECONDS": "60",
+    "GATE_MIN_AGENTS": "1",
+    "GATE_SOAK_HOURS": "2"
+  },
+  // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`.
+  "observability": { "enabled": true }
+}

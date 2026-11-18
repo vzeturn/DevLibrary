@@ -1,0 +1,25 @@
+{
+  "name": "agent-hub",
+  "private": true,
+  "type": "module",
+  "description": "Control plane for dl-agent: enrolment, signed heartbeats, commands, problem reports, releases and the canary gate.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply agent-hub-db --local",
+    "db:migrate": "wrangler d1 migrations apply agent-hub-db --remote",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "4.13.18",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260702.1",
+    "@types/node": "^24.0.0",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9",
+    "wrangler": "4.162.0"
+  }
+}
