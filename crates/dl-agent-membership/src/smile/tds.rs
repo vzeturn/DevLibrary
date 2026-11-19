@@ -74,10 +74,15 @@ fn split_parts(raw: &str) -> Vec<String> {
     parts
 }
 
+/// SqlClient accepts a value in single or double quotes, a doubled quote inside standing
+/// for itself (`Server=".";Password='p;w''d'`).
 fn unquote(v: &str) -> String {
     let v = v.trim();
-    if v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'') {
-        return v[1..v.len() - 1].replace("''", "'");
+    for q in ['\'', '"'] {
+        if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+            let doubled = format!("{q}{q}");
+            return v[1..v.len() - 1].replace(&doubled, &q.to_string());
+        }
     }
     v.to_owned()
 }
@@ -438,6 +443,19 @@ mod tests {
         assert!(!c.trust_server_certificate());
         assert_eq!(c.connect_timeout(), Duration::from_secs(5));
         assert_eq!(c.timeout(), Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn double_quoted_values_are_unquoted() {
+        // RT-0164 test PC: the bench writes Server=".";Database="SMILE_FO"; the host "\".\""
+        // went to DNS ("No such host is known").
+        let c = normalize_connection_string(
+            r#"Server=".";Database="SMILE_FO";Integrated Security=true;Password="a""b;c""#,
+        )
+        .unwrap();
+        assert_eq!(c.host(), "localhost");
+        assert_eq!(c.database(), "SMILE_FO");
+        assert_eq!(c.password(), r#"a"b;c"#);
     }
 
     #[test]
