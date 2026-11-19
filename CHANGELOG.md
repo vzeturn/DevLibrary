@@ -11,6 +11,13 @@ All notable changes are listed here. The format follows
 - dl-agent-einvoice: per-tenant collect profile from the hub config (`collect_profile.pos_item_name`,
   default `till`); `iname1` takes POS line names from `ItemDef.IName1` (RT-0204 port, opt-in). Golden
   drift guard against MM-EINVOICE (`$MMEI_REPO`).
+- Kill switch (PROTOCOL.md §5.3, §6.5, migration `0006_kill_switch.sql`). The hub can pause a
+  release (`POST /admin/releases/:product/:version/pause`, `/resume`): it is never offered on
+  canary or stable and the manifest falls back to the newest non-paused release. It can hold a
+  tenant or one site (`POST/DELETE /admin/tenants/:tenant/hold`, optional `site_id`, `product`,
+  `reason`): no `update_check` and no manifest, except for an explicit `update_now`. dl-agent
+  honours a `<data dir>/no-update` file: no self-update, `update_blocked: "local"` in the
+  heartbeat, an info report per start and a selftest warn row; `update_now` still works.
 - Update lanes (docs/decisions/0001-update-lanes.md, PROTOCOL.md §5.1, §5.2, §6.4). Canary is
   the fast lane for test machines: the hub answers canary heartbeats with a 15 s interval
   (`CANARY_HEARTBEAT_SECONDS`), 5 s while an update is on probation, and dl-agent on canary

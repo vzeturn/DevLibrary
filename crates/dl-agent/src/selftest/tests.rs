@@ -520,6 +520,17 @@ fn open_private_files_fail_the_permission_check() {
 }
 
 #[test]
+fn the_no_update_file_adds_a_warn_row() {
+    let d = TestDir::new("st-noupdate");
+    assert!(checks_core::no_update(&d.0).is_none());
+    std::fs::write(d.0.join("no-update"), b"").unwrap();
+    let c = checks_core::no_update(&d.0).unwrap();
+    assert_eq!(c.status, Status::Warn);
+    assert!(c.detail.contains("no-update"));
+    assert!(c.remedy.is_some());
+}
+
+#[test]
 fn command_output_fits_and_keeps_failures_first() {
     let long = "x y ".repeat(150);
     let mut checks: Vec<Check> = (0..400)

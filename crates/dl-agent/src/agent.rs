@@ -191,6 +191,13 @@ impl Agent {
             if let Some(e) = &agent.sql.load_error {
                 agent.report(Severity::Critical, "sql_config_invalid", e);
             }
+            if crate::optout::blocked(&agent.opts.data_dir) {
+                agent.report(
+                    Severity::Info,
+                    "update_blocked_local",
+                    "automatic updates are off: the no-update file exists in the data directory (update_now still works)",
+                );
+            }
         })
     }
 
@@ -421,13 +428,20 @@ impl Agent {
             .iter()
             .map(|s| s.to_json())
             .collect();
-        json!({
+        let mut body = json!({
             "agent_id": id.agent_id, "product": self.opts.product, "version": self.opts.version.to_string(),
             "channel": self.channel,
             "target": current_target(), "hostname": self.hostname, "started_at": self.started_at,
             "uptime_seconds": now.saturating_sub(self.started_at), "config_version": self.config.current.version,
             "update": {"state": self.update_status.0, "version": self.update_status.1}, "modules": modules,
-        })
+        });
+        if let (Some(why), Some(map)) = (
+            crate::optout::reason(&self.opts.data_dir),
+            body.as_object_mut(),
+        ) {
+            map.insert("update_blocked", why);
+        }
+        body
     }
 
     /// The site survey and its hash when it changed or is due again, else `None`.
@@ -478,7 +492,10 @@ impl Agent {
                 return Some(exit);
             }
         }
-        if answer.update_check && self.update_check_due(now) {
+        if answer.update_check
+            && !crate::optout::blocked(&self.opts.data_dir)
+            && self.update_check_due(now)
+        {
             self.last_update_check = now;
             match self.try_update(now, false) {
                 Ok(update_flow::Checked::Installed) => return Some(Exit::Restart),

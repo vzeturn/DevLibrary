@@ -79,6 +79,7 @@ pub fn execute(app: &App, dir: &Path, trigger: Trigger, only: Option<&str>, args
         checks.push(hub);
         checks.push(checks_hub::clock(link.skew));
         checks.push(checks_hub::update(app, &link));
+        checks.extend(checks_core::no_update(dir));
         checks.push(checks_hub::spool(dir, &link));
         checks.extend(checks_core::databases(dir, &site, args));
         checks.push(legacy::check(&enabled));

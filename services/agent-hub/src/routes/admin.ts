@@ -17,6 +17,7 @@ import { benchView, createBench, revokeBenchBundle } from '../services/bench';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { allowRelease, disallowRelease } from '../services/lanes';
+import { holdsView, holdTenant, pauseRelease, releaseHold, resumeRelease } from '../services/holds';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
 import { renderStatusPage } from './statusPage';
@@ -43,6 +44,8 @@ const configBody = z.object({ body: z.record(z.string(), z.unknown()) });
 const promoteBody = z.object({ manifest: z.string().min(2), force: z.boolean().optional(), reason: z.string().max(2000).optional() });
 /** A tenant (every site) or one site of it, opted in to a major release. */
 const allowBody = z.object({ tenant_id: id, site_id: id.optional() });
+const pauseBody = z.object({ reason: z.string().max(2000).optional() });
+const holdBody = z.object({ site_id: id.optional(), product: productName.optional(), reason: z.string().max(2000).optional() });
 const reportQuery = z.object({
   tenant_id: z.string().optional(),
   severity: severity.optional(),
@@ -53,6 +56,12 @@ const reportQuery = z.object({
 
 async function jsonBody(req: { text(): Promise<string> }): Promise<unknown> {
   return parseJson(await req.text());
+}
+
+/** Like jsonBody, but an empty body means `{}` (every field optional). */
+async function optionalBody(req: { text(): Promise<string> }): Promise<unknown> {
+  const text = await req.text();
+  return text.trim() ? parseJson(text) : {};
 }
 
 export const adminRoutes = new Hono<AppEnv>();
@@ -148,6 +157,30 @@ adminRoutes.delete('/releases/:product/:version/allow', async (c) => {
   const body = validate(allowBody, await jsonBody(c.req));
   const { product, version } = c.req.param();
   await disallowRelease(c.env, product, version, body);
+  return c.json({});
+});
+
+/** Kill switch (PROTOCOL §5.3): a paused release is never offered, on canary or stable. */
+adminRoutes.post('/releases/:product/:version/pause', async (c) => {
+  const body = validate(pauseBody, await optionalBody(c.req));
+  const { product, version } = c.req.param();
+  return c.json(await pauseRelease(c.env, product, version, body.reason, nowSeconds()), 201);
+});
+adminRoutes.post('/releases/:product/:version/resume', async (c) => {
+  const { product, version } = c.req.param();
+  await resumeRelease(c.env, product, version);
+  return c.json({});
+});
+
+/** Hold a tenant, or one of its sites, off updates; update_now remains the operator's override. */
+adminRoutes.get('/tenants/:tenant/hold', async (c) => c.json({ holds: await holdsView(c.env, validate(id, c.req.param('tenant'))) }));
+adminRoutes.post('/tenants/:tenant/hold', async (c) => {
+  const body = validate(holdBody, await optionalBody(c.req));
+  return c.json(await holdTenant(c.env, validate(id, c.req.param('tenant')), body, nowSeconds()), 201);
+});
+adminRoutes.delete('/tenants/:tenant/hold', async (c) => {
+  const body = validate(holdBody, await optionalBody(c.req));
+  await releaseHold(c.env, validate(id, c.req.param('tenant')), body);
   return c.json({});
 });
 

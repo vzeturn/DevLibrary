@@ -32,19 +32,24 @@ export async function getRelease(db: D1Database, product: string, version: strin
 
 export async function latestRelease(db: D1Database, product: string, channel: Channel): Promise<ReleaseRow | null> {
   return db
-    .prepare('SELECT * FROM releases WHERE product = ?1 AND channel = ?2 ORDER BY published_at DESC LIMIT 1')
+    .prepare(`SELECT * FROM releases r WHERE product = ?1 AND channel = ?2
+       AND NOT EXISTS (SELECT 1 FROM release_pauses p WHERE p.product = r.product AND p.version = r.version)
+       ORDER BY published_at DESC LIMIT 1`)
     .bind(product, channel)
     .first<ReleaseRow>();
 }
 
-export async function listReleases(db: D1Database): Promise<Omit<ReleaseRow, 'manifest'>[]> {
+export type ReleaseListRow = Omit<ReleaseRow, 'manifest'> & { paused: boolean };
+
+export async function listReleases(db: D1Database): Promise<ReleaseListRow[]> {
   const res = await db
     .prepare(
-      `SELECT product, version, channel, published_at, created_at FROM releases
-       ORDER BY product, published_at DESC, channel LIMIT 200`,
+      `SELECT r.product, r.version, r.channel, r.published_at, r.created_at,
+              EXISTS (SELECT 1 FROM release_pauses p WHERE p.product = r.product AND p.version = r.version) AS paused
+       FROM releases r ORDER BY r.product, r.published_at DESC, r.channel LIMIT 200`,
     )
-    .all<Omit<ReleaseRow, 'manifest'>>();
-  return res.results;
+    .all<Omit<ReleaseListRow, 'paused'> & { paused: number }>();
+  return res.results.map((r) => ({ ...r, paused: Number(r.paused) === 1 }));
 }
 
 /** The release before this one: the latest stable published earlier, else the latest earlier canary. */
