@@ -97,9 +97,11 @@ impl Agent {
             unhealthy_before: self.supervisor.unhealthy_names(),
         });
         self.update.save(&self.opts.data_dir)?;
+        self.drain();
         if let Err(e) = self.installer().install(&bytes, &artifact) {
             // A bad download (stale CDN copy, truncated file) or a failed swap counts
-            // towards the failure cap; network errors above do not.
+            // towards the failure cap; network errors above do not. The drained modules
+            // start again on the next tick.
             self.update.pending = None;
             self.update.record_failure(&version, now);
             self.update.save(&self.opts.data_dir)?;
@@ -115,6 +117,17 @@ impl Agent {
             now,
         ));
         Ok(Checked::Installed)
+    }
+
+    /// Stops every module before the swap so in-flight work (a SQL batch, an upload)
+    /// finishes on the old binary (PROTOCOL.md §6). Each module gets `opts.drain_wait`; one
+    /// that does not stop is reported as `module_stuck` and the update goes on, since the
+    /// restart that follows ends it anyway.
+    pub(super) fn drain(&mut self) {
+        let started = std::time::Instant::now();
+        self.supervisor.stop_all(self.opts.drain_wait);
+        let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        dl_log::info!("modules drained before the update"; ms = ms);
     }
 
     fn defer(&mut self, reason: String) -> Checked {
@@ -190,3 +203,7 @@ impl Agent {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "agent_drain_tests.rs"]
+mod drain_tests;

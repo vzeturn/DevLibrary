@@ -37,10 +37,10 @@ installRoutes.get('/download/:product/:channel/:version/:target', async (c) => {
 });
 
 /** Served at the root as `/install.ps1`. */
-export function installScriptResponse(url: string): Response {
+export function installScriptResponse(url: string, hubs: readonly string[] = []): Response {
   const origin = new URL(url).origin;
   if (!origin.startsWith('http')) throw new HttpError(400, 'bad_origin');
-  return new Response(installScript(origin), {
+  return new Response(installScript(origin, hubs), {
     headers: { 'Content-Type': 'text/plain; charset=utf-8', ...NO_CACHE },
   });
 }

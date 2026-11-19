@@ -7,8 +7,8 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 
 | Area | Endpoints |
 |---|---|
-| Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`) |
-| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id` |
+| Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/agent/diagnostics?command_id=` (zip), `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`, never `diag/…`) |
+| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit` |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
 | Bench (public, `no-store`) | `GET /bench/:token` — the bench script of a bundle (see "Bench (test PC)") |
@@ -39,9 +39,14 @@ Notes:
   Defender, checks size + SHA-256, removes older copies (other services running the same exe, leftover
   processes, a service pointing elsewhere), optionally declares and tests SQL Server first (`-SqlPrompt`
   for a server on another machine, or `-SqlName`/`-SqlConnection`) so the code is not spent on a site that
-  cannot reach its database, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
+  cannot reach its database, chooses the SQL login (`[1] Windows [2] SQL login`, or unattended
+  `-SqlAuth windows|sql -SqlServer -SqlUser` with the password only from env
+  `DL_AGENT_SQL_PASSWORD` or, run interactively, a hidden prompt, never a parameter; Enter keeps what this machine saved, else what the old Check-In agent used,
+  through the `Get-ArrivalLegacySql` hook of `installScript`), tested on every SMILE database before it is
+  saved, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
   replaces it), runs an optional product setup sub-command (`-Setup`, secrets through env
-  `DL_AGENT_SETUP_ARGS`, removed afterwards), only then removes a product's previous agent (`-Replace
+  `DL_AGENT_SETUP_ARGS`; for `arrival-enroll` the SQL login too, as env `DL_AGENT_ARRIVAL_SQL_AUTH`,
+  `DL_AGENT_ARRIVAL_SQL_USER`, `DL_AGENT_SQL_PASSWORD`, never argv; all removed afterwards), only then removes a product's previous agent (`-Replace
   '<service pattern>'`: services stopped and deleted, their processes ended, files kept, so any failure
   earlier leaves the old agent running), installs the service + watchdog, prints Kaspersky allow-list guidance with the exe hash, and
   waits for `heartbeat.json` to show a hub contact (`Connected`, or the last log lines and `status`).
@@ -52,6 +57,32 @@ Notes:
   latest run with its checks and the summaries of the kept runs. To run it remotely, queue the generic
   command: `POST /admin/commands {"agent_id": "…", "kind": "selftest", "args": {"trigger": "command"}}`;
   the agent gets it on its next heartbeat like any other command (the hub has no special case for it).
+- Diagnostics: the `collect_diagnostics` command makes the agent upload a zip (`diagnostics.json`, the
+  newest logs within 6 MB, the state files, `bundle.json`; every text scrubbed of secrets on the agent,
+  `identity.key` and `sql.json` never included) to `POST /v1/agent/diagnostics`. The hub refuses a body
+  over 8 MB or without `Content-Length` before checking the signature, stores the zip in R2 as
+  `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip` and a `diagnostics` row (agent, tenant, site, size,
+  SHA-256, command id, agent version), and answers `{id, key, size, sha256}`; the command result carries
+  the same. Only an open `collect_diagnostics` command of the same agent (handed out, not answered)
+  may upload, once (`command_id` required and unique: `400 command_id_required`,
+  `409 no_open_diagnostics_command`, `409 diagnostics_already_uploaded`), and at most 4 bundles per
+  agent an hour (`429 diagnostics_rate_limited`). Bundles are never served on `/v1/artifacts/*`;
+  admins list and download them. Retention: the R2 lifecycle rule `diag-30d` deletes `diag/` objects
+  after 30 days (see Production).
+- Admin audit: every admin request that changes something (any method but GET/HEAD, after auth) is
+  written to `admin_audit` before it runs — time, actor, method, path with query, body with secrets
+  replaced by `[redacted]` (JSON fields named like password/pwd/secret/token/authorization/credential,
+  `*_sealed` or ending in `key` such as `tenant_key`/`hmac_key`/`api-key`, but not `r2_key`,
+  `object_key`, `public_key`, `sort_key`, `cache_key`, `key_id`, `kid`; `Password=`/`Pwd=` in
+  connection strings with ADO.NET quoting; `name=value` text pairs with such names; `Bearer`/`Basic`
+  values; cut at 4 000 characters) — and its status and error code once it finished. The actor is the
+  e-mail (or `service-token:<client id>`) of a verified Cloudflare Access token
+  (`Cf-Access-Jwt-Assertion`: RS256 by the team's keys, `aud` = `ACCESS_AUD`, `iss` =
+  `https://<ACCESS_TEAM_DOMAIN>`, unexpired); without those vars or a valid token it is `admin-token`
+  (the `Cf-Access-Authenticated-User-Email` header alone is never trusted). If the row cannot be
+  written the change is refused with `503 audit_unavailable`, except the kill switches (release
+  pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and log the would-be row
+  (`admin_audit_write_failed`, `fail_open: true`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
 ## Bench (test PC)
@@ -146,6 +177,16 @@ Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0
   public half `rel-2026:jz7z7AVXs8ArKexwiZimYtGICV9cXrie6v7Cuulw3CI=` baked into builds with
   `DL_AGENT_RELEASE_KEYS`).
 - Redeploy: `pnpm typecheck && pnpm test`, then `pnpm db:migrate` (remote) and `pnpm deploy`.
+  Apply migration `0007_diagnostics_audit.sql` (`pnpm db:migrate`) **before** deploying the Worker
+  that has the admin audit: until the table exists every admin change except the kill switches
+  answers `503 audit_unavailable`. `HUB_URLS` is a `wrangler.jsonc` var, so a changed list goes live
+  with that deploy (agents keep only allow-listed hosts, PROTOCOL.md §2.1).
+- Audit actor (optional vars, both or neither): `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`)
+  and `ACCESS_AUD` (the admin Access application's audience tag), e.g. in `wrangler.jsonc` `vars`.
+- Diagnostics retention (run once, by the operator):
+  `wrangler r2 bucket lifecycle add agent-hub-artifacts diag-30d diag/ --expire-days 30`
+  (check with `wrangler r2 bucket lifecycle list agent-hub-artifacts`; the same rule as JSON is
+  `r2-lifecycle.json`, for `wrangler r2 bucket lifecycle set`, which replaces every rule of the bucket).
 - Bench needs `BENCH_KEY` (32 random bytes, base64): `openssl rand -base64 32 | wrangler secret put BENCH_KEY`.
   Rotating it makes every existing bundle unreadable (`500 bench_unreadable`); revoke them first.
 - Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,

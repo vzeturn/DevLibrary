@@ -16,6 +16,10 @@ dl-decimal.workspace = true
 dl-time.workspace = true
 dl-uuid.workspace = true
 
+[features]
+## A scripted TDS server on loopback (`dl_tds::fake`) for connection-path tests.
+fake-server = []
+
 [dev-dependencies]
 dl-rand.workspace = true
 

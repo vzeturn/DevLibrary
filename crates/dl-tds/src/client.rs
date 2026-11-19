@@ -101,6 +101,7 @@ pub struct Client {
     login_ack: LoginAck,
     encrypted: bool,
     cancel: Option<CancelToken>,
+    peer: Option<SocketAddr>,
 }
 
 impl fmt::Debug for Client {
@@ -163,16 +164,18 @@ fn handshake_error(e: dl_tls::Error) -> Error {
     Error::Tls(e)
 }
 
-fn dial(cfg: &Config) -> Result<TcpStream, Error> {
-    let host = cfg.host();
-    let dial_host = if host == "."
-        || host.eq_ignore_ascii_case("(local)")
-        || host.eq_ignore_ascii_case("localhost")
+/// The address to dial: `.`, `(local)` and `localhost` mean this computer.
+fn dial_host(host: &str) -> &str {
+    if host == "." || host.eq_ignore_ascii_case("(local)") || host.eq_ignore_ascii_case("localhost")
     {
         "127.0.0.1"
     } else {
         host
-    };
+    }
+}
+
+fn dial(cfg: &Config) -> Result<TcpStream, Error> {
+    let dial_host = dial_host(cfg.host());
     let port = match (cfg.port().filter(|&p| p != 0), cfg.instance()) {
         (Some(p), _) => p,
         (None, Some(inst)) => crate::browser::resolve(dial_host, inst, cfg.connect_timeout())?,
@@ -215,6 +218,7 @@ impl Client {
             None
         };
         let tcp = dial(cfg)?;
+        let peer = tcp.peer_addr().ok();
         tcp.set_nodelay(true)?;
         // Bound the handshake even without a configured timeout.
         let login_timeout = cfg
@@ -352,6 +356,7 @@ impl Client {
             login_ack: LoginAck::default(),
             encrypted,
             cancel: None,
+            peer,
         };
         let ack = client.finish_login(negotiate.as_mut())?;
         client.login_ack = ack;
@@ -557,6 +562,12 @@ impl Client {
         self.encrypted
     }
 
+    /// The server address this session is connected to (after named-instance lookup):
+    /// shows which port a `host\instance` resolved to.
+    pub fn peer_addr(&self) -> Option<SocketAddr> {
+        self.peer
+    }
+
     /// Server version from LOGINACK: (major, minor, build), e.g. (16, 0, 4135).
     pub fn server_version(&self) -> (u8, u8, u16) {
         self.login_ack.version
@@ -728,3 +739,7 @@ fn write_packets<W: Write>(w: &mut W, framed: &[u8]) -> io::Result<()> {
     }
     w.write_all(rest)
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

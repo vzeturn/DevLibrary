@@ -8,6 +8,12 @@
 //! from SQL Server itself (login, database). The first rung that connects is kept for the
 //! life of the process and reported; an explicit `encrypt=true` / `strict` / `disable`
 //! never steps down.
+//!
+//! The unencrypted rung is on the ladder only when no password crosses the network in clear:
+//! a Windows login, or a server on this computer ([`clear_allowed`]). A SQL login to another
+//! computer stops at TLS 1.0 and fails as `sql_tls_unavailable` instead; pinning
+//! `"transport": "unencrypted"` in `sql.json` (or `sql-setup --allow-unencrypted`) is the
+//! operator's explicit choice to accept it.
 
 use std::io;
 
@@ -58,8 +64,17 @@ impl Rung {
     }
 }
 
-/// The rungs to try for `base`, in order. `pin` (from `sql.json`) fixes one rung.
+/// The rungs to try for `base`, in order. `pin` (from `sql.json`) fixes one rung. The
+/// unencrypted rung is left out when [`clear_allowed`] says no (this computer's name from
+/// `COMPUTERNAME`).
 pub fn rungs(base: &Config, pin: Option<Rung>) -> Vec<Rung> {
+    let here = std::env::var("COMPUTERNAME").ok();
+    ladder(base, pin, clear_allowed(base, here.as_deref()))
+}
+
+/// [`rungs`] with the clear-text decision given: `clear_ok` false drops the unencrypted rung
+/// from an automatic ladder (a pin is always kept: it is the operator's choice).
+pub fn ladder(base: &Config, pin: Option<Rung>, clear_ok: bool) -> Vec<Rung> {
     if let Some(p) = pin {
         return vec![p];
     }
@@ -71,8 +86,31 @@ pub fn rungs(base: &Config, pin: Option<Rung>) -> Vec<Rung> {
     if base.tls_min() > TlsVersion::Tls10 {
         out.push(Rung::Tls10);
     }
-    out.push(Rung::Unencrypted);
+    if clear_ok {
+        out.push(Rung::Unencrypted);
+    }
     out
+}
+
+/// Whether an automatic ladder may end unencrypted for `base`: a Windows login (no password
+/// on the wire) or a server on this computer (`.`, `(local)`, `localhost`, a loopback
+/// address, or exactly `this_computer`, the NetBIOS name). A SQL login to any other host
+/// never steps down to clear text by itself, so a man in the middle cannot force it.
+pub fn clear_allowed(base: &Config, this_computer: Option<&str>) -> bool {
+    super::secret::AuthMode::of(base) == super::secret::AuthMode::Windows
+        || is_this_computer(base.host(), this_computer)
+}
+
+fn is_this_computer(host: &str, this_computer: Option<&str>) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    let bare = h.trim_start_matches('[').trim_end_matches(']');
+    matches!(h.as_str(), "." | "(local)" | "localhost")
+        || bare
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+        || this_computer
+            .map(str::trim)
+            .is_some_and(|n| !n.is_empty() && h.eq_ignore_ascii_case(n))
 }
 
 /// `true` when `e` happened below SQL Server's own answer and a lower rung may work: a TLS
@@ -137,11 +175,43 @@ mod tests {
     fn default_encryption_gets_the_full_ladder() {
         let c = cfg("Server=h;User Id=u;Password=p");
         assert_eq!(
-            rungs(&c, None),
+            ladder(&c, None, true),
             [Rung::AsConfigured, Rung::Tls10, Rung::Unencrypted]
         );
         let low = cfg("Server=h;User Id=u;Password=p;TLSMin=1.0");
-        assert_eq!(rungs(&low, None), [Rung::AsConfigured, Rung::Unencrypted]);
+        assert_eq!(
+            ladder(&low, None, true),
+            [Rung::AsConfigured, Rung::Unencrypted]
+        );
+    }
+
+    #[test]
+    fn a_sql_login_to_another_computer_never_ends_unencrypted() {
+        let remote = cfg("Server=fo-server\\SQLEXPRESS;User Id=u;Password=p");
+        assert!(!clear_allowed(&remote, Some("POS-01")));
+        assert_eq!(
+            ladder(&remote, None, clear_allowed(&remote, None)),
+            [Rung::AsConfigured, Rung::Tls10]
+        );
+        assert_eq!(rungs(&remote, None), [Rung::AsConfigured, Rung::Tls10]);
+        // An explicit pin is the operator's choice and is kept.
+        assert_eq!(rungs(&remote, Some(Rung::Unencrypted)), [Rung::Unencrypted]);
+        // Windows login, or a server on this computer, keeps the whole ladder.
+        let windows = cfg("Server=fo-server;Integrated Security=SSPI");
+        assert!(clear_allowed(&windows, None));
+        for local in [
+            "Server=.\\SQLEXPRESS",
+            "Server=(local)",
+            "Server=localhost,1433",
+            "Server=127.0.0.1",
+            "Server=::1",
+            "Server=pos-01\\SQLEXPRESS",
+        ] {
+            let c = cfg(&format!("{local};User Id=u;Password=p"));
+            assert!(clear_allowed(&c, Some("POS-01")), "{local}");
+        }
+        let fqdn = cfg("Server=pos-01.evil.example;User Id=u;Password=p");
+        assert!(!clear_allowed(&fqdn, Some("POS-01")));
     }
 
     #[test]
@@ -187,7 +257,7 @@ mod tests {
     /// fails, TLS 1.0 completes and the server resets; only the unencrypted rung works.
     #[test]
     fn sql_2008_r2_rtm_ends_unencrypted() {
-        let c = cfg("Server=h;User Id=u;Password=p");
+        let c = cfg("Server=.;User Id=u;Password=p");
         let all = rungs(&c, None);
         let mut tried = Vec::new();
         let (r, at) = walk(&all, 0, |rung| {

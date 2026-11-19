@@ -411,7 +411,7 @@ pub enum Problem {
     Locked,
     /// 1205: chosen as deadlock victim; retry.
     Deadlock,
-    /// 18456 login failed, 4060 cannot open database, 229/230 permission denied.
+    /// 18456 login failed, 4060/4063 cannot open database, 229/230 permission denied.
     Access {
         /// SQL error number.
         number: i32,
@@ -453,7 +453,7 @@ pub fn classify(e: &dl_tds::Error) -> Problem {
             },
             1222 => Problem::Locked,
             1205 => Problem::Deadlock,
-            18456 | 4060 | 229 | 230 => Problem::Access { number: *number },
+            18456 | 4060 | 4063 | 229 | 230 => Problem::Access { number: *number },
             _ => Problem::Other,
         },
         dl_tds::Error::Timeout => Problem::Timeout,
@@ -594,6 +594,10 @@ mod tests {
         assert!(locked.retryable());
         assert_eq!(
             classify(&server(18456, "Login failed")).code(),
+            "sql_access_denied"
+        );
+        assert_eq!(
+            classify(&server(4063, "Cannot open database \"SMILE_POS\"")).code(),
             "sql_access_denied"
         );
         assert_eq!(classify(&dl_tds::Error::Timeout), Problem::Timeout);

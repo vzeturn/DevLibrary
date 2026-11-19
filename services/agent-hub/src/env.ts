@@ -17,6 +17,12 @@ export interface Env {
   GATE_SOAK_HOURS_MAJOR?: string;
   /** Minor rollout ramp after promotion, "hours:percent,…" (default "0:10,24:50,48:100"). */
   MINOR_RAMP?: string;
+  /** Hub base URLs handed to agents, primary first ("https://a,https://b"); also limits the fallback host to agent paths. */
+  HUB_URLS?: string;
+  /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`); with ACCESS_AUD, names admins in the audit trail. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** Audience tag of the Access application in front of /admin. */
+  ACCESS_AUD?: string;
 }
 
 export interface AgentRow {
@@ -40,6 +46,8 @@ export type Channel = 'canary' | 'stable';
 export interface AppVars {
   agent: AgentRow;
   rawBody: string;
+  /** The signed body as sent (binary uploads such as diagnostics bundles). */
+  rawBytes: Uint8Array;
 }
 
 export type AppEnv = { Bindings: Env; Variables: AppVars };

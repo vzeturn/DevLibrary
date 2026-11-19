@@ -6,7 +6,8 @@
   "routes": [{ "pattern": "agent.pms.id.vn", "custom_domain": true }],
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "workers_dev": false,
+  // workers.dev is the fallback hub host (PROTOCOL.md §2.1): agents only, admin stays on the custom domain.
+  "workers_dev": true,
   "preview_urls": false,
   "d1_databases": [
     { "binding": "DB", "database_name": "agent-hub-db", "database_id": "81c8a571-9363-414b-bdcc-59944f0e961c", "migrations_dir": "migrations" }
@@ -22,7 +23,9 @@
     "GATE_SOAK_HOURS_PATCH": "2",
     "GATE_SOAK_HOURS_MINOR": "24",
     "GATE_SOAK_HOURS_MAJOR": "72",
-    "MINOR_RAMP": "0:10,24:50,48:100"
+    "MINOR_RAMP": "0:10,24:50,48:100",
+    // Hub hosts handed to agents, primary first; the fallback serves /v1, /install and /healthz only.
+    "HUB_URLS": "https://agent.pms.id.vn,https://agent-hub.vutq-sense.workers.dev"
   },
   // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`; `BENCH_KEY` (base64 of 32 random bytes) enables /admin/bench.
   "observability": { "enabled": true }

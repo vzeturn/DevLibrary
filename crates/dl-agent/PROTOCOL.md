@@ -38,8 +38,37 @@ does not verify.
 | `POST /v1/heartbeat` | Heartbeat (§3) → `{server_time, channel, heartbeat_seconds, config?:{version, body}, commands:[Command], update_check:bool}` |
 | `POST /v1/reports` | `{reports:[ProblemReport]}` → `{accepted:N}` |
 | `POST /v1/commands/{id}/result` | `{ok:bool, output:string, finished_at}` → `{}` |
+| `POST /v1/agent/selftest` | self-test run → `{accepted, run_id}` |
+| `POST /v1/agent/diagnostics?command_id=` | zip (§4.1, at most 8 MB) → `{id, key, size, sha256}` |
 | `GET  /v1/releases/{product}/{channel}` | → signed Manifest (§5); `404` when no release |
 | `GET  <artifact url>` | binary, size and SHA-256 come from the manifest |
+
+### 2.1 Hub hosts and fallback
+
+The enrol answer and every heartbeat answer may carry `hub_urls`: the hub's hosts in order of
+preference, at most 5, each `https://` (`http://` only for localhost). The agent keeps the
+list in `identity.json` (the host that answered is kept even if the list leaves it out) and
+sends each call to the host that last worked, moving down the list on a transport error or a
+5xx. A missing, empty or unusable list changes nothing; the agent warns once. Only hosts on
+the build's allowlist (`hub_urls::ALLOWED_HOSTS`: `agent.pms.id.vn`, `*.pms.id.vn`,
+`agent-hub.vutq-sense.workers.dev`; loopback always) are kept; any other entry is ignored and
+reported once per change as `hub_urls_ignored` (warning), so a tampered or mistyped
+`HUB_URLS` can never steer agents to a foreign host. The hub sets the list from `HUB_URLS`
+(a `wrangler.jsonc` var: it goes live with the next deploy); a fallback host (not the first) serves only `/healthz`, `/install.ps1`,
+`/install/*` and `/v1/*` and answers 404 for everything else, so the admin API stays on the
+primary host. The installer passes the same list to `enroll`, so a new agent can enrol while
+the primary host is down. Self-test row `core/hub_urls`: pass with a fallback, warn with one host.
+
+### 2.2 Proxy
+
+The agent reads the proxy once per start: `HTTPS_PROXY` / `HTTP_PROXY` (with `NO_PROXY`),
+else the WinHTTP setting (`netsh winhttp set proxy`), else the Internet Options of the
+service account (`ProxyEnable`, `ProxyServer` as `host:port` or `http=…;https=…`,
+`ProxyOverride` with `*` wildcards and `<local>`; machine-wide under the
+`ProxySettingsPerUser = 0` policy). Only `http://` proxies are used, `https` goes through
+`CONNECT`. Credentials come from the proxy URL or from `DL_AGENT_PROXY_USER` /
+`DL_AGENT_PROXY_PASSWORD` (Basic). Self-test row `core/proxy` names the source and the proxy
+and says `credentials yes/no`, never the password; a setting that cannot be used is a warning.
 
 ## 3. Heartbeat
 
@@ -70,6 +99,40 @@ the failure cap; the output says why nothing was installed), `retry_update {vers
 `collect_diagnostics`, `reload_config`, `revoke` (wipe identity and stop). Any other kind with a `module` is
 passed to that module. Expired commands are answered `{ok:false, output:"expired"}`.
 Every command gets exactly one result.
+
+### 4.1 Diagnostics bundle
+
+`collect_diagnostics` builds a zip and uploads it signed to
+`POST /v1/agent/diagnostics?command_id=<id>` (`Content-Type: application/zip`, the
+signature covers the zip bytes and the query). The zip holds `diagnostics.json` (agent,
+tenant, site, hub hosts, version, channel, uptime, clock skew, config version, update state,
+modules, spooled reports), `logs/<file>` (newest file first, the end of each, 6 MB in all),
+`state/<file>` (`update.json`, `config.json`, `heartbeat.json`, `watchdog.json`,
+`watchdog-reports.json`, `reports.json`, `sql-installs.jsonl`, `sql-setup.last.json` when
+present), `modules/<module>/<file>` (the files a module named with
+`ModuleContext::add_diagnostic_file`, the last 512 KiB of each: e.g. `arrival`'s
+`agent-problems.json` and `dl-enroll.json`; only `.json`/`.jsonl`/`.log`/`.txt` names without
+`key`, `secret`, `identity`, `password` or `appsettings`) and `bundle.json` (what was taken
+from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed like the log (`Password=…` / `Pwd=…`
+with ADO.NET quoting, `Bearer …`, fields named like password/pwd/secret/token/authorization,
+`*_sealed` or ending in `key` (`tenant_key`, `hmac_key`, `key=`) → `[redacted]`; `r2_key`,
+`object_key`, `public_key`, `sort_key`, `cache_key`, `key_id` and `kid` stay readable);
+`identity.key` and `sql.json` are never included. Over 8 MB the log share is halved until it fits.
+
+The hub answers `{id, key, size, sha256}` (key `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip`),
+refuses more than 8 MB or a body without `Content-Length` (`413` / `411`, before the
+signature check) and anything that is not a zip (`400 not_a_zip`). It takes a bundle only for
+an open `collect_diagnostics` command of the same agent: `command_id` is required
+(`400 command_id_required`), the command must have been handed out and not answered yet
+(`409 no_open_diagnostics_command`), and each command uploads once
+(`409 diagnostics_already_uploaded`). An agent stores at most 4 bundles an hour
+(`429 diagnostics_rate_limited`). An R2 lifecycle rule deletes `diag/` objects after 30 days
+(the D1 row stays; its download then answers `404 diagnostics_object_missing`). The command result is
+`{ok:true, output:{uploaded:{id, r2_key, size, sha256}, diagnostics:{…}}}` (the hub's `key`
+renamed so the scrub keeps it); when the bundle
+cannot be built or uploaded it is `{ok:false, output:{upload_error, diagnostics:{…, log_tail}}}`.
+Admins read bundles with `GET /admin/diagnostics?agent_id=` and
+`GET /admin/diagnostics/{id}/download`; agents can never fetch them.
 
 ## 5. Releases, channels and the canary gate
 
@@ -169,13 +232,18 @@ Two operator stops, both kept in the hub (migration `0006_kill_switch.sql`):
   `tenant_not_found`, `hold_not_found`.
 
 Other tenants are untouched. Agents need no change: they only see `update_check` false.
-The hub keeps no separate audit log for admin calls (none of its admin routes has one); the
-admin bearer token is the audit boundary.
+Every admin change is written to `admin_audit` before it runs (hub README "Admin audit"); a
+change whose row cannot be written is refused with `503 audit_unavailable`, except these kill
+switches (release pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and
+leave the would-be row in the Worker log (`admin_audit_write_failed`, `fail_open: true`).
 
 ## 6. Update, probation and rollback (agent side)
 
 1. Download the artifact for the agent's target, check size and SHA-256, stage it.
-2. Keep the running binary as `previous`, put the new one in place, record
+2. Drain: every module is asked to stop and gets up to 30 s to finish in-flight work on the
+   old binary (a module still running after that is reported `module_stuck` and left to the
+   restart). If the swap then fails, the drained modules start again on the next tick.
+   Keep the running binary as `previous`, put the new one in place, record
    `pending = {version, previous, probation_until, unhealthy_before}` and exit with code 75;
    the service manager restarts the agent. `unhealthy_before` names the modules already
    degraded or stopped at install time: probation ignores them (a site problem must not
@@ -208,8 +276,11 @@ the hub send `Cache-Control: no-cache`; the hub serves artifacts with `no-store`
 
 ### 6.3 External watchdog
 
-The agent rewrites `heartbeat.json` (`{at, hub_at, version, pid}`) once a minute and at
-once after each successful hub heartbeat. `install` registers `<binary> watchdog`, run every
+The agent rewrites `heartbeat.json` (`{at, hub_at, version, pid, channel, skew, links}`) once
+a minute and at once after each successful hub heartbeat. `links` lists the running modules'
+own cloud links, `{module, url, ok_at, since}`: a module that talks to a cloud besides the hub
+calls `ModuleContext::set_cloud_link(url, last_ok)` after each exchange (only the origin is
+kept; also the metric `cloud_link_ok_at`) and `clear_cloud_link` when it stops using it. `install` registers `<binary> watchdog`, run every
 5 minutes: a scheduled task `"<display name> Watchdog"` as SYSTEM on Windows (put back and
 service recovery re-applied at each service start), a `<service>-watchdog.timer` on Linux.
 Each run takes at most one action:
@@ -222,10 +293,12 @@ Each run takes at most one action:
 | running | an update is on probation | none (the agent rolls back itself) |
 | running | loop beat ≥ 20 min old | restart |
 | running | hub beat ≥ 20 min old **and** the hub `/healthz` answers | restart |
+| running | a module's cloud link silent ≥ 20 min (since its last success, or since it was declared) **and** that origin answers 2xx or 3xx | restart, even with the hub link up |
 
 Restarts back off 1 h, 2 h, 4 h … 12 h, reset by a healthy run. Every action leaves a report
 (`watchdog_started` warning, `watchdog_killed` / `watchdog_restarted` error,
-`watchdog_action_failed` critical) in `watchdog-reports.json`; the agent sends them after
+`watchdog_action_failed` critical) in `watchdog-reports.json`, with `last_loop_at`,
+`last_hub_at`, `version` and `link_<module>_ok_at` per link; the agent sends them after
 its next start. The watchdog logs to `logs/watchdog.log`; `uninstall` removes the task or
 timer first.
 
@@ -250,6 +323,27 @@ fetched, nothing installs). It says so: the heartbeat carries `"update_blocked":
 while the file exists (absent otherwise), one `info` report `update_blocked_local` is sent per
 start, and `selftest` shows a warn row `core/no_update`. The `update_now` command still runs,
 as does `retry_update`. Hubs that do not know the field ignore it.
+
+### 6.6 Rollback smoke test (fault build)
+
+`scripts/build-dl-agent.sh --fault probation <version>` compiles `DL_AGENT_FAULT=probation`
+into the binary (never set otherwise; the variable in the builder's environment is ignored).
+`--version` then prints `<version> (fault build: probation)`. Such a build installs and runs
+normally but never commits: when probation ends it rolls back as in step 4, with the reason
+`fault build (DL_AGENT_FAULT=probation) never passes probation`. Procedure on a canary test
+machine:
+
+1. Build `X` with `--fault probation`, sign it as a canary manifest, `PUT /admin/releases/dl-agent/X`.
+2. The canary agent installs `X`, restarts, and after its probation (120 s on canary) restores
+   the previous binary, records one failure of `X` (§6.2) and restarts.
+3. Visible on the hub: the `critical` report `update_rolled_back` with `version = X`
+   (`GET /admin/reports?severity=critical&version=X`), the heartbeat `update.state =
+   "rolled_back"`, the `core/update_state` selftest row listing `X` as failed, and the gate of
+   `X` failing `no_rollback`. Pause `X` (`POST /admin/releases/dl-agent/X/pause`).
+4. Publish the fixed build `X+1` (no fault): the agent takes it and commits it.
+
+The fault build is for canary test machines only; publishing one to stable is a mistake the
+gate (`no_rollback`) already refuses.
 
 ## 7. Problem reports
 
@@ -307,6 +401,14 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   drops are outages. `encrypt=true|strict|disable` never steps down; `transport` may pin
   `as_configured`, `tls1.0` or `unencrypted`. Ending unencrypted files one `sql_unencrypted`
   (warning); the rung is in stats (`transport.rung`) and in `sql-test` output.
+  The automatic ladder reaches *unencrypted* only for a Windows login or a server on this
+  computer (`.`, `(local)`, `localhost`, loopback, or exactly `COMPUTERNAME`). A SQL login
+  to another computer stops at TLS 1.0: a handshake failure there is an error report
+  `sql_tls_unavailable` (the module turns degraded) and no password is ever sent in clear,
+  so nobody on the path can force a downgrade. To accept it anyway, an operator pins
+  `"transport": "unencrypted"` or runs `dl-agent sql-setup --allow-unencrypted`.
+  `sql-setup` writes the rung each database connected on as its `transport` pin, so the
+  runtime never steps below what setup proved; re-run `sql-setup` after a server upgrade.
 - **Lock waits**: every new session runs `SET LOCK_TIMEOUT` (`lock_timeout_seconds`, default
   8, 0 = wait forever), so a row locked by the product fails fast with SQL error 1222
   instead of holding a slot until `query_timeout` (default 15 s, below the hub's 20 s wait).

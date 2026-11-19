@@ -4,14 +4,19 @@ pub mod agent;
 pub mod channel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_sql;
 pub mod command;
 pub mod config;
 mod error;
+pub mod fault;
 pub mod host;
 pub mod hub;
+pub mod hub_urls;
 pub mod identity;
 pub mod manifest;
 pub mod optout;
+pub mod proxy;
 pub mod report;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod selftest;

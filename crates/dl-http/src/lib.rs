@@ -8,6 +8,7 @@ mod error;
 mod headers;
 mod message;
 mod proxy;
+mod proxy_rules;
 mod url;
 
 pub use body::ChunkedDecoder;
@@ -20,4 +21,5 @@ pub use message::{
     parse_response_head, response_framing,
 };
 pub use proxy::Proxy;
+pub use proxy_rules::ProxyRules;
 pub use url::{Scheme, Url, encode_path_segment, encode_query_component, percent_decode};

@@ -6,15 +6,26 @@
  *
  * Steps: admin + TLS 1.2 → OS gate (NT < 10 → windows7 build, x86/x64) → clock check against
  * the hub → Defender exclusion → download + size + SHA-256 → stop and remove older copies
- * (the old exe uninstalls itself, other services are deleted) → optional SQL Server prompt,
- * tested before the code is spent → enroll unless already enrolled (re-run keeps the identity)
- * → optional product setup sub-command (`-Setup`) → remove the product's previous agent
+ * (the old exe uninstalls itself, other services are deleted) → SQL login (PROTOCOL.md §9.8:
+ * Windows or SQL login, defaulting to what this machine saved, tested on every SMILE database as
+ * the service account before anything is saved, and before the code is spent; with nothing saved, the
+ * old Check-In agent's connection from `Get-ArrivalLegacySql`) → enroll unless already enrolled (re-run
+ * keeps the identity) → optional product setup sub-command (`-Setup`; `arrival-enroll` also gets the SQL
+ * login through env) → remove the product's previous agent
  * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
  * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
  */
 const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Administrator):
 #   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 #   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
+# SQL login: asked when run interactively on a machine with SQL Server (or with -SqlPrompt):
+#   "SQL login: [1] Windows  [2] SQL login"; Enter keeps what this machine saved.
+#   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile]; the password only
+#   from env DL_AGENT_SQL_PASSWORD or, run interactively, a hidden prompt (never a parameter,
+#   echoed or logged; sealed with DPAPI).
+#   A failed test prints the exact SQL error and exits 1; nothing is saved. With nothing saved
+#   the old Check-In agent's connection (Get-ArrivalLegacySql) is the default, its password included.
+#   With -Setup arrival-enroll the same -SqlAuth/-SqlUser and password reach it through env.
 # Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
 #          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
 #          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
@@ -28,6 +39,9 @@ param(
   [string]$SqlName = '',
   [string]$SqlConnection = '',
   [switch]$SqlPrompt,
+  [ValidateSet('', 'windows', 'sql')][string]$SqlAuth = '',
+  [string]$SqlServer = '',
+  [string]$SqlUser = '',
   [switch]$Reenroll,
   [switch]$NoDefender,
   [int]$LinkTimeout = 120,
@@ -113,40 +127,117 @@ function Ask([string]$label, [string]$default) {
   if ($a) { return $a } else { return $default }
 }
 
-function Quote([string]$v) { return '"' + ($v -replace '"', '""') + '"' }
+function Read-Secret([string]$label) {
+  $sec = Read-Host $label -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+  try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
 
-function Read-SqlDatabases {
-  $d = @{ name = 'SMILE_FO'; server = ''; database = ''; user = 'sa' }
+# -- arrival legacy SQL (RT-0164): the old Check-In agent's SQL Server connection is the saved
+#    answer when this machine saved none. Get-ArrivalLegacySql (the arrival slice's body from
+#    src/install/arrival.ts, else a stub that finds nothing) is spliced below; it needs $St,
+#    Add-Secret and Warn. This script prints no transcript, so Add-Secret only keeps the list.
+$St = @{ SqlFrom = ''; Secrets = @() }
+function Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }
+__ARRIVAL_SQL__
+# Fills $s from the old agent's connection: mode, server, login and, in memory only, its password.
+function Add-LegacySql($s) {
+  $conn = [string](Get-ArrivalLegacySql)
+  if (-not $conn) { return }
+  try { $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $conn } catch { Warn ('The old Check-In agent''s SQL connection was not understood: ' + $_.Exception.Message); return }
+  $s.server = $b.DataSource
+  $s.from = $St.SqlFrom
+  if ($b.IntegratedSecurity) { $s.auth = 'windows' } else { $s.auth = 'sql'; $s.user = $b.UserID; $s.password = $b.Password }
+}
+# -- end arrival legacy SQL
+
+# What this machine saved (sql-setup --show: auth, server, user, databases; never the password),
+# else what the old Check-In agent used (from and password set only then).
+function Get-SavedSql {
+  $s = @{ auth = ''; server = ''; user = ''; databases = ''; from = ''; password = '' }
+  foreach ($l in @(& $Exe sql-setup --show --data $Data 2>$null)) {
+    $i = ([string]$l).IndexOf('=')
+    if ($i -gt 0) { $s[([string]$l).Substring(0, $i)] = ([string]$l).Substring($i + 1) }
+  }
+  if (-not $s.auth) { Add-LegacySql $s }
+  return $s
+}
+
+function Get-LocalSqlServer {
+  $svc = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' })
+  if ($svc.Count -eq 0) { return '' }
+  if (@($svc | Where-Object { $_.Name -eq 'MSSQLSERVER' }).Count -gt 0) { return '.' }
+  return ('.\' + $svc[0].Name.Substring(6))
+}
+
+# Tests the login on every SMILE database (Windows: as LocalSystem, the service account) and
+# saves it only when all connect. The password travels in env DL_AGENT_SQL_PASSWORD, removed after.
+function Invoke-SqlSetup([string]$auth, [string]$server, [string]$user, [string]$pw) {
+  $argv = @('sql-setup', '--auth', $auth, '--server', $server, '--data', $Data, '--result', $SqlResult)
+  if ($auth -eq 'sql') { $argv += @('--user', $user) } else { $argv += '--as-service' }
+  if ($pw) { $env:DL_AGENT_SQL_PASSWORD = $pw }
+  try { & $Exe @argv | Out-Host; $code = $LASTEXITCODE } finally { Remove-Item Env:DL_AGENT_SQL_PASSWORD -ErrorAction SilentlyContinue }
+  return $code
+}
+
+function Read-SqlLogin {
+  $saved = Get-SavedSql
+  $mode = '1'
+  if ($saved.auth -eq 'sql') { $mode = '2' }
+  $server = $saved.server
+  if (-not $server) { $server = Get-LocalSqlServer }
+  if (-not $server) { $server = '.' }
+  $user = $saved.user
+  if (-not $user) { $user = 'sa' }
+  if ($saved.from) {
+    Say ($saved.from + ': ' + $saved.auth + ' login on ' + $saved.server + '. Enter keeps it.')
+  } elseif ($saved.auth) {
+    Say ('Saved SQL login: ' + $saved.auth + ' on ' + $saved.server + ' (' + $saved.databases + '). Enter keeps it.')
+  }
   while ($true) {
-    $d.name = Ask 'Database key (SMILE_FO, SMILE_POS, PDA...)' $d.name
-    $d.server = Ask 'SQL Server (host\instance or host,port)' $d.server
-    $d.database = Ask 'Database name' $d.database
-    $d.user = Ask 'SQL login' $d.user
-    $sec = Read-Host 'Password' -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-    try { $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-    $conn = 'Server=' + (Quote $d.server) + ';Database=' + (Quote $d.database) + ';User Id=' + (Quote $d.user) + ';Password=' + (Quote $pw) + ';'
-    if (Add-Sql $d.name $conn) {
-      Say ('SQL ' + $d.name + ' connected.')
-      if ((Read-Host 'Add another database? (y/N)') -ne 'y') { return }
-      $d.name = ''
-    } else {
-      Warn 'Connection failed (see above). Enter the values again; Enter keeps the previous answer.'
+    $mode = Ask 'SQL login: [1] Windows  [2] SQL login  [0] skip' $mode
+    if ($mode -eq '0') { Warn 'SQL login not changed.'; return }
+    if ($mode -ne '1' -and $mode -ne '2') { Warn 'Type 1, 2 or 0.'; $mode = '1'; continue }
+    $server = Ask 'SQL Server (., .\SQLEXPRESS, host\instance or host,port)' $server
+    $pw = ''
+    $auth = 'windows'
+    if ($mode -eq '2') {
+      $auth = 'sql'
+      $user = Ask 'SQL login name' $user
+      if ($saved.auth -eq 'sql' -and $user -eq $saved.user) { $pw = Read-Secret 'Password (Enter keeps the saved one)' } else { $pw = Read-Secret 'Password' }
+      if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }
     }
+    $code = Invoke-SqlSetup $auth $server $user $pw
+    $pw = $null
+    if ($code -eq 0) { Say 'SQL login tested and saved.'; return }
+    Warn 'The SQL login test failed (exact error above). Choose again; Enter keeps the previous answer.'
   }
 }
 
-# A reinstall keeps the databases already declared in sql.json when they all still connect
-# (Enter at the question), so -SqlPrompt asks for them again only when something changed.
-function Test-SavedSql {
-  $f = Join-Path $Data 'sql.json'
-  if (-not (Test-Path $f)) { return $false }
-  try { $names = @((Get-Content -Raw -Path $f | ConvertFrom-Json).databases.PSObject.Properties | Where-Object { $_ } | ForEach-Object { $_.Name }) }
-  catch { Warn ('sql.json could not be read (' + $_.Exception.Message + '): asking for the databases.'); return $false }
-  if ($names.Count -eq 0) { return $false }
-  Say ('SQL databases already declared: ' + ($names -join ', ') + '.')
-  if (-not (Invoke-Agent @('sql-test', '--data', $Data))) { Warn 'A declared database did not connect (see above): enter it again.'; return $false }
-  return ((Read-Host 'Keep them? (Y/n)') -ne 'n')
+# Unattended (-SqlAuth): unset values fall back to what this machine saved. Returns $false on a
+# failed test after printing the structured result (sql-setup.last.json). $Password holds the
+# password from env DL_AGENT_SQL_PASSWORD; a password typed at the prompt is handed back in it.
+function Set-SqlLoginUnattended([ref]$Password) {
+  $saved = Get-SavedSql
+  $server = $SqlServer
+  if (-not $server) { $server = $saved.server }
+  if (-not $server) { $server = Get-LocalSqlServer }
+  if (-not $server) { $server = '.' }
+  $user = $SqlUser
+  if (-not $user) { $user = $saved.user }
+  $pw = $Password.Value
+  if (-not $pw -and $SqlAuth -eq 'sql' -and $saved.password -and $user -eq $saved.user) {
+    Say 'No DL_AGENT_SQL_PASSWORD: using the old Check-In agent''s password for this login.'
+    $pw = $saved.password
+  } elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {
+    $pw = Read-Secret ('Password of SQL login ' + $user)
+    $Password.Value = $pw
+  }
+  $code = Invoke-SqlSetup $SqlAuth $server $user $pw
+  $pw = $null
+  if ($code -eq 0) { Say ('SQL login ' + $SqlAuth + ' tested and saved.'); return $true }
+  if (Test-Path $SqlResult) { Write-Host ('[dl-agent] SQL_SETUP_RESULT ' + [IO.File]::ReadAllText($SqlResult).Trim()) }
+  return $false
 }
 
 function Remove-OldCopies {
@@ -224,6 +315,8 @@ try {
   $InstallDir = Join-Path $pf ('DevLibrary\' + $Product)
   $Exe = Join-Path $InstallDir ($Product + '.exe')
   $Data = Join-Path $env:ProgramData $Product
+  $SqlResult = Join-Path $Data 'sql-setup.last.json'
+  $SqlFailed = $false
   Say ('Windows NT ' + $v + ', build ' + $target + ', channel ' + $Channel + ', hub ' + $Hub)
 
   $info = Get-Info $target
@@ -257,19 +350,35 @@ try {
   Move-Item -Force $tmp $Exe
   Say ('Installed ' + $Exe + ' (SHA-256 ' + $sha + ')')
 
+  $enrolled = Test-Path (Join-Path $Data 'identity.json')
   if ($SqlName -and $SqlConnection) {
     if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
-  } elseif ($SqlPrompt) {
-    if (Test-SavedSql) { Say 'Keeping the declared SQL databases.' } else { Read-SqlDatabases }
+  } elseif ($SqlAuth) {
+    # -- SQL password: env DL_AGENT_SQL_PASSWORD or the hidden prompt, never a parameter
+    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD
+    # -- end SQL password
+    $SqlFailed = -not (Set-SqlLoginUnattended ([ref]$SqlPassword))
+    # arrival-enroll takes the same sign-in (below); otherwise the password is dropped now.
+    if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }
+    # Nothing was saved: a new machine stops before the code is spent; a reinstall comes back
+    # with its previous SQL settings and reports sql_setup_failed to the hub.
+    if ($SqlFailed -and -not $enrolled) { throw 'The SQL login test failed (see above); nothing was saved or enrolled.' }
+    if ($SqlFailed) { Warn 'The SQL login test failed (see above): the previous SQL settings are kept.' }
+  } elseif ($SqlPrompt -or ([Environment]::UserInteractive -and ((Get-LocalSqlServer) -or (Test-Path (Join-Path $Data 'sql.json'))))) {
+    Read-SqlLogin
   }
 
-  $enrolled = Test-Path (Join-Path $Data 'identity.json')
   if ($enrolled -and -not $Reenroll) {
     Say 'Already enrolled: keeping this machine''s identity.'
   } else {
     if (-not $Code) { $Code = Read-Host 'Enrolment code' }
     if (-not $Code) { throw 'An enrolment code is needed (ask the hub admin).' }
-    $argv = @('enroll', '--hub', $Hub, '--data', $Data)
+    # -- hub fallback list (PROTOCOL.md §2.1): the hub's other hosts follow -Hub, so enrolment
+    #    still works while the primary host is down; the answer's hub_urls is what the agent keeps.
+    $hubArg = $Hub
+    foreach ($h in ('__HUBS__' -split ',')) { if ($h -and (($hubArg -split ',') -notcontains $h)) { $hubArg += ',' + $h } }
+    # -- end hub fallback list
+    $argv = @('enroll', '--hub', $hubArg, '--data', $Data)
     if ($enrolled) { $argv += '--force' }
     $env:DL_AGENT_ENROLL_CODE = $Code
     try { $ok = Invoke-Agent $argv } finally { Remove-Item Env:DL_AGENT_ENROLL_CODE -ErrorAction SilentlyContinue }
@@ -278,7 +387,21 @@ try {
 
   if ($Setup) {
     Say ('Running setup: ' + $Setup)
-    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally { Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue }
+    # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser and the password reach arrival-enroll through env
+    #    only, never argv; the setup's secret env (token, PMS connection, tenant key, password) is
+    #    removed right after it ran.
+    $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')
+    if ($Setup -eq 'arrival-enroll') {
+      if ($SqlAuth) { $env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth }
+      if ($SqlUser) { $env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser }
+      if ($SqlPassword) { $env:DL_AGENT_SQL_PASSWORD = $SqlPassword }
+    }
+    $SqlPassword = $null
+    # -- end arrival sign-in
+    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {
+      Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue
+      foreach ($n in $SetupSecrets) { Remove-Item ('Env:' + $n) -ErrorAction SilentlyContinue }
+    }
     if (-not $ok) { throw ('Setup ' + $Setup + ' failed (see above). The previous agent, if any, is still running.') }
   }
   Remove-Replaced
@@ -300,14 +423,28 @@ try {
     if (Test-Path $log) { Get-Content $log | Select-Object -Last 15 | ForEach-Object { Write-Host $_ } }
     & $Exe status --data $Data | Out-Host
   }
+  if ($SqlFailed) { Write-Host '[dl-agent] FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1 }
 } catch {
   Write-Host ('[dl-agent] FAILED: ' + $_.Exception.Message) -ForegroundColor Red
+  # Unattended runs report failure through the exit code.
+  if ($SqlAuth) { exit 1 }
 }
 `;
 
-/** The installer with this hub's origin as its default hub. */
-export function installScript(origin: string): string {
-  return SCRIPT.split('__HUB__').join(origin);
+/**
+ * Arrival hook (RT-0164 SMILE100): `Get-ArrivalLegacySql` returns the old Check-In agent's SQL
+ * Server connection (server part, its authentication, '' when none) for `Get-SavedSql` to offer.
+ * The arrival slice ships it as `ARRIVAL_LEGACY_SQL_BODY` in `./arrival`; until that is the
+ * default of `installScript` below, this stub finds nothing and nothing changes.
+ */
+export const ARRIVAL_SQL_STUB = String.raw`function Get-ArrivalLegacySql { return '' }`;
+
+/**
+ * The installer with this hub's origin as its default hub, `hubs` (HUB_URLS) as the enrolment
+ * fallbacks and `arrivalSql` as the `Get-ArrivalLegacySql` body.
+ */
+export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_SQL_STUB): string {
+  return SCRIPT.split('__ARRIVAL_SQL__').join(arrivalSql).split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
 }
 
 /** The one-liner an admin pastes (PowerShell 2.0 safe; the code stays out of the URL). */

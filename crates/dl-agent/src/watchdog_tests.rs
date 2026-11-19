@@ -10,6 +10,30 @@ fn beat(at: u64, hub_at: u64) -> Beat {
         pid: 4242,
         channel: "canary".into(),
         skew: -3,
+        links: Vec::new(),
+    }
+}
+
+/// [`super::decide`] for beats whose modules have no cloud link of their own.
+fn decide(
+    s: &mut State,
+    now: u64,
+    service: Service,
+    beat: Option<&Beat>,
+    pending: bool,
+    hub: impl FnOnce() -> bool,
+) -> Action {
+    super::decide(s, now, service, beat, pending, hub, |_: &Link| {
+        panic!("no module link to ask")
+    })
+}
+
+fn link(ok_at: u64, since: u64) -> Link {
+    Link {
+        module: "arrival".into(),
+        url: "https://checkin.test".into(),
+        ok_at,
+        since,
     }
 }
 
@@ -159,6 +183,90 @@ fn stale_hub_link_restarts_only_when_the_hub_answers() {
         decide(&mut s, now, Service::Running, Some(&link_down), false, || true),
         Action::Restart(r) if r.contains("hub")
     ));
+}
+
+#[test]
+fn stale_module_link_restarts_when_its_cloud_answers_even_with_the_hub_up() {
+    let hub = || panic!("the hub link is fresh: not asked");
+    let with = |l: Link| Beat {
+        links: vec![l],
+        ..beat(T, T - 30)
+    };
+    let silent = with(link(T - STALE_SECONDS - 60, T - 3 * STALE_SECONDS));
+    let mut s = State::default();
+    assert_eq!(
+        super::decide(
+            &mut s,
+            T,
+            Service::Running,
+            Some(&silent),
+            false,
+            hub,
+            |_| false
+        ),
+        Action::Nothing("healthy".into()),
+        "its cloud does not answer: a restart would not help"
+    );
+    let mut asked = Vec::new();
+    let action = super::decide(
+        &mut s,
+        T,
+        Service::Running,
+        Some(&silent),
+        false,
+        hub,
+        |l| {
+            asked.push(l.url.clone());
+            true
+        },
+    );
+    assert_eq!(
+        action,
+        Action::Restart(
+            "module arrival cloud link silent for 21 min while https://checkin.test answers".into()
+        )
+    );
+    assert_eq!(asked, ["https://checkin.test"]);
+    assert_eq!(s.not_before, T + MIN_BACKOFF_SECONDS);
+
+    // Fresh, or never worked but declared only 5 min ago: healthy, the cloud is not asked.
+    let mut s = State::default();
+    for l in [link(T - 60, T - 3600), link(0, T - 300)] {
+        assert_eq!(
+            super::decide(
+                &mut s,
+                T,
+                Service::Running,
+                Some(&with(l)),
+                false,
+                hub,
+                |_| { panic!("fresh link: not asked") }
+            ),
+            Action::Nothing("healthy".into())
+        );
+    }
+    // Declared 25 min ago and never worked: stale.
+    assert!(matches!(
+        super::decide(&mut s, T, Service::Running, Some(&with(link(0, T - 1500))), false, hub, |_| true),
+        Action::Restart(r) if r.contains("silent for 25 min")
+    ));
+}
+
+#[test]
+fn beat_carries_module_links_and_only_their_origin() {
+    let d = TestDir::new("wd-links");
+    let b = Beat {
+        links: vec![link(T - 5, T - 900)],
+        ..beat(T, T - 5)
+    };
+    write_beat(&d.0, &b).unwrap();
+    assert_eq!(read_beat(&d.0), Some(b));
+    assert_eq!(
+        origin("https://user:pw@CheckIn.test:8443/api/poll?x=1"),
+        "https://CheckIn.test:8443"
+    );
+    assert_eq!(origin("HTTP://a.test"), "http://a.test");
+    assert_eq!(origin("a.test/x"), "https://a.test");
 }
 
 #[test]

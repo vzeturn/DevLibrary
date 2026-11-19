@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dl_hash::{Digest, Sha256};
-use dl_json::{Map, Value, json};
+use dl_json::{Value, json};
 use dl_winsvc::StopSignal;
 
 use crate::command::{Command, CommandResult, Outbox};
@@ -35,6 +35,8 @@ pub const SURVEY_RESEND_SECONDS: u64 = 24 * 3600;
 pub const UPDATE_CHECK_SECONDS: u64 = 300;
 /// How long a module gets to stop on restart or shutdown.
 pub const STOP_WAIT: Duration = Duration::from_secs(10);
+/// How long each module gets to finish in-flight work before an update swaps the binary.
+pub const DRAIN_WAIT: Duration = Duration::from_secs(30);
 /// Reports sent per request.
 const REPORT_BATCH: usize = 100;
 
@@ -72,6 +74,10 @@ pub struct Options {
     pub probation_seconds: u64,
     /// Answers the `selftest` command (set by the CLI; `None` answers "no self-test").
     pub selftest: Option<crate::sys_module::SelfTestHook>,
+    /// How long each module gets to finish in-flight work before an update swaps the binary.
+    pub drain_wait: Duration,
+    /// A fault compiled in for the rollback smoke test ([`crate::fault`]); `None` normally.
+    pub fault: Option<&'static str>,
 }
 
 impl Options {
@@ -85,6 +91,8 @@ impl Options {
             trusted: release_keys(),
             probation_seconds: PROBATION_SECONDS,
             selftest: None,
+            drain_wait: DRAIN_WAIT,
+            fault: crate::fault::COMPILED,
         }
     }
 }
@@ -133,6 +141,7 @@ pub struct Agent {
     survey_sent: Option<(String, u64)>,
     hub_ok_at: u64,
     beat_at: u64,
+    ignored_hub_urls: Vec<String>,
 }
 
 impl Agent {
@@ -185,6 +194,7 @@ impl Agent {
             survey_sent: None,
             hub_ok_at: 0,
             beat_at: 0,
+            ignored_hub_urls: Vec::new(),
             opts,
         })
         .inspect(|agent| {
@@ -319,10 +329,22 @@ impl Agent {
             pid: std::process::id(),
             channel: self.channel.clone(),
             skew: self.hub.skew(),
+            links: self.module_links(),
         };
         if let Err(e) = watchdog::write_beat(&self.opts.data_dir, &beat) {
             dl_log::warn!("cannot write the heartbeat file"; error = %e);
         }
+    }
+
+    /// The cloud links of the modules that run now (a stopped one's link is not watched).
+    fn module_links(&self) -> Vec<watchdog::Link> {
+        use crate::supervisor::ModuleState as S;
+        self.supervisor
+            .statuses()
+            .into_iter()
+            .filter(|s| matches!(s.state, S::Starting | S::Running | S::Degraded))
+            .filter_map(|s| s.link)
+            .collect()
     }
 
     fn watch_config(&mut self, now: u64) {
@@ -394,12 +416,15 @@ impl Agent {
         let pending = self.update.pending.as_ref()?;
         let until = pending.probation_until;
         let skip = pending.unhealthy_before.clone();
-        if try_commit(
-            &mut self.update,
-            now,
-            self.supervisor.all_running_except(&skip),
-            self.hub_ok,
-        ) {
+        let fault = crate::fault::probation_failure(self.opts.fault);
+        if fault.is_none()
+            && try_commit(
+                &mut self.update,
+                now,
+                self.supervisor.all_running_except(&skip),
+                self.hub_ok,
+            )
+        {
             if let Err(e) = self.update.save(&self.opts.data_dir) {
                 self.report(Severity::Error, "update_state_save_failed", &e.to_string());
             }
@@ -408,11 +433,13 @@ impl Agent {
             return None;
         }
         if now >= until
-            && self
-                .supervisor
-                .any_unhealthy_for_except(self.probation_seconds(), now, &skip)
+            && (fault.is_some()
+                || self
+                    .supervisor
+                    .any_unhealthy_for_except(self.probation_seconds(), now, &skip))
         {
-            if let Err(e) = self.roll_back("a module stayed unhealthy through probation") {
+            let why = fault.unwrap_or("a module stayed unhealthy through probation");
+            if let Err(e) = self.roll_back(why) {
                 self.report(Severity::Critical, "rollback_failed", &e.to_string());
             }
             return Some(Exit::Restart);
@@ -480,6 +507,7 @@ impl Agent {
         if let Some((_, hash)) = survey {
             self.survey_sent = Some((hash, now));
         }
+        self.adopt_hub_urls(answer.hub_urls.as_ref());
         self.channel = answer.channel;
         self.heartbeat_seconds = answer.heartbeat_seconds;
         self.next_heartbeat = now + answer.heartbeat_seconds;
@@ -585,8 +613,8 @@ impl Agent {
                 None
             }
             "collect_diagnostics" => {
-                let d = self.diagnostics(now);
-                self.answer(&cmd.id, true, dl_json::to_string_pretty(&d));
+                let (ok, out) = self.collect_diagnostics(&cmd.id, now);
+                self.answer(&cmd.id, ok, out);
                 None
             }
             "reload_config" => {
@@ -633,7 +661,7 @@ impl Agent {
             .map(|(v, at)| json!({"version": v.to_string(), "at": *at}))
             .collect();
         json!({
-            "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls.clone(),
+            "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": self.hub.hub_urls(),
             "product": self.opts.product, "version": self.opts.version.to_string(), "target": current_target(), "hostname": self.hostname,
             "channel": self.channel, "uptime_seconds": now.saturating_sub(self.started_at), "clock_skew": self.hub.skew(),
             "config_version": self.config.current.version, "config_on_trial": self.config.trial_since.is_some(),
@@ -731,52 +759,19 @@ pub fn log_tail(dir: &Path, lines: usize) -> Vec<String> {
         .collect()
 }
 
-/// What `dl-agent status` prints: local state only, no hub call.
-pub fn local_status(data_dir: &Path, product: &str, version: &Version) -> Value {
-    let identity = match Identity::load(data_dir) {
-        Ok(id) => {
-            json!({"agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls})
-        }
-        Err(e) => json!({"error": e.to_string()}),
-    };
-    let mut out = Map::new();
-    out.insert("product", product);
-    out.insert("version", version.to_string());
-    out.insert("target", current_target());
-    out.insert("data_dir", data_dir.display().to_string());
-    out.insert("identity", identity);
-    out.insert(
-        "config_version",
-        ConfigStore::load(data_dir).map_or(0, |c| c.current.version),
-    );
-    let update = UpdateState::load(data_dir).ok();
-    out.insert(
-        "update_pending",
-        update
-            .as_ref()
-            .and_then(|u| u.pending.as_ref())
-            .map(|p| p.version.to_string()),
-    );
-    out.insert(
-        "failed_versions",
-        update
-            .map(|u| {
-                u.failed_versions()
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-    );
-    out.insert(
-        "spooled_reports",
-        Spool::open(data_dir.join("reports.json")).len() as u64,
-    );
-    Value::Object(out)
-}
+#[path = "agent_status.rs"]
+mod status;
+pub use status::local_status;
 
 #[path = "agent_update.rs"]
 mod update_flow;
+
+#[path = "agent_hub.rs"]
+mod hub_list;
+
+#[path = "agent_diag.rs"]
+mod diag;
+pub use diag::diagnostic_file_allowed;
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]

@@ -1,5 +1,6 @@
 //! Signed calls to the hub (PROTOCOL.md §1–§2), with fallback hosts and clock-skew repair.
 
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use dl_json::{Value, json};
@@ -12,6 +13,11 @@ use crate::{Error, now};
 
 /// Where a self-test run is uploaded (agent-hub `routes/agent.ts`).
 pub const SELFTEST_PATH: &str = "/v1/agent/selftest";
+
+/// Where `collect_diagnostics` uploads its zip (agent-hub `routes/agent.ts`).
+pub const DIAGNOSTICS_PATH: &str = "/v1/agent/diagnostics";
+
+const JSON: &str = "application/json";
 
 /// Sends one HTTP request. The runtime uses [`HttpTransport`]; tests use a fake.
 pub trait Transport: Send + Sync {
@@ -47,6 +53,7 @@ impl HttpTransport {
             max_body: 200 * 1024 * 1024,
             user_agent: Some(format!("dl-agent/{}", crate::agent_version())),
             max_redirects: 3,
+            proxy: crate::proxy::current().proxy.clone(),
             ..dl_http::ClientOptions::default()
         };
         HttpTransport {
@@ -84,10 +91,15 @@ impl Transport for HttpTransport {
                 .map_err(|e| Error::Transport(e.to_string()))?;
         }
         if method == "POST" {
-            req = req
-                .with_header("Content-Type", "application/json")
-                .map_err(|e| Error::Transport(e.to_string()))?
-                .with_body(body.to_vec());
+            if !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
+                req = req
+                    .with_header("Content-Type", JSON)
+                    .map_err(|e| Error::Transport(e.to_string()))?;
+            }
+            req = req.with_body(body.to_vec());
         }
         let resp = self
             .client
@@ -139,6 +151,8 @@ pub struct HeartbeatAnswer {
     pub commands: Vec<Command>,
     /// A newer release exists on the agent's channel.
     pub update_check: bool,
+    /// The hub's host list, primary first, as sent (checked by [`crate::hub_urls::accept`]).
+    pub hub_urls: Option<Value>,
 }
 
 impl HeartbeatAnswer {
@@ -169,6 +183,7 @@ impl HeartbeatAnswer {
                 .get("update_check")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            hub_urls: v.get("hub_urls").filter(|u| !u.is_null()).cloned(),
         })
     }
 }
@@ -196,6 +211,7 @@ fn path_and_query(url: &str) -> Result<String, Error> {
 pub struct HubClient {
     transport: Box<dyn Transport>,
     identity: Identity,
+    urls: RwLock<Vec<String>>,
     preferred: AtomicUsize,
     skew: AtomicI64,
 }
@@ -205,6 +221,7 @@ impl HubClient {
     pub fn new(transport: Box<dyn Transport>, identity: Identity) -> HubClient {
         HubClient {
             transport,
+            urls: RwLock::new(identity.hub_urls.clone()),
             identity,
             preferred: AtomicUsize::new(0),
             skew: AtomicI64::new(0),
@@ -214,6 +231,36 @@ impl HubClient {
     /// The identity requests are signed with.
     pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The hub hosts in use, primary first.
+    pub fn hub_urls(&self) -> Vec<String> {
+        self.urls.read().map(|u| u.clone()).unwrap_or_default()
+    }
+
+    /// The host the last successful call went to.
+    pub fn current_url(&self) -> Option<String> {
+        let urls = self.hub_urls();
+        let at = self.preferred.load(Ordering::Relaxed);
+        urls.get(at % urls.len().max(1)).cloned()
+    }
+
+    /// Replaces the host list (from a hub answer); the host in use stays preferred when it
+    /// is still listed. `false` when the list did not change.
+    pub fn set_hub_urls(&self, urls: Vec<String>) -> bool {
+        let current = self.current_url();
+        let Ok(mut held) = self.urls.write() else {
+            return false;
+        };
+        if *held == urls || urls.is_empty() {
+            return false;
+        }
+        let at = current
+            .and_then(|c| urls.iter().position(|u| *u == c))
+            .unwrap_or(0);
+        *held = urls;
+        self.preferred.store(at, Ordering::Relaxed);
+        true
     }
 
     /// Hub clock minus local clock, learnt from `clock_skew` answers and heartbeats.
@@ -233,23 +280,38 @@ impl HubClient {
         (now() as i64 + self.skew()).max(0) as u64
     }
 
-    fn signed_once(&self, method: &str, url: &str, body: &[u8]) -> Result<(u16, Vec<u8>), Error> {
-        let headers = self
-            .identity
-            .sign(method, &path_and_query(url)?, body, self.hub_now())?;
+    fn signed_once(
+        &self,
+        method: &str,
+        url: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<(u16, Vec<u8>), Error> {
+        let mut headers =
+            self.identity
+                .sign(method, &path_and_query(url)?, body, self.hub_now())?;
+        if method == "POST" {
+            headers.push(("Content-Type", content_type.to_string()));
+        }
         self.transport.send(method, url, &headers, body)
     }
 
     /// One signed call to `url`, retried once after a `clock_skew` answer.
-    fn signed_url(&self, method: &str, url: &str, body: &[u8]) -> Result<Vec<u8>, Error> {
-        let (mut code, mut resp) = self.signed_once(method, url, body)?;
+    fn signed_url(
+        &self,
+        method: &str,
+        url: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let (mut code, mut resp) = self.signed_once(method, url, body, content_type)?;
         if code == 401
             && let Ok(v) = dl_json::parse_slice(&resp)
             && v.get("error").and_then(Value::as_str) == Some("clock_skew")
             && let Some(t) = v.get("server_time").and_then(Value::as_u64)
         {
             self.observe_server_time(t);
-            (code, resp) = self.signed_once(method, url, body)?;
+            (code, resp) = self.signed_once(method, url, body, content_type)?;
         }
         if (200..300).contains(&code) {
             Ok(resp)
@@ -264,12 +326,23 @@ impl HubClient {
     /// A signed call to `path` on the first hub that answers; fallback hosts are tried on
     /// transport errors and 5xx answers, and the one that worked is used first next time.
     fn call(&self, method: &str, path: &str, body: &[u8]) -> Result<Vec<u8>, Error> {
-        let urls = &self.identity.hub_urls;
+        self.call_as(method, path, body, JSON)
+    }
+
+    /// [`Self::call`] with another body type.
+    fn call_as(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let urls = &self.hub_urls();
         let first = self.preferred.load(Ordering::Relaxed) % urls.len().max(1);
         let mut last = Error::Config("no hub URL".into());
         for i in 0..urls.len() {
             let idx = (first + i) % urls.len();
-            match self.signed_url(method, &join(&urls[idx], path), body) {
+            match self.signed_url(method, &join(&urls[idx], path), body, content_type) {
                 Ok(r) => {
                     self.preferred.store(idx, Ordering::Relaxed);
                     return Ok(r);
@@ -320,6 +393,22 @@ impl HubClient {
         }
     }
 
+    /// Uploads a `collect_diagnostics` zip to [`DIAGNOSTICS_PATH`]; returns the hub's
+    /// `{id, key, size, sha256}`.
+    pub fn upload_diagnostics(&self, zip: &[u8], command_id: &str) -> Result<Value, Error> {
+        let path = format!(
+            "{DIAGNOSTICS_PATH}?command_id={}",
+            dl_http::encode_query_component(command_id)
+        );
+        let v = dl_json::parse_slice(&self.call_as("POST", &path, zip, "application/zip")?)?;
+        if v.get("key").and_then(Value::as_str).is_none() {
+            return Err(Error::Json(
+                "the hub's diagnostics answer has no key".into(),
+            ));
+        }
+        Ok(v)
+    }
+
     /// `POST /v1/commands/{id}/result`.
     pub fn command_result(&self, r: &CommandResult) -> Result<(), Error> {
         let id = dl_http::encode_path_segment(&r.id);
@@ -350,12 +439,11 @@ impl HubClient {
     /// copy that would then fail the hash check.
     pub fn download(&self, url: &str) -> Result<Vec<u8>, Error> {
         let on_hub = self
-            .identity
-            .hub_urls
+            .hub_urls()
             .iter()
             .any(|h| url.starts_with(&format!("{}/", h.trim_end_matches('/'))));
         if on_hub {
-            return self.signed_url("GET", url, b"");
+            return self.signed_url("GET", url, b"", JSON);
         }
         let headers = [("Cache-Control", "no-cache".to_string())];
         let (code, body) = self.transport.send("GET", url, &headers, b"")?;
@@ -396,13 +484,17 @@ pub fn enroll(
                         .map(str::to_string)
                         .ok_or_else(|| Error::Json(format!("enroll answer without {k}")))
                 };
-                let identity = Identity::new(
-                    &s("agent_id")?,
-                    &s("tenant")?,
-                    &s("site")?,
-                    hub_urls.to_vec(),
-                    key,
-                );
+                // The hub's own list (PROTOCOL §2.1) when it sends one, else what was given.
+                let accepted = v
+                    .get("hub_urls")
+                    .map(|o| crate::hub_urls::accept(o, base))
+                    .unwrap_or_default();
+                if !accepted.ignored.is_empty() {
+                    dl_log::warn!("hub hosts outside the allowlist ignored"; hub_urls = %accepted.ignored.join(", "));
+                }
+                let urls = accepted.urls.unwrap_or_else(|| hub_urls.to_vec());
+                let identity =
+                    Identity::new(&s("agent_id")?, &s("tenant")?, &s("site")?, urls, key);
                 let config = match v.get("config") {
                     Some(c) if c.get("version").and_then(Value::as_u64).unwrap_or(0) > 0 => {
                         Some(RemoteConfig::from_json(c)?)

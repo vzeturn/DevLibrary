@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { nowSeconds, type AppEnv, type Env } from './env';
+import { hubUrls, primaryHost, servedOnFallback } from './domain/hubUrls';
 import { HttpError, logError } from './lib/http';
 import { NONCE_TTL_SECONDS } from './middleware/signature';
 import { pruneNonces } from './repo/agents';
@@ -11,8 +12,16 @@ import { productRoutes } from './routes/products';
 
 export const app = new Hono<AppEnv>();
 
+// The fallback host (workers.dev) serves agents only; admin, bench and products stay on the primary host.
+app.use('*', async (c, next) => {
+  const primary = primaryHost(c.env.HUB_URLS);
+  const url = new URL(c.req.url);
+  if (primary && url.host !== primary && !servedOnFallback(url.pathname)) return c.json({ error: 'not_found' }, 404);
+  await next();
+});
+
 app.get('/healthz', (c) => c.json({ ok: true }));
-app.get('/install.ps1', (c) => installScriptResponse(c.req.url));
+app.get('/install.ps1', (c) => installScriptResponse(c.req.url, hubUrls(c.env.HUB_URLS)));
 app.route('/install', installRoutes);
 app.route('/products', productRoutes);
 app.route('/v1', agentRoutes);

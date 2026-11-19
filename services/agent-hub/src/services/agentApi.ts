@@ -10,6 +10,7 @@ import { saveHeartbeat } from '../repo/heartbeats';
 import { latestRelease } from '../repo/releases';
 import { upsertReports } from '../repo/reports';
 import type { ConfigView } from './config';
+import { withHubUrls } from './enroll';
 import { agentHeld } from './holds';
 import { heartbeatSeconds, stableOffered } from './lanes';
 
@@ -28,6 +29,7 @@ export interface HeartbeatAnswer {
   config?: ConfigView;
   commands: WireCommand[];
   update_check: boolean;
+  hub_urls?: string[];
 }
 
 export async function agentChannel(db: D1Database, agent: AgentRow): Promise<Channel> {
@@ -62,6 +64,7 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
       : {}),
     commands,
     update_check: updateCheck,
+    ...withHubUrls(env),
   };
 }
 

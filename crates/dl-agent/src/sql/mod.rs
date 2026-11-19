@@ -12,18 +12,22 @@
 //! The hub may tune the limits per database through remote config
 //! (`{"sql": {"SMILE_FO": {"max_connections": 8}}}`); a `connection` key from the hub is
 //! ignored. `transport` (see [`transport`]) and `lock_timeout_seconds` are local only.
+//! Passwords are kept sealed beside the string and `auth` names the login mode
+//! ([`secret`]); `sql-setup` ([`setup`]) writes such entries after testing them.
 
 pub mod bundle;
 pub mod install;
 pub mod module;
 pub mod pool;
 pub mod probe;
+pub mod secret;
+pub mod setup;
 pub mod survey;
 pub mod transport;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -43,9 +47,14 @@ pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(8);
 pub struct TdsConnector {
     config: dl_tds::Config,
     rungs: Vec<transport::Rung>,
+    /// An automatic ladder that left out the unencrypted rung ([`transport::clear_allowed`]):
+    /// a handshake failure on its last rung is `sql_tls_unavailable`.
+    guarded: bool,
     at: AtomicUsize,
     settled: AtomicBool,
     lock_timeout: Option<Duration>,
+    /// TCP port of the last session (0 = none yet): where a named instance resolved to.
+    port: AtomicU32,
 }
 
 impl TdsConnector {
@@ -60,19 +69,56 @@ impl TdsConnector {
         if config.app_name() == "dl-tds" {
             config = config.with_app_name("dl-agent");
         }
+        let rungs = transport::rungs(&config, None);
         Ok(TdsConnector {
-            rungs: transport::rungs(&config, None),
+            guarded: guarded(&config, None, &rungs),
+            rungs,
             config,
             at: AtomicUsize::new(0),
             settled: AtomicBool::new(false),
             lock_timeout: Some(DEFAULT_LOCK_TIMEOUT),
+            port: AtomicU32::new(0),
         })
     }
 
     /// Fixes the transport rung (`None` = walk the ladder).
     pub fn with_transport(mut self, pin: Option<transport::Rung>) -> TdsConnector {
         self.rungs = transport::rungs(&self.config, pin);
+        self.guarded = guarded(&self.config, pin, &self.rungs);
         self
+    }
+
+    /// Lets an automatic ladder end unencrypted even for a SQL login to another computer:
+    /// the operator's explicit choice (`sql-setup --allow-unencrypted`).
+    pub fn allow_unencrypted(mut self) -> TdsConnector {
+        self.rungs = transport::ladder(&self.config, None, true);
+        self.guarded = false;
+        self
+    }
+
+    /// The `sql_tls_unavailable` message when `e` ended a guarded ladder: the server took no
+    /// TLS handshake this client offers, and a lower rung would send a SQL password in clear
+    /// to another computer. `None` for any other failure.
+    pub fn tls_refusal(&self, e: &dl_tds::Error) -> Option<String> {
+        (self.guarded && !self.settled.load(Ordering::Acquire) && transport::should_step_down(e))
+            .then(|| {
+                format!(
+                    "sql_tls_unavailable: {e}: the server ({}) completed no TLS handshake and a \
+                     SQL login to another computer is never sent unencrypted; install the SQL \
+                     Server TLS 1.2 update, use a Windows login, or accept it explicitly \
+                     (sql-setup --allow-unencrypted, or \"transport\": \"unencrypted\" for \
+                     this database in sql.json)",
+                    self.config.host()
+                )
+            })
+    }
+
+    /// [`tds`] for a connect failure, `sql_tls_unavailable` when [`Self::tls_refusal`] says so.
+    fn connect_error(&self, e: dl_tds::Error) -> Error {
+        match self.tls_refusal(&e) {
+            Some(m) => Error::Sql(m),
+            None => tds(e),
+        }
     }
 
     /// `SET LOCK_TIMEOUT` on every new session (`None` = wait forever).
@@ -93,7 +139,23 @@ impl TdsConnector {
             .then(|| self.rungs[self.at.load(Ordering::Acquire)])
     }
 
+    /// The TCP port the last session reached (a named instance's port comes from SQL
+    /// Browser), once one has connected.
+    pub fn resolved_port(&self) -> Option<u16> {
+        u16::try_from(self.port.load(Ordering::Acquire))
+            .ok()
+            .filter(|&p| p != 0)
+    }
+
     fn open(&self) -> Result<dl_tds::Client, dl_tds::Error> {
+        let c = self.open_rung()?;
+        if let Some(a) = c.peer_addr() {
+            self.port.store(u32::from(a.port()), Ordering::Release);
+        }
+        Ok(c)
+    }
+
+    fn open_rung(&self) -> Result<dl_tds::Client, dl_tds::Error> {
         let start = self.at.load(Ordering::Acquire);
         if self.settled.load(Ordering::Acquire) {
             // Once a rung worked, a later drop is an outage, not a reason to lower security.
@@ -110,6 +172,18 @@ impl TdsConnector {
     }
 }
 
+/// Whether `rungs` (for `config`, `pin`) is an automatic ladder that dropped the unencrypted
+/// rung for safety.
+fn guarded(
+    config: &dl_tds::Config,
+    pin: Option<transport::Rung>,
+    rungs: &[transport::Rung],
+) -> bool {
+    pin.is_none()
+        && config.encrypt() == dl_tds::Encrypt::Off
+        && !rungs.contains(&transport::Rung::Unencrypted)
+}
+
 /// A session error, prefixed with its [`probe::Problem`] code when it is one the agent acts
 /// on (`sql_missing_object: Invalid column name 'MaCQT'.`); see [`problem_code`].
 fn tds(e: dl_tds::Error) -> Error {
@@ -119,20 +193,25 @@ fn tds(e: dl_tds::Error) -> Error {
     }
 }
 
-/// The problem code of an [`Error::Sql`] (`sql_missing_object`, `sql_locked`, …), or
-/// `fallback` for any other error.
+/// The problem code of an [`Error::Sql`] (`sql_missing_object`, `sql_locked`, …), at the
+/// start or after the pool's `<db>: connect failed: ` prefix, or `fallback` for any other
+/// error.
 pub fn problem_code<'a>(e: &Error, fallback: &'a str) -> &'a str {
-    const CODES: [&str; 5] = [
+    const CODES: [&str; 6] = [
         "sql_missing_object",
         "sql_locked",
         "sql_deadlock",
         "sql_access_denied",
         "sql_timeout",
+        "sql_tls_unavailable",
     ];
     match e {
         Error::Sql(m) => CODES
             .into_iter()
-            .find(|c| m.strip_prefix(c).is_some_and(|r| r.starts_with(':')))
+            .find(|c| {
+                m.strip_prefix(c).is_some_and(|r| r.starts_with(':'))
+                    || m.contains(&format!(": {c}:"))
+            })
             .unwrap_or(fallback),
         _ => fallback,
     }
@@ -141,7 +220,7 @@ pub fn problem_code<'a>(e: &Error, fallback: &'a str) -> &'a str {
 impl Connector for TdsConnector {
     type Conn = dl_tds::Client;
     fn connect(&self) -> Result<dl_tds::Client, Error> {
-        let mut client = self.open().map_err(tds)?;
+        let mut client = self.open().map_err(|e| self.connect_error(e))?;
         if let Some(t) = self.lock_timeout {
             client
                 .execute(&format!("SET LOCK_TIMEOUT {}", t.as_millis()), &[])
@@ -150,9 +229,16 @@ impl Connector for TdsConnector {
         Ok(client)
     }
     fn describe(&self) -> Value {
+        let auth = secret::AuthMode::of(&self.config);
         json!({
             "rung": self.rung().map(transport::Rung::name),
             "lock_timeout_ms": self.lock_timeout.map(|t| t.as_millis() as u64),
+            "auth": auth.as_str(),
+            "login": (auth == secret::AuthMode::Sql).then(|| self.config.user().to_string()),
+            "server": self.config.host(),
+            "instance": self.config.instance(),
+            "port": self.config.port().map(u64::from),
+            "resolved_port": self.resolved_port().map(u64::from),
         })
     }
 }
@@ -384,10 +470,7 @@ impl SqlPools {
             if !valid_name(name) {
                 return Err(bad("name must be 1-64 letters, digits, '_' or '-'"));
             }
-            let connection = entry
-                .get("connection")
-                .and_then(Value::as_str)
-                .ok_or_else(|| bad("missing \"connection\""))?;
+            let (connection, _) = secret::resolve(entry).map_err(|e| bad(&e.to_string()))?;
             let pin = match entry.get("transport") {
                 None | Some(Value::Null) => None,
                 Some(v) => {
@@ -399,7 +482,7 @@ impl SqlPools {
             };
             let lock = seconds(entry, "lock_timeout_seconds", Some(DEFAULT_LOCK_TIMEOUT))
                 .map_err(|e| bad(&e.to_string()))?;
-            let connector = TdsConnector::parse(connection)
+            let connector = TdsConnector::parse(&connection)
                 .map_err(|e| bad(&e.to_string()))?
                 .with_transport(pin)
                 .with_lock_timeout(lock);
@@ -457,7 +540,13 @@ impl Site {
 pub fn declare(data_dir: &Path, name: &str, connection: &str, max: usize) -> Result<(), Error> {
     let path = data_dir.join(SQL_FILE);
     let mut doc = crate::store::read_json(&path)?.unwrap_or_else(|| json!({"databases": {}}));
-    let entry = json!({"connection": connection, "max_connections": max as u64});
+    let (stored, password) = secret::split_password(connection)?;
+    let (_, auth) = secret::resolve(&json!({"connection": connection}))?;
+    let mut entry =
+        json!({"connection": stored, "auth": auth.as_str(), "max_connections": max as u64});
+    if let (Some(pw), Some(o)) = (password, entry.as_object_mut()) {
+        o.insert(secret::PASSWORD_KEY, Value::String(secret::seal(&pw)?));
+    }
     let mut probe = Map::new();
     probe.insert(name, entry.clone());
     SqlPools::from_json(&json!({"databases": Value::Object(probe)}))?;
@@ -472,7 +561,7 @@ pub fn declare(data_dir: &Path, name: &str, connection: &str, max: usize) -> Res
         .ok_or_else(|| Error::Config(format!("{SQL_FILE}: databases is not an object")))?
         .insert(name, entry);
     crate::store::write_json(&path, &doc)?;
-    // Connection strings carry passwords: only the service account and admins may read them.
+    // Sealed passwords and server names: only the service account and admins may read them.
     crate::identity::restrict_file(&path)
 }
 
@@ -521,5 +610,7 @@ pub fn options_from(entry: &Value) -> Result<PoolOptions, Error> {
     })
 }
 
+#[cfg(test)]
+mod tds_tests;
 #[cfg(test)]
 mod tests;

@@ -427,6 +427,7 @@ fn hub_check_uses_the_service_heartbeat_inside_the_service() {
         pid: 1,
         channel: "canary".into(),
         skew: 4,
+        links: Vec::new(),
     };
     write_beat(&d.0, &beat(crate::now() - 5)).unwrap();
     let (c, link) = checks_hub::hub(&a, &d.0, Some(id.clone()), None, Trigger::Command);

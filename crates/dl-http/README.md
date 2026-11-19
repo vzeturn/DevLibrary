@@ -70,6 +70,11 @@ match client.get("https://api.example.com/") {
   suffixes, `.subdomain-only`, `host:port`, IPs, CIDR ranges). `localhost` and loopback
   addresses are always direct. `HTTP_PROXY` is ignored when `REQUEST_METHOD` is set (CGI,
   "httpoxy").
+- `Proxy::Rules(ProxyRules)` holds settings read once: `ProxyRules::from_windows(server,
+  bypass)` takes the Windows Internet Options / `netsh winhttp` form (`host:port` or
+  `http=…;https=…`, `ProxyOverride` with `*` wildcards, `:port` and `<local>` for dotless
+  names), `ProxyRules::from_env` a snapshot of the variables above. `with_credentials`
+  adds Basic credentials to a proxy whose URL has none; `describe()` never shows them.
 - `http` URLs go to the proxy in absolute form (`GET http://host/path HTTP/1.1`);
   `https` URLs use a `CONNECT host:443` tunnel and TLS end to end. Credentials in the proxy
   URL become `Proxy-Authorization: Basic ...`.

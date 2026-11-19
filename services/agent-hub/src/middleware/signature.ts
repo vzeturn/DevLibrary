@@ -36,6 +36,7 @@ export const requireSignedAgent: MiddlewareHandler<AppEnv> = async (c, next) => 
   if (!(await recordNonce(c.env.DB, agent.id, nonce, now, NONCE_TTL_SECONDS))) throw new HttpError(401, 'replay');
 
   c.set('agent', agent);
+  c.set('rawBytes', body);
   c.set('rawBody', new TextDecoder().decode(body));
   await next();
 };

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
+import { ARRIVAL_SQL_STUB, installScript } from '../src/install/script';
 import { admin, createTenant, manifestText, setNow, T0, testEnv, type TestEnv } from './helpers';
 
 const BASE = 'https://hub.test';
@@ -42,9 +43,103 @@ describe('install script', () => {
     expect(replace).toBeGreaterThan(setup);
     expect(install).toBeGreaterThan(replace);
     expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
-    // A reinstall with -SqlPrompt keeps the declared databases that still connect.
-    expect(text).toContain('if (Test-SavedSql) { Say');
-    expect(text).toContain("Invoke-Agent @('sql-test', '--data', $Data)");
+  });
+
+  it('asks Windows or SQL login, defaulting to what this machine saved, and tests before enrolling', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("SQL login: [1] Windows  [2] SQL login");
+    // The saved choice is the default (a reinstall with no change reuses it); else Windows.
+    expect(text).toContain('& $Exe sql-setup --show --data $Data');
+    expect(text).toContain("if ($saved.auth -eq 'sql') { $mode = '2' }");
+    expect(text).toContain("$mode = '1'");
+    expect(text).toContain("Read-Secret 'Password (Enter keeps the saved one)'");
+    // Windows mode is tested as the service account (LocalSystem).
+    expect(text).toContain("$argv += '--as-service'");
+    // A failed test re-prompts.
+    const loop = text.slice(text.indexOf('function Read-SqlLogin'), text.indexOf('function Set-SqlLoginUnattended'));
+    expect(loop).toContain('while ($true)');
+    expect(loop).toContain('Choose again');
+    // The SQL step runs before enrolment so a failure never spends the code.
+    const sql = text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))');
+    const enroll = text.indexOf("@('enroll', '--hub'");
+    expect(sql).toBeGreaterThan(0);
+    expect(enroll).toBeGreaterThan(sql);
+    expect(text.indexOf('    Read-SqlLogin\n')).toBeLessThan(enroll);
+  });
+
+  it('takes the SQL login unattended without echoing the password and exits 1 on failure', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("[ValidateSet('', 'windows', 'sql')][string]$SqlAuth = ''");
+    expect(text).toContain('[string]$SqlUser = ');
+    // The password is never a parameter: env DL_AGENT_SQL_PASSWORD or the hidden prompt only.
+    const params = text.slice(text.indexOf('param('), text.indexOf('$ErrorActionPreference'));
+    expect(params).not.toMatch(/SqlPassword|Password/);
+    expect(text).not.toMatch(/-SqlPassword/);
+    expect(text).toContain('    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD\n');
+    const unattended = text.slice(text.indexOf('function Set-SqlLoginUnattended([ref]$Password)'), text.indexOf('function Remove-OldCopies'));
+    expect(unattended).toContain("} elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {");
+    expect(unattended).toContain("$pw = Read-Secret ('Password of SQL login ' + $user)");
+    expect(unattended).toContain('$Password.Value = $pw');
+    // The password reaches the agent only through the environment, removed right after.
+    expect(text).toContain('$env:DL_AGENT_SQL_PASSWORD = $pw');
+    expect(text).toContain('Remove-Item Env:DL_AGENT_SQL_PASSWORD');
+    expect(text).not.toMatch(/--password/);
+    for (const line of text.split('\n')) {
+      if (/Say|Warn|Write-Host/.test(line)) expect(line).not.toMatch(/\$SqlPassword|\$pw\b/);
+    }
+    // A failure prints the structured result and exits 1; a new machine is not enrolled.
+    expect(text).toContain("'[dl-agent] SQL_SETUP_RESULT '");
+    expect(text).toContain("if ($SqlFailed -and -not $enrolled) { throw");
+    expect(text).toContain('if ($SqlAuth) { exit 1 }');
+    expect(text).toContain("FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1");
+  });
+
+  it('offers the old Check-In agent SQL connection when this machine saved none (arrival hook)', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).not.toContain('__ARRIVAL_SQL__');
+    expect(text).toContain(ARRIVAL_SQL_STUB);
+    // The arrival body needs $St, Add-Secret and Warn defined before it is spliced in.
+    const body = text.indexOf(ARRIVAL_SQL_STUB);
+    for (const before of ['$St = @{', 'function Add-Secret(', 'function Warn(']) {
+      expect(text.indexOf(before)).toBeGreaterThan(0);
+      expect(text.indexOf(before)).toBeLessThan(body);
+    }
+    const saved = text.slice(text.indexOf('function Get-SavedSql'), text.indexOf('function Get-LocalSqlServer'));
+    expect(saved).toContain('if (-not $s.auth) { Add-LegacySql $s }');
+    // Its password is offered in memory only: an empty answer keeps it, the source is named.
+    expect(text).toContain('if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }');
+    expect(text).toContain("Say ($saved.from + ': '");
+    // The arrival slice's body replaces the stub.
+    const real = "function Get-ArrivalLegacySql { $St.SqlFrom = 'old'; return 'Server=.;Integrated Security=True;' }";
+    const spliced = installScript(BASE, [], real);
+    expect(spliced).toContain(real);
+    expect(spliced).not.toContain(ARRIVAL_SQL_STUB);
+    expect(spliced.split('function Get-ArrivalLegacySql').length).toBe(2);
+  });
+
+  it('passes the SQL sign-in to arrival-enroll through env only and removes it after', async () => {
+    const text = await (await get('/install.ps1')).text();
+    const start = text.indexOf('# -- arrival sign-in');
+    const end = text.indexOf('# -- end arrival sign-in');
+    const block = text.slice(start, end);
+    expect(start).toBeGreaterThan(text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))'));
+    expect(block).toContain("if ($Setup -eq 'arrival-enroll') {");
+    expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth');
+    expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser');
+    expect(block).toContain('$env:DL_AGENT_SQL_PASSWORD = $SqlPassword');
+    expect(block).toContain('$SqlPassword = $null');
+    for (const name of ['DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD']) {
+      expect(block).toContain(`'${name}'`);
+    }
+    const run = text.indexOf("try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {");
+    expect(run).toBeGreaterThan(end);
+    expect(text.slice(run, text.indexOf('Remove-Replaced', run))).toContain("foreach ($n in $SetupSecrets) { Remove-Item ('Env:' + $n)");
+    // Never in argv: no agent call carries the password, the login or the mode.
+    for (const line of text.split('\n').filter((l) => l.includes('Invoke-Agent @('))) {
+      expect(line).not.toMatch(/\$SqlPassword|\$SqlUser|\$SqlAuth|\$pw\b/);
+    }
+    // Without arrival-enroll the password is dropped right after the SQL step.
+    expect(text).toContain("if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }");
   });
 
   it('keeps the verified download until Move-Item installs it (RT-0164 test PC)', async () => {

@@ -120,9 +120,16 @@ impl Identity {
     /// Saves the identity: public facts as JSON, the seed sealed (DPAPI machine scope on
     /// Windows, mode 0600 elsewhere).
     pub fn save(&self, dir: &Path) -> Result<(), Error> {
-        let (meta, key) = Identity::paths(dir);
-        store::write_bytes(&key, &seal(self.key.seed())?)?;
+        let (_, key) = Identity::paths(dir);
+        store::write_bytes(&key, &seal(self.key.seed(), ENTROPY)?)?;
         restrict_file(&key)?;
+        self.save_meta(dir)
+    }
+
+    /// Rewrites only the public facts (`identity.json`), e.g. after the hub sent a new
+    /// host list; the sealed key is left as it is.
+    pub fn save_meta(&self, dir: &Path) -> Result<(), Error> {
+        let (meta, _) = Identity::paths(dir);
         let v = json!({"agent_id": self.agent_id, "tenant": self.tenant, "site": self.site,
                        "hub_urls": self.hub_urls.clone(), "public_key": self.public_key()});
         store::write_json(&meta, &v)
@@ -141,7 +148,7 @@ impl Identity {
                 .ok_or_else(|| Error::Config(format!("identity.json: missing {k}")))
         };
         let blob = std::fs::read(&key).map_err(|e| Error::Io("read identity key", e))?;
-        let seed: [u8; SEED_LEN] = unseal(&blob)?
+        let seed: [u8; SEED_LEN] = unseal(&blob, ENTROPY)?
             .try_into()
             .map_err(|_| Error::Config("identity key has the wrong length".into()))?;
         let hub_urls = v
@@ -185,17 +192,20 @@ impl Identity {
     }
 }
 
+/// Seals a local secret (identity seed, SQL password): DPAPI machine scope with `entropy`
+/// on Windows; as-is elsewhere, where the file holding it is mode 0600.
 #[cfg(windows)]
-fn seal(seed: &[u8]) -> Result<Vec<u8>, Error> {
+pub(crate) fn seal(data: &[u8], entropy: &[u8]) -> Result<Vec<u8>, Error> {
     use dl_winsvc::dpapi::{Scope, protect_with_entropy};
-    protect_with_entropy(seed, Scope::LocalMachine, ENTROPY)
+    protect_with_entropy(data, Scope::LocalMachine, entropy)
         .map_err(|e| Error::Config(format!("DPAPI protect: {e}")))
 }
 
+/// Opens what [`seal`] sealed with the same `entropy`.
 #[cfg(windows)]
-fn unseal(blob: &[u8]) -> Result<Vec<u8>, Error> {
+pub(crate) fn unseal(blob: &[u8], entropy: &[u8]) -> Result<Vec<u8>, Error> {
     use dl_winsvc::dpapi::{Scope, unprotect_with_entropy};
-    unprotect_with_entropy(blob, Scope::LocalMachine, ENTROPY)
+    unprotect_with_entropy(blob, Scope::LocalMachine, entropy)
         .map_err(|e| Error::Config(format!("DPAPI unprotect: {e}")))
 }
 
@@ -205,15 +215,14 @@ pub(crate) fn restrict_file(path: &Path) -> Result<(), Error> {
         .map_err(|e| Error::Config(format!("restrict {}: {e}", path.display())))
 }
 
-// Outside Windows the seed is stored as-is with mode 0600 (the data dir is root-owned).
+// Outside Windows secrets are stored as-is with mode 0600 (the data dir is root-owned).
 #[cfg(not(windows))]
-fn seal(seed: &[u8]) -> Result<Vec<u8>, Error> {
-    let _ = ENTROPY;
-    Ok(seed.to_vec())
+pub(crate) fn seal(data: &[u8], _entropy: &[u8]) -> Result<Vec<u8>, Error> {
+    Ok(data.to_vec())
 }
 
 #[cfg(not(windows))]
-fn unseal(blob: &[u8]) -> Result<Vec<u8>, Error> {
+pub(crate) fn unseal(blob: &[u8], _entropy: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(blob.to_vec())
 }
 

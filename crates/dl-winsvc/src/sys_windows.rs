@@ -7,6 +7,7 @@ use core::mem::size_of;
 use core::ptr;
 
 use crate::Error;
+use crate::process::Process;
 use crate::raw::{HandlerFn, RawConfig, RawService, ServiceMainFn, ServiceStatus};
 
 type Handle = *mut c_void;
@@ -680,8 +681,15 @@ pub(crate) fn parent_is_services() -> Result<bool, Error> {
             code: st as u32,
         });
     }
-    let parent = pbi.inherited_from_unique_process_id;
+    let parent = u32::try_from(pbi.inherited_from_unique_process_id).unwrap_or(u32::MAX);
+    Ok(processes()?
+        .iter()
+        .find(|p| p.pid == parent)
+        .is_some_and(|p| p.session_id == 0 && p.name.eq_ignore_ascii_case("services.exe")))
+}
 
+/// Every running process, from one `NtQuerySystemInformation(SystemProcessInformation)` call.
+pub(crate) fn processes() -> Result<Vec<Process>, Error> {
     let mut buf = AlignedBuf::new(512 << 10);
     loop {
         let size = len_u32(buf.len(), "buffer too large")?;
@@ -715,13 +723,16 @@ pub(crate) fn parent_is_services() -> Result<bool, Error> {
         break;
     }
     let bytes = buf.bytes();
+    let mut out = Vec::new();
     let mut off = 0usize;
     while let Some(e) = read_pod::<SystemProcessInformation>(bytes, off) {
-        if e.unique_process_id == parent {
-            let units = usize::from(e.image_name.length / 2);
-            let name = wide_in_buf(bytes, e.image_name.buffer, Some(units));
-            return Ok(e.session_id == 0 && name.eq_ignore_ascii_case("services.exe"));
-        }
+        let units = usize::from(e.image_name.length / 2);
+        out.push(Process {
+            pid: u32::try_from(e.unique_process_id).unwrap_or(u32::MAX),
+            parent_pid: u32::try_from(e.inherited_from_unique_process_id).unwrap_or(u32::MAX),
+            session_id: e.session_id,
+            name: wide_in_buf(bytes, e.image_name.buffer, Some(units)),
+        });
         if e.next_entry_offset == 0 {
             break;
         }
@@ -730,7 +741,7 @@ pub(crate) fn parent_is_services() -> Result<bool, Error> {
             None => break,
         };
     }
-    Ok(false)
+    Ok(out)
 }
 
 const SERVICE_CONFIG_FAILURE_ACTIONS: u32 = 2;

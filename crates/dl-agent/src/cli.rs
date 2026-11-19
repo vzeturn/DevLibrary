@@ -101,7 +101,10 @@ pub fn command(app: &App) -> Command {
             .help("State directory (default: %ProgramData%\\<service> or /var/lib/<service>)")
     };
     let cmd = Command::new(app.service.clone())
-        .version(app.version.to_string())
+        .version(crate::fault::version_label(
+            &app.version.to_string(),
+            crate::fault::COMPILED,
+        ))
         .about(format!(
             "{}: shared on-prem agent (modules, signed self-update, reports)",
             app.display
@@ -176,6 +179,7 @@ pub fn command(app: &App) -> Command {
                 .arg(Arg::positional("name").help("Only this database"))
                 .arg(data()),
         )
+        .subcommand(crate::cli_sql::grammar(data()))
         .subcommand(crate::selftest::cli::grammar(data()));
     app.tools.iter().fold(cmd, |cmd, t| {
         cmd.subcommand((t.grammar)(Command::new(t.name)).arg(data()))
@@ -208,6 +212,7 @@ pub fn main(app: App) -> i32 {
         }
         "sql-add" => sql_add(&dir, sub),
         "sql-test" => return sql_test(&dir, sub.value("name")),
+        "sql-setup" => return crate::cli_sql::main(&app.service, &dir, sub),
         crate::selftest::COMMAND => return crate::selftest::cli::main(&app, &dir, sub),
         "status" => {
             println!(
@@ -277,8 +282,9 @@ fn sql_test(dir: &Path, only: Option<&str>) -> i32 {
                     .cloned()
                     .unwrap_or(Value::Null);
                 let rung = t.get("rung").and_then(Value::as_str).unwrap_or("-");
+                let auth = t.get("auth").and_then(Value::as_str).unwrap_or("-");
                 println!(
-                    "{}: ok ({} ms, transport {rung})",
+                    "{}: ok ({} ms, transport {rung}, auth {auth})",
                     pool.name(),
                     d.as_millis()
                 );
@@ -366,18 +372,26 @@ fn init_logging(app: &App, dir: &Path, console: bool, file: &str) {
     {
         b = b.level(l);
     }
-    match dl_log::FileSink::builder(dir.join("logs").join(file))
-        .max_size(LOG_MAX_BYTES)
-        .keep(LOG_KEEP)
-        .build()
-    {
+    match log_file_sink(dir.join("logs").join(file)) {
         Ok(sink) => b = b.sink(sink),
         Err(e) => eprintln!("cannot open log file: {e}"),
     }
     if console {
-        b = b.sink(dl_log::ConsoleSink::stderr());
+        b = b.sink(
+            dl_log::ConsoleSink::stderr().with_format(dl_log::Redacted(dl_log::TextFormat::new())),
+        );
     }
     dl_log::init(b.build());
+}
+
+/// The agent's rolling log file; every line is scrubbed of passwords, bearer tokens and
+/// key fields before it is written ([`dl_log::scrub`]).
+fn log_file_sink(path: PathBuf) -> Result<dl_log::FileSink, dl_log::Error> {
+    dl_log::FileSink::builder(path)
+        .max_size(LOG_MAX_BYTES)
+        .keep(LOG_KEEP)
+        .format(dl_log::Redacted(dl_log::TextFormat::new()))
+        .build()
 }
 
 fn run(app: &App, dir: &Path) -> i32 {
@@ -559,6 +573,44 @@ fn uninstall(app: &App, dir: &Path, purge: bool) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_log_file_never_receives_secrets() {
+        let d = crate::store::testdir::TestDir::new("cli-log-scrub");
+        let path = d.0.join("agent.log");
+        let log = dl_log::Logger::builder()
+            .sink(log_file_sink(path.clone()).unwrap())
+            .build();
+        let rec = |msg: &str| {
+            dl_log::Record::new(
+                dl_log::OffsetDateTime::UNIX_EPOCH,
+                dl_log::Level::Error,
+                "dl_agent::sql",
+                msg,
+            )
+        };
+        log.log(rec(
+            "open failed: Server=.;User Id=sa;Password=Hunter2!;Database=SMILE_FO",
+        ));
+        log.log(rec(
+            "hub said 401 to Authorization: Bearer eyJhbGciOiJFZERTQSJ9.e30.sig",
+        ));
+        log.log(
+            rec("config applied")
+                .with_field("api_key", "sk-live-123")
+                .with_field("detail", "pwd=abc;uid=x"),
+        );
+        log.flush();
+        drop(log);
+        let text = std::fs::read_to_string(&path).unwrap();
+        for secret in ["Hunter2", "eyJhbGci", "sk-live-123", "pwd=abc"] {
+            assert!(!text.contains(secret), "{secret} leaked:\n{text}");
+        }
+        assert!(
+            text.contains("SMILE_FO") && text.contains("[redacted]"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn grammar_is_valid_and_parses() {

@@ -16,7 +16,9 @@ dependencies = [
  "dl-rand",
  "dl-tds",
  "dl-tls",
+ "dl-winos",
  "dl-winsvc",
+ "dl-zip",
 ]
 
 [[package]]
