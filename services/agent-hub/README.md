@@ -8,7 +8,7 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 | Area | Endpoints |
 |---|---|
 | Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/agent/diagnostics?command_id=` (zip), `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`, never `diag/…`) |
-| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit` |
+| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `POST /admin/demo-bench`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit` |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
 | Bench (public, `no-store`) | `GET /bench/:token` — the bench script of a bundle (see "Bench (test PC)") |
@@ -84,6 +84,25 @@ Notes:
   pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and log the would-be row
   (`admin_audit_write_failed`, `fail_open: true`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
+
+## Demo bench (one command, RT-0261)
+
+`POST /admin/demo-bench` `{tenant_id, site_id, modules?, expires_hours? (1–72, default 24), settings?}`
+→ `201` (`Cache-Control: no-store`) `{tenant_id, site_id, channel: "canary", enroll_code_id,
+enroll_code, expires_at, install_command, modules: [{module, product, setup, source, secrets:[{env,
+required, what}], options:[{env, flag, required, what, value?}], note}], operator_env: ["$env:… = …"]}`.
+
+- The tenant is created as a demo tenant (canary); a live one answers `409 tenant_not_demo`. The code
+  is an ordinary one-time enrolment code (only its SHA-256 in D1, shown once here) whose first config
+  enables the modules (`modules`, default all nine). No new table, no migration.
+- The hub mints no product code: E-Invoice, PMS, Check-In, Membership, Hotel Link, SRBackup and PDA
+  codes come from those clouds, so each module answers `source: "operator"` and the variable the
+  operator sets on the PC (`DL_AGENT_DEMO_*`); `pms-device` and `speaker` answer `none`.
+  `settings` takes only the non-secret option variables (https URLs, ids) to prefill `operator_env`;
+  a module code there is a `400`.
+- `install.ps1 -Demo` (or env `DL_AGENT_DEMO=1`) does the rest on the PC: see
+  `crates/dl-agent/README.md` "Demo bench". The module table is `src/domain/demo.ts`, rendered into
+  `install.ps1` as `$DemoTable` (`src/install/demo.ts`).
 
 ## Bench (test PC)
 

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { nowSeconds, type AppEnv } from '../env';
 import { benchBody } from '../domain/bench';
+import { demoBenchBody } from '../domain/demo';
 import { productName, severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
@@ -17,6 +18,7 @@ import { listTenants, upsertTenant } from '../repo/tenants';
 import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
 import { benchView, createBench, revokeBenchBundle } from '../services/bench';
+import { createDemoBench } from '../services/demoBench';
 import { diagnosticsObject } from '../services/diagnostics';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
@@ -146,6 +148,16 @@ adminRoutes.get('/bench', async (c) => c.json({ bundles: await benchView(c.env, 
 adminRoutes.delete('/bench/:id', async (c) => {
   await revokeBenchBundle(c.env, c.req.param('id'), nowSeconds());
   return c.json({});
+});
+
+/**
+ * Demo bench (RT-0261): a one-time canary enrolment code for a demo tenant with every module
+ * enabled, the `install.ps1 -Demo` line and the variables the operator sets for the module codes.
+ */
+adminRoutes.post('/demo-bench', async (c) => {
+  const body = validate(demoBenchBody, await jsonBody(c.req));
+  const set = await createDemoBench(c.env, body, new URL(c.req.url).origin, nowSeconds());
+  return c.json(set, 201, { 'Cache-Control': 'no-store' });
 });
 
 adminRoutes.get('/releases', async (c) => c.json({ releases: await listReleases(c.env.DB) }));

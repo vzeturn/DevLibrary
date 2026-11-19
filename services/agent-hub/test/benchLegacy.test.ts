@@ -318,7 +318,7 @@ describe('bench: reruns and the service login (RT-0164 test PC)', () => {
     expect(listed.script).toContain('$SqlGrantCreate = @()');
   });
 
-  it('a rerun keeps the dl-agent already enrolled for the tenant instead of installing again', () => {
+  it.skipIf(!pwsh)('a rerun keeps the dl-agent already enrolled for the tenant instead of installing again', () => {
     const script = benchScript({
       hub: BASE, label: 'bench', tenant_id: 'bench-demo', site_id: 'test-pc', expires_at: T0, code: 'ABCD-EFGH-JKLM-NPQR',
       steps: [EINVOICE_STEP], sql_databases: [], sql_fixups: [], sql_names: [], sql_parts: false, remove_legacy: true, sql_grant_service: false,

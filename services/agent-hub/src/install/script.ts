@@ -12,7 +12,9 @@
  * Kept free of backticks and dollar-brace so it can live in a raw template literal; the hub
  * origin replaces `__HUB__`, the hub list `__HUBS__`.
  */
+import { demoModulesPs } from '../domain/demo';
 import { ARRIVAL_LEGACY_SQL_BODY } from './arrival';
+import { DEMO_BLOCK } from './demo';
 import { legacyInstallScript } from './legacyScript';
 
 const SCRIPT = String.raw`# DevLibrary Agent installer. PowerShell as Administrator:
@@ -32,6 +34,12 @@ const SCRIPT = String.raw`# DevLibrary Agent installer. PowerShell as Administra
 #   identity), -NoDefender, -LinkTimeout <seconds>, -Setup <sub-command> (its secrets through env
 #   DL_AGENT_SETUP_ARGS, removed afterwards), -Replace <service name pattern> (an older per-product
 #   agent: its services are stopped and deleted, its files and config stay).
+# Demo bench (a test PC, canary, every product module on its demo tenant, then the self test):
+#   & ([scriptblock]::Create((irm __HUB__/install.ps1))) -Demo -Code XXXX-XXXX
+#   or env DL_AGENT_DEMO=1 (and DL_AGENT_ENROLL_CODE) with the short form. Module codes and URLs come
+#   from env DL_AGENT_DEMO_* (or -DemoEnv @{ NAME = 'value' }), reach each enrol tool through the
+#   variable it reads, never argv, and are cleared when the script ends; -DemoModules picks modules.
+#   POST /admin/demo-bench on the hub answers the code and the list of variables.
 # Remove: irm __HUB__/uninstall.ps1 | iex
 param(
   [string]$Target = '',
@@ -49,10 +57,14 @@ param(
   [switch]$NoDefender,
   [int]$LinkTimeout = 120,
   [string]$Setup = '',
-  [string[]]$Replace = @()
+  [string[]]$Replace = @(),
+  [switch]$Demo,
+  [hashtable]$DemoEnv = @{},
+  [string[]]$DemoModules = @()
 )
 
-$DlState = @{ Exit = 0; Extra = @($args); Done = $false }
+$DlState = @{ Exit = 0; Extra = @($args); Done = $false; Demo = ([bool]$Demo -or ($env:DL_AGENT_DEMO -eq '1')) }
+if ($DemoModules.Count -eq 0 -and $env:DL_AGENT_DEMO_MODULES) { $DemoModules = @(($env:DL_AGENT_DEMO_MODULES -split '[,\s]+') | Where-Object { $_ }) }
 $MaxSkew = 240
 # Secret env a -Setup sub-command reads (DL_AGENT_SETUP_ARGS too): removed when the installer ends.
 $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD', 'DL_AGENT_EINVOICE_TOKEN', 'DL_AGENT_PMS_CODE')
@@ -197,6 +209,14 @@ function Install-Agent {
     if ($Target -notmatch '^(|stable|latest|canary|auto|\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?)$') { Stop-Install 78 ('Unknown target ' + $Target) 'Use stable, canary, auto or a version such as 1.4.2.' }
     if ($Channel -notmatch '^(|stable|canary)$') { Stop-Install 78 ('Unknown channel ' + $Channel) 'Use -Channel stable or -Channel canary.' }
     if ($SqlAuth -notmatch '^(|windows|sql)$') { Stop-Install 78 ('Unknown SQL login mode ' + $SqlAuth) 'Use -SqlAuth windows or -SqlAuth sql.' }
+    if ($DlState.Demo) {
+      if ($Target -and $Target -ne 'canary') { Stop-Install 78 ('-Demo installs the canary build, not ' + $Target + '.') 'Leave the target out (or use canary) with -Demo.' }
+      if ($Channel -and $Channel -ne 'canary') { Stop-Install 78 ('-Demo installs the canary build, not -Channel ' + $Channel + '.') 'Leave -Channel out with -Demo.' }
+      foreach ($m in $DemoModules) {
+        if (@($DemoTable | Where-Object { $_.Module -eq $m }).Count -eq 0) { Stop-Install 78 ('Unknown demo module ' + $m + '.') ('Known modules: ' + ((@($DemoTable | ForEach-Object { $_.Module })) -join ', ') + '.') }
+      }
+      $Target = 'canary'
+    } elseif ($DemoModules.Count -gt 0 -or $DemoEnv.Count -gt 0) { Stop-Install 78 '-DemoModules and -DemoEnv go with -Demo.' 'Add -Demo, or leave them out.' }
     $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Stop-Install 77 'Not running as Administrator.' 'Open PowerShell with "Run as administrator" and paste the command again.' }
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 }
@@ -246,6 +266,7 @@ function Install-Agent {
 
     if (-not (Test-Modern $tmp)) {
       if ($version) { Stop-Install 78 ($Product + ' ' + $version + ' predates version pinning.') 'Install a channel instead: stable or canary.' }
+      if ($DlState.Demo) { Stop-Install 78 ($Product + ' ' + $info['version'] + ' predates -Demo.') 'Publish a newer canary build, then run again.' }
       Say 'This build predates the new installer: the previous installer runs it.'
       Invoke-Legacy $lane
       return
@@ -306,7 +327,13 @@ function Install-Agent {
   }
 }
 
+__DEMO_BLOCK__
 Install-Agent
+if ($DlState.Demo) {
+  try { if ($DlState.Done) { Invoke-Demo } }
+  catch { Write-Host ('[dl-agent] Demo FAILED: ' + (Hide-Demo $_.Exception.Message)) -ForegroundColor Red; $DlState.Exit = 1 }
+  finally { Clear-DemoEnv }
+}
 $global:LASTEXITCODE = $DlState.Exit
 if ($DlState.Done) {
   $ok = '[dl-agent]'
@@ -329,7 +356,14 @@ const ARRIVAL_END = '#</arrival-sql>\n';
  * agent's connection reader from `./arrival`).
  */
 export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_LEGACY_SQL_BODY): string {
-  return SCRIPT.split('__ARRIVAL_SQL__').join(arrivalSql).split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
+  return SCRIPT.split('__DEMO_BLOCK__')
+    .join(DEMO_BLOCK.split('__DEMO_MODULES__').join(demoModulesPs()))
+    .split('__ARRIVAL_SQL__')
+    .join(arrivalSql)
+    .split('__HUBS__')
+    .join(hubs.join(','))
+    .split('__HUB__')
+    .join(origin);
 }
 
 /** The `Get-ArrivalLegacySql` body `installScript` splices in (whatever its default is). */
@@ -353,4 +387,10 @@ export function installCommand(origin: string, code: string): string {
     '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; ' +
     `& ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('${origin}/install.ps1'))) -Code '${code}'`
   );
+}
+
+/** The demo bench one-liner (`POST /admin/demo-bench`): canary, `-Demo`, the one-time code; module codes stay in env. */
+export function demoCommand(origin: string, code: string, modules?: readonly string[]): string {
+  const pick = modules && modules.length > 0 ? ` -DemoModules ${modules.map((m) => `'${m}'`).join(',')}` : '';
+  return `${installCommand(origin, code)} -Demo${pick}`;
 }

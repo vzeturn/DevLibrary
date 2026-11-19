@@ -157,6 +157,64 @@ over the hub's assignment), `auto` (the hub's channel again) or a version `x.y.z
 `-Channel canary` only picks the build installed now. `-SqlPrompt` asks for the SQL login when SQL
 Server is on another machine. See `services/agent-hub/README.md` for the hub side.
 
+### Demo bench: one command, every module (RT-0261)
+
+For a test PC wired to each product's **demo** tenant. On the hub (admin auth like every `/admin`
+route):
+
+```sh
+curl -sS https://agent.pms.id.vn/admin/demo-bench -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"tenant_id": "demo-bench", "site_id": "owner-pc", "settings": {"DL_AGENT_DEMO_EINVOICE_URL": "https://…"}}'
+```
+
+It answers a one-time enrolment code (canary: the tenant is created as, or must already be, a demo
+tenant; `409 tenant_not_demo` otherwise) whose first config enables `einvoice`, `pms-site`,
+`arrival`, `membership`, `hotellink`, `backup`, `pda-sync`, `pms-device` and `speaker` (or the
+`modules` asked for), the `install_command` with `-Demo`, the variables each module needs and
+`operator_env`: PowerShell lines with the non-secret `settings` prefilled and a placeholder for each
+module code. The hub mints only the dl-agent code: every module code comes from that product's own
+cloud and never passes through the hub (`settings` refuses them). On the PC, as Administrator, set
+the module codes, then run the line:
+
+```text
+$env:DL_AGENT_DEMO_EINVOICE_TOKEN = '…'   # one line per module, from operator_env
+$env:DL_AGENT_DEMO_PDA_CODE = '…'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('https://agent.pms.id.vn/install.ps1'))) -Code 'XXXX-XXXX' -Demo
+```
+
+(Or `$env:DL_AGENT_DEMO = '1'; $env:DL_AGENT_ENROLL_CODE = 'XXXX-XXXX'` and the short
+`irm https://agent.pms.id.vn/install.ps1 | iex`.) The values may also go in `-DemoEnv @{ NAME =
+'value' }` (they then sit in the console history); `-DemoModules einvoice,pda-sync` (or
+`DL_AGENT_DEMO_MODULES`) picks modules. `-Demo` installs canary (another target or `-Channel` is
+refused) and, after the install:
+
+| Module | Enrol tool | Operator variables (secret → the variable the tool reads; options → flag) |
+|---|---|---|
+| `einvoice` | `einvoice-enroll` | `DL_AGENT_DEMO_EINVOICE_TOKEN` → `DL_AGENT_EINVOICE_TOKEN`; `DL_AGENT_DEMO_EINVOICE_URL` → `--platform-url` (SQL login from `MMEI_SQL_*` when set) |
+| `pms-site` | `pms-enroll` | `DL_AGENT_DEMO_PMS_CODE` → `DL_AGENT_PMS_CODE`; `DL_AGENT_DEMO_PMS_URL` → `--cloud-url` |
+| `arrival` | `arrival-enroll` | `DL_AGENT_DEMO_ARRIVAL_TOKEN` → `DL_AGENT_ARRIVAL_TOKEN`, optional `DL_AGENT_DEMO_ARRIVAL_PMS` → `DL_AGENT_ARRIVAL_PMS`; `DL_AGENT_DEMO_ARRIVAL_URL` → `--cloud-url` |
+| `membership` | `membership-enroll` | `DL_AGENT_DEMO_MEMBERSHIP_TOKEN` → `DL_AGENT_MEMBERSHIP_TOKEN`, optional `DL_AGENT_DEMO_MEMBERSHIP_SMILE` → `DL_AGENT_MEMBERSHIP_SMILE`; `DL_AGENT_DEMO_MEMBERSHIP_URL` → `--hub-url` |
+| `hotellink` | `hl-enroll` | `DL_AGENT_DEMO_HL_TOKEN` → `DL_AGENT_HL_TOKEN`, optional `DL_AGENT_DEMO_HL_SQL_PASSWORD` → `DL_AGENT_HL_SQL_PASSWORD`; `DL_AGENT_DEMO_HL_URL` → `--hub-url`, `DL_AGENT_DEMO_HL_HOTEL_ID` → `--hotel-id`, `DL_AGENT_DEMO_HL_INSTANCE_ID` → `--instance-id`, optional `DL_AGENT_DEMO_HL_SQL_USER` → `--sql-user` |
+| `backup` | `backup-enroll` | `DL_AGENT_DEMO_BACKUP_KEY` → `DL_AGENT_BACKUP_KEY`; `DL_AGENT_DEMO_BACKUP_URL` → `--hub-url` |
+| `pda-sync` | `pda-enroll` | `DL_AGENT_DEMO_PDA_CODE` → `DL_AGENT_PDA_CODE`; `DL_AGENT_DEMO_PDA_URL` → `--url` |
+| `pms-device` | none | reads the DeviceAgent appsettings and token file already on the PC |
+| `speaker` | none | uses the `pda-sync` identity |
+
+1. each enrol tool runs with its code set for that process only (never argv, never written by the
+   script; agent output lines are masked); a module without its required variables is `skip`
+   (`set …`), a failed one does not stop the next;
+2. the service is restarted and the script waits up to 90 s for a hub contact;
+3. `dl-agent selftest --trigger install` runs (and uploads), and a table prints one row per
+   module: `Enrol` (`ok`, `skip`, `n/a`, `FAILED`) and `Selftest` (the worst of its checks:
+   `pass`, `warn`, `fail`, `skip`, or `none`);
+4. every `DL_AGENT_DEMO_*` variable and every tool variable is removed from the session and
+   `-DemoEnv` is emptied, whatever happened. Exit code 1 (unattended runs) when a module failed.
+
+The table lives once in `services/agent-hub/src/domain/demo.ts`; a test checks each entry against
+the tool's own source (sub-command, variable, flags). The `/bench/<token>` bundle (hub README
+"Bench (test PC)") stays for benches that also restore a SMILE copy and run SQL fixups.
+
 Remove: `irm https://agent.pms.id.vn/uninstall.ps1 | iex` (or `dl-agent uninstall`): tells the
 hub, removes the watchdog task, the service, the program and the Defender exclusion; the data
 folder (identity, spool, logs) stays unless `-Purge` (`--purge`).

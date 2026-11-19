@@ -35,6 +35,10 @@ dl-agent pda-enroll --code <code> --url <https cloud url> [--dry-run]
                     [--sql-instance <instance>] [--database SMILE_POS] [--sql-admin-user <login>]
 ```
 
+The code may come from the environment variable `DL_AGENT_PDA_CODE` instead of `--code`
+(the argument wins), so an installer such as `install.ps1 -Demo` keeps it out of the
+process list.
+
 Live SQL tests run when `PDA_SYNC_TEST_SQL` holds a dl-tds URL of a login that may
 create databases; each test creates and drops its own `pda_sync_test_*` database.
 `tests/live_orders*.rs` run every order, combo, covers, table, KDS and reservation command
