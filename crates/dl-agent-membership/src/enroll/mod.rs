@@ -15,7 +15,7 @@ use dl_http::{ClientOptions, Request, Scheme, Url};
 
 use crate::config::{AgentConfig, ConfigStore, FILE_NAME, Sealer};
 use crate::hub::base_address;
-use crate::module::AGENT_VERSION;
+use crate::module::agent_version;
 use crate::smile::TdsSmile;
 use crate::wire::EnrollRequest;
 use crate::wire::parse::{EnrollResponse, enroll_response};
@@ -157,7 +157,7 @@ fn post_enroll(hub_url: &str, req: &EnrollRequest) -> Result<EnrollResponse, Str
         .map_err(|e| format!("enroll request: {e}"))?;
     let http = dl_http::Client::with_options(ClientOptions {
         timeout: Some(ENROLL_TIMEOUT),
-        user_agent: Some(AGENT_VERSION.to_owned()),
+        user_agent: Some(agent_version().to_owned()),
         ..ClientOptions::default()
     });
     let resp = http
@@ -232,7 +232,7 @@ pub fn run_enroll(
     let req = EnrollRequest {
         code,
         machine_name: machine_name(env),
-        agent_version: AGENT_VERSION.to_owned(),
+        agent_version: agent_version().to_owned(),
         smile_data_source: target.as_ref().map(|t| t.data_source.clone()),
         smile_database: target.as_ref().map(|t| t.database.clone()),
     };

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use dl_agent::selftest::{Check, Outcome, PROBE_TIMEOUT, SelfTest};
 use dl_agent::supervisor::ModuleContext;
 
-use super::{AGENT_VERSION, NAME, TOKEN_RETRY};
+use super::{NAME, TOKEN_RETRY, agent_version};
 use crate::config::{AgentConfig, ConfigStore, Dpapi, FILE_NAME, Sealer};
 use crate::hub::gate::TokenGate;
 use crate::hub::{HubApi, HubClient, HubError};
@@ -67,7 +67,7 @@ fn hub(cfg: &AgentConfig) -> Check {
         PROBE_TIMEOUT * 3,
         move || {
             let gate = Arc::new(TokenGate::new(TOKEN_RETRY));
-            let client = match HubClient::new(&url, &token, hotel, AGENT_VERSION, gate) {
+            let client = match HubClient::new(&url, &token, hotel, agent_version(), gate) {
                 Ok(c) => c,
                 Err(e) => return Outcome::fail(format!("hub address: {e}")).remedy(REENROLL),
             };

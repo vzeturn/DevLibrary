@@ -223,6 +223,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `dl-agent-membership` reports the released dl-agent version to the Membership hub
+  (heartbeat, enroll, User-Agent) instead of the crate's own 0.2.1.
 - `dl-rand`: Windows 7 builds (`*-win7-windows-*`) take entropy from `RtlGenRandom`;
   `ProcessPrng` (bcryptprimitives.dll) does not exist before Windows 8, so the agent
   could not start there.
