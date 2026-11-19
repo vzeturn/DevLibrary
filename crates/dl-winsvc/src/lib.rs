@@ -15,6 +15,7 @@ mod sys;
 
 pub mod acl;
 pub mod dpapi;
+pub mod process;
 pub mod scm;
 
 pub use error::{Error, codes};

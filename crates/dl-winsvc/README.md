@@ -153,6 +153,23 @@ fn open_like_go(blob: &[u8]) -> Option<Vec<u8>> {
 }
 ```
 
+## Running processes
+
+`process::list` returns every running process (id, parent id, session, image name) from one
+`NtQuerySystemInformation` call, in place of running `tasklist` and parsing its localised CSV.
+It needs no elevation; off Windows it returns `Error::Unsupported`.
+
+```rust,no_run
+use dl_winsvc::process;
+
+// Is the old per-product agent still running? Case and ".exe" do not matter.
+let old = process::named("MM.Arrival.Agent")?;
+for p in &old {
+    println!("{} pid {} (parent {}, session {})", p.name, p.pid, p.parent_pid, p.session_id);
+}
+# Ok::<(), dl_winsvc::Error>(())
+```
+
 ## Detecting a service process
 
 `is_service_process` checks that the parent process is `services.exe` in session 0, the

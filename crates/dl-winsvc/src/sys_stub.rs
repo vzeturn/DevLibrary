@@ -2,6 +2,7 @@
 //! [`Error::Unsupported`] so callers compile and can fall back at run time.
 
 use crate::Error;
+use crate::process::Process;
 use crate::raw::{HandlerFn, RawConfig, RawService, ServiceMainFn, ServiceStatus};
 
 // Never constructed: every function that would return one fails first.
@@ -124,6 +125,10 @@ pub(crate) fn restrict_path(_path: &[u16], _is_dir: bool) -> Result<(), Error> {
 
 pub(crate) fn parent_is_services() -> Result<bool, Error> {
     Ok(false)
+}
+
+pub(crate) fn processes() -> Result<Vec<Process>, Error> {
+    Err(Error::Unsupported)
 }
 
 pub(crate) fn start_dispatcher(_name: &[u16], _main: ServiceMainFn) -> Result<(), Error> {
