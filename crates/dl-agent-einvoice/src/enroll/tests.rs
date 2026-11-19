@@ -75,6 +75,7 @@ fn without_a_password_or_a_build_default_the_enroll_refuses_before_the_exchange(
         sql_host: String::new(),
         sql_user: String::new(),
         sql_password: String::new(),
+        sql_auth: String::new(),
         collect_from: None,
         prompt_sql: false,
         input: None,
@@ -109,6 +110,7 @@ fn run(prompt: bool, stdin: &str, ping: Ping<'_>) -> Run {
         sql_user: String::new(),
         // The Go tests rely on the built-in password; test builds have none.
         sql_password: if prompt { String::new() } else { "pw".into() },
+        sql_auth: String::new(),
         collect_from: None,
         prompt_sql: prompt,
         input: Some(&mut input),

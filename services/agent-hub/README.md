@@ -65,7 +65,9 @@ curl -sS https://agent.pms.id.vn/admin/bench -H "Authorization: Bearer $ADMIN_TO
   "sql_databases": ["SMILE_FO"],
   "sql_fixups": [{"name": "quiet outbound", "database": "SMILE_FO", "sql_url": "https://…/fixups.sql", "sha256": "…"}],
   "steps": [
-    {"setup": "einvoice-enroll", "args": ["--state-dir", "{{BENCH_DIR}}\\einvoice"], "env": {"DL_AGENT_SETUP_ARGS": "--token …"}},
+    {"setup": "einvoice-enroll", "args": ["--platform-url", "https://…", "--state-dir", "{{BENCH_DIR}}\\einvoice"],
+     "env": {"DL_AGENT_EINVOICE_TOKEN": "…", "MMEI_SQL_HOST": "{{SQL_SERVER}}", "MMEI_SQL_USER": "{{SQL_USER}}",
+             "MMEI_SQL_PASSWORD": "{{SQL_PASSWORD}}", "MMEI_SQL_AUTH": "{{SQL_AUTH}}"}},
     {"setup": "membership-enroll", "env": {"DL_MEMBERSHIP_SQL": "{{SQL:SMILE_POS}}"}}
   ],
   "config": {"modules": {"einvoice": {"enabled": true}}},
@@ -85,11 +87,21 @@ curl -sS https://agent.pms.id.vn/admin/bench -H "Authorization: Bearer $ADMIN_TO
   `GET /admin/bench` lists bundles (`active`, `expired`, `revoked`, `used_up`, whether the code was
   used), never the sealed steps; `DELETE /admin/bench/:id` revokes a bundle and its unused code.
 - On the PC, in Windows PowerShell 5.1 as Administrator, `irm … | iex`:
-  1. lists the older per-product agent services (E-Invoice, SmilePmsAgent, SmileHLAgent,
-     MM.Arrival.Agent, MM.Membership.Agent, SRBackup, PdaSyncAgent) with state and path; they are never
-     stopped, removed or replaced (install.ps1 runs without `-Replace`), and their state is compared again
-     at the end;
-  2. asks once for SQL Server (`.` by default, SQL login or Windows) when the bundle names a database,
+  1. removes the older per-product agents (`remove_legacy`, default `true`): scheduled tasks whose
+     name, path or action matches the legacy pattern (E-Invoice, SmilePmsAgent, SmileHLAgent,
+     MM.Arrival.Agent and its watchdog task, MM.Membership.Agent, SRBackup, PdaSyncAgent) are
+     unregistered (`schtasks /Delete /F` when the ScheduledTasks module is missing); matching services
+     are stopped (≤ 30 s, then their process is killed) and `sc.exe delete`d; their data and install
+     folders (one table in `src/install/benchLegacy.ts`, each entry citing the installer it comes from,
+     plus the folder of each removed service's binary) are **renamed** to `<dir>.bench-old-<yyyyMMddHHmmss>`,
+     never deleted. `dl-agent`, SQL Server services (also a named instance such as `MSSQL$SMILEPMS`) and
+     anything unmatched are never touched. Every action is printed and in the summary, and recorded in
+     `%ProgramData%\dl-agent\bench-removed-<ts>.json` (with a one-line restore hint: rename each `to` back
+     to `from`, then run that agent's own installer). The first failure stops the bench before
+     install, so the code is not spent. With `"remove_legacy": false` (and for bundles sealed before the
+     field existed) they are only listed, never stopped or replaced, and compared again at the end;
+  2. asks once for SQL Server (`.` by default, SQL login or Windows) when the bundle names a database
+     or a step uses a SQL part placeholder,
      unless `-SqlConnection` is passed (`& ([scriptblock]::Create((irm <link>))) -SqlConnection '…'`),
      and checks each database exists;
   3. runs each `sql_fixups` entry (`sql_inline`, or `sql_url` with an optional `sha256`) once against its
@@ -99,7 +111,9 @@ curl -sS https://agent.pms.id.vn/admin/bench -H "Authorization: Bearer $ADMIN_TO
   4. runs the hub `install.ps1 -Code <code> -Channel canary`, then `dl-agent sql-add`/`sql-test` per
      `sql_databases` (the connection only in `DL_AGENT_SQL_CONNECTION`), then each step as
      `dl-agent <setup> <args…> --data %ProgramData%\dl-agent` with its env set for that process only.
-     `{{SQL:<Db>}}` (env only) becomes the connection string for that database and `{{BENCH_DIR}}`
+     `{{SQL:<Db>}}` (env only) becomes the connection string for that database; `{{SQL_SERVER}}`,
+     `{{SQL_USER}}`, `{{SQL_PASSWORD}}` and `{{SQL_AUTH}}` (`sql` or `windows`; env only) give the
+     prompted connection field by field (user and password empty with Windows); `{{BENCH_DIR}}`
      (args and env) becomes `%ProgramData%\dl-agent\bench`, so steps keep their own install/config/state
      directories away from the older agents'. A failed step is reported and the next one runs;
   5. restarts the service, waits for a hub contact, runs `dl-agent selftest --trigger install` (skipped
