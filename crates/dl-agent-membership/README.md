@@ -169,7 +169,7 @@ command resumes. Re-running never double-earns (the hub dedups by `CONF:{Confirm
 
 The TCVN3 decoding of
 legacy text, `SmileDiagnostics`, the SMILE
-schema probe, the folio revenue scan, the earn-pair drift check and the inventory fallback.
+schema probe, the earn-pair drift check and the inventory fallback.
 Off Windows `config.dpapi` cannot be opened (no DPAPI); tests use a plain sealer.
 
 ## Tests
@@ -193,4 +193,7 @@ the real `SmileWriter`, the checkout scan and the walk-in backfill against the f
 It creates a throw-away database from the MM-MEMBERSHIP SMILE fixture schema
 (`tests/fixtures/smile_schema.sql`), seeds it, runs every SMILE read and the scan workers
 against the fake hub, and drops the database. macOS has no TLS backend, so use
-`Encrypt=disable` there.
+`Encrypt=disable` there. Run the SQL Server container in the hotel time zone
+(`-e TZ=Asia/Ho_Chi_Minh`), as SMILE servers are: the seeds use the server's `GETDATE()` and
+the probes the hotel date (UTC+7), so a UTC container fails `sql_live` between 17:00 and
+24:00 UTC.
