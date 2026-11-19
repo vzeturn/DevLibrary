@@ -1,7 +1,7 @@
 //! Proxy selection: explicit proxy URL or `HTTP(S)_PROXY` / `NO_PROXY` from the environment.
 
 use crate::url::Scheme;
-use crate::{Error, Url};
+use crate::{Error, ProxyRules, Url};
 use std::net::IpAddr;
 
 /// Which proxy the client uses.
@@ -23,6 +23,9 @@ pub enum Proxy {
     /// optionally with `:port`, IP addresses, and CIDR ranges such as `10.0.0.0/8`.
     #[default]
     FromEnv,
+    /// Fixed settings read once: Windows Internet Options, `netsh winhttp`, or an
+    /// environment snapshot with credentials ([`ProxyRules`]).
+    Rules(ProxyRules),
 }
 
 impl Proxy {
@@ -44,6 +47,7 @@ impl Proxy {
             Proxy::None => Ok(None),
             Proxy::Http(url) => check_proxy_url(url).map(|()| Some(url.clone())),
             Proxy::FromEnv => resolve_with(target, |name| std::env::var(name).ok()),
+            Proxy::Rules(rules) => Ok(rules.proxy_for(target).cloned()),
         }
     }
 }
@@ -57,7 +61,7 @@ fn check_proxy_url(url: &Url) -> Result<(), Error> {
     Ok(())
 }
 
-fn first_set(get: &impl Fn(&str) -> Option<String>, names: &[&str]) -> Option<String> {
+pub(crate) fn first_set(get: &impl Fn(&str) -> Option<String>, names: &[&str]) -> Option<String> {
     names
         .iter()
         .filter_map(|n| get(n))
@@ -96,7 +100,7 @@ pub(crate) fn resolve_with(
 }
 
 /// `localhost`, `*.localhost` and loopback addresses never use a proxy.
-fn is_always_direct(host: &str) -> bool {
+pub(crate) fn is_always_direct(host: &str) -> bool {
     let h = host.strip_suffix('.').unwrap_or(host);
     if h == "localhost" || h.ends_with(".localhost") {
         return true;
