@@ -163,7 +163,7 @@ impl ExtraBedTerms {
 pub const NO_RATE_CODE_WRITTEN: &str = "RATE:NONE";
 
 /// `Field`: length-prefixed (UTF-16 code units, like .NET `string.Length`); `-` for null.
-fn field(text: &mut String, name: &str, value: Option<&str>) {
+pub(crate) fn field(text: &mut String, name: &str, value: Option<&str>) {
     text.push_str(name);
     text.push('=');
     match value {
@@ -189,7 +189,7 @@ fn tax(text: &mut String, name: &str, t: Option<&TaxCodes>) {
     field(text, &format!("{name}.sTaxCode"), t.s_tax_code.as_deref());
 }
 
-fn flag(b: Option<bool>) -> Option<&'static str> {
+pub(crate) fn flag(b: Option<bool>) -> Option<&'static str> {
     b.map(|b| if b { "1" } else { "0" })
 }
 
@@ -199,7 +199,7 @@ pub fn amount_text(value: Option<Decimal>) -> Option<String> {
     value.map(|v| v.round_dp(2, RoundingMode::HalfUp).normalize().to_string())
 }
 
-fn sha256_hex(text: &str) -> String {
+pub(crate) fn sha256_hex(text: &str) -> String {
     dl_encoding::hex::encode(Sha256::digest(text.as_bytes()))
 }
 

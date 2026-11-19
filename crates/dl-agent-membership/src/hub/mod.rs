@@ -128,6 +128,14 @@ pub trait HubApi: Send + Sync {
     ) -> Result<ObservationResult, HubError>;
     /// `POST jobs/ack` (`EnsureNoContent`).
     fn ack_job(&self, ack: &Ack) -> Result<(), HubError>;
+    /// `POST pms/extra-bed-terms`: `false` when the hub predates the endpoint (404/405).
+    fn post_extra_bed_terms(&self, _req: &crate::terms::TermsRequest) -> Result<bool, HubError> {
+        Ok(false)
+    }
+    /// `POST pms/special-services`: `false` when the hub predates the endpoint (404/405).
+    fn post_special_services(&self, _req: &crate::terms::CatalogRequest) -> Result<bool, HubError> {
+        Ok(false)
+    }
 }
 
 /// `HubBaseAddress.Create`: trims, drops a trailing `/` and a trailing `/api` (enrolment
@@ -234,6 +242,20 @@ impl HubClient {
         Ok(resp)
     }
 
+    /// A report an older hub may lack: 404/405 is `false`, else `EnsureNoContent`.
+    fn post_optional(
+        &self,
+        route: &'static str,
+        path: &str,
+        body: String,
+    ) -> Result<bool, HubError> {
+        let resp = self.send(route, path, Some(body))?;
+        if matches!(resp.status.as_u16(), 404 | 405) {
+            return Ok(false);
+        }
+        ensure_ok(&resp, route).map(|()| true)
+    }
+
     fn post_no_content(
         &self,
         route: &'static str,
@@ -318,6 +340,22 @@ impl HubApi for HubClient {
             return Ok(Vec::new());
         }
         Ok(parse::jobs(body)?)
+    }
+
+    fn post_extra_bed_terms(&self, req: &crate::terms::TermsRequest) -> Result<bool, HubError> {
+        self.post_optional(
+            "pms/extra-bed-terms",
+            "api/agent/pms/extra-bed-terms",
+            req.to_j().to_json(),
+        )
+    }
+
+    fn post_special_services(&self, req: &crate::terms::CatalogRequest) -> Result<bool, HubError> {
+        self.post_optional(
+            "pms/special-services",
+            "api/agent/pms/special-services",
+            req.to_j().to_json(),
+        )
     }
 
     fn post_availability(&self, req: &AvailabilityRequest) -> Result<(), HubError> {

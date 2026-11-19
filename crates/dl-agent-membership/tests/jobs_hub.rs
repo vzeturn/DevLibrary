@@ -410,3 +410,40 @@ fn a_smile_special_create_acks_the_special_bed_and_the_hub_code_reaches_the_writ
     // `SetHubExtraBedSpecialCode`: the sync-config pick, trimmed, for the next write.
     assert_eq!(r.shared.hub_special_code.get().as_deref(), Some("XB"));
 }
+
+#[test]
+fn terms_reports_post_to_the_pms_routes_and_an_older_hub_answers_false() {
+    let hub = FakeHub::start();
+    let client = HubClient::new(
+        &hub.url(),
+        TOKEN,
+        HOTEL.parse().unwrap(),
+        "dl-agent/test",
+        Arc::new(TokenGate::new(TOKEN_RETRY)),
+    )
+    .unwrap();
+    let inputs = pms_priced_inputs();
+    let req = dl_agent_membership::terms::TermsRequest {
+        terms: inputs.terms.unwrap(),
+        wire_hash: "wire".into(),
+        mode_configured: MODE_SMILE_SPECIAL.into(),
+        mode_effective: MODE_SMILE_SPECIAL,
+        mode_reason: None,
+        is_full_snapshot: true,
+        special_earn_covered: Some(true),
+    };
+    // No route on the fake hub: an older hub (404) is not an error.
+    hub.reply("/api/agent/pms/extra-bed-terms", 404, "");
+    assert!(!client.post_extra_bed_terms(&req).unwrap());
+    hub.reply("/api/agent/pms/extra-bed-terms", 204, "");
+    assert!(client.post_extra_bed_terms(&req).unwrap());
+    let seen = hub.to("/api/agent/pms/extra-bed-terms");
+    let body = dl_json::parse(&seen.last().unwrap().body).unwrap();
+    assert_eq!(body.get("SpecialCode").and_then(Value::as_str), Some("XB"));
+    assert_eq!(
+        body.get("ContentHash").and_then(Value::as_str),
+        Some("wire")
+    );
+    hub.reply("/api/agent/pms/extra-bed-terms", 500, "");
+    assert!(client.post_extra_bed_terms(&req).is_err());
+}

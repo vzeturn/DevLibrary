@@ -17,6 +17,7 @@ use dl_agent_membership::jobs::dispatch::{DispatchSettings, Dispatcher, Outcome}
 use dl_agent_membership::jobs::plan::PmsWriter;
 use dl_agent_membership::jobs::result::Ack;
 use dl_agent_membership::smile::{TdsSmile, normalize_connection_string};
+use dl_agent_membership::terms::TermsSource;
 use dl_agent_membership::wire::parse::Job;
 use dl_agent_membership::writer::folio::{FolioWriter, WriteOptions};
 use dl_agent_membership::writer::smile_writer::SmileWriter;
@@ -200,6 +201,23 @@ fn smile_special_rows_are_written_and_reconciled_against_sql_server() {
     assert_eq!(terms.structural_fingerprint, VICTORY_FINGERPRINT);
     assert_eq!(terms.smile_hotel_id, "VIC");
     assert_eq!(terms.stock_total, Some(48));
+
+    // The terms sync reads the same SMILE and the SpecialService catalogue.
+    let smile = TdsSmile::new(&format!(
+        "{};Database={}",
+        conn.trim_end_matches(';'),
+        db.name
+    ))
+    .expect("TdsSmile");
+    let (read, catalog) = TermsSource::read(&smile, None, "EB").unwrap();
+    assert_eq!(
+        read.terms.unwrap().structural_fingerprint,
+        VICTORY_FINGERPRINT
+    );
+    let catalog = catalog.unwrap().unwrap();
+    assert_eq!(catalog.items.len(), 1);
+    assert_eq!(catalog.items[0].tax_label.as_deref(), Some("V8/S5"));
+    assert_eq!(catalog.rate_code_plus_plus, Some(true));
 
     // Create: one agent row at the grossed-up price, ExtraBed 1, the rate without the bed.
     let a = ack(d.process(&job("c1", "Create", 1)));

@@ -29,6 +29,20 @@ pub struct Hub {
     pub jobs: Mutex<Vec<Job>>,
     pub acks: Mutex<Vec<Ack>>,
     pub fail_acks: Mutex<bool>,
+    /// Bodies posted to `pms/extra-bed-terms` and `pms/special-services`.
+    pub pms_posts: Mutex<Vec<(&'static str, String)>>,
+    /// Whether the hub has those endpoints.
+    pub has_pms_endpoints: Mutex<bool>,
+}
+
+impl Hub {
+    fn pms_post(&self, what: &'static str, body: String) -> Result<bool, HubError> {
+        if !*self.has_pms_endpoints.lock().unwrap() {
+            return Ok(false);
+        }
+        self.pms_posts.lock().unwrap().push((what, body));
+        Ok(true)
+    }
 }
 
 impl HubApi for Hub {
@@ -37,6 +51,12 @@ impl HubApi for Hub {
     }
     fn sync_config(&self) -> Result<SyncConfig, HubError> {
         Ok(self.config.lock().unwrap().clone())
+    }
+    fn post_extra_bed_terms(&self, req: &crate::terms::TermsRequest) -> Result<bool, HubError> {
+        self.pms_post("terms", req.to_j().to_json())
+    }
+    fn post_special_services(&self, req: &crate::terms::CatalogRequest) -> Result<bool, HubError> {
+        self.pms_post("catalog", req.to_j().to_json())
     }
     fn pull_jobs(&self, max: u32) -> Result<Vec<Job>, HubError> {
         let mut jobs = self.jobs.lock().unwrap();

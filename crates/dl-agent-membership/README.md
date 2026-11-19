@@ -21,10 +21,16 @@ jobs against SMILE and acks them like the .NET agent: create / modify / cancel f
 (applock, `GetFolioNumber` / `GetConfirmNum` / `GetCancelNum`, replay lookup, hand-entered
 duplicate guard), member profile (`GetProfileNumber`), link folio, voucher and reward
 discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity).
-Not ported yet: earn reporting (`EarnPoints` jobs are left un-acked), SMILE_SPECIAL
-extra-bed rows (a booking that needs them is left un-acked), the checkout / walk-in
-scanners and the extra-bed terms sync. Only one writer may run per hotel: stop the .NET
-`MM.Membership.Agent` service before turning writes on.
+Extra beds follow `extra_bed_write_mode`: `SMILE_SPECIAL` runs the .NET preflight (terms
+read from `GlobalParameter` / `SpecialService` / `TransactionCode`, the hub's verified
+fingerprint, the special the hub picked in sync-config or in the job) and writes one
+agent-marked `Folio_Special` row per price band inside the folio transaction; any failed
+check folds the bed into the room rate with the .NET reason. With writes on, the module
+also reports the extra-bed terms and the `SpecialService` catalogue to the hub every
+300 s (`pms/extra-bed-terms`, `pms/special-services`). Not ported yet: earn reporting
+(`EarnPoints` jobs are left un-acked) and the checkout / walk-in scanners. Only one
+writer may run per hotel: stop the .NET `MM.Membership.Agent` service before turning
+writes on.
 
 ## Turning it on
 
@@ -49,6 +55,7 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | `rooms_interval_seconds`, `rooms_full_push_every` | `300`, `12` | room inventory |
 | `extra_bed_special_code`, `guest_phone_column`, `earn_charge_codes`, `member_discount_code` | `EB`, `MobileNum`, SMILE's catalog, none | `Smile` / `Earn` |
 | `write_lock_timeout_ms`, `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode` | `10000`, `1`, `BFF`, `SMILE_SPECIAL` | `SmileWriteOptions`; an empty code is not written; an unknown mode falls back to `FOLD_LEGACY` with a warning |
+| `smile_hotel_id` | none | `Smile:SmileHotelId`: the `GlobalParameter.HotelID` whose extra-bed terms are read; needed only when SMILE has several |
 | `capabilities` | the .NET `FullCapabilities` | sent in the heartbeat |
 
 No secret is in the remote config: the hotel token and the SMILE connection string stay in
@@ -93,7 +100,7 @@ A site already enrolled by the .NET installer needs nothing: the module reads th
 
 ## Not ported yet
 
-`CheckoutScanner`, the extra-bed terms and special-service sync, the TCVN3 decoding of
+`CheckoutScanner`, the TCVN3 decoding of
 legacy text, `SmileDiagnostics`, the walk-in backfill, the travel-agent reader, the SMILE
 schema probe, the folio revenue scan, the earn-pair drift check and the inventory fallback.
 Off Windows `config.dpapi` cannot be opened (no DPAPI); tests use a plain sealer.
@@ -110,7 +117,7 @@ against SQL Server:
 
 ```
 MEMBERSHIP_AGENT_TEST_SQL='Data Source=127.0.0.1,14333;User ID=sa;Password=…;Encrypt=disable' \
-  cargo test -p dl-agent-membership --test sql_live
+  cargo test -p dl-agent-membership --test sql_live --test sql_live_writes --test sql_live_extra_bed
 ```
 
 It creates a throw-away database from the MM-MEMBERSHIP SMILE fixture schema
