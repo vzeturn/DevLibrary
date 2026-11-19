@@ -7,7 +7,7 @@ import { pruneNonces } from './repo/agents';
 import { adminRoutes } from './routes/admin';
 import { agentRoutes } from './routes/agent';
 import { benchRoutes } from './routes/bench';
-import { installRoutes, installScriptResponse } from './routes/install';
+import { installRoutes, installScriptResponse, uninstallScriptResponse } from './routes/install';
 import { productRoutes } from './routes/products';
 
 export const app = new Hono<AppEnv>();
@@ -22,6 +22,7 @@ app.use('*', async (c, next) => {
 
 app.get('/healthz', (c) => c.json({ ok: true }));
 app.get('/install.ps1', (c) => installScriptResponse(c.req.url, hubUrls(c.env.HUB_URLS)));
+app.get('/uninstall.ps1', (c) => uninstallScriptResponse(c.req.url));
 app.route('/install', installRoutes);
 app.route('/products', productRoutes);
 app.route('/v1', agentRoutes);

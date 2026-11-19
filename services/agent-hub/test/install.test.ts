@@ -31,131 +31,174 @@ describe('install script', () => {
     expect(text).not.toContain('__HUB__');
   });
 
-  it('runs product setup and replaces the old agent only after enrolment, before the service install', async () => {
+  it('takes the short form with no options and the long forms with them', async () => {
     const text = await (await get('/install.ps1')).text();
-    expect(text).toContain("[string]$Setup = ''");
-    expect(text).toContain('[string[]]$Replace = @()');
-    const enroll = text.indexOf("@('enroll', '--hub'");
-    const setup = text.indexOf('Invoke-Agent @($Setup, ');
-    const replace = text.lastIndexOf('Remove-Replaced');
-    const install = text.indexOf("Invoke-Agent @('install'");
-    expect(enroll).toBeGreaterThan(0);
-    expect(setup).toBeGreaterThan(enroll);
-    expect(replace).toBeGreaterThan(setup);
-    expect(install).toBeGreaterThan(replace);
-    expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
-  });
-
-  it('asks Windows or SQL login, defaulting to what this machine saved, and tests before enrolling', async () => {
-    const text = await (await get('/install.ps1')).text();
-    expect(text).toContain("SQL login: [1] Windows  [2] SQL login");
-    // The saved choice is the default (a reinstall with no change reuses it); else Windows.
-    expect(text).toContain('& $Exe sql-setup --show --data $Data');
-    expect(text).toContain("if ($saved.auth -eq 'sql') { $mode = '2' }");
-    expect(text).toContain("$mode = '1'");
-    expect(text).toContain("Read-Secret 'Password (Enter keeps the saved one)'");
-    // Windows mode is tested as the service account (LocalSystem).
-    expect(text).toContain("$argv += '--as-service'");
-    // A failed test re-prompts.
-    const loop = text.slice(text.indexOf('function Read-SqlLogin'), text.indexOf('function Set-SqlLoginUnattended'));
-    expect(loop).toContain('while ($true)');
-    expect(loop).toContain('Choose again');
-    // The SQL step runs before enrolment so a failure never spends the code.
-    const sql = text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))');
-    const enroll = text.indexOf("@('enroll', '--hub'");
-    expect(sql).toBeGreaterThan(0);
-    expect(enroll).toBeGreaterThan(sql);
-    expect(text.indexOf('    Read-SqlLogin\n')).toBeLessThan(enroll);
-  });
-
-  it('takes the SQL login unattended without echoing the password and exits 1 on failure', async () => {
-    const text = await (await get('/install.ps1')).text();
-    expect(text).toContain("[ValidateSet('', 'windows', 'sql')][string]$SqlAuth = ''");
-    expect(text).toContain('[string]$SqlUser = ');
-    // The password is never a parameter: env DL_AGENT_SQL_PASSWORD or the hidden prompt only.
-    const params = text.slice(text.indexOf('param('), text.indexOf('$ErrorActionPreference'));
-    expect(params).not.toMatch(/SqlPassword|Password/);
-    expect(text).not.toMatch(/-SqlPassword/);
-    expect(text).toContain('    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD\n');
-    const unattended = text.slice(text.indexOf('function Set-SqlLoginUnattended([ref]$Password)'), text.indexOf('function Remove-OldCopies'));
-    expect(unattended).toContain("} elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {");
-    expect(unattended).toContain("$pw = Read-Secret ('Password of SQL login ' + $user)");
-    expect(unattended).toContain('$Password.Value = $pw');
-    // The password reaches the agent only through the environment, removed right after.
-    expect(text).toContain('$env:DL_AGENT_SQL_PASSWORD = $pw');
-    expect(text).toContain('Remove-Item Env:DL_AGENT_SQL_PASSWORD');
-    expect(text).not.toMatch(/--password/);
-    for (const line of text.split('\n')) {
-      if (/Say|Warn|Write-Host/.test(line)) expect(line).not.toMatch(/\$SqlPassword|\$pw\b/);
+    expect(text).toContain(`irm ${BASE}/install.ps1 | iex`);
+    expect(text).toContain(`& ([scriptblock]::Create((irm ${BASE}/install.ps1))) -Code XXXX-XXXX -Channel canary`);
+    expect(text).toContain(`DownloadString('${BASE}/install.ps1'))) -Code 'XXXX-XXXX'`);
+    const params = text.slice(text.indexOf('param('), text.indexOf('$DlState'));
+    // The target is the only positional option; everything else is named, unattended through env.
+    expect(params.indexOf('[string]$Target = ')).toBe(params.indexOf('[string]$') );
+    for (const p of [
+      '[string]$Code = $env:DL_AGENT_ENROLL_CODE',
+      '[string]$Channel = $env:DL_AGENT_CHANNEL',
+      '[string]$SqlAuth = $env:DL_AGENT_SQL_AUTH',
+      '[string]$SqlServer = $env:DL_AGENT_SQL_SERVER',
+      '[string]$SqlUser = $env:DL_AGENT_SQL_USER',
+      "[string]$Setup = ''",
+      '[string[]]$Replace = @()',
+    ]) {
+      expect(params).toContain(p);
     }
-    // A failure prints the structured result and exits 1; a new machine is not enrolled.
-    expect(text).toContain("'[dl-agent] SQL_SETUP_RESULT '");
-    expect(text).toContain("if ($SqlFailed -and -not $enrolled) { throw");
-    expect(text).toContain('if ($SqlAuth) { exit 1 }');
-    expect(text).toContain("FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1");
+    // Validated by hand (ValidateSet would reject an empty env default) and unknown arguments refused.
+    expect(text).toContain("$Target -notmatch '^(|stable|latest|canary|auto|\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?)$'");
+    expect(text).toContain("$Channel -notmatch '^(|stable|canary)$'");
+    expect(text).toContain("$SqlAuth -notmatch '^(|windows|sql)$'");
+    expect(text).toContain('if ($DlState.Extra.Count -gt 0) { Stop-Install 78');
   });
 
-  it('offers the old Check-In agent SQL connection when this machine saved none (arrival hook)', async () => {
+  it('runs on PowerShell 2.0 and fits a raw template: no backtick, no dollar-brace, ASCII only', async () => {
+    for (const path of ['/install.ps1', '/install/legacy.ps1', '/uninstall.ps1']) {
+      const text = await (await get(path)).text();
+      expect(text, path).not.toContain('`');
+      expect(text, path).not.toContain('${');
+      // The previous installer keeps its text as it was (a few non-ASCII signs in comments).
+      if (path !== '/install/legacy.ps1') expect(/^[\x09\x0a\x0d\x20-\x7e]*$/.test(text), path).toBe(true);
+      for (const ps3 of ['Invoke-RestMethod', 'Invoke-WebRequest', 'ConvertFrom-Json', 'ConvertTo-Json', 'Get-FileHash', '::new(', '$PSScriptRoot', '[ordered]', '[pscustomobject]', ' -in ', ' -notin ']) {
+        expect(text, `${path} ${ps3}`).not.toContain(ps3);
+      }
+    }
+  });
+
+  it('never takes, sets or prints a password: the binary asks for it hidden or reads env', async () => {
+    const text = await (await get('/install.ps1')).text();
+    const params = text.slice(text.indexOf('param('), text.indexOf('$DlState'));
+    expect(params).not.toMatch(/password|secret/i);
+    expect(text).not.toMatch(/-SqlPassword|--password|--sql-password|Read-Host/);
+    expect(text).not.toMatch(/\$env:DL_AGENT_SQL_PASSWORD\s*=/);
+    for (const line of text.split('\n')) {
+      if (/Say|Warn|Write-Host/.test(line)) expect(line).not.toMatch(/\$legacy|\$Code\b|\$SqlConnection|assword/);
+    }
+    // The secrets this script hands over travel in env and are removed when it ends.
+    expect(text).toContain('$env:DL_AGENT_ENROLL_CODE = $Code');
+    expect(text).toContain('$env:DL_AGENT_SQL_CONNECTION = $SqlConnection');
+    expect(text).toContain('$env:DL_AGENT_SQL_LEGACY = $legacy');
+    const argv = text.slice(text.indexOf("$argv = @('install')"), text.indexOf('if ($Code) { $env:'));
+    expect(argv).not.toMatch(/\$Code\b|\$SqlConnection|\$legacy\b/);
+    const fin = text.slice(text.indexOf('  } finally {', text.indexOf('function Install-Agent')));
+    expect(fin).toContain("foreach ($n in ($HandoffSecrets + $SetupSecrets)) { Remove-Item ('Env:' + $n)");
+    for (const name of ['DL_AGENT_ENROLL_CODE', 'DL_AGENT_SQL_CONNECTION', 'DL_AGENT_SQL_LEGACY', 'DL_AGENT_SETUP_ARGS', 'DL_AGENT_SQL_PASSWORD', 'DL_AGENT_ARRIVAL_TOKEN']) {
+      expect(text).toContain(`'${name}'`);
+    }
+  });
+
+  it('rejects an HTML page or other garbage as an unreachable hub or a proxy', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("$Unreachable = 'hub unreachable or blocked by a proxy'");
+    const info = text.slice(text.indexOf('function Get-Info'), text.indexOf('function Show-AvBlock'));
+    expect(info).toContain("$info['sha256'] -notmatch '^[0-9a-fA-F]{64}$'");
+    expect(info).toContain('Stop-Install 69 ($Unreachable');
+    expect(text).toContain("if ($manifest -notmatch '^\\s*\\{') { Stop-Install 69 ($Unreachable");
+    // Every failure names the next step.
+    for (const line of text.split('\n').filter((l) => l.includes('Stop-Install ') && !l.includes('function Stop-Install'))) {
+      expect(line).toMatch(/Stop-Install \$?\w+ .+ '.+'\s*\}?\s*$|Stop-Install \$?\w+ .+\) \(.+\)\s*\}?\s*$/);
+    }
+    expect(text).toContain("Write-Host ('[dl-agent] Next: ' + $next) -ForegroundColor Yellow");
+  });
+
+  it('checks size, SHA-256 and the release signature before the build runs, then removes the download', async () => {
+    const text = await (await get('/install.ps1')).text();
+    const tmp = text.indexOf('$tmp = Join-Path ([IO.Path]::GetTempPath())');
+    const size = text.indexOf("if ($size -ne [long]$info['size'])");
+    const sha = text.indexOf("if ($sha -ne $info['sha256'].ToLower())");
+    const modern = text.indexOf('if (-not (Test-Modern $tmp))');
+    const manifest = text.indexOf("Get-HubText ('/install/manifest/' + $Product + '/' + $info['channel'] + '/' + $info['version'])");
+    const verify = text.indexOf('& $verifier verify-self --manifest $mf --file $tmp --target $os --product $Product');
+    const run = text.indexOf('& $tmp @argv');
+    expect(tmp).toBeGreaterThan(0);
+    const order = [tmp, size, sha, modern, manifest, verify, run];
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+    // An installed agent that knows verify-self is the verifier (trust carried over).
+    expect(text).toContain('if (Test-Modern $Exe) { $verifier = $Exe }');
+    expect(text.slice(verify)).toContain('if ($LASTEXITCODE -ne 0) { Stop-Install 65');
+    const fin = text.slice(text.indexOf('  } finally {', text.indexOf('function Install-Agent')));
+    expect(fin).toContain('foreach ($f in @($tmp, $mf))');
+    expect(fin).toContain('Remove-Item -Force $f');
+  });
+
+  it('hands off to dl-agent install with the hub list, the target and the options', async () => {
+    const text = await installScript(BASE, [BASE, 'https://b.test']);
+    expect(text).toContain("foreach ($h in ('https://hub.test,https://b.test' -split ','))");
+    const argv = text.slice(text.indexOf("$argv = @('install')"), text.indexOf('& $tmp @argv'));
+    expect(argv).toContain('if ($Target) { $argv += $Target }');
+    expect(argv).toContain("$argv += @('--hub', $hubs, '--data', $Data, '--link-timeout', [string]$LinkTimeout)");
+    for (const o of ['--sql-name', '--sql-auth', '--sql-server', '--sql-user', '--sql-prompt', '--reenroll', '--no-defender', '--setup', '--replace']) {
+      expect(argv).toContain(`'${o}'`);
+    }
+    // -Channel only picks the build: it is not handed over as the machine's channel.
+    expect(argv).not.toContain('$Channel');
+    expect(text).toContain('elseif (-not $lane) { $lane = Get-InstalledChannel $Data }');
+    expect(text).toContain("if ($rc -ne 0) { Stop-Install $rc");
+  });
+
+  it('hands a build without the installer verbs to the previous installer with the same options', async () => {
+    const text = await (await get('/install.ps1')).text();
+    const legacy = text.slice(text.indexOf('function Invoke-Legacy'), text.indexOf('function Install-Agent'));
+    expect(legacy).toContain("Get-HubText '/install/legacy.ps1'");
+    expect(legacy).toContain('Set-StrictMode -Off');
+    expect(legacy).toContain('& ([scriptblock]::Create($text)) @p');
+    for (const n of ['Code', 'SqlName', 'SqlConnection', 'SqlAuth', 'SqlServer', 'SqlUser', 'Setup', 'SqlPrompt', 'Reenroll', 'NoDefender', 'Replace', 'LinkTimeout']) {
+      expect(legacy).toContain(n);
+    }
+    expect(text).toContain("if ($version) { Stop-Install 78 ($Product + ' ' + $version + ' predates version pinning.')");
+  });
+
+  it('offers the old Check-In agent SQL connection to the binary through env (arrival hook)', async () => {
     const text = await (await get('/install.ps1')).text();
     expect(text).not.toContain('__ARRIVAL_SQL__');
+    expect(text).toContain(`#<arrival-sql>\n$St = @{ SqlFrom = ''; Secrets = @() }\nfunction Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }\n${ARRIVAL_LEGACY_SQL_BODY}\n#</arrival-sql>\n`);
     // The arrival slice's reader is the default body, spliced once.
-    expect(text).toContain(ARRIVAL_LEGACY_SQL_BODY);
     expect(text.split('function Get-ArrivalLegacySql').length).toBe(2);
-    // The arrival body needs $St, Add-Secret and Warn defined before it is spliced in.
     const body = text.indexOf(ARRIVAL_LEGACY_SQL_BODY);
-    for (const before of ['$St = @{', 'function Add-Secret(', 'function Warn(']) {
-      expect(text.indexOf(before)).toBeGreaterThan(0);
-      expect(text.indexOf(before)).toBeLessThan(body);
-    }
-    const saved = text.slice(text.indexOf('function Get-SavedSql'), text.indexOf('function Get-LocalSqlServer'));
-    expect(saved).toContain('if (-not $s.auth) { Add-LegacySql $s }');
-    // Its password is offered in memory only: an empty answer keeps it, the source is named.
-    expect(text).toContain('if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }');
-    expect(text).toContain("Say ($saved.from + ': '");
-    // A caller can still splice another body in its place.
-    const other = "function Get-ArrivalLegacySql { $St.SqlFrom = 'old'; return 'Server=.;Integrated Security=True;' }";
-    const spliced = installScript(BASE, [], other);
-    expect(spliced).toContain(other);
+    expect(text.indexOf('function Warn(')).toBeLessThan(body);
+    expect(text).toContain('try { return [string](Get-ArrivalLegacySql) }');
+    expect(text).toContain("if ($legacy) { $env:DL_AGENT_SQL_LEGACY = $legacy; $env:DL_AGENT_SQL_LEGACY_FROM = $St.SqlFrom }");
+    const real = "function Get-ArrivalLegacySql { $St.SqlFrom = 'old'; return 'Server=.;Integrated Security=True;' }";
+    const spliced = installScript(BASE, [], real);
+    expect(spliced).toContain(real);
     expect(spliced).not.toContain(ARRIVAL_LEGACY_SQL_BODY);
     expect(spliced.split('function Get-ArrivalLegacySql').length).toBe(2);
   });
 
-  it('passes the SQL sign-in to arrival-enroll through env only and removes it after', async () => {
+  it('exits with the code only when unattended; an interactive console stays open', async () => {
     const text = await (await get('/install.ps1')).text();
-    const start = text.indexOf('# -- arrival sign-in');
-    const end = text.indexOf('# -- end arrival sign-in');
-    const block = text.slice(start, end);
-    expect(start).toBeGreaterThan(text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))'));
-    expect(block).toContain("if ($Setup -eq 'arrival-enroll') {");
-    expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth');
-    expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser');
-    expect(block).toContain('$env:DL_AGENT_SQL_PASSWORD = $SqlPassword');
-    expect(block).toContain('$SqlPassword = $null');
-    for (const name of ['DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD']) {
-      expect(block).toContain(`'${name}'`);
-    }
-    const run = text.indexOf("try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {");
-    expect(run).toBeGreaterThan(end);
-    expect(text.slice(run, text.indexOf('Remove-Replaced', run))).toContain("foreach ($n in $SetupSecrets) { Remove-Item ('Env:' + $n)");
-    // Never in argv: no agent call carries the password, the login or the mode.
-    for (const line of text.split('\n').filter((l) => l.includes('Invoke-Agent @('))) {
-      expect(line).not.toMatch(/\$SqlPassword|\$SqlUser|\$SqlAuth|\$pw\b/);
-    }
-    // Without arrival-enroll the password is dropped right after the SQL step.
-    expect(text).toContain("if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }");
+    expect(text).toContain('$global:LASTEXITCODE = $DlState.Exit');
+    expect(text).toContain("$batch = (-not [Environment]::UserInteractive) -or [bool]$SqlAuth");
+    expect(text).toContain('if ($DlState.Exit -ne 0 -and $batch) { exit $DlState.Exit }');
+    expect(text.match(/\bexit \$/g)?.length).toBe(1);
+    expect(text).toContain("Write-Host ($ok + ' Installation complete') -ForegroundColor Green");
+    expect(text).toContain("Stop-Install 77 'Not running as Administrator.'");
+    // Strict mode and preferences stay inside the installer (iex runs in the caller's scope).
+    const main = text.slice(text.indexOf('function Install-Agent'));
+    expect(main).toContain("Set-StrictMode -Version 2.0\n  $ErrorActionPreference = 'Stop'\n  $ProgressPreference = 'SilentlyContinue'");
+    expect(text.slice(0, text.indexOf('function Install-Agent'))).not.toContain('$ErrorActionPreference');
   });
 
-  it('keeps the verified download until Move-Item installs it (RT-0164 test PC)', async () => {
-    const text = await (await get('/install.ps1')).text();
-    const start = text.indexOf('function Remove-OldCopies');
-    const body = text.slice(start, text.indexOf('\nfunction ', start + 1));
-    expect(start).toBeGreaterThan(0);
-    expect(body).not.toContain(".download'");
-    const download = text.indexOf("$tmp = $Exe + '.download'");
-    const cleanup = text.indexOf('  Remove-OldCopies', download);
-    const move = text.indexOf('Move-Item -Force $tmp $Exe');
-    expect(cleanup).toBeGreaterThan(download);
-    expect(move).toBeGreaterThan(cleanup);
+  it('serves the uninstaller: the agent removes itself, the data folder stays unless -Purge', async () => {
+    const res = await get('/uninstall.ps1');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toContain('no-store');
+    const text = await res.text();
+    expect(text).toContain(`irm ${BASE}/uninstall.ps1 | iex`);
+    expect(text).toContain('[switch]$Purge');
+    expect(text).toContain("(& $exe uninstall --help | Out-String) -match 'keep-files'");
+    expect(text).toContain("$argv = @('uninstall', '--data', $data)");
+    expect(text).toContain("if ($Purge) { $argv += '--purge' }");
+    // An older agent: what it leaves is removed here; the data folder only with -Purge.
+    expect(text).toContain("& sc.exe delete $Product");
+    expect(text).toContain("$task = $Display + ' Watchdog'");
+    expect(text).toContain('if ($Purge -and (Test-Path $data)) { Remove-Item -Recurse -Force $data');
+    expect(text.match(/\bexit \$/g)?.length).toBe(1);
   });
 
   it('enrolment codes come with the one-line install command', async () => {
@@ -213,5 +256,22 @@ describe('install info and download', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('Location')).toBe('https://dl.test/a.exe');
     expect((await get('/install/download/dl-agent/canary/9.9.9/windows-x86_64')).status).toBe(404);
+  });
+
+  it('describes a pinned version on either channel and serves its signed manifest', async () => {
+    const text = manifestText('1.2.0', 'canary', T0);
+    await admin(env, 'PUT', '/admin/releases/dl-agent/1.2.0', text);
+    const res = await get('/install/info/dl-agent/stable/windows-x86_64?version=1.2.0');
+    expect(res.status).toBe(200);
+    const lines = Object.fromEntries((await res.text()).trim().split('\n').map((l) => l.split('=') as [string, string]));
+    expect(lines).toMatchObject({ version: '1.2.0', channel: 'canary', download: '/install/download/dl-agent/canary/1.2.0/windows-x86_64' });
+    expect((await get('/install/info/dl-agent/stable/windows-x86_64?version=9.9.9')).status).toBe(404);
+    expect((await get('/install/info/dl-agent/stable/windows-x86_64?version=latest')).status).toBe(400);
+    const m = await get('/install/manifest/dl-agent/canary/1.2.0');
+    expect(m.status).toBe(200);
+    expect(m.headers.get('Cache-Control')).toContain('no-store');
+    expect(await m.text()).toBe(text);
+    expect((await get('/install/manifest/dl-agent/stable/1.2.0')).status).toBe(404);
+    expect((await get('/install/manifest/dl-agent/canary/x.y')).status).toBe(400);
   });
 });

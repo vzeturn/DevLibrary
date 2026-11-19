@@ -40,7 +40,7 @@ export function primaryHost(value: string | undefined): string | null {
   return first ? new URL(first).host : null;
 }
 
-/** Paths a fallback host serves: the agent API, health, and the installer. Admin, bench and products stay on the primary. */
+/** Paths a fallback host serves: the agent API, health, and the installer and uninstaller. Admin, bench and products stay on the primary. */
 export function servedOnFallback(path: string): boolean {
-  return path === '/healthz' || path === '/install.ps1' || path.startsWith('/v1/') || path.startsWith('/install/');
+  return path === '/healthz' || path === '/install.ps1' || path === '/uninstall.ps1' || path.startsWith('/v1/') || path.startsWith('/install/');
 }

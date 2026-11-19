@@ -1,49 +1,50 @@
 /**
- * The Windows installer served at `/install.ps1` (RT-0164 C8). It runs on PowerShell 2.0
- * (Windows 7 / Server 2008 R2): no JSON cmdlets, no Get-FileHash, no Invoke-RestMethod.
- * Kept free of backticks and dollar-brace so it can live in a raw template literal; the hub
- * origin replaces `__HUB__`.
+ * The Windows installer served at `/install.ps1` (RT-0164): a thin bootstrap modelled on Claude
+ * Code's install.ps1. It downloads the build, checks its size and SHA-256 against the hub, has
+ * the release signature checked (`verify-self`), then hands off to the signed binary
+ * (`dl-agent install`), which does the machine setup: old copies, service + watchdog, SQL login
+ * (hidden password prompt), enrolment, `-Setup`, `-Replace`, Defender exclusion, link wait.
  *
- * Steps: admin + TLS 1.2 → OS gate (NT < 10 → windows7 build, x86/x64) → clock check against
- * the hub → Defender exclusion → download + size + SHA-256 → stop and remove older copies
- * (the old exe uninstalls itself, other services are deleted) → SQL login (PROTOCOL.md §9.8:
- * Windows or SQL login, defaulting to what this machine saved, tested on every SMILE database as
- * the service account before anything is saved, and before the code is spent; with nothing saved, the
- * old Check-In agent's connection from `Get-ArrivalLegacySql`) → enroll unless already enrolled (re-run
- * keeps the identity) → optional product setup sub-command (`-Setup`; `arrival-enroll` also gets the SQL
- * login through env) → remove the product's previous agent
- * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
- * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
+ * One script for every Windows: it parses and runs on PowerShell 2.0 (Windows 7 / Server 2008
+ * R2: WebClient, no JSON cmdlets, no Get-FileHash, no Invoke-RestMethod) and is short enough for
+ * `irm <hub>/install.ps1 | iex` on 5.1. A build that predates `dl-agent install` is installed by
+ * the previous script (`/install/legacy.ps1`, `./legacyScript.ts`) with the same options.
+ * Kept free of backticks and dollar-brace so it can live in a raw template literal; the hub
+ * origin replaces `__HUB__`, the hub list `__HUBS__`.
  */
 import { ARRIVAL_LEGACY_SQL_BODY } from './arrival';
+import { legacyInstallScript } from './legacyScript';
 
-const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Administrator):
-#   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-#   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
-# SQL login: asked when run interactively on a machine with SQL Server (or with -SqlPrompt):
-#   "SQL login: [1] Windows  [2] SQL login"; Enter keeps what this machine saved.
-#   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile]; the password only
-#   from env DL_AGENT_SQL_PASSWORD or, run interactively, a hidden prompt (never a parameter,
-#   echoed or logged; sealed with DPAPI).
-#   A failed test prints the exact SQL error and exits 1; nothing is saved. With nothing saved
-#   the old Check-In agent's connection (Get-ArrivalLegacySql) is the default, its password included.
-#   With -Setup arrival-enroll the same -SqlAuth/-SqlUser and password reach it through env.
-# Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
-#          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
-#          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
-#          removed afterwards), -Replace <service name pattern> (an older per-product agent: its
-#          services are stopped and deleted and its processes ended; its files and config stay).
+const SCRIPT = String.raw`# DevLibrary Agent installer. PowerShell as Administrator:
+#   Windows 10 / Server 2016 and newer:   irm __HUB__/install.ps1 | iex
+#   With options:   & ([scriptblock]::Create((irm __HUB__/install.ps1))) -Code XXXX-XXXX -Channel canary
+#   Windows 7 / Server 2008 R2 (PowerShell 2.0):
+#     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+#     & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
+# What is missing is asked: enrolment code, SQL login [1] Windows [2] SQL, server, user and the
+# password (typed hidden; never a parameter, echoed or logged). Unattended: env DL_AGENT_ENROLL_CODE,
+# DL_AGENT_CHANNEL, DL_AGENT_SQL_AUTH (windows|sql), DL_AGENT_SQL_SERVER, DL_AGENT_SQL_USER and
+# DL_AGENT_SQL_PASSWORD. Running it again repairs or updates the agent and keeps its identity.
+# Target (first argument): stable or canary makes this machine follow that channel; a version
+# (1.4.2) holds it there until "dl-agent install stable"; auto drops both and follows the hub.
+# -Channel only picks the build installed now (the hub keeps assigning the channel).
+# Options: -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection, -Reenroll (new
+#   identity), -NoDefender, -LinkTimeout <seconds>, -Setup <sub-command> (its secrets through env
+#   DL_AGENT_SETUP_ARGS, removed afterwards), -Replace <service name pattern> (an older per-product
+#   agent: its services are stopped and deleted, its files and config stay).
+# Remove: irm __HUB__/uninstall.ps1 | iex
 param(
+  [string]$Target = '',
   [string]$Code = $env:DL_AGENT_ENROLL_CODE,
   [string]$Hub = '__HUB__',
-  [ValidateSet('stable', 'canary')][string]$Channel = 'stable',
+  [string]$Channel = $env:DL_AGENT_CHANNEL,
   [string]$Product = 'dl-agent',
   [string]$SqlName = '',
   [string]$SqlConnection = '',
   [switch]$SqlPrompt,
-  [ValidateSet('', 'windows', 'sql')][string]$SqlAuth = '',
-  [string]$SqlServer = '',
-  [string]$SqlUser = '',
+  [string]$SqlAuth = $env:DL_AGENT_SQL_AUTH,
+  [string]$SqlServer = $env:DL_AGENT_SQL_SERVER,
+  [string]$SqlUser = $env:DL_AGENT_SQL_USER,
   [switch]$Reenroll,
   [switch]$NoDefender,
   [int]$LinkTimeout = 120,
@@ -51,12 +52,41 @@ param(
   [string[]]$Replace = @()
 )
 
-$ErrorActionPreference = 'Stop'
+$DlState = @{ Exit = 0; Extra = @($args); Done = $false }
 $MaxSkew = 240
+# Secret env a -Setup sub-command reads (DL_AGENT_SETUP_ARGS too): removed when the installer ends.
+$SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')
+# Secret env this script hands to the binary: removed when the installer ends.
+$HandoffSecrets = @('DL_AGENT_ENROLL_CODE', 'DL_AGENT_SQL_CONNECTION', 'DL_AGENT_SQL_LEGACY', 'DL_AGENT_SQL_LEGACY_FROM', 'DL_AGENT_SETUP_ARGS')
 
 function Say([string]$m) { Write-Host ('[dl-agent] ' + $m) }
 function Warn([string]$m) { Write-Host ('[dl-agent] ' + $m) -ForegroundColor Yellow }
 function UnixNow { [long]([DateTime]::UtcNow - (New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc))).TotalSeconds }
+
+# A failure with its exit code and the next step to take.
+function Stop-Install([int]$exitCode, [string]$message, [string]$next) {
+  $e = New-Object Exception $message
+  $e.Data['code'] = $exitCode
+  $e.Data['next'] = $next
+  throw $e
+}
+
+# -- arrival legacy SQL (RT-0164): the old Check-In agent's SQL Server connection is the saved
+#    answer when this machine saved none. Get-ArrivalLegacySql (the arrival slice's body from
+#    src/install/arrival.ts by default) is spliced below; it needs $St,
+#    Add-Secret and Warn. This script prints no transcript, so Add-Secret only keeps the list.
+#<arrival-sql>
+$St = @{ SqlFrom = ''; Secrets = @() }
+function Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }
+__ARRIVAL_SQL__
+#</arrival-sql>
+# The connection (password included) reaches the binary through env DL_AGENT_SQL_LEGACY only.
+function Get-LegacySqlConnection {
+  Set-StrictMode -Off
+  try { return [string](Get-ArrivalLegacySql) }
+  catch { Warn ('The old Check-In agent''s SQL connection was not read: ' + $_.Exception.Message); return '' }
+}
+# -- end arrival legacy SQL
 
 function New-Client {
   $wc = New-Object Net.WebClient
@@ -65,43 +95,52 @@ function New-Client {
   return $wc
 }
 
+function Get-WebError($err) {
+  $ex = $err.Exception
+  while ($ex -and -not ($ex -is [Net.WebException]) -and $ex.InnerException) { $ex = $ex.InnerException }
+  return $ex
+}
+
+$Unreachable = 'hub unreachable or blocked by a proxy'
 function Get-HubText([string]$path) {
   try { return (New-Client).DownloadString($Hub + $path) }
-  catch [Net.WebException] {
+  catch {
+    $ex = Get-WebError $_
     $body = ''
-    if ($_.Exception.Response) {
-      $r = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
+    if (($ex -is [Net.WebException]) -and $ex.Response) {
+      $r = New-Object IO.StreamReader($ex.Response.GetResponseStream())
       $body = $r.ReadToEnd()
       $r.Close()
     }
-    throw ('hub ' + $path + ' failed: ' + $_.Exception.Message + ' ' + $body)
+    if ($body -match '^\s*\{\s*"error"') { Stop-Install 69 ('The hub refused ' + $path + ': ' + $body) 'Check -Channel or the version asked for; the hub admin can tell which builds are published.' }
+    Stop-Install 69 ($Unreachable + ' (' + $Hub + $path + ': ' + $ex.Message + ')') ('Open ' + $Hub + '/healthz in a browser on this PC; allow it in the proxy or firewall, then run again.')
   }
 }
 
-function Get-Info([string]$target) {
+function Get-Info([string]$lane, [string]$target, [string]$version) {
+  $path = '/install/info/' + $Product + '/' + $lane + '/' + $target
+  if ($version) { $path += '?version=' + $version }
   $info = @{}
-  foreach ($line in ((Get-HubText ('/install/info/' + $Product + '/' + $Channel + '/' + $target)) -split '\r?\n')) {
+  foreach ($line in ((Get-HubText $path) -split '\r?\n')) {
     $i = $line.IndexOf('=')
     if ($i -gt 0) { $info[$line.Substring(0, $i)] = $line.Substring($i + 1).Trim() }
   }
-  if (-not $info['sha256']) { throw ('hub answered without a build for ' + $target) }
+  # An HTML page (a proxy's login or block page) or anything else that is not the hub's answer.
+  if (-not ($info.ContainsKey('sha256') -and $info.ContainsKey('download') -and $info.ContainsKey('server_time')) -or $info['sha256'] -notmatch '^[0-9a-fA-F]{64}$') {
+    Stop-Install 69 ($Unreachable + ': ' + $Hub + ' answered something that is not the installer''s data') ('Open ' + $Hub + '/healthz in a browser on this PC; allow it in the proxy or firewall, then run again.')
+  }
   return $info
 }
 
 # Called when a just-written file vanished: names the active antivirus and Defender's latest detection.
-function Show-AvBlock([string]$path) {
+function Show-AvBlock {
   try {
     foreach ($a in @(Get-WmiObject -Namespace root\SecurityCenter2 -Class AntivirusProduct -ErrorAction Stop)) { Warn ('Antivirus on this PC: ' + $a.displayName) }
   } catch { Warn 'Antivirus list not available (Windows Server has no Security Center).' }
   if (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue) {
     try {
       $d = @(Get-MpThreatDetection -ErrorAction Stop | Sort-Object InitialDetectionTime -Descending | Select-Object -First 1)
-      if ($d.Count -gt 0) {
-        $t = @(Get-MpThreat -ThreatID $d[0].ThreatID -ErrorAction SilentlyContinue)
-        $name = 'id ' + $d[0].ThreatID
-        if ($t.Count -gt 0) { $name = $t[0].ThreatName }
-        Warn ('Windows Defender latest detection: ' + $name + ' at ' + $d[0].InitialDetectionTime + ' on ' + ($d[0].Resources -join ', '))
-      }
+      if ($d.Count -gt 0) { Warn ('Windows Defender latest detection: id ' + $d[0].ThreatID + ' at ' + $d[0].InitialDetectionTime + ' on ' + ($d[0].Resources -join ', ')) }
     } catch { Warn ('Windows Defender detections not readable: ' + $_.Exception.Message) }
   }
 }
@@ -112,326 +151,177 @@ function Get-Sha256([string]$path) {
   return ([BitConverter]::ToString($h) -replace '-', '').ToLower()
 }
 
-function Invoke-Agent([string[]]$argv) {
-  & $Exe @argv | Out-Host
-  return ($LASTEXITCODE -eq 0)
+# True when the binary has the installer verbs (help is printed on stdout, exit 0).
+function Test-Modern([string]$exe) {
+  if (-not (Test-Path $exe)) { return $false }
+  return ((& $exe --help | Out-String) -match 'verify-self')
 }
 
-function Add-Sql([string]$name, [string]$conn) {
-  $env:DL_AGENT_SQL_CONNECTION = $conn
-  try { $ok = Invoke-Agent @('sql-add', $name, '--data', $Data) } finally { Remove-Item Env:DL_AGENT_SQL_CONNECTION -ErrorAction SilentlyContinue }
-  if (-not $ok) { return $false }
-  return (Invoke-Agent @('sql-test', $name, '--data', $Data))
-}
-
-function Ask([string]$label, [string]$default) {
-  $a = Read-Host ($label + ' [' + $default + ']')
-  if ($a) { return $a } else { return $default }
-}
-
-function Read-Secret([string]$label) {
-  $sec = Read-Host $label -AsSecureString
-  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-  try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-}
-
-# -- arrival legacy SQL (RT-0164): the old Check-In agent's SQL Server connection is the saved
-#    answer when this machine saved none. Get-ArrivalLegacySql (the arrival slice's body from
-#    src/install/arrival.ts by default) is spliced below; it needs $St,
-#    Add-Secret and Warn. This script prints no transcript, so Add-Secret only keeps the list.
-$St = @{ SqlFrom = ''; Secrets = @() }
-function Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }
-__ARRIVAL_SQL__
-# Fills $s from the old agent's connection: mode, server, login and, in memory only, its password.
-function Add-LegacySql($s) {
-  $conn = [string](Get-ArrivalLegacySql)
-  if (-not $conn) { return }
-  try { $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $conn } catch { Warn ('The old Check-In agent''s SQL connection was not understood: ' + $_.Exception.Message); return }
-  $s.server = $b.DataSource
-  $s.from = $St.SqlFrom
-  if ($b.IntegratedSecurity) { $s.auth = 'windows' } else { $s.auth = 'sql'; $s.user = $b.UserID; $s.password = $b.Password }
-}
-# -- end arrival legacy SQL
-
-# What this machine saved (sql-setup --show: auth, server, user, databases; never the password),
-# else what the old Check-In agent used (from and password set only then).
-function Get-SavedSql {
-  $s = @{ auth = ''; server = ''; user = ''; databases = ''; from = ''; password = '' }
-  foreach ($l in @(& $Exe sql-setup --show --data $Data 2>$null)) {
-    $i = ([string]$l).IndexOf('=')
-    if ($i -gt 0) { $s[([string]$l).Substring(0, $i)] = ([string]$l).Substring($i + 1) }
+# The channel this machine follows now: its local choice, else its last heartbeat, else stable.
+function Get-InstalledChannel([string]$data) {
+  $choice = Join-Path $data 'update-channel'
+  if (Test-Path $choice) {
+    $c = ([IO.File]::ReadAllText($choice)).Trim()
+    if ($c -eq 'stable' -or $c -eq 'canary') { return $c }
   }
-  if (-not $s.auth) { Add-LegacySql $s }
-  return $s
-}
-
-function Get-LocalSqlServer {
-  $svc = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' })
-  if ($svc.Count -eq 0) { return '' }
-  if (@($svc | Where-Object { $_.Name -eq 'MSSQLSERVER' }).Count -gt 0) { return '.' }
-  return ('.\' + $svc[0].Name.Substring(6))
-}
-
-# Tests the login on every SMILE database (Windows: as LocalSystem, the service account) and
-# saves it only when all connect. The password travels in env DL_AGENT_SQL_PASSWORD, removed after.
-function Invoke-SqlSetup([string]$auth, [string]$server, [string]$user, [string]$pw) {
-  $argv = @('sql-setup', '--auth', $auth, '--server', $server, '--data', $Data, '--result', $SqlResult)
-  if ($auth -eq 'sql') { $argv += @('--user', $user) } else { $argv += '--as-service' }
-  if ($pw) { $env:DL_AGENT_SQL_PASSWORD = $pw }
-  try { & $Exe @argv | Out-Host; $code = $LASTEXITCODE } finally { Remove-Item Env:DL_AGENT_SQL_PASSWORD -ErrorAction SilentlyContinue }
-  return $code
-}
-
-function Read-SqlLogin {
-  $saved = Get-SavedSql
-  $mode = '1'
-  if ($saved.auth -eq 'sql') { $mode = '2' }
-  $server = $saved.server
-  if (-not $server) { $server = Get-LocalSqlServer }
-  if (-not $server) { $server = '.' }
-  $user = $saved.user
-  if (-not $user) { $user = 'sa' }
-  if ($saved.from) {
-    Say ($saved.from + ': ' + $saved.auth + ' login on ' + $saved.server + '. Enter keeps it.')
-  } elseif ($saved.auth) {
-    Say ('Saved SQL login: ' + $saved.auth + ' on ' + $saved.server + ' (' + $saved.databases + '). Enter keeps it.')
+  $beat = Join-Path $data 'heartbeat.json'
+  if (Test-Path $beat) {
+    $m = [regex]::Match([IO.File]::ReadAllText($beat), '"channel"\s*:\s*"(stable|canary)"')
+    if ($m.Success) { return $m.Groups[1].Value }
   }
-  while ($true) {
-    $mode = Ask 'SQL login: [1] Windows  [2] SQL login  [0] skip' $mode
-    if ($mode -eq '0') { Warn 'SQL login not changed.'; return }
-    if ($mode -ne '1' -and $mode -ne '2') { Warn 'Type 1, 2 or 0.'; $mode = '1'; continue }
-    $server = Ask 'SQL Server (., .\SQLEXPRESS, host\instance or host,port)' $server
-    $pw = ''
-    $auth = 'windows'
-    if ($mode -eq '2') {
-      $auth = 'sql'
-      $user = Ask 'SQL login name' $user
-      if ($saved.auth -eq 'sql' -and $user -eq $saved.user) { $pw = Read-Secret 'Password (Enter keeps the saved one)' } else { $pw = Read-Secret 'Password' }
-      if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }
+  return 'stable'
+}
+
+# The previous installer, for a build without the installer verbs; same options.
+function Invoke-Legacy([string]$lane) {
+  $p = @{ Hub = $Hub; Channel = $lane; Product = $Product; LinkTimeout = $LinkTimeout; Replace = $Replace }
+  $named = @{ Code = $Code; SqlName = $SqlName; SqlConnection = $SqlConnection; SqlAuth = $SqlAuth; SqlServer = $SqlServer; SqlUser = $SqlUser; Setup = $Setup }
+  foreach ($k in @($named.Keys)) { if ($named[$k]) { $p[$k] = $named[$k] } }
+  if ($SqlPrompt) { $p.SqlPrompt = $true }
+  if ($Reenroll) { $p.Reenroll = $true }
+  if ($NoDefender) { $p.NoDefender = $true }
+  $text = Get-HubText '/install/legacy.ps1'
+  if ($text -notmatch 'DevLibrary Agent installer') { Stop-Install 69 ($Unreachable + ': /install/legacy.ps1 is not the installer') ('Open ' + $Hub + '/healthz in a browser on this PC, then run again.') }
+  Set-StrictMode -Off
+  & ([scriptblock]::Create($text)) @p
+}
+
+function Install-Agent {
+  Set-StrictMode -Version 2.0
+  $ErrorActionPreference = 'Stop'
+  $ProgressPreference = 'SilentlyContinue'
+  $tmp = ''
+  $mf = ''
+  try {
+    if ($DlState.Extra.Count -gt 0) { Stop-Install 78 ('Unknown argument: ' + ($DlState.Extra -join ' ')) 'Options are named (-Code, -Channel, -SqlAuth ...); the only positional one is the target: stable, canary or a version.' }
+    if ($Target -notmatch '^(|stable|latest|canary|auto|\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?)$') { Stop-Install 78 ('Unknown target ' + $Target) 'Use stable, canary, auto or a version such as 1.4.2.' }
+    if ($Channel -notmatch '^(|stable|canary)$') { Stop-Install 78 ('Unknown channel ' + $Channel) 'Use -Channel stable or -Channel canary.' }
+    if ($SqlAuth -notmatch '^(|windows|sql)$') { Stop-Install 78 ('Unknown SQL login mode ' + $SqlAuth) 'Use -SqlAuth windows or -SqlAuth sql.' }
+    $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Stop-Install 77 'Not running as Administrator.' 'Open PowerShell with "Run as administrator" and paste the command again.' }
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 }
+    catch { Warn 'TLS 1.2 is not available: install .NET Framework 4.5 or newer if the download fails.' }
+
+    $v = [Environment]::OSVersion.Version
+    if ($v.Major -lt 6 -or ($v.Major -eq 6 -and $v.Minor -lt 1)) { Stop-Install 78 ('Windows NT ' + $v + ' is too old.') 'Windows 7 / Server 2008 R2 or newer is needed.' }
+    $os = 'windows'
+    if ($v.Major -lt 10) { $os = 'windows7' }
+    $arch = 'x86'
+    if ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'AMD64' -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $arch = 'x86_64' }
+    $os = $os + '-' + $arch
+
+    $pf = $env:ProgramW6432
+    if (-not $pf) { $pf = $env:ProgramFiles }
+    $Exe = Join-Path $pf ('DevLibrary\' + $Product + '\' + $Product + '.exe')
+    $Data = Join-Path $env:ProgramData $Product
+
+    # The build to download: the target's, else -Channel's, else the channel this machine follows.
+    $version = ''
+    $lane = $Channel
+    if ($Target -match '^\d') { $version = $Target; $lane = 'stable' }
+    elseif ($Target -eq 'canary') { $lane = 'canary' }
+    elseif ($Target -and $Target -ne 'auto') { $lane = 'stable' }
+    elseif (-not $lane) { $lane = Get-InstalledChannel $Data }
+
+    $info = Get-Info $lane $os $version
+    $skew = (UnixNow) - [long]$info['server_time']
+    if ([Math]::Abs($skew) -gt $MaxSkew) {
+      Warn ('The clock is off by ' + $skew + ' s; trying to resync with w32tm.')
+      & w32tm.exe /resync /force | Out-Null
+      $info = Get-Info $lane $os $version
+      $skew = (UnixNow) - [long]$info['server_time']
+      if ([Math]::Abs($skew) -gt $MaxSkew) { Stop-Install 78 ('The clock is off by ' + $skew + ' s; the hub refuses agents more than 5 min off.') 'Set the date, time and time zone of this PC, then run again.' }
     }
-    $code = Invoke-SqlSetup $auth $server $user $pw
-    $pw = $null
-    if ($code -eq 0) { Say 'SQL login tested and saved.'; return }
-    Warn 'The SQL login test failed (exact error above). Choose again; Enter keeps the previous answer.'
-  }
-}
+    Say ('Downloading ' + $Product + ' ' + $info['version'] + ' (' + $info['channel'] + ', ' + $os + ') from ' + $Hub)
 
-# Unattended (-SqlAuth): unset values fall back to what this machine saved. Returns $false on a
-# failed test after printing the structured result (sql-setup.last.json). $Password holds the
-# password from env DL_AGENT_SQL_PASSWORD; a password typed at the prompt is handed back in it.
-function Set-SqlLoginUnattended([ref]$Password) {
-  $saved = Get-SavedSql
-  $server = $SqlServer
-  if (-not $server) { $server = $saved.server }
-  if (-not $server) { $server = Get-LocalSqlServer }
-  if (-not $server) { $server = '.' }
-  $user = $SqlUser
-  if (-not $user) { $user = $saved.user }
-  $pw = $Password.Value
-  if (-not $pw -and $SqlAuth -eq 'sql' -and $saved.password -and $user -eq $saved.user) {
-    Say 'No DL_AGENT_SQL_PASSWORD: using the old Check-In agent''s password for this login.'
-    $pw = $saved.password
-  } elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {
-    $pw = Read-Secret ('Password of SQL login ' + $user)
-    $Password.Value = $pw
-  }
-  $code = Invoke-SqlSetup $SqlAuth $server $user $pw
-  $pw = $null
-  if ($code -eq 0) { Say ('SQL login ' + $SqlAuth + ' tested and saved.'); return $true }
-  if (Test-Path $SqlResult) { Write-Host ('[dl-agent] SQL_SETUP_RESULT ' + [IO.File]::ReadAllText($SqlResult).Trim()) }
-  return $false
-}
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ($Product + '-setup-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.exe')
+    try { (New-Client).DownloadFile($Hub + $info['download'], $tmp) }
+    catch { $ex = Get-WebError $_; Stop-Install 69 ($Unreachable + ' (download: ' + $ex.Message + ')') 'Run again; if it repeats, allow the hub in the proxy or firewall.' }
+    if (-not (Test-Path $tmp)) { Start-Sleep -Seconds 2 }
+    if (-not (Test-Path $tmp)) { Show-AvBlock; Stop-Install 69 'The download was removed right after it was written (antivirus).' 'Restore it from the antivirus quarantine or allow the hub''s downloads, then run again.' }
+    $size = (Get-Item $tmp).Length
+    if ($size -ne [long]$info['size']) { Stop-Install 65 ('The download is ' + $size + ' bytes, expected ' + $info['size'] + '.') 'Run again; if it repeats, a proxy is changing downloads.' }
+    $sha = Get-Sha256 $tmp
+    if ($sha -ne $info['sha256'].ToLower()) { Stop-Install 65 ('SHA-256 mismatch: got ' + $sha + ', expected ' + $info['sha256'] + '.') 'Run again; if it repeats, a proxy is changing downloads.' }
 
-function Remove-OldCopies {
-  $svc = $null
-  foreach ($s in @(Get-WmiObject Win32_Service | Where-Object { $_.PathName -like ('*\' + $Product + '.exe*') })) {
-    if ($s.Name -eq $Product) { $svc = $s; continue }
-    Warn ('Removing older copy: service ' + $s.Name + ' (' + $s.PathName + ')')
-    if ($s.State -ne 'Stopped') { $s.StopService() | Out-Null; Start-Sleep -Seconds 3 }
-    & sc.exe delete $s.Name | Out-Null
-  }
-  if ($svc) {
-    Say ('Stopping service ' + $Product)
-    if ($svc.PathName -notlike ('*' + $Exe + '*')) { Warn ('Service pointed at ' + $svc.PathName + '; repairing the path.') }
-    $removed = $false
-    if (Test-Path $Exe) { $removed = Invoke-Agent @('uninstall', '--data', $Data) }
-    if (-not $removed) {
-      if ($svc.State -ne 'Stopped') { $svc.StopService() | Out-Null; Start-Sleep -Seconds 3 }
-      & sc.exe delete $Product | Out-Null
+    if (-not (Test-Modern $tmp)) {
+      if ($version) { Stop-Install 78 ($Product + ' ' + $version + ' predates version pinning.') 'Install a channel instead: stable or canary.' }
+      Say 'This build predates the new installer: the previous installer runs it.'
+      Invoke-Legacy $lane
+      return
     }
-  }
-  foreach ($p in @(Get-Process -Name $Product -ErrorAction SilentlyContinue)) {
-    Warn ('Stopping leftover process ' + $p.Id)
-    Stop-Process -Id $p.Id -Force
-  }
-  # Not $Exe.download: it is the verified download that Move-Item installs next.
-  if (Test-Path ($Exe + '.new')) { Remove-Item ($Exe + '.new') -Force }
-}
 
-function Remove-Replaced {
-  foreach ($pattern in $Replace) {
-    if (-not $pattern) { continue }
-    foreach ($s in @(Get-WmiObject Win32_Service | Where-Object { ($_.Name -like $pattern -or $_.DisplayName -like $pattern) -and $_.PathName -notlike ('*' + $Exe + '*') })) {
-      Warn ('Replacing ' + $s.Name + ' (' + $s.PathName + '); its files are kept.')
-      if ($s.State -ne 'Stopped') { $s.StopService() | Out-Null; Start-Sleep -Seconds 3 }
-      & sc.exe delete $s.Name | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw ('Could not delete service ' + $s.Name + ' (sc.exe exit ' + $LASTEXITCODE + ').') }
-      if ($s.PathName -match '^\s*"([^"]+)"') { $path = $matches[1] } else { $path = ($s.PathName -split ' ')[0] }
-      foreach ($p in @(Get-WmiObject Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -eq $path })) {
-        Warn ('Ending process ' + $p.ProcessId + ' (' + $p.ExecutablePath + ')')
-        $p.Terminate() | Out-Null
+    # The release signature (Ed25519) over the manifest that names this SHA-256. An installed agent
+    # that knows verify-self checks it (trust carried from the previous install); on a new PC the
+    # downloaded binary checks itself against the release keys built into it.
+    $manifest = Get-HubText ('/install/manifest/' + $Product + '/' + $info['channel'] + '/' + $info['version'])
+    if ($manifest -notmatch '^\s*\{') { Stop-Install 69 ($Unreachable + ': the release manifest is not JSON') ('Open ' + $Hub + '/healthz in a browser on this PC, then run again.') }
+    $mf = $tmp + '.manifest.json'
+    [IO.File]::WriteAllText($mf, $manifest)
+    $verifier = $tmp
+    if (Test-Modern $Exe) { $verifier = $Exe }
+    & $verifier verify-self --manifest $mf --file $tmp --target $os --product $Product
+    if ($LASTEXITCODE -ne 0) { Stop-Install 65 'The download failed the release signature check; it was not run.' 'Run again; if it repeats, tell the hub admin (a proxy or an attacker may be changing downloads).' }
+
+    # Hand-off: the binary does the machine setup. Secrets travel in env only, removed below.
+    $hubs = $Hub
+    foreach ($h in ('__HUBS__' -split ',')) { if ($h -and (($hubs -split ',') -notcontains $h)) { $hubs += ',' + $h } }
+    $argv = @('install')
+    if ($Target) { $argv += $Target }
+    $argv += @('--hub', $hubs, '--data', $Data, '--link-timeout', [string]$LinkTimeout)
+    if ($SqlName) { $argv += @('--sql-name', $SqlName) }
+    if ($SqlAuth) { $argv += @('--sql-auth', $SqlAuth) }
+    if ($SqlServer) { $argv += @('--sql-server', $SqlServer) }
+    if ($SqlUser) { $argv += @('--sql-user', $SqlUser) }
+    if ($SqlPrompt) { $argv += '--sql-prompt' }
+    if ($Reenroll) { $argv += '--reenroll' }
+    if ($NoDefender) { $argv += '--no-defender' }
+    if ($Setup) { $argv += @('--setup', $Setup) }
+    foreach ($r in $Replace) { if ($r) { $argv += @('--replace', $r) } }
+    if ($Code) { $env:DL_AGENT_ENROLL_CODE = $Code }
+    if ($SqlConnection) { $env:DL_AGENT_SQL_CONNECTION = $SqlConnection }
+    if (-not (Test-Path (Join-Path $Data 'sql.json'))) {
+      $legacy = Get-LegacySqlConnection
+      if ($legacy) { $env:DL_AGENT_SQL_LEGACY = $legacy; $env:DL_AGENT_SQL_LEGACY_FROM = $St.SqlFrom }
+      $legacy = $null
+    }
+    & $tmp @argv
+    $rc = $LASTEXITCODE
+    if ($rc -ne 0) { Stop-Install $rc ('The install stopped (exit ' + $rc + ').') 'Fix what the agent named above, then run the same command again: it keeps this machine''s identity.' }
+    $DlState.Done = $true
+  } catch {
+    $rc = 1
+    $next = 'Run the same command again; it keeps this machine''s identity.'
+    if ($_.Exception.Data.Contains('code')) { $rc = [int]$_.Exception.Data['code']; $next = [string]$_.Exception.Data['next'] }
+    Write-Host ('[dl-agent] FAILED: ' + $_.Exception.Message) -ForegroundColor Red
+    if ($next) { Write-Host ('[dl-agent] Next: ' + $next) -ForegroundColor Yellow }
+    $DlState.Exit = $rc
+  } finally {
+    foreach ($f in @($tmp, $mf)) {
+      if ($f -and (Test-Path $f)) {
+        try { Remove-Item -Force $f } catch { Warn ('Could not remove the temporary file ' + $f + ': ' + $_.Exception.Message) }
       }
     }
+    foreach ($n in ($HandoffSecrets + $SetupSecrets)) { Remove-Item ('Env:' + $n) -ErrorAction SilentlyContinue }
   }
 }
 
-function Wait-Link([long]$since) {
-  $beat = Join-Path $Data 'heartbeat.json'
-  $deadline = (UnixNow) + $LinkTimeout
-  while ((UnixNow) -lt $deadline) {
-    if (Test-Path $beat) {
-      $m = [regex]::Match([IO.File]::ReadAllText($beat), '"hub_at"\s*:\s*(\d+)')
-      if ($m.Success -and ([long]$m.Groups[1].Value) -ge $since) { return $true }
-    }
-    Start-Sleep -Seconds 3
-  }
-  return $false
+Install-Agent
+$global:LASTEXITCODE = $DlState.Exit
+if ($DlState.Done) {
+  $ok = '[dl-agent]'
+  if ($PSVersionTable.PSVersion.Major -ge 5) { $ok = [string][char]0x2705 }
+  Write-Host ''
+  Write-Host ($ok + ' Installation complete') -ForegroundColor Green
 }
-
-try {
-  $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-  if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run PowerShell as Administrator.' }
-  try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 }
-  catch { Warn 'TLS 1.2 is not available: install .NET Framework 4.5 or newer if the download fails.' }
-
-  $v = [Environment]::OSVersion.Version
-  if ($v.Major -lt 6 -or ($v.Major -eq 6 -and $v.Minor -lt 1)) { throw ('Windows NT ' + $v + ' is too old: Windows 7 / Server 2008 R2 or newer is needed.') }
-  $os = 'windows'
-  if ($v.Major -lt 10) { $os = 'windows7' }
-  $arch = 'x86'
-  if ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'AMD64' -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $arch = 'x86_64' }
-  $target = $os + '-' + $arch
-
-  $pf = $env:ProgramW6432
-  if (-not $pf) { $pf = $env:ProgramFiles }
-  $InstallDir = Join-Path $pf ('DevLibrary\' + $Product)
-  $Exe = Join-Path $InstallDir ($Product + '.exe')
-  $Data = Join-Path $env:ProgramData $Product
-  $SqlResult = Join-Path $Data 'sql-setup.last.json'
-  $SqlFailed = $false
-  Say ('Windows NT ' + $v + ', build ' + $target + ', channel ' + $Channel + ', hub ' + $Hub)
-
-  $info = Get-Info $target
-  $skew = (UnixNow) - [long]$info['server_time']
-  if ([Math]::Abs($skew) -gt $MaxSkew) {
-    Warn ('The clock is off by ' + $skew + ' s; trying to resync with w32tm.')
-    & w32tm.exe /resync /force | Out-Null
-    $info = Get-Info $target
-    $skew = (UnixNow) - [long]$info['server_time']
-    if ([Math]::Abs($skew) -gt $MaxSkew) { throw ('The clock is off by ' + $skew + ' s and the hub refuses agents more than 5 min off. Set the date, time and time zone, then run again.') }
-  }
-
-  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-  New-Item -ItemType Directory -Force -Path $Data | Out-Null
-  if (-not $NoDefender -and (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) {
-    try { Add-MpPreference -ExclusionPath @($InstallDir, $Data); Say 'Windows Defender: agent folders excluded.' }
-    catch { Warn ('Windows Defender exclusion not added: ' + $_.Exception.Message) }
-  }
-
-  Say ('Downloading ' + $Product + ' ' + $info['version'] + ' (' + $info['size'] + ' bytes)')
-  $tmp = $Exe + '.download'
-  (New-Client).DownloadFile($Hub + $info['download'], $tmp)
-  if (-not (Test-Path $tmp)) { Start-Sleep -Seconds 2 }
-  if (-not (Test-Path $tmp)) { Show-AvBlock $tmp; throw ('The downloaded file was removed right after it was written (antivirus). Allow ' + $InstallDir + ' in the antivirus shown above, then run again.') }
-  $size = (Get-Item $tmp).Length
-  if ($size -ne [long]$info['size']) { Remove-Item $tmp -Force; throw ('Download is ' + $size + ' bytes, expected ' + $info['size'] + '. Run again.') }
-  $sha = Get-Sha256 $tmp
-  if ($sha -ne $info['sha256'].ToLower()) { Remove-Item $tmp -Force; throw ('SHA-256 mismatch: got ' + $sha + ', expected ' + $info['sha256'] + '. Run again.') }
-
-  Remove-OldCopies
-  Move-Item -Force $tmp $Exe
-  Say ('Installed ' + $Exe + ' (SHA-256 ' + $sha + ')')
-
-  $enrolled = Test-Path (Join-Path $Data 'identity.json')
-  if ($SqlName -and $SqlConnection) {
-    if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
-  } elseif ($SqlAuth) {
-    # -- SQL password: env DL_AGENT_SQL_PASSWORD or the hidden prompt, never a parameter
-    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD
-    # -- end SQL password
-    $SqlFailed = -not (Set-SqlLoginUnattended ([ref]$SqlPassword))
-    # arrival-enroll takes the same sign-in (below); otherwise the password is dropped now.
-    if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }
-    # Nothing was saved: a new machine stops before the code is spent; a reinstall comes back
-    # with its previous SQL settings and reports sql_setup_failed to the hub.
-    if ($SqlFailed -and -not $enrolled) { throw 'The SQL login test failed (see above); nothing was saved or enrolled.' }
-    if ($SqlFailed) { Warn 'The SQL login test failed (see above): the previous SQL settings are kept.' }
-  } elseif ($SqlPrompt -or ([Environment]::UserInteractive -and ((Get-LocalSqlServer) -or (Test-Path (Join-Path $Data 'sql.json'))))) {
-    Read-SqlLogin
-  }
-
-  if ($enrolled -and -not $Reenroll) {
-    Say 'Already enrolled: keeping this machine''s identity.'
-  } else {
-    if (-not $Code) { $Code = Read-Host 'Enrolment code' }
-    if (-not $Code) { throw 'An enrolment code is needed (ask the hub admin).' }
-    # -- hub fallback list (PROTOCOL.md §2.1): the hub's other hosts follow -Hub, so enrolment
-    #    still works while the primary host is down; the answer's hub_urls is what the agent keeps.
-    $hubArg = $Hub
-    foreach ($h in ('__HUBS__' -split ',')) { if ($h -and (($hubArg -split ',') -notcontains $h)) { $hubArg += ',' + $h } }
-    # -- end hub fallback list
-    $argv = @('enroll', '--hub', $hubArg, '--data', $Data)
-    if ($enrolled) { $argv += '--force' }
-    $env:DL_AGENT_ENROLL_CODE = $Code
-    try { $ok = Invoke-Agent $argv } finally { Remove-Item Env:DL_AGENT_ENROLL_CODE -ErrorAction SilentlyContinue }
-    if (-not $ok) { throw 'Enrolment failed (see above). The code may be used, expired or revoked.' }
-  }
-
-  if ($Setup) {
-    Say ('Running setup: ' + $Setup)
-    # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser and the password reach arrival-enroll through env
-    #    only, never argv; the setup's secret env (token, PMS connection, tenant key, password) is
-    #    removed right after it ran.
-    $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')
-    if ($Setup -eq 'arrival-enroll') {
-      if ($SqlAuth) { $env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth }
-      if ($SqlUser) { $env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser }
-      if ($SqlPassword) { $env:DL_AGENT_SQL_PASSWORD = $SqlPassword }
-    }
-    $SqlPassword = $null
-    # -- end arrival sign-in
-    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {
-      Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue
-      foreach ($n in $SetupSecrets) { Remove-Item ('Env:' + $n) -ErrorAction SilentlyContinue }
-    }
-    if (-not $ok) { throw ('Setup ' + $Setup + ' failed (see above). The previous agent, if any, is still running.') }
-  }
-  Remove-Replaced
-
-  $since = (UnixNow) - 5
-  if (-not (Invoke-Agent @('install', '--data', $Data))) { throw 'Service install failed (see above).' }
-
-  $kav = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AVP*' -or $_.Name -eq 'klnagent' -or $_.DisplayName -like '*Kaspersky*' })
-  if ($kav.Count -gt 0) {
-    Warn ('Kaspersky is installed. In Kaspersky (or Security Center policy) add ' + $Exe + ' as a Trusted application (SHA-256 ' + $sha + ') and exclude ' + $Data + ' from scanning.')
-  }
-
-  Say ('Waiting up to ' + $LinkTimeout + ' s for the agent to reach the hub...')
-  if (Wait-Link $since) {
-    Write-Host '[dl-agent] Connected to the hub.' -ForegroundColor Green
-  } else {
-    Write-Host ('[dl-agent] NOT connected after ' + $LinkTimeout + ' s. Last log lines:') -ForegroundColor Red
-    $log = Join-Path $Data 'logs\agent.log'
-    if (Test-Path $log) { Get-Content $log | Select-Object -Last 15 | ForEach-Object { Write-Host $_ } }
-    & $Exe status --data $Data | Out-Host
-  }
-  if ($SqlFailed) { Write-Host '[dl-agent] FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1 }
-} catch {
-  Write-Host ('[dl-agent] FAILED: ' + $_.Exception.Message) -ForegroundColor Red
-  # Unattended runs report failure through the exit code.
-  if ($SqlAuth) { exit 1 }
-}
+# Unattended runs (RMM, SYSTEM, -NonInteractive, -SqlAuth) report failure through the exit
+# code; an interactive console stays open.
+$batch = (-not [Environment]::UserInteractive) -or [bool]$SqlAuth -or (@([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }).Count -gt 0)
+if ($DlState.Exit -ne 0 -and $batch) { exit $DlState.Exit }
 `;
+
+const ARRIVAL_START = '#<arrival-sql>\n';
+const ARRIVAL_END = '#</arrival-sql>\n';
 
 /**
  * The installer with this hub's origin as its default hub, `hubs` (HUB_URLS) as the enrolment
@@ -440,6 +330,21 @@ try {
  */
 export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_LEGACY_SQL_BODY): string {
   return SCRIPT.split('__ARRIVAL_SQL__').join(arrivalSql).split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
+}
+
+/** The `Get-ArrivalLegacySql` body `installScript` splices in (whatever its default is). */
+export function arrivalSqlOf(script: string): string {
+  const start = script.indexOf(ARRIVAL_START);
+  const end = script.indexOf(ARRIVAL_END, start);
+  if (start < 0 || end < 0) throw new Error('install script without the arrival block');
+  const block = script.slice(start + ARRIVAL_START.length, end).split('\n');
+  // The block is $St, Add-Secret, then the body.
+  return block.slice(2).join('\n').replace(/\n$/, '');
+}
+
+/** The previous installer (`/install/legacy.ps1`) with the same arrival body as `/install.ps1`. */
+export function legacyScript(origin: string, hubs: readonly string[] = []): string {
+  return legacyInstallScript(origin, hubs, arrivalSqlOf(installScript(origin, hubs)));
 }
 
 /** The one-liner an admin pastes (PowerShell 2.0 safe; the code stays out of the URL). */
