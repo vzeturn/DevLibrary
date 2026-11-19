@@ -56,6 +56,7 @@ describe('einvoice switch helpers', () => {
     for (const text of [installScript('https://agent.example.test'), legacyScript('https://agent.example.test')]) {
       const list = text.match(/\$SetupSecrets = @\(([^)]*)\)/);
       expect(list?.[1]).toContain("'DL_AGENT_EINVOICE_TOKEN'");
+      expect(list?.[1]).toContain("'DL_AGENT_PMS_CODE'");
       expect(text).toMatch(/foreach \(\$n in \(?(\$HandoffSecrets \+ )?\$SetupSecrets\)?\) \{ Remove-Item \('Env:' \+ \$n\)/);
     }
   });

@@ -5,7 +5,7 @@
 //!
 //! A site that already has `identity.json` is enrolled: nothing changes unless `--force`,
 //! which deletes `identity.json` so the new code is used (the Go agent's re-enroll step).
-//! The code is never printed.
+//! The code is never printed; it may come from `DL_AGENT_PMS_CODE` instead of `--code`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,9 @@ mod tests;
 
 /// The registered sub-command name.
 pub const NAME: &str = "pms-enroll";
+/// Where the code may come from instead of `--code` (the argument wins), so an installer keeps
+/// it off the command line and the process list.
+pub const CODE_ENV: &str = "DL_AGENT_PMS_CODE";
 
 /// The tool to register with `App::tool`.
 pub fn pms_enroll_tool() -> Tool {
@@ -46,8 +49,12 @@ fn grammar(cmd: Command) -> Command {
         .arg(
             Arg::option("code")
                 .required()
+                .env(CODE_ENV)
                 .value_name("CODE")
-                .help("One-time enrollment code from the PMS console"),
+                .help(
+                    "One-time enrollment code from the PMS console (default DL_AGENT_PMS_CODE; \
+                     this argument wins)",
+                ),
         )
         .arg(
             Arg::option("config").value_name("PATH").help(

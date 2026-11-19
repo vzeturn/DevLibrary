@@ -89,7 +89,9 @@ once on `pms.reconnect`, and removes the code from the file afterwards.
 
 - **Already enrolled** (`identity.json` in the state dir): prints one line and changes nothing.
   `--force` removes `identity.json` so the next attempt enrolls with the new code.
-- The code is never printed or logged.
+- The code is never printed or logged. It may come from `DL_AGENT_PMS_CODE` instead of `--code`
+  (the argument wins), which keeps it off the command line; `install.ps1` removes that variable
+  after its setup step.
 - No service step: dl-agent installs its own service.
 
 ## Migrations
