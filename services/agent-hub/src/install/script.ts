@@ -72,6 +72,24 @@ function Get-Info([string]$target) {
   return $info
 }
 
+# Called when a just-written file vanished: names the active antivirus and Defender's latest detection.
+function Show-AvBlock([string]$path) {
+  try {
+    foreach ($a in @(Get-WmiObject -Namespace root\SecurityCenter2 -Class AntivirusProduct -ErrorAction Stop)) { Warn ('Antivirus on this PC: ' + $a.displayName) }
+  } catch { Warn 'Antivirus list not available (Windows Server has no Security Center).' }
+  if (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue) {
+    try {
+      $d = @(Get-MpThreatDetection -ErrorAction Stop | Sort-Object InitialDetectionTime -Descending | Select-Object -First 1)
+      if ($d.Count -gt 0) {
+        $t = @(Get-MpThreat -ThreatID $d[0].ThreatID -ErrorAction SilentlyContinue)
+        $name = 'id ' + $d[0].ThreatID
+        if ($t.Count -gt 0) { $name = $t[0].ThreatName }
+        Warn ('Windows Defender latest detection: ' + $name + ' at ' + $d[0].InitialDetectionTime + ' on ' + ($d[0].Resources -join ', '))
+      }
+    } catch { Warn ('Windows Defender detections not readable: ' + $_.Exception.Message) }
+  }
+}
+
 function Get-Sha256([string]$path) {
   $s = [IO.File]::OpenRead($path)
   try { $h = [Security.Cryptography.SHA256]::Create().ComputeHash($s) } finally { $s.Close() }
@@ -214,6 +232,8 @@ try {
   Say ('Downloading ' + $Product + ' ' + $info['version'] + ' (' + $info['size'] + ' bytes)')
   $tmp = $Exe + '.download'
   (New-Client).DownloadFile($Hub + $info['download'], $tmp)
+  if (-not (Test-Path $tmp)) { Start-Sleep -Seconds 2 }
+  if (-not (Test-Path $tmp)) { Show-AvBlock $tmp; throw ('The downloaded file was removed right after it was written (antivirus). Allow ' + $InstallDir + ' in the antivirus shown above, then run again.') }
   $size = (Get-Item $tmp).Length
   if ($size -ne [long]$info['size']) { Remove-Item $tmp -Force; throw ('Download is ' + $size + ' bytes, expected ' + $info['size'] + '. Run again.') }
   $sha = Get-Sha256 $tmp
