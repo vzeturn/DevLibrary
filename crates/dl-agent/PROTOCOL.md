@@ -38,6 +38,8 @@ does not verify.
 | `POST /v1/heartbeat` | Heartbeat (§3) → `{server_time, channel, heartbeat_seconds, config?:{version, body}, commands:[Command], update_check:bool}` |
 | `POST /v1/reports` | `{reports:[ProblemReport]}` → `{accepted:N}` |
 | `POST /v1/commands/{id}/result` | `{ok:bool, output:string, finished_at}` → `{}` |
+| `POST /v1/agent/selftest` | self-test run → `{accepted, run_id}` |
+| `POST /v1/agent/diagnostics?command_id=` | zip (§4.1, at most 8 MB) → `{id, key, size, sha256}` |
 | `GET  /v1/releases/{product}/{channel}` | → signed Manifest (§5); `404` when no release |
 | `GET  <artifact url>` | binary, size and SHA-256 come from the manifest |
 
@@ -93,6 +95,28 @@ the failure cap; the output says why nothing was installed), `retry_update {vers
 `collect_diagnostics`, `reload_config`, `revoke` (wipe identity and stop). Any other kind with a `module` is
 passed to that module. Expired commands are answered `{ok:false, output:"expired"}`.
 Every command gets exactly one result.
+
+### 4.1 Diagnostics bundle
+
+`collect_diagnostics` builds a zip and uploads it signed to
+`POST /v1/agent/diagnostics?command_id=<id>` (`Content-Type: application/zip`, the
+signature covers the zip bytes and the query). The zip holds `diagnostics.json` (agent,
+tenant, site, hub hosts, version, channel, uptime, clock skew, config version, update state,
+modules, spooled reports), `logs/<file>` (newest file first, the end of each, 6 MB in all),
+`state/<file>` (`update.json`, `config.json`, `heartbeat.json`, `watchdog.json`,
+`watchdog-reports.json`, `reports.json`, `sql-installs.jsonl`, `sql-setup.last.json` when
+present) and `bundle.json` (what was taken from each file, what was skipped, whether the
+`no-update` file exists). Every text is scrubbed like the log (`Password=…`, `Bearer …`,
+fields named like password/secret/token/key/`*_sealed` → `[redacted]`); `identity.key` and
+`sql.json` are never included. Over 8 MB the log share is halved until it fits.
+
+The hub answers `{id, key, size, sha256}` (key `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip`),
+refuses more than 8 MB or a body without `Content-Length` (`413` / `411`, before the
+signature check) and anything that is not a zip (`400 not_a_zip`). The command result is
+`{ok:true, output:{uploaded:{id, key, size, sha256}, diagnostics:{…}}}`; when the bundle
+cannot be built or uploaded it is `{ok:false, output:{upload_error, diagnostics:{…, log_tail}}}`.
+Admins read bundles with `GET /admin/diagnostics?agent_id=` and
+`GET /admin/diagnostics/{id}/download`; agents can never fetch them.
 
 ## 5. Releases, channels and the canary gate
 

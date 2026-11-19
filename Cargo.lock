@@ -18,6 +18,7 @@ dependencies = [
  "dl-tls",
  "dl-winos",
  "dl-winsvc",
+ "dl-zip",
 ]
 
 [[package]]

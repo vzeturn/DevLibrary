@@ -42,6 +42,8 @@ export type Channel = 'canary' | 'stable';
 export interface AppVars {
   agent: AgentRow;
   rawBody: string;
+  /** The signed body as sent (binary uploads such as diagnostics bundles). */
+  rawBytes: Uint8Array;
 }
 
 export type AppEnv = { Bindings: Env; Variables: AppVars };

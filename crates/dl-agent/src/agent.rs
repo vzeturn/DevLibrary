@@ -599,8 +599,8 @@ impl Agent {
                 None
             }
             "collect_diagnostics" => {
-                let d = self.diagnostics(now);
-                self.answer(&cmd.id, true, dl_json::to_string_pretty(&d));
+                let (ok, out) = self.collect_diagnostics(&cmd.id, now);
+                self.answer(&cmd.id, ok, out);
                 None
             }
             "reload_config" => {
@@ -754,6 +754,9 @@ mod update_flow;
 
 #[path = "agent_hub.rs"]
 mod hub_list;
+
+#[path = "agent_diag.rs"]
+mod diag;
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]

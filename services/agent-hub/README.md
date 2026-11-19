@@ -7,8 +7,8 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 
 | Area | Endpoints |
 |---|---|
-| Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`) |
-| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id` |
+| Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/agent/diagnostics?command_id=` (zip), `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`, never `diag/…`) |
+| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit` |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
 | Bench (public, `no-store`) | `GET /bench/:token` — the bench script of a bundle (see "Bench (test PC)") |
@@ -52,6 +52,20 @@ Notes:
   latest run with its checks and the summaries of the kept runs. To run it remotely, queue the generic
   command: `POST /admin/commands {"agent_id": "…", "kind": "selftest", "args": {"trigger": "command"}}`;
   the agent gets it on its next heartbeat like any other command (the hub has no special case for it).
+- Diagnostics: the `collect_diagnostics` command makes the agent upload a zip (`diagnostics.json`, the
+  newest logs within 6 MB, the state files, `bundle.json`; every text scrubbed of secrets on the agent,
+  `identity.key` and `sql.json` never included) to `POST /v1/agent/diagnostics`. The hub refuses a body
+  over 8 MB or without `Content-Length` before checking the signature, stores the zip in R2 as
+  `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip` and a `diagnostics` row (agent, tenant, site, size,
+  SHA-256, command id, agent version), and answers `{id, key, size, sha256}`; the command result carries
+  the same. Bundles are never served on `/v1/artifacts/*`; admins list and download them. Nothing prunes
+  them yet.
+- Admin audit: every admin request that changes something (any method but GET/HEAD, after auth) is
+  written to `admin_audit` before it runs — time, actor (`Cf-Access-Authenticated-User-Email`, else
+  `admin-token`), method, path with query, body with secrets replaced by `[redacted]` (JSON fields named
+  like password/secret/token/api key/private key/authorization/`*_sealed`, `Password=` in connection
+  strings, `Bearer`/`Basic` values; cut at 4 000 characters) — and its status and error code once it
+  finished. If the row cannot be written the change is refused with `503 audit_unavailable`.
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
 ## Bench (test PC)

@@ -14,6 +14,11 @@ use crate::{Error, now};
 /// Where a self-test run is uploaded (agent-hub `routes/agent.ts`).
 pub const SELFTEST_PATH: &str = "/v1/agent/selftest";
 
+/// Where `collect_diagnostics` uploads its zip (agent-hub `routes/agent.ts`).
+pub const DIAGNOSTICS_PATH: &str = "/v1/agent/diagnostics";
+
+const JSON: &str = "application/json";
+
 /// Sends one HTTP request. The runtime uses [`HttpTransport`]; tests use a fake.
 pub trait Transport: Send + Sync {
     /// Sends `method url` with the headers and body; returns status and body. Errors are
@@ -86,10 +91,15 @@ impl Transport for HttpTransport {
                 .map_err(|e| Error::Transport(e.to_string()))?;
         }
         if method == "POST" {
-            req = req
-                .with_header("Content-Type", "application/json")
-                .map_err(|e| Error::Transport(e.to_string()))?
-                .with_body(body.to_vec());
+            if !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
+                req = req
+                    .with_header("Content-Type", JSON)
+                    .map_err(|e| Error::Transport(e.to_string()))?;
+            }
+            req = req.with_body(body.to_vec());
         }
         let resp = self
             .client
@@ -270,23 +280,38 @@ impl HubClient {
         (now() as i64 + self.skew()).max(0) as u64
     }
 
-    fn signed_once(&self, method: &str, url: &str, body: &[u8]) -> Result<(u16, Vec<u8>), Error> {
-        let headers = self
-            .identity
-            .sign(method, &path_and_query(url)?, body, self.hub_now())?;
+    fn signed_once(
+        &self,
+        method: &str,
+        url: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<(u16, Vec<u8>), Error> {
+        let mut headers =
+            self.identity
+                .sign(method, &path_and_query(url)?, body, self.hub_now())?;
+        if method == "POST" {
+            headers.push(("Content-Type", content_type.to_string()));
+        }
         self.transport.send(method, url, &headers, body)
     }
 
     /// One signed call to `url`, retried once after a `clock_skew` answer.
-    fn signed_url(&self, method: &str, url: &str, body: &[u8]) -> Result<Vec<u8>, Error> {
-        let (mut code, mut resp) = self.signed_once(method, url, body)?;
+    fn signed_url(
+        &self,
+        method: &str,
+        url: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let (mut code, mut resp) = self.signed_once(method, url, body, content_type)?;
         if code == 401
             && let Ok(v) = dl_json::parse_slice(&resp)
             && v.get("error").and_then(Value::as_str) == Some("clock_skew")
             && let Some(t) = v.get("server_time").and_then(Value::as_u64)
         {
             self.observe_server_time(t);
-            (code, resp) = self.signed_once(method, url, body)?;
+            (code, resp) = self.signed_once(method, url, body, content_type)?;
         }
         if (200..300).contains(&code) {
             Ok(resp)
@@ -301,12 +326,23 @@ impl HubClient {
     /// A signed call to `path` on the first hub that answers; fallback hosts are tried on
     /// transport errors and 5xx answers, and the one that worked is used first next time.
     fn call(&self, method: &str, path: &str, body: &[u8]) -> Result<Vec<u8>, Error> {
+        self.call_as(method, path, body, JSON)
+    }
+
+    /// [`Self::call`] with another body type.
+    fn call_as(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+        content_type: &str,
+    ) -> Result<Vec<u8>, Error> {
         let urls = &self.hub_urls();
         let first = self.preferred.load(Ordering::Relaxed) % urls.len().max(1);
         let mut last = Error::Config("no hub URL".into());
         for i in 0..urls.len() {
             let idx = (first + i) % urls.len();
-            match self.signed_url(method, &join(&urls[idx], path), body) {
+            match self.signed_url(method, &join(&urls[idx], path), body, content_type) {
                 Ok(r) => {
                     self.preferred.store(idx, Ordering::Relaxed);
                     return Ok(r);
@@ -357,6 +393,22 @@ impl HubClient {
         }
     }
 
+    /// Uploads a `collect_diagnostics` zip to [`DIAGNOSTICS_PATH`]; returns the hub's
+    /// `{id, key, size, sha256}`.
+    pub fn upload_diagnostics(&self, zip: &[u8], command_id: &str) -> Result<Value, Error> {
+        let path = format!(
+            "{DIAGNOSTICS_PATH}?command_id={}",
+            dl_http::encode_query_component(command_id)
+        );
+        let v = dl_json::parse_slice(&self.call_as("POST", &path, zip, "application/zip")?)?;
+        if v.get("key").and_then(Value::as_str).is_none() {
+            return Err(Error::Json(
+                "the hub's diagnostics answer has no key".into(),
+            ));
+        }
+        Ok(v)
+    }
+
     /// `POST /v1/commands/{id}/result`.
     pub fn command_result(&self, r: &CommandResult) -> Result<(), Error> {
         let id = dl_http::encode_path_segment(&r.id);
@@ -391,7 +443,7 @@ impl HubClient {
             .iter()
             .any(|h| url.starts_with(&format!("{}/", h.trim_end_matches('/'))));
         if on_hub {
-            return self.signed_url("GET", url, b"");
+            return self.signed_url("GET", url, b"", JSON);
         }
         let headers = [("Cache-Control", "no-cache".to_string())];
         let (code, body) = self.transport.send("GET", url, &headers, b"")?;

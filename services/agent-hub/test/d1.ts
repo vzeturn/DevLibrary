@@ -72,5 +72,13 @@ export function fakeR2() {
       const bytes = store.get(key);
       return bytes ? { body: new Response(bytes).body, size: bytes.byteLength } : null;
     },
+    async put(key: string, value: Uint8Array | ArrayBuffer | string) {
+      const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+      store.set(key, bytes);
+      return { key, size: bytes.byteLength };
+    },
+    async delete(key: string) {
+      store.delete(key);
+    },
   };
 }

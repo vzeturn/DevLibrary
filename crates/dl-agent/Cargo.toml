@@ -21,6 +21,7 @@ dl-winsvc.workspace = true
 dl-log.workspace = true
 dl-tds.workspace = true
 dl-tls.workspace = true
+dl-zip.workspace = true
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 dl-cli.workspace = true

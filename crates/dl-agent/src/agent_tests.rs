@@ -109,7 +109,8 @@ fn heartbeat_applies_config_and_answers_commands() {
     assert!(!ok(1) && out(1).contains("unknown command"));
     assert!(!ok(2) && out(2) == "expired");
     assert!(!ok(3) && out(3).contains("nope is not running"));
-    assert!(ok(4) && out(4).contains("\"agent_id\""));
+    // The fake hub's `{}` is no upload answer: the command fails but carries the diagnostics.
+    assert!(!ok(4) && out(4).contains("\"agent_id\"") && out(4).contains("upload_error"));
     // No step before the next heartbeat is due calls the hub.
     let n = hub.seen().len();
     assert_eq!(a.step(1029), None);

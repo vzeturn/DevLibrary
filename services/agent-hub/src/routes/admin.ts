@@ -5,7 +5,10 @@ import { benchBody } from '../domain/bench';
 import { productName, severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
+import { auditAdmin } from '../middleware/adminAudit';
 import { requireAdmin } from '../middleware/adminAuth';
+import { listAudit } from '../repo/audit';
+import { listDiagnostics } from '../repo/diagnostics';
 import { listCodes, revokeCode } from '../repo/enrollCodes';
 import { listProductKeys, revokeProductKey } from '../repo/productKeys';
 import { listReleases, listPromotions } from '../repo/releases';
@@ -14,6 +17,7 @@ import { listTenants, upsertTenant } from '../repo/tenants';
 import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
 import { benchView, createBench, revokeBenchBundle } from '../services/bench';
+import { diagnosticsObject } from '../services/diagnostics';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { allowRelease, disallowRelease } from '../services/lanes';
@@ -53,6 +57,17 @@ const reportQuery = z.object({
   version: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(200),
 });
+const diagnosticsQuery = z.object({
+  agent_id: z.string().optional(),
+  tenant_id: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+});
+const auditQuery = z.object({
+  since: z.coerce.number().int().min(0).optional(),
+  actor: z.string().max(320).optional(),
+  path_prefix: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
+});
 
 async function jsonBody(req: { text(): Promise<string> }): Promise<unknown> {
   return parseJson(await req.text());
@@ -66,6 +81,7 @@ async function optionalBody(req: { text(): Promise<string> }): Promise<unknown> 
 
 export const adminRoutes = new Hono<AppEnv>();
 adminRoutes.use('*', requireAdmin);
+adminRoutes.use('*', auditAdmin);
 
 adminRoutes.get('/', async (c) => c.html(await renderStatusPage(c.env, nowSeconds())));
 
@@ -212,4 +228,26 @@ adminRoutes.get('/reports', async (c) => {
   const q = validate(reportQuery, c.req.query());
   const rows = await listReports(c.env.DB, q);
   return c.json({ reports: rows.map((r) => ({ ...r, context: JSON.parse(r.context) as unknown })) });
+});
+
+/** Uploaded `collect_diagnostics` bundles, newest first. */
+adminRoutes.get('/diagnostics', async (c) => {
+  const q = validate(diagnosticsQuery, c.req.query());
+  return c.json({ diagnostics: await listDiagnostics(c.env.DB, q) });
+});
+
+adminRoutes.get('/diagnostics/:id/download', async (c) => {
+  const { name, object } = await diagnosticsObject(c.env, c.req.param('id'));
+  return c.body(object.body, 200, {
+    'Content-Type': 'application/zip',
+    'Content-Length': String(object.size),
+    'Content-Disposition': `attachment; filename="${name}"`,
+    'Cache-Control': 'private, no-store',
+  });
+});
+
+/** Every admin change (method, path, scrubbed body, who, outcome), newest first. */
+adminRoutes.get('/audit', async (c) => {
+  const q = validate(auditQuery, c.req.query());
+  return c.json({ audit: await listAudit(c.env.DB, q) });
 });
