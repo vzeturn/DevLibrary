@@ -8,6 +8,10 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- agent-hub installers reuse the SQL Server connection dl-agent already holds: the bench link
+  offers it on a rerun or reinstall (Enter keeps it; a failed or declined one prefills the prompt,
+  and an empty password keeps the saved one), and `install.ps1 -SqlPrompt` keeps the declared
+  databases when `sql-test` passes.
 - `dl-agent-membership` (M2, write side): with `read_only: false` and `pull_jobs: true` the
   module executes and acks hub jobs against SMILE with the .NET agent's SQL: create / modify /
   cancel folios under the folio and cancel applocks (replay lookup, hand-entered duplicate
