@@ -71,15 +71,19 @@ impl SmileError {
     pub(crate) fn from_tds(e: &dl_tds::Error) -> SmileError {
         match e.number() {
             // Login failures are "SMILE down" for the module: nothing can be read.
-            Some(n @ (18456 | 4060 | 18452)) => {
+            // 4063: the login has no user in the requested database.
+            Some(n @ (18456 | 4060 | 4063 | 18452)) => {
                 SmileError::Unavailable(format!("login refused ({n})"))
             }
             Some(n) if e.is_server() => SmileError::Server(n),
-            _ if e.is_tls() => SmileError::Unavailable("TLS handshake failed".into()),
+            // Keep dl-tds's own text (OS error code included): "I/O: uncategorized error"
+            // alone could not be diagnosed on a site. A rejected connection string is not
+            // echoed, as its text may carry the password.
             _ => SmileError::Unavailable(match e {
-                dl_tds::Error::Io(io) => format!("I/O: {}", io.kind()),
                 dl_tds::Error::Config { .. } => "connection string rejected".into(),
-                _ => "connection failed".into(),
+                _ if e.is_tls() => format!("TLS handshake failed: {e}"),
+                dl_tds::Error::Io(io) => format!("I/O: {io}"),
+                _ => format!("connection failed: {e}"),
             }),
         }
     }
@@ -365,4 +369,29 @@ pub trait FolioSource: Send + Sync {
         code: &str,
         with_cancel_filter: bool,
     ) -> Result<Vec<(Decimal, i64)>, SmileError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SmileError;
+
+    #[test]
+    fn io_errors_keep_the_os_code() {
+        // RT-0164 test PC: only "I/O: uncategorized error" reached the hub.
+        let e = dl_tds::Error::Io(std::io::Error::from_raw_os_error(64));
+        let SmileError::Unavailable(text) = SmileError::from_tds(&e) else {
+            panic!("an I/O failure means SMILE is unavailable");
+        };
+        assert!(text.starts_with("I/O: "), "{text}");
+        assert!(text.contains("os error 64"), "{text}");
+    }
+
+    #[test]
+    fn a_rejected_connection_string_is_not_echoed() {
+        let e = dl_tds::Error::Config {
+            key: "password".into(),
+            message: "secret-ish".into(),
+        };
+        assert!(!SmileError::from_tds(&e).to_string().contains("secret-ish"));
+    }
 }
