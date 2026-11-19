@@ -236,7 +236,11 @@ fn probe_server(
     let info = conn.info().clone();
     let compression = Outcome::pass(BackupOptions::for_server(&info).reason);
     let (mut ok, mut denied, mut missing) = (Vec::new(), Vec::new(), Vec::new());
-    for db in &s.databases {
+    // Only databases a schedule backs up: the hub also lists every database it found on the
+    // server (MM_*, test copies, …), and BACKUP on those is none of the agent's business.
+    let scheduled = |id: &str| remote.config.schedules.iter().any(|x| x.database_id == id);
+    let unscheduled = s.databases.iter().filter(|d| !scheduled(&d.id)).count();
+    for db in s.databases.iter().filter(|d| scheduled(&d.id)) {
         match conn.can_backup(&db.database_name) {
             Ok(Some(true)) => ok.push(db.database_name.as_str()),
             Ok(Some(false)) => denied.push(db.database_name.as_str()),
@@ -253,11 +257,16 @@ fn probe_server(
     } else {
         backup_dir.to_owned()
     };
-    let detail = format!(
-        "login over {}; {} database(s) may be backed up; backup folder {folder}",
+    let mut detail = format!(
+        "login over {}; {} scheduled database(s) may be backed up; backup folder {folder}",
         info.transport,
         ok.len()
     );
+    if unscheduled > 0 {
+        detail.push_str(&format!(
+            "; {unscheduled} database(s) without a schedule not checked"
+        ));
+    }
     let perm = if !denied.is_empty() {
         Outcome::fail(format!(
             "{detail}; BACKUP DATABASE denied on {}",
