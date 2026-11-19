@@ -44,6 +44,19 @@ describe('install script', () => {
     expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
   });
 
+  it('keeps the verified download until Move-Item installs it (RT-0164 test PC)', async () => {
+    const text = await (await get('/install.ps1')).text();
+    const start = text.indexOf('function Remove-OldCopies');
+    const body = text.slice(start, text.indexOf('\nfunction ', start + 1));
+    expect(start).toBeGreaterThan(0);
+    expect(body).not.toContain(".download'");
+    const download = text.indexOf("$tmp = $Exe + '.download'");
+    const cleanup = text.indexOf('  Remove-OldCopies', download);
+    const move = text.indexOf('Move-Item -Force $tmp $Exe');
+    expect(cleanup).toBeGreaterThan(download);
+    expect(move).toBeGreaterThan(cleanup);
+  });
+
   it('enrolment codes come with the one-line install command', async () => {
     await createTenant(env, 'demo', true);
     const res = await admin(env, 'POST', '/admin/enroll-codes', { tenant_id: 'demo', site_id: 'hq' });
