@@ -211,6 +211,8 @@ pub struct BackupResult {
     pub checksum: String,
     /// The `WITH` options chosen and why (also in the `backup` step).
     pub options: String,
+    /// The tenant backup key the uploaded copy is sealed under; empty when it is not sealed.
+    pub key_id: String,
 }
 
 /// A name made safe for a file name: characters Windows forbids become `_`.

@@ -69,6 +69,7 @@ fn full_pipeline_backs_up_uploads_and_cleans_up() {
             ("connect", "done"),
             ("backup", "done"),
             ("checksum", "done"),
+            ("encrypt", "skipped"),
             ("upload", "done"),
             ("cleanup", "done")
         ])

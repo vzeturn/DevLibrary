@@ -92,6 +92,10 @@ shared by every module on the site.
   (`--fault probation`, PROTOCOL §6.6) is run on the SR bench instead. Every module switch needs a Windows
   smoke run on the demo tenant first.
 - SRBackup hands every agent the same master key (cross-tenant exposure) — fix in the hub before porting.
+  Status (RT-0259): credentials are already sealed under a per-agent key derived from the hub master key
+  (SRBackup `f9ffb01`, `hub/src/lib/agentKey.ts`); backup files were never encrypted. dl-agent-backup now
+  seals uploaded backups under a per-tenant data key; the hub endpoint is specified in
+  `docs/plans/2026-11-19-rt0259-backup-tenant-keys.md` (SRBackup repo, not yet built).
 - SMILE-HL and SRBackup allow downgrades; EINVOICE has no hash check at install; speaker token in plaintext.
 - No code signing anywhere except Membership's self-signed Authenticode; antivirus (Kaspersky/Defender)
   untested on most.

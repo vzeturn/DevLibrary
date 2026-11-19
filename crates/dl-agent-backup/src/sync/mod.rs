@@ -134,6 +134,7 @@ impl SyncLoop {
     /// reported and the rest carry on.
     pub fn tick(&mut self, now_ms: u64) -> Result<(), Error> {
         let cfg = self.core.hub.fetch_config()?;
+        self.core.prefetch_backup_key();
         let run_now = std::mem::take(&mut *lock(&self.core.run_now));
         for sched in &cfg.schedules {
             self.schedule(&cfg, sched, run_now.contains(&sched.id), now_ms)?;

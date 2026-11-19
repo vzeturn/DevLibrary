@@ -91,6 +91,22 @@ stays the rollback path (reinstall the Go service and it carries on as the same 
   the hub's `encryptCredential`). The key is kept in memory only; when a credential does not
   open it is fetched once more (key rotation). A credential the hub flags `credentialError`
   (sent as `""`) fails that schedule, restore or command with the reason, and the rest run.
+- **Backup encryption** (per tenant): before an upload the module asks the hub for the
+  tenant's current backup data key (`GET /api/agent/backup-key` → `{"keyId", "key"}`, 32 bytes
+  base64url; fetched with each config poll, cached in memory for 15 minutes, and the last
+  answer is kept through a hub outage). The copy sent to the destination is `<name>.bak.dlbk`:
+  magic `DLBKENC1`, key id, random salt, chunk size, then 1 MiB chunks of AES-256-GCM under
+  HKDF-SHA256(data key, salt, `dl-agent-backup/file/v1` ‖ header), nonce = chunk index, the
+  final chunk flagged in the AAD (a cut, reordered or extended file is refused). The report
+  carries `encryptionKeyId`. A restore reads the key id from the downloaded file and asks
+  `GET /api/agent/backup-key?id=<keyId>`; the hub answers only for the agent's own tenant, so
+  another tenant's backup fails with `backup_credential_error` before SQL Server is asked,
+  and the plaintext is written to `….part` and renamed only after every chunk checked out. A
+  hub that answers 404 (no per-tenant keys yet) gets the plaintext `.bak` uploaded as before
+  (step `encrypt` = `skipped`); a downloaded file without the magic (every backup made before
+  encryption) is restored as it is. The `.bak` the server writes locally stays plaintext, as
+  SQL Server writes it. Throughput of the built-in AES: about 33 MiB/s each way (release,
+  64 MiB, Linux x86-64), so a 10 GiB backup spends about five minutes encrypting.
 - **Reports** (`POST /api/agent/report`) go through a sealed outbox: written to disk first,
   removed once the hub accepts them, sent again after every successful poll. A hub outage
   loses none.
@@ -140,11 +156,30 @@ Metrics: `queue_depth`, `outbox_depth`, `jobs_ok`, `jobs_failed`, `dead_lettered
 Commands: `backup.status` (the metrics and the last outcomes) and
 `backup.run-now {"scheduleId": "…"}` (queued on the next poll, which it brings forward).
 
+## Live SQL Server tests
+
+`BACKUP_AGENT_TEST_SQL` (`server=host,port;user id=sa;password=…;encrypt=disable`) and
+`BACKUP_AGENT_TEST_DIR` (a directory the server and the test see at the same path, a bind
+mount for a container) turn on `backup::sql_tests`, including `sql_tests::replace`: a database
+with three tables goes through the real backup path (sealed upload to a `LocalFolder`
+destination), is damaged, and comes back through the real restore path with
+`RESTORE … WITH REPLACE` and under a new name; per-table row counts and
+`CHECKSUM_AGG(BINARY_CHECKSUM(*))` must equal the values taken before the backup.
+
+```sh
+docker run -d --name bk-sql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=… -p 14362:1433 \
+  -v /tmp/bkdir:/tmp/bkdir mcr.microsoft.com/mssql/server:2022-latest
+BACKUP_AGENT_TEST_DIR=/tmp/bkdir BACKUP_AGENT_TEST_SQL='server=127.0.0.1,14362;user id=sa;password=…;encrypt=disable' \
+  cargo test -p dl-agent-backup sql_tests -- --test-threads=1
+```
+
 ## Differences from the Go agent
 
 - `COMPRESSION` / `CHECKSUM` only where supported (Go always sent `COMPRESSION`, which fails on
   Express and Web).
 - Statement parameters instead of spliced names and paths.
+- Uploaded backups are encrypted under a per-tenant key when the hub serves one (the Go agent
+  uploaded the plaintext `.bak`).
 - A failure no retry can fix (SIMPLE recovery for a log backup, an unsupported destination, a
   credential the hub could not open, a bad schedule) is reported and dropped at once instead of
   being tried three times.

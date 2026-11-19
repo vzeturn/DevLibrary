@@ -8,7 +8,7 @@ use dl_json::{Value, json};
 use super::{HUB_USERNAME, SyncLoop, deliver};
 use crate::Error;
 use crate::backup::Steps;
-use crate::backup::restore::{RestoreParams, Source, restore_from_record};
+use crate::backup::restore::{RecordIo, RestoreParams, Source, restore_from_record_with};
 use crate::core::lock;
 use crate::discovery::{filter_system, list_databases};
 use crate::hub::types::{CommandConfig, ConfigResponse, RestoreRequestConfig};
@@ -101,12 +101,16 @@ impl SyncLoop {
             destination,
         };
         let mut steps = Steps::new();
-        restore_from_record(
+        let io = RecordIo {
+            uploaders: core.uploaders.as_ref(),
+            keys: core.as_ref(),
+            backup_dir: &core.settings.backup_dir,
+        };
+        restore_from_record_with(
             core.sql.as_ref(),
-            core.uploaders.as_ref(),
+            &io,
             &src,
             params,
-            &core.settings.backup_dir,
             &core.cancel,
             &mut steps,
         )
