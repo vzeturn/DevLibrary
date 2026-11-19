@@ -119,8 +119,16 @@ function Grant-ServiceLogin($c) {
     $cmd.CommandText = "IF SUSER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS"
     [void]$cmd.ExecuteNonQuery()
   } catch { Warn ('Could not create the SQL login ' + $acct + ': ' + $_.Exception.Message); return }
-  foreach ($n in $SqlDatabases) {
+  foreach ($n in (@($SqlDatabases) + @($SqlGrantCreate))) {
     try {
+      if ($SqlGrantCreate -contains $n) {
+        # A module creates this database itself on first start (Check-In: SMILE_PICTURE), which
+        # LocalSystem may not do: create it here, separately (USE needs it at compile time).
+        $cmd = $c.CreateCommand()
+        $cmd.CommandText = 'IF DB_ID(@n) IS NULL CREATE DATABASE ' + (Bracket $n)
+        [void]$cmd.Parameters.AddWithValue('@n', $n)
+        [void]$cmd.ExecuteNonQuery()
+      }
       $cmd = $c.CreateCommand()
       $cmd.CommandText = 'USE ' + (Bracket $n) + "; IF USER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE USER [NT AUTHORITY\SYSTEM] FOR LOGIN [NT AUTHORITY\SYSTEM]; EXEC sp_addrolemember N'db_owner', N'NT AUTHORITY\SYSTEM'; USE master;"
       [void]$cmd.ExecuteNonQuery()
@@ -469,6 +477,8 @@ export interface BenchScriptInput {
   remove_legacy: boolean;
   /** Windows authentication: grant NT AUTHORITY\\SYSTEM db_owner in `sql_databases`. */
   sql_grant_service: boolean;
+  /** Also granted (and created when missing): databases a module creates itself, see `grantCreateOf`. */
+  sql_grant_create?: string[];
 }
 
 export function benchScript(b: BenchScriptInput): string {
@@ -482,6 +492,7 @@ export function benchScript(b: BenchScriptInput): string {
     `$Code = ${psQuote(b.code)}`,
     `$SqlDatabases = ${psArray(b.sql_databases)}`,
     `$SqlNames = ${psArray(b.sql_names)}`,
+    `$SqlGrantCreate = ${psArray(b.sql_grant_create ?? [])}`,
     `$Steps = @(\n${b.steps.map(psStep).join(',\n')}\n)`,
     `$Fixups = @(\n${b.sql_fixups.map(psFixup).join(',\n')}\n)`,
     `$SqlParts = ${b.sql_parts ? '$true' : '$false'}`,

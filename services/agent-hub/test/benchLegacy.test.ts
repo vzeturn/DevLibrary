@@ -304,6 +304,20 @@ describe('bench: reruns and the service login (RT-0164 test PC)', () => {
     expect((await admin(env, 'POST', '/admin/bench', body({ sql_grant_service: 'yes' }))).status).toBe(400);
   });
 
+  it('with a Check-In step, also grants SMILE_PICTURE, creating it first (RT-0164 test PC: error 916)', async () => {
+    const arrival = { setup: 'arrival-enroll', args: ['--cloud-url', 'https://arrival.test'], env: {} };
+    const plain = await scriptFor({ sql_grant_service: true });
+    expect(plain.script).toContain('$SqlGrantCreate = @()');
+    const on = await scriptFor({ sql_grant_service: true, steps: [EINVOICE_STEP, arrival], sql_databases: ['SMILE_FO'] });
+    expect(on.script).toContain("$SqlGrantCreate = @('SMILE_PICTURE')");
+    const fn = /^function Grant-ServiceLogin[\s\S]*?\n}\n/m.exec(on.script)?.[0] ?? '';
+    // CREATE runs as its own command before the USE batch, which needs the database to compile.
+    expect(fn.indexOf("'IF DB_ID(@n) IS NULL CREATE DATABASE '")).toBeGreaterThan(0);
+    expect(fn.indexOf("'IF DB_ID(@n) IS NULL CREATE DATABASE '")).toBeLessThan(fn.indexOf("'USE ' + (Bracket $n)"));
+    const listed = await scriptFor({ sql_grant_service: true, steps: [arrival], sql_databases: ['SMILE_PICTURE'] });
+    expect(listed.script).toContain('$SqlGrantCreate = @()');
+  });
+
   it('a rerun keeps the dl-agent already enrolled for the tenant instead of installing again', () => {
     const script = benchScript({
       hub: BASE, label: 'bench', tenant_id: 'bench-demo', site_id: 'test-pc', expires_at: T0, code: 'ABCD-EFGH-JKLM-NPQR',

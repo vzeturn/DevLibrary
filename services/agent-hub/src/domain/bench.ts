@@ -120,6 +120,19 @@ export interface BenchPayload {
   sql_grant_service?: boolean;
 }
 
+/**
+ * Databases a module creates on first start but the agent service may not be allowed to:
+ * Check-In installs its SMILE_PICTURE tables from `master` (RT-0164 test PC: SQL error 916).
+ * Granted, and created when missing, alongside `sql_databases` when `sql_grant_service` is set.
+ */
+export function grantCreateOf(p: Pick<BenchPayload, 'steps' | 'sql_databases'>): string[] {
+  const out: string[] = [];
+  if (p.steps.some((s) => s.setup === 'arrival-enroll') && !p.sql_databases.includes('SMILE_PICTURE')) {
+    out.push('SMILE_PICTURE');
+  }
+  return out;
+}
+
 /** Every database a bundle touches: registered, fixed up, or named by an env placeholder. */
 export function sqlNamesOf(p: Pick<BenchPayload, 'steps' | 'sql_databases' | 'sql_fixups'>): string[] {
   const names = new Set(p.sql_databases);

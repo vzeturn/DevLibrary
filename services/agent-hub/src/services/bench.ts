@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { sqlNamesOf, usesSqlParts, type BenchBody, type BenchPayload } from '../domain/bench';
+import { grantCreateOf, sqlNamesOf, usesSqlParts, type BenchBody, type BenchPayload } from '../domain/bench';
 import { benchScript } from '../install/benchScript';
 import { importAesKey, randomToken, seal, sha256Hex, unseal } from '../lib/crypto';
 import { HttpError, logError } from '../lib/http';
@@ -112,5 +112,6 @@ export async function fetchBenchScript(env: Env, token: string, origin: string, 
     sql_parts: usesSqlParts(payload.steps),
     remove_legacy: payload.remove_legacy ?? false,
     sql_grant_service: payload.sql_grant_service ?? false,
+    sql_grant_create: grantCreateOf(payload),
   });
 }
