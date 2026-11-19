@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { benchStep } from '../src/domain/bench';
+import { installScript } from '../src/install/script';
 import {
   EINVOICE_CHECK_COMMANDS,
   EINVOICE_GO_SERVICES,
@@ -49,6 +50,15 @@ describe('einvoice switch helpers', () => {
     expect(step.args).toContain('--switch');
     expect(step.args.join(' ')).not.toContain('tok-xyz');
     expect(step.env.MMEI_SQL_AUTH).toBe('{{SQL_AUTH}}');
+  });
+
+  it('has install.ps1 remove the token after the setup ran', () => {
+    const text = installScript('https://agent.example.test');
+    const add = text.indexOf("$SetupSecrets += 'DL_AGENT_EINVOICE_TOKEN'");
+    const run = text.indexOf("try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {");
+    expect(add).toBeGreaterThan(text.indexOf('# -- end arrival sign-in'));
+    expect(run).toBeGreaterThan(add);
+    expect(text.slice(run, text.indexOf('Remove-Replaced', run))).toContain('foreach ($n in $SetupSecrets)');
   });
 
   it('lists only read-only check commands', () => {
