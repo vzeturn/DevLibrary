@@ -62,7 +62,10 @@ shared by every module on the site.
 - **pda-sync**: TDS capture (open checks 2 s, closed ledger keyset, masters 120 s, shadow hashes), outbox
   2 GB with 424 parking, blobs, staff sync, exactly-once commands (`order.*`, `kds.*`, `reservation.*`,
   `sync.*`) in one SQL tx with log row, WebSocket + long-poll fallback, SignalR print relay (TCP 9100 +
-  spooler RAW, crash-safe journal), SQL bootstrap/grants, legacy-export/archive/upload verbs.
+  spooler RAW, crash-safe journal), SQL bootstrap/grants, legacy-export/archive/upload verbs. Phase A built as
+  `dl-agent-pda-sync` (opt-in `modules.pda-sync`; tools `pda-enroll`, `pda-grants`; commands `status`, `selftest`,
+  `capture_dry_run`); phase B (verify, live order verbs, watchdog link, capture.db carry-over) in
+  docs/plans/2026-11-19-pda-sync-plan.md.
 - **speaker**: SignalR `JoinRvc`, embedded WAV tones, SAPI vi/en, sound mode per RVC. Replace 365-day
   plaintext JWT with enrolled identity.
 - **pms-site**: WSS stream with JWT, allow-listed procs on MM_PMS/SMILE_FO/SMILE_BO/SMILE_POS, ≤ 8 ops in
