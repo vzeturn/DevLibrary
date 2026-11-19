@@ -17,8 +17,11 @@
 //! offset for the `{today}` of the watches (default 420, Vietnam), the
 //! `HotelUtcOffsetMinutes` of the .NET agent.
 
+pub mod commands;
+pub mod picture;
 pub mod reporter;
 pub mod selftest;
+pub mod sweep;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,10 +36,12 @@ use crate::agent::executor::Executor;
 use crate::agent::health::{self, Health};
 use crate::agent::installer;
 use crate::agent::layout::Layout;
+use crate::agent::problems::ProblemJournal;
 use crate::agent::runtime::{Installer, Parts, Wiring};
 use crate::agent::secrets::Identity;
 use crate::agent::settings::Settings;
 use crate::agent::tds::{TdsExecutor, TdsOptions};
+use crate::agent::{eventlog, inventory};
 use crate::error::Error;
 use reporter::CtxSink;
 
@@ -166,15 +171,16 @@ impl Module for ArrivalModule {
                 return Ok(());
             }
         };
-        let health = Arc::new(Health::new(
-            Arc::new(CtxSink::new(ctx.clone())),
-            health::REPORT_INTERVAL,
-        ));
+        let sink = Arc::new(CtxSink::new(ctx.clone()));
+        let health = Arc::new(Health::new(sink.clone(), health::REPORT_INTERVAL));
+        commands::publish_metrics(ctx);
         loop {
-            match self.prepare(&config, ctx, &health) {
-                Ok(parts) => {
+            match self.prepare(&config, ctx, &health, &sink) {
+                Ok((parts, journal)) => {
                     let on_tick = || answer_commands(ctx);
-                    return parts.run(ctx.stop(), &on_tick).map_err(Into::into);
+                    let result = parts.run(ctx.stop(), &on_tick).map_err(Into::into);
+                    journal.mark_stopped();
+                    return result;
                 }
                 Err(detail) => {
                     ctx.set_degraded(&detail);
@@ -194,16 +200,19 @@ impl ArrivalModule {
         config: &ModuleConfig,
         ctx: &ModuleContext,
         health: &Arc<Health>,
-    ) -> Result<Parts, String> {
+        sink: &Arc<CtxSink>,
+    ) -> Result<(Parts, Arc<ProblemJournal>), String> {
         let cannot = |e: Error| {
             dl_log::error!("the arrival link cannot start"; error = %e);
             format!("cannot start: {e}")
         };
         let layout = Layout::detect(config.install_dir.as_deref(), ctx.data_dir());
         let settings = Settings::load(layout.install_dir()).map_err(cannot)?;
-        let identity = Identity::load(&layout.resolve(&settings.identity_file))
+        let identity_path = layout.resolve(&settings.identity_file);
+        let identity = Identity::load(&identity_path)
             .map_err(cannot)?
             .ok_or_else(|| NOT_ENROLLED.to_string())?;
+        let journal = Arc::new(ProblemJournal::next_to(&identity_path));
         let (executor, installer): (Arc<dyn Executor>, Option<Installer>) = match &self
             .hooks
             .executor
@@ -225,9 +234,48 @@ impl ArrivalModule {
             health: Arc::clone(health),
             utc_offset: config.offset().map_err(cannot)?,
             installer,
+            problems: Some(Arc::clone(&journal)),
+            installations: None,
         };
-        Parts::assemble(&settings, &layout, &identity, wiring).map_err(cannot)
+        let mut wiring = wiring;
+        wiring.installations = start_journal(&journal, sink);
+        let parts = Parts::assemble(&settings, &layout, &identity, wiring).map_err(cannot)?;
+        Ok((parts, journal))
     }
+}
+
+/// Opens the run in the journal, attaches it to the sink, lists the agent copies on this
+/// machine and reads Windows' event logs in the background (the hello waits for nothing).
+fn start_journal(journal: &Arc<ProblemJournal>, sink: &Arc<CtxSink>) -> Option<String> {
+    journal.mark_started(
+        &dl_agent::agent_version().to_string(),
+        &dl_agent::hub::hostname(),
+    );
+    sink.attach(Arc::clone(journal));
+    let (installations, old_left) = inventory::describe();
+    if old_left {
+        journal.record(
+            "Warning",
+            "Inventory",
+            &format!(
+                "The old Check-In agent ({}) is still installed or running here: remove it with the bench (remove_legacy).",
+                inventory::OLD_BINARY
+            ),
+            Some("inventory|old-agent"),
+        );
+    }
+    let j = Arc::clone(journal);
+    let spawned = std::thread::Builder::new()
+        .name("arrival-eventlog".into())
+        .spawn(move || {
+            if let Err(e) = eventlog::import(&j) {
+                dl_log::warn!("Windows event logs not read"; error = %e);
+            }
+        });
+    if let Err(e) = spawned {
+        dl_log::warn!("event-log reader not started"; error = %e);
+    }
+    installations
 }
 
 /// Pool sizing: the request lane, one session per watch and one for the hello.
@@ -243,11 +291,9 @@ fn tds_options(settings: &Settings) -> TdsOptions {
     }
 }
 
-/// Every command gets one answer; this module takes none.
+/// Every command gets one answer (see [`commands`]).
 fn answer_commands(ctx: &ModuleContext) {
-    while let Some(c) = ctx.next_command() {
-        ctx.complete(&c.id, false, &format!("{NAME}: unknown command {}", c.kind));
-    }
+    commands::answer_all(ctx);
 }
 
 /// Waits `limit` (forever when `None`) answering commands; `true` when stopped.

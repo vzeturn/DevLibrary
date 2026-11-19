@@ -235,7 +235,7 @@ fn run_batches(conn: &mut Client, b: &Bundle, picture: bool) -> Vec<String> {
     failed
 }
 
-fn read_marker(conn: &mut Client, name: &str) -> Result<Option<String>, InstallError> {
+pub(crate) fn read_marker(conn: &mut Client, name: &str) -> Result<Option<String>, InstallError> {
     let results = conn
         .query(
             "SELECT CAST(value AS NVARCHAR(64)) FROM sys.extended_properties WHERE class = 0 AND name = @name",

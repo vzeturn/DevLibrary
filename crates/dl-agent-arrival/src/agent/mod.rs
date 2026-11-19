@@ -3,13 +3,16 @@
 
 pub mod clock;
 pub mod cloud;
+pub mod eventlog;
 pub mod executor;
 pub mod health;
 pub mod installer;
+pub mod inventory;
 pub mod journal;
 pub mod layout;
 pub mod link_status;
 pub mod outbox;
+pub mod problems;
 pub mod processor;
 pub mod runtime;
 pub mod secrets;

@@ -192,7 +192,7 @@ impl TdsExecutor {
         })
     }
 
-    fn params(op: &Operation, params: &Params) -> Result<Vec<Param>, ExecError> {
+    pub(crate) fn params(op: &Operation, params: &Params) -> Result<Vec<Param>, ExecError> {
         let mut out = Vec::with_capacity(op.parameters.len());
         for p in &op.parameters {
             // Absent = the procedure default applies; present with null = explicit SQL NULL.

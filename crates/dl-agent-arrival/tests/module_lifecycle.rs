@@ -146,6 +146,13 @@ fn not_enrolled_idles_degraded_answers_commands_and_stops_promptly() {
     assert_eq!(st.state, ModuleState::Degraded, "{st:?}");
     assert!(st.detail.starts_with("not enrolled"), "{}", st.detail);
     let answer = r.command("arrival.status");
+    assert!(answer.ok, "{}", answer.output);
+    assert!(
+        answer.output.contains("\"enrolled\":false"),
+        "{}",
+        answer.output
+    );
+    let answer = r.command("arrival.nope");
     assert!(!answer.ok);
     assert!(
         answer.output.contains("unknown command"),
@@ -191,15 +198,33 @@ fn picks_up_an_enrollment_links_up_and_stops_promptly() {
     assert_eq!(st.state, ModuleState::Running, "{st:?}");
     let st = r.tick_until(3000, |s| s.metrics.contains_key("last_poll"));
     assert!(st.metrics.contains_key("requests_ok"), "{:?}", st.metrics);
+    let hello = cloud
+        .exchanges()
+        .iter()
+        .find_map(|e| e.body.get("hello").filter(|h| !h.is_null()).cloned())
+        .expect("a hello");
+    let problems = hello
+        .get("recentProblems")
+        .and_then(|p| p.as_array().cloned());
     assert!(
-        cloud
-            .exchanges()
+        problems.is_some_and(|p| p
             .iter()
-            .any(|e| e.body.get("hello").is_some_and(|h| !h.is_null()))
+            .any(|x| x.get("source").and_then(|s| s.as_str()) == Some("Lifecycle"))),
+        "the hello carries the journal: {hello:?}"
     );
-    assert!(!r.command("arrival.status").ok);
+    let answer = r.command("arrival.status");
+    assert!(answer.ok, "{}", answer.output);
+    assert!(
+        answer.output.contains("\"enrolled\":true"),
+        "{}",
+        answer.output
+    );
+    assert!(!answer.output.contains("Password"), "{}", answer.output);
     assert!(r.stop() < Duration::from_secs(4));
     let status =
         std::fs::read_to_string(install.path().join("link-status.json")).expect("link status");
     assert!(status.contains("\"state\": \"connected\""), "{status}");
+    let journal =
+        std::fs::read_to_string(install.path().join("agent-problems.json")).expect("journal");
+    assert!(!journal.contains("runningSince"), "a clean stop: {journal}");
 }

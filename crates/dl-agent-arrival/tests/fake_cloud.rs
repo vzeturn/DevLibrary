@@ -77,6 +77,8 @@ impl Agent {
             health: Arc::clone(&health),
             utc_offset: Offset::from_seconds(7 * 3600).expect("offset"),
             installer: None,
+            problems: None,
+            installations: None,
         };
         let parts = Parts::assemble(&settings, &Layout::new(dir.to_path_buf(), None), id, wiring)
             .expect("assemble");
