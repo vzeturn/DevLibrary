@@ -1,18 +1,25 @@
-//! `dl-agent arrival-enroll`: enrolls this site the way Install.ps1 and
-//! `MM.Arrival.Agent enroll` do, without the .NET agent.
+//! `dl-agent arrival-enroll`: enrolls this site with Azolo Check-In, the fresh enrol that
+//! follows the removal of the .NET agent (no in-place takeover of its identity).
 //!
 //! The enrollment token (shown once by the platform console) comes from
 //! `DL_AGENT_ARRIVAL_TOKEN`, else the first line of stdin; the PMS connection string from
-//! `DL_AGENT_ARRIVAL_PMS`, else the next line of stdin, else the one already saved. Neither
-//! is ever taken from the command line (it would show in the process list) or printed.
+//! `DL_AGENT_ARRIVAL_PMS`, else the next line of stdin, else the one already saved, else the
+//! one the removed .NET agent saved (its sign-in mode preselected; `DL_AGENT_ARRIVAL_SQL_AUTH`
+//! = `windows` | `sql` with `DL_AGENT_ARRIVAL_SQL_USER` and `DL_AGENT_SQL_PASSWORD` chooses
+//! another). None of them is ever taken from the command line (it would show in the process
+//! list) or printed.
 //!
 //! Steps: probe the PMS (`test-pms`, unless `--no-probe`; a TLS failure without an `Encrypt`
-//! key retries with `Encrypt=False`, as Install.ps1 does), write `appsettings.json` when it is
-//! missing and `appsettings.Production.json` (`CloudBaseUrl`, `PmsConnectionString` and the
-//! absolute `IdentityFile` / `IdempotencyFile` under `data`), save the identity (DPAPI on
-//! Windows) and create or keep the tenant master key, printing only its fingerprint. The
-//! settings file and `data` are closed to everyone but SYSTEM and Administrators (0600 /
-//! 0700 elsewhere). A site that already has an identity is left alone unless `--force`.
+//! key retries with `Encrypt=False`, as Install.ps1 does); decide the tenant master key so
+//! the old agent's legal vault stays readable ([`crate::legacy::tenant_key`]: kept, or only
+//! that key file imported, or refuse); write `appsettings.json` when it is missing and
+//! `appsettings.Production.json` (`CloudBaseUrl`, `PmsConnectionString`, the absolute
+//! `IdentityFile` / `IdempotencyFile` under `data`, and `TenantKeyFile` / `VaultDirectory`
+//! when the key was imported or the vault stays elsewhere; other keys already there are
+//! kept); save the identity (DPAPI on Windows) and record the enrol in `data/dl-enroll.json`,
+//! printing only the key fingerprint. The settings file and `data` are closed to everyone but
+//! SYSTEM and Administrators (0600 / 0700 elsewhere). A site that already has an identity is
+//! left alone unless `--force`.
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -21,13 +28,18 @@ use dl_agent::Error;
 use dl_agent::tool::{Tool, ToolContext};
 use dl_cli::{Arg, Command, Matches};
 use dl_json::{Map, Value};
+use dl_time::OffsetDateTime;
 
 use crate::agent::cloud;
 use crate::agent::layout::{IDENTITY_IN_INSTALL, Layout};
 use crate::agent::secrets::{Identity, TenantKeyStore};
 use crate::agent::settings::{BASE_FILE, PRODUCTION_FILE, Settings};
 use crate::agent::tds;
+use crate::legacy::installs::{self, LegacyInstall};
+use crate::legacy::sqlauth::{self, SqlAuth};
+use crate::legacy::tenant_key::{self, KeyPlan, KeySource, PlanInput};
 use crate::module;
+use crate::tools::files::{self, AgentKeys};
 
 /// The registered sub-command name.
 pub const NAME: &str = "arrival-enroll";
@@ -35,6 +47,15 @@ pub const NAME: &str = "arrival-enroll";
 pub const TOKEN_ENV: &str = "DL_AGENT_ARRIVAL_TOKEN";
 /// The environment variable holding the PMS connection string.
 pub const PMS_ENV: &str = "DL_AGENT_ARRIVAL_PMS";
+/// The environment variable choosing the SQL sign-in mode (`windows` | `sql`).
+pub const SQL_AUTH_ENV: &str = "DL_AGENT_ARRIVAL_SQL_AUTH";
+/// The environment variable naming the SQL login (with `sql`).
+pub const SQL_USER_ENV: &str = "DL_AGENT_ARRIVAL_SQL_USER";
+/// The environment variable holding the SQL login's password (with `sql`).
+pub const SQL_PASSWORD_ENV: &str = "DL_AGENT_SQL_PASSWORD";
+/// The environment variable holding a tenant key the operator recovered (base64, e.g. from
+/// the Check-In key escrow).
+pub const TENANT_KEY_ENV: &str = "DL_AGENT_ARRIVAL_TENANT_KEY";
 
 /// The `appsettings.json` the .NET agent ships with (written when the install has none).
 const BASE_SETTINGS: &str = include_str!("../../assets/appsettings.json");
@@ -65,6 +86,11 @@ fn grammar(cmd: Command) -> Command {
             .value_name("DIR")
             .help("The agent folder (default: the MM-Arrival Agent folder; must match modules.arrival.install_dir)"),
     )
+    .arg(
+        Arg::option("legacy-dir")
+            .value_name("DIR")
+            .help("The removed .NET agent folder to take the tenant key and PMS connection from (default: found under Program Files and the bench records)"),
+    )
     .arg(Arg::flag("force").help("Enroll again although an identity exists"))
     .arg(Arg::flag("no-probe").help("Do not test the PMS connection first"))
 }
@@ -76,6 +102,8 @@ pub struct Args {
     pub cloud_url: String,
     /// `--install-dir`.
     pub install_dir: Option<PathBuf>,
+    /// `--legacy-dir`.
+    pub legacy_dir: Option<PathBuf>,
     /// `--force`.
     pub force: bool,
     /// `--no-probe`.
@@ -87,6 +115,7 @@ impl Args {
         Args {
             cloud_url: m.value("cloud-url").unwrap_or_default().trim().to_owned(),
             install_dir: m.value("install-dir").map(PathBuf::from),
+            legacy_dir: m.value("legacy-dir").map(PathBuf::from),
             force: m.flag("force"),
             no_probe: m.flag("no-probe"),
         }
@@ -138,7 +167,7 @@ fn run(ctx: &ToolContext<'_>, m: &Matches) -> Result<(), Error> {
 pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), String> {
     let fail = |e: &dyn std::fmt::Display| format!("{NAME}: {e}");
     let base = cloud::check_base_url(&args.cloud_url).map_err(|e| fail(&e))?;
-    let layout = Layout::detect(args.install_dir.as_deref(), fallback);
+    let layout = Layout::detect_with(args.install_dir.as_deref(), fallback, io.getenv);
     let install = layout.install_dir().to_path_buf();
     let saved = Settings::load(&install).map_err(|e| fail(&e))?;
     let data = install.join("data");
@@ -155,6 +184,7 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
             ),
         );
     }
+    let legacy = legacy_installs(args, io)?;
 
     let token = secret(io, TOKEN_ENV, "Enrollment token")?;
     if token.is_empty() {
@@ -163,45 +193,64 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
         )));
     }
     let identity = Identity::from_token(&token).map_err(|e| fail(&e))?;
-    let mut pms = secret(io, PMS_ENV, "PMS connection string")?;
-    if pms.is_empty() && !saved.pms_connection_string.starts_with(PLACEHOLDER) {
-        pms = saved.pms_connection_string.trim().to_string();
-    }
-    if pms.is_empty() {
-        return Err(fail(&format!(
-            "no PMS connection string: set {PMS_ENV} or pass it on stdin"
-        )));
-    }
+    let mut pms = connection(io, &saved, &legacy)?;
     if !args.no_probe {
         pms = probe(io, pms)?;
     }
 
-    restricted_dir(&data).map_err(|e| fail(&e))?;
+    // Decide the tenant key before anything is written: a refusal leaves the site as it was.
+    let supplied = (io.getenv)(TENANT_KEY_ENV);
+    let supplied = supplied.trim();
+    let key_plan = tenant_key::plan(&PlanInput {
+        layout: &layout,
+        target: &saved,
+        legacy: &legacy,
+        system32: layout.legacy_cwd(),
+        supplied: (!supplied.is_empty()).then_some(supplied),
+    })
+    .map_err(|e| fail(&e))?;
+    for note in &key_plan.notes {
+        say(io, &format!("{NAME}: {note}"))?;
+    }
+
+    files::restricted_dir(&data).map_err(|e| fail(&e))?;
     let base_file = install.join(BASE_FILE);
     if !base_file.exists() {
-        write_file(&base_file, BASE_SETTINGS.as_bytes(), false).map_err(|e| fail(&e))?;
+        files::write_file(&base_file, BASE_SETTINGS.as_bytes(), false).map_err(|e| fail(&e))?;
     }
-    let mut agent = Map::new();
-    agent.insert("CloudBaseUrl", base.to_string().trim_end_matches('/'));
-    agent.insert("PmsConnectionString", pms.as_str());
-    agent.insert("IdentityFile", path_text(&identity_path));
-    agent.insert(
-        "IdempotencyFile",
-        path_text(&data.join("agent-idempotency.jsonl")),
-    );
-    let mut root = Map::new();
-    root.insert("Agent", Value::Object(agent));
-    let mut text = dl_json::to_string_pretty(&Value::Object(root));
-    text.push('\n');
-    write_file(&install.join(PRODUCTION_FILE), text.as_bytes(), true).map_err(|e| fail(&e))?;
-    say(
-        io,
-        &format!("{NAME}: wrote {}", install.join(PRODUCTION_FILE).display()),
-    )?;
+    // The key file first: settings naming a missing key file leave the link without a key.
+    tenant_key::import(&key_plan).map_err(|e| fail(&e))?;
+    if let Some(file) = &key_plan.tenant_key_file {
+        files::restrict(file).map_err(|e| fail(&e))?;
+    }
+    let production = install.join(PRODUCTION_FILE);
+    let text = files::production_settings(
+        files::read_optional(&production)
+            .map_err(|e| fail(&e))?
+            .as_deref(),
+        &AgentKeys {
+            cloud_base_url: base.to_string().trim_end_matches('/').to_string(),
+            pms_connection_string: pms.clone(),
+            identity_file: identity_path.clone(),
+            idempotency_file: data.join("agent-idempotency.jsonl"),
+            tenant_key_file: key_plan.tenant_key_file.clone(),
+            vault_directory: key_plan.vault_directory.clone(),
+        },
+    )
+    .map_err(|e| fail(&e))?;
+    files::write_file(&production, text.as_bytes(), true).map_err(|e| fail(&e))?;
+    say(io, &format!("{NAME}: wrote {}", production.display()))?;
+
+    // The key before the identity: a refusal here leaves the site without an enrolment.
+    let settings = Settings::load(&install).map_err(|e| fail(&e))?;
+    let key_file = layout.resolve(&settings.tenant_key_file);
+    let vault_dir = layout.resolve(&settings.vault_directory);
+    let fingerprint =
+        install_key(&settings, &key_plan, &key_file, &vault_dir).map_err(|e| fail(&e))?;
 
     // The settings now name this file; an identity at an older path is left as it was.
     identity.save(&identity_path).map_err(|e| fail(&e))?;
-    restrict(&identity_path).map_err(|e| fail(&e))?;
+    files::restrict(&identity_path).map_err(|e| fail(&e))?;
     say(
         io,
         &format!(
@@ -212,17 +261,35 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
         ),
     )?;
 
-    let settings = Settings::load(&install).map_err(|e| fail(&e))?;
-    let key_file = layout.resolve(&settings.tenant_key_file);
-    let keys = TenantKeyStore::new(&settings.tenant_key, key_file.clone());
-    let fingerprint = keys.vault().map_err(|e| fail(&e))?.fingerprint();
+    write_record(
+        &install,
+        &identity,
+        &key_plan,
+        &fingerprint,
+        &key_file,
+        &vault_dir,
+        &legacy,
+        &pms,
+    )
+    .map_err(|e| fail(&e))?;
     say(
         io,
         &format!(
-            "{NAME}: tenant master key fingerprint {fingerprint} ({}). Keep a copy of that file offline: without the key the cloud data cannot be read.",
+            "{NAME}: tenant master key fingerprint {fingerprint} ({}, {}). Keep a copy of that file offline: without the key the cloud data cannot be read.",
+            key_plan.source.as_str(),
             key_file.display()
         ),
     )?;
+    let sealed: usize = key_plan.vault.iter().map(|s| s.files).sum();
+    if sealed > 0 {
+        say(
+            io,
+            &format!(
+                "{NAME}: legal vault {} keeps {sealed} sealed files, all under this key",
+                vault_dir.display()
+            ),
+        )?;
+    }
     say(
         io,
         &format!(
@@ -231,6 +298,157 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
             install.display()
         ),
     )
+}
+
+/// The key the settings now reach: made only for a `created` plan with an empty vault,
+/// otherwise the existing one, which must be the planned one. Answers its fingerprint.
+fn install_key(
+    settings: &Settings,
+    plan: &KeyPlan,
+    key_file: &Path,
+    vault_dir: &Path,
+) -> Result<String, String> {
+    let keys = TenantKeyStore::new(&settings.tenant_key, key_file.to_path_buf());
+    if plan.source == KeySource::Created {
+        if plan.vault.iter().any(|s| s.files > 0 || s.malformed > 0) {
+            return Err(
+                "the plan found sealed vault files, so it cannot make a new key; stop and report this"
+                    .into(),
+            );
+        }
+        keys.create(vault_dir).map_err(|e| e.to_string())?;
+    }
+    let fingerprint = keys.vault().map_err(|e| e.to_string())?.fingerprint();
+    match &plan.fingerprint {
+        Some(expected) if *expected != fingerprint => Err(format!(
+            "the install holds tenant key {fingerprint} but {expected} was planned; stop the module and report this"
+        )),
+        _ => Ok(fingerprint),
+    }
+}
+
+/// The old .NET installs with their settings (an unreadable one stops the enrol: it might
+/// hold the tenant key).
+fn legacy_installs(args: &Args, io: &mut Io<'_>) -> Result<Vec<(LegacyInstall, Settings)>, String> {
+    let found = installs::discover(io.getenv, args.legacy_dir.as_deref())
+        .map_err(|e| format!("{NAME}: {e}"))?;
+    let mut out = Vec::with_capacity(found.len());
+    for install in found {
+        let settings = install.settings().map_err(|e| {
+            format!("{NAME}: cannot read the old agent settings ({e}); name the folder to follow with --legacy-dir")
+        })?;
+        say(
+            io,
+            &format!(
+                "{NAME}: old agent install {} ({})",
+                install.dir.display(),
+                install.found.as_str()
+            ),
+        )?;
+        out.push((install, settings));
+    }
+    Ok(out)
+}
+
+/// The PMS connection string: the environment, stdin, the install's own settings, else the
+/// newest old install's; then the sign-in mode the operator chose (`DL_AGENT_ARRIVAL_SQL_AUTH`).
+fn connection(
+    io: &mut Io<'_>,
+    saved: &Settings,
+    legacy: &[(LegacyInstall, Settings)],
+) -> Result<String, String> {
+    let usable = |s: &str| !s.trim().is_empty() && !s.trim().starts_with(PLACEHOLDER);
+    let mut pms = secret(io, PMS_ENV, "PMS connection string")?;
+    let mut from = "given".to_string();
+    if pms.is_empty() && usable(&saved.pms_connection_string) {
+        pms = saved.pms_connection_string.trim().to_string();
+        from = "saved".into();
+    }
+    if pms.is_empty()
+        && let Some((install, s)) = legacy
+            .iter()
+            .find(|(_, s)| usable(&s.pms_connection_string))
+    {
+        pms = s.pms_connection_string.trim().to_string();
+        from = format!("old agent {}", install.dir.display());
+    }
+    if pms.is_empty() {
+        return Err(format!(
+            "{NAME}: no PMS connection string: set {PMS_ENV} or pass it on stdin"
+        ));
+    }
+    let preselected = sqlauth::detect(&pms);
+    let chosen = (io.getenv)(SQL_AUTH_ENV);
+    let auth = match chosen.trim() {
+        "" => preselected,
+        text => SqlAuth::parse(text)
+            .ok_or_else(|| format!("{NAME}: {SQL_AUTH_ENV} must be windows or sql, not {text}"))?,
+    };
+    if auth != preselected || !chosen.trim().is_empty() {
+        let user = (io.getenv)(SQL_USER_ENV);
+        let password = (io.getenv)(SQL_PASSWORD_ENV);
+        let user = Some(user.trim()).filter(|u| !u.is_empty());
+        let password = Some(password.as_str()).filter(|p| !p.is_empty());
+        pms = sqlauth::with_auth(&pms, auth, user, password).map_err(|e| format!("{NAME}: {e}"))?;
+    }
+    let login = sqlauth::user(&pms)
+        .map(|u| format!(" as {u}"))
+        .unwrap_or_default();
+    say(
+        io,
+        &format!(
+            "{NAME}: PMS connection from {from}; sql_auth={auth}{login} (preselected {preselected})"
+        ),
+    )?;
+    Ok(pms)
+}
+
+/// `data/dl-enroll.json`: what this enrol did, for the self-test and the hub (no secrets).
+#[allow(clippy::too_many_arguments)]
+fn write_record(
+    install: &Path,
+    identity: &Identity,
+    plan: &KeyPlan,
+    fingerprint: &str,
+    key_file: &Path,
+    vault_dir: &Path,
+    legacy: &[(LegacyInstall, Settings)],
+    pms: &str,
+) -> Result<(), String> {
+    let mut key = Map::new();
+    key.insert("source", plan.source.as_str());
+    key.insert("fingerprint", fingerprint);
+    key.insert("file", files::path_text(key_file));
+    if let Some(from) = &plan.from {
+        key.insert("from", from.to_string());
+    }
+    let mut vault = Map::new();
+    vault.insert("directory", files::path_text(vault_dir));
+    vault.insert(
+        "sealed_files",
+        plan.vault.iter().map(|s| s.files).sum::<usize>() as u64,
+    );
+    let old: Vec<Value> = legacy
+        .iter()
+        .map(|(i, _)| {
+            let mut m = Map::new();
+            m.insert("dir", files::path_text(&i.dir));
+            m.insert("found", i.found.as_str());
+            Value::Object(m)
+        })
+        .collect();
+    let mut root = Map::new();
+    root.insert("enrolled_at", OffsetDateTime::now_utc().to_rfc3339());
+    root.insert("agent_id", identity.agent_id.as_str());
+    root.insert("tenant_id", identity.tenant_id.as_str());
+    root.insert("identity_source", "fresh_enrol");
+    root.insert("sql_auth", sqlauth::detect(pms).as_str());
+    root.insert("tenant_key", Value::Object(key));
+    root.insert("vault", Value::Object(vault));
+    root.insert("legacy_installs", Value::Array(old));
+    let mut text = dl_json::to_string_pretty(&Value::Object(root));
+    text.push('\n');
+    files::write_file(&install.join(files::ENROLL_RECORD), text.as_bytes(), true)
 }
 
 fn say(io: &mut Io<'_>, line: &str) -> Result<(), String> {
@@ -282,50 +500,4 @@ fn probe(io: &mut Io<'_>, pms: String) -> Result<String, String> {
         }
         Err(e) => Err(cannot(&e)),
     }
-}
-
-fn path_text(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
-}
-
-/// Writes through a temporary file and a rename; `secret` restricts it first.
-fn write_file(path: &Path, bytes: &[u8], secret: bool) -> Result<(), String> {
-    let e = |what: &str, x: &dyn std::fmt::Display| format!("{what} {}: {x}", path.display());
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(|x| e("create the folder of", &x))?;
-    }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    if secret {
-        crate::agent::secrets::write_secret(&tmp, bytes, "settings").map_err(|x| e("write", &x))?;
-        restrict(&tmp).map_err(|x| e("restrict", &x))?;
-    } else {
-        std::fs::write(&tmp, bytes).map_err(|x| e("write", &x))?;
-    }
-    std::fs::rename(&tmp, path).map_err(|x| e("replace", &x))
-}
-
-/// Creates `dir` closed to everyone but the service (and administrators).
-fn restricted_dir(dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("restrict {}: {e}", dir.display()))?;
-    }
-    restrict(dir)
-}
-
-/// The Windows ACL of Install.ps1 (SYSTEM and Administrators only); a no-op elsewhere,
-/// where files are written 0600.
-fn restrict(path: &Path) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        dl_winsvc::acl::restrict(path).map_err(|e| format!("restrict {}: {e}", path.display()))?;
-    }
-    #[cfg(not(windows))]
-    let _ = path;
-    Ok(())
 }

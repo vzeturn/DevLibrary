@@ -152,9 +152,13 @@ fn sql_failure(what: &str, e: &dl_tds::Error) -> InstallError {
 ///
 /// # Errors
 /// [`InstallError`] with counts and SQL error numbers.
-pub fn ensure_installed(connection: &str, force: bool) -> Result<bool, InstallError> {
+pub fn ensure_installed<'a>(
+    target: impl Into<tds::Target<'a>>,
+    force: bool,
+) -> Result<bool, InstallError> {
+    let target = target.into();
     let b = bundle();
-    let mut conn = tds::connect(connection, None).map_err(|e| sql_failure("connect", &e))?;
+    let mut conn = tds::connect(target, None).map_err(|e| sql_failure("connect", &e))?;
     let installed = read_marker(&mut conn, PROPERTY_NAME)?;
     let installed_picture = read_marker(&mut conn, PICTURE_PROPERTY_NAME)?;
     let (run, run_picture) = plan(
@@ -182,13 +186,14 @@ pub fn ensure_installed(connection: &str, force: bool) -> Result<bool, InstallEr
     )?;
     if run_picture {
         // SMILE_PICTURE objects first: the signature procedures compile against them.
-        let mut master = tds::connect(connection, Some("master"))
+        let mut master = tds::connect(target, Some("master"))
             .map_err(|e| sql_failure("connect to master", &e))?;
         let failed = run_batches(&mut master, b, true);
         if !failed.is_empty() {
             return Err(InstallError(format!(
-                "{} SMILE_PICTURE batch(es) failed (they need more than db_owner of the PMS: run the install as an administrator); the bundle was not installed. {}",
+                "{} SMILE_PICTURE batch(es) failed ({}); the bundle was not installed. {}",
                 failed.len(),
+                picture_hint(&failed),
                 failed.join(" | ")
             )));
         }
@@ -207,6 +212,21 @@ pub fn ensure_installed(connection: &str, force: bool) -> Result<bool, InstallEr
     write_marker(&mut conn, PROPERTY_NAME, &b.hash)?;
     dl_log::info!("PMS procedure bundle installed."; hash = %b.hash);
     Ok(true)
+}
+
+/// What the service login lacks, from the SQL error numbers of the failed picture batches
+/// (`arrival.picture_probe` answers the exact statements for this server).
+pub fn picture_hint(failed: &[String]) -> &'static str {
+    let has = |n: &str| failed.iter().any(|f| f.contains(&format!("[{n}]")));
+    if has("262") || has("1802") {
+        "the service login may not create SMILE_PICTURE: as an administrator CREATE DATABASE [SMILE_PICTURE], give the login a user there with db_owner, then send arrival.install_procedures"
+    } else if has("916") || has("4060") {
+        "the service login has no user in SMILE_PICTURE: as an administrator USE [SMILE_PICTURE]; CREATE USER [<login>] FOR LOGIN [<login>]; EXEC sp_addrolemember N'db_owner', N'<login>'; then send arrival.install_procedures"
+    } else if has("229") || has("1088") || has("2760") || has("15247") {
+        "the service login may not create or alter tables in SMILE_PICTURE: as an administrator USE [SMILE_PICTURE]; EXEC sp_addrolemember N'db_ddladmin', N'<login>'; plus db_datareader and db_datawriter (or db_owner), then send arrival.install_procedures"
+    } else {
+        "send arrival.picture_probe for what the service login lacks, or run the install as an administrator"
+    }
 }
 
 /// Runs the batches of one side; returns `"#<position> [<number>]"` per failure.
@@ -235,7 +255,7 @@ fn run_batches(conn: &mut Client, b: &Bundle, picture: bool) -> Vec<String> {
     failed
 }
 
-fn read_marker(conn: &mut Client, name: &str) -> Result<Option<String>, InstallError> {
+pub(crate) fn read_marker(conn: &mut Client, name: &str) -> Result<Option<String>, InstallError> {
     let results = conn
         .query(
             "SELECT CAST(value AS NVARCHAR(64)) FROM sys.extended_properties WHERE class = 0 AND name = @name",
@@ -281,6 +301,15 @@ mod tests {
             plan(false, Some("pending:h"), None, "h", LEGACY_PICTURE_HASH),
             (true, true)
         );
+    }
+
+    #[test]
+    fn picture_failures_name_the_missing_grant() {
+        let f = |s: &[&str]| s.iter().map(|x| (*x).to_owned()).collect::<Vec<_>>();
+        assert!(picture_hint(&f(&["#0 [262]"])).contains("CREATE DATABASE"));
+        assert!(picture_hint(&f(&["#1 [916]", "#2 [916]"])).contains("CREATE USER"));
+        assert!(picture_hint(&f(&["#3 [1088]"])).contains("db_ddladmin"));
+        assert!(picture_hint(&f(&["#4 [Timeout]"])).contains("picture_probe"));
     }
 
     #[test]

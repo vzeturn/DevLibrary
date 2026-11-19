@@ -37,12 +37,26 @@ impl Layout {
     /// Finds the install: `configured` when given, else the platform default (see the
     /// module docs), else `fallback`.
     pub fn detect(configured: Option<&Path>, fallback: &Path) -> Layout {
-        let legacy_cwd = std::env::var_os("SystemRoot").map(|r| PathBuf::from(r).join("System32"));
+        Layout::detect_with(configured, fallback, &|k| {
+            std::env::var(k).unwrap_or_default()
+        })
+    }
+
+    /// [`Layout::detect`] over an injected environment (empty = unset).
+    pub fn detect_with(
+        configured: Option<&Path>,
+        fallback: &Path,
+        getenv: &dyn Fn(&str) -> String,
+    ) -> Layout {
+        let env = |k: &str| {
+            let v = getenv(k);
+            (!v.trim().is_empty()).then(|| PathBuf::from(v.trim()))
+        };
+        let legacy_cwd = system32(getenv);
         if let Some(dir) = configured {
             return Layout::new(dir.to_path_buf(), legacy_cwd);
         }
         if cfg!(windows) {
-            let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
             let primary = env("ProgramW6432").or_else(|| env("ProgramFiles"));
             let others: Vec<PathBuf> = [env("ProgramFiles"), env("ProgramFiles(x86)")]
                 .into_iter()
@@ -61,6 +75,11 @@ impl Layout {
         &self.install_dir
     }
 
+    /// `%SystemRoot%\System32`, the .NET service's working directory (when known).
+    pub fn legacy_cwd(&self) -> Option<&Path> {
+        self.legacy_cwd.as_deref()
+    }
+
     /// Resolves a configured path for reading: absolute as is; relative under the legacy
     /// working directory when it exists there, else under the install directory.
     pub fn resolve(&self, configured: &str) -> PathBuf {
@@ -76,6 +95,12 @@ impl Layout {
         }
         self.install_dir.join(p)
     }
+}
+
+/// `%SystemRoot%\System32` from the environment.
+pub fn system32(getenv: &dyn Fn(&str) -> String) -> Option<PathBuf> {
+    let root = getenv("SystemRoot");
+    (!root.trim().is_empty()).then(|| PathBuf::from(root.trim()).join("System32"))
 }
 
 /// Install.ps1's choice: the 64-bit folder, unless it has no identity and exactly one other

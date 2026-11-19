@@ -163,8 +163,41 @@ pub struct PmsChangeNotice {
     pub changed_rows: i32,
 }
 
-/// `AgentHello` (problems and installations are not reported by this agent: dl-agent's
-/// own reports carry them).
+/// `AgentProblem`: one warning or error of the problem journal (repeats folded).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentProblem {
+    /// First occurrence (round-trip UTC text).
+    pub at: String,
+    /// Warning, Error, Critical or Information.
+    pub level: String,
+    /// The component.
+    pub source: String,
+    /// The last occurrence's text.
+    pub message: String,
+    /// Occurrences folded in.
+    pub count: u32,
+    /// The last occurrence, when more than one.
+    pub last_at: Option<String>,
+}
+
+impl AgentProblem {
+    /// Appends the JSON text (`JsonSerializerDefaults.Web`).
+    pub fn write(&self, out: &mut String) {
+        out.push_str("{\"at\":");
+        escape_into(out, &self.at);
+        out.push_str(",\"level\":");
+        escape_into(out, &self.level);
+        out.push_str(",\"source\":");
+        escape_into(out, &self.source);
+        out.push_str(",\"message\":");
+        escape_into(out, &self.message);
+        out.push_str(&format!(",\"count\":{},\"lastAt\":", self.count));
+        opt_string(out, self.last_at.as_deref());
+        out.push('}');
+    }
+}
+
+/// `AgentHello`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentHello {
     /// Agent version.
@@ -177,6 +210,10 @@ pub struct AgentHello {
     pub pms_schema_fingerprint: Option<String>,
     /// `procedures: ...` when the bundle failed to install.
     pub procedures_report: Option<String>,
+    /// The newest problem-journal entries, oldest first (empty: sent as `null`).
+    pub recent_problems: Vec<AgentProblem>,
+    /// The agent copies on this machine (`None` off Windows).
+    pub installations: Option<String>,
 }
 
 /// `AgentPollRequest`.
@@ -367,7 +404,22 @@ impl AgentHello {
         opt_string(out, self.pms_schema_fingerprint.as_deref());
         out.push_str(",\"proceduresReport\":");
         opt_string(out, self.procedures_report.as_deref());
-        out.push_str(",\"recentProblems\":null,\"installations\":null}");
+        out.push_str(",\"recentProblems\":");
+        if self.recent_problems.is_empty() {
+            out.push_str("null");
+        } else {
+            out.push('[');
+            for (i, p) in self.recent_problems.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                p.write(out);
+            }
+            out.push(']');
+        }
+        out.push_str(",\"installations\":");
+        opt_string(out, self.installations.as_deref());
+        out.push('}');
     }
 }
 

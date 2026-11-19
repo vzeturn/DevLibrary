@@ -8,6 +8,17 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-arrival: hub commands `status`, `vault_check`, `selftest`, `diagnostics`, `picture_probe`,
+  `op_sweep` (always rolled back) and `install_procedures`, returning JSON without secrets; new selftest
+  rows incl. `pms_source`; problem journal with `recentProblems` and `installations` in the hello.
+- dl-agent-arrival: `arrival-enroll` keeps the legal vault readable across a fresh enrol and pre-fills the
+  PMS connection with its sign-in mode; no tenant key is created at runtime; `Agent__*` env overrides.
+- dl-agent-arrival: the core `sql.json` SMILE_FO entry (windows/sql auth, sealed password, pinned TLS
+  rung) serves the PMS link when present, `PmsConnectionString` is the fallback
+  (`arrival_core_sql_unusable` when the entry is unusable); cloud link reported to the watchdog;
+  `agent-problems.json` and `dl-enroll.json` in the diagnostics bundle.
+- agent-hub: the bench and the installer pre-fill SQL Server from the old Check-In agent
+  (`ARRIVAL_LEGACY_SQL_BODY`).
 - dl-agent: `sql-setup` picks a Windows or SQL login, tests it on every SMILE database before saving
   and seals the password with DPAPI; the installer offers the same choice (password from env
   `DL_AGENT_SQL_PASSWORD` or a hidden prompt only). The working TLS rung is saved; no silent fall back to
@@ -75,6 +86,11 @@ All notable changes are listed here. The format follows
 
 - `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
+
+### Changed
+
+- dl-agent-arrival: a failed SMILE_PICTURE phase names the missing grant; the install inventory lists
+  processes through `dl_winsvc::process` instead of `tasklist`.
 
 ### Fixed
 

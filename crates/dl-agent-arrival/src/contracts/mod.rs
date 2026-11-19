@@ -18,8 +18,8 @@ pub mod xml;
 pub use catalog::{Catalog, Operation, OperationKind, ParamType, Parameter, catalog};
 pub use envelope::{Direction, EnvelopeCipher, ReplayGuard, SyncEnvelope};
 pub use messages::{
-    AgentHello, AgentPollRequest, AgentPollResponse, Params, PmsChangeNotice, PmsRequest,
-    PmsResponse, PmsResultSet, Status,
+    AgentHello, AgentPollRequest, AgentPollResponse, AgentProblem, Params, PmsChangeNotice,
+    PmsRequest, PmsResponse, PmsResultSet, Status,
 };
 pub use row::PmsRow;
 

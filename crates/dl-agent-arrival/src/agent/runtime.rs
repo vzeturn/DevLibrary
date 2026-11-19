@@ -27,6 +27,7 @@ use crate::agent::journal::Journal;
 use crate::agent::layout::Layout;
 use crate::agent::link_status::{self, LinkStatus, LinkStatusFile};
 use crate::agent::outbox::{self, Batching, Outbox, Pacer};
+use crate::agent::problems::{self, ProblemJournal};
 use crate::agent::processor::{Lane, Processor};
 use crate::agent::secrets::{Identity, TenantKeyStore};
 use crate::agent::settings::{Settings, Watch};
@@ -75,6 +76,10 @@ pub struct Wiring {
     pub utc_offset: Offset,
     /// Run before the first poll (`AutoInstallProcedures`).
     pub installer: Option<Installer>,
+    /// The problem journal the hello carries (none: `recentProblems` null).
+    pub problems: Option<Arc<ProblemJournal>>,
+    /// `AgentHello.Installations`.
+    pub installations: Option<String>,
 }
 
 impl std::fmt::Debug for Wiring {
@@ -178,6 +183,8 @@ impl Parts {
             health,
             utc_offset,
             installer,
+            problems,
+            installations,
         } = wiring;
         let notices = Arc::new(Outbox::new(Some(outbox::NOTICE_CAPACITY)));
         let link = Arc::new(Link {
@@ -200,6 +207,9 @@ impl Parts {
             last_beat: Mutex::new(None),
             version: agent_version(),
             catalog_version: cat.version,
+            problems,
+            installations,
+            hello_problems: Mutex::new(None),
         });
         let mut threads = Threads::default();
         let started = link.start(&mut threads, pms_threads, installer).map(|()| {
@@ -251,7 +261,14 @@ struct Link {
     last_beat: Mutex<Option<Instant>>,
     version: String,
     catalog_version: i32,
+    problems: Option<Arc<ProblemJournal>>,
+    installations: Option<String>,
+    /// The journal version the last hello carried, and when it went.
+    hello_problems: Mutex<Option<(i64, Instant)>>,
 }
+
+/// `CloudLinkWorker.ProblemResendInterval`.
+pub const PROBLEM_RESEND_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -353,6 +370,10 @@ impl Link {
         let mut hello_sent = false;
         let mut failures = 0u32;
         while !self.stop.is_stopped() {
+            // A hello comes at start-up and again whenever the journal has something new.
+            if hello_sent && self.problems_changed() {
+                hello_sent = false;
+            }
             let body = AgentPollRequest {
                 hello: (!hello_sent).then(|| self.hello()),
                 responses: Vec::new(),
@@ -413,12 +434,35 @@ impl Link {
 
     fn hello(&self) -> AgentHello {
         let fingerprint = self.executor.schema_fingerprint().unwrap_or_default();
+        let recent_problems = match &self.problems {
+            Some(j) => {
+                *lock(&self.hello_problems) = Some((j.version(), Instant::now()));
+                j.recent(problems::MAX_SENT).unwrap_or_else(|e| {
+                    dl_log::warn!("problem journal not readable for the hello"; error = %e);
+                    Vec::new()
+                })
+            }
+            None => Vec::new(),
+        };
         AgentHello {
             agent_version: self.version.clone(),
             catalog_version: self.catalog_version,
             machine_name: dl_agent::hub::hostname(),
             pms_schema_fingerprint: Some(format!("{}.{fingerprint}", installer::bundle().hash)),
             procedures_report: lock(&self.procedures_report).clone(),
+            recent_problems,
+            installations: self.installations.clone(),
+        }
+    }
+
+    /// The journal recorded something since the last hello, and that hello is at least
+    /// [`PROBLEM_RESEND_INTERVAL`] old (a chronic warning costs one hello per window).
+    fn problems_changed(&self) -> bool {
+        match (&self.problems, *lock(&self.hello_problems)) {
+            (Some(j), Some((sent, at))) => {
+                j.version() != sent && at.elapsed() >= PROBLEM_RESEND_INTERVAL
+            }
+            _ => false,
         }
     }
 

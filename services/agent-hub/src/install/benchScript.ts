@@ -13,6 +13,7 @@
  */
 import type { BenchStep, SqlFixup } from '../domain/bench';
 import { toBase64 } from '../lib/crypto';
+import { ARRIVAL_LEGACY_SQL_BODY } from './arrival';
 import { LEGACY_BODY, LEGACY_SERVICE_PATTERN, SQL_BINARY_PATTERN, SQL_SERVICE_PATTERN } from './benchLegacy';
 
 export { LEGACY_SERVICE_PATTERN, SQL_BINARY_PATTERN, SQL_SERVICE_PATTERN } from './benchLegacy';
@@ -178,10 +179,11 @@ function Use-Sql([string]$base) {
   }
 }
 
-# The server part of the connection dl-agent already holds in sql.json (a rerun or a reinstall), or ''.
+# The server part of the connection dl-agent already holds in sql.json (a rerun or a reinstall), else
+# the old Check-In agent's (arrival.ts), or ''.
 function Get-SavedSql {
   $f = Join-Path $Data 'sql.json'
-  if (-not (Test-Path $f)) { return '' }
+  if (-not (Test-Path $f)) { return (Get-ArrivalLegacySql) }
   try {
     $dbs = (Get-Content -Raw -Path $f | ConvertFrom-Json).databases
     foreach ($p in @($dbs.PSObject.Properties | Where-Object { $_ })) {
@@ -193,8 +195,9 @@ function Get-SavedSql {
       return ($b.ConnectionString + ';')
     }
   } catch { Warn ('sql.json could not be read (' + $_.Exception.Message + '): asking for SQL Server instead.') }
-  return ''
+  return (Get-ArrivalLegacySql)
 }
+__ARRIVAL__
 function Show-Sql([string]$base) {
   $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $base
   if ($b.IntegratedSecurity) { return $b.DataSource + ', Windows authentication' }
@@ -238,7 +241,7 @@ function Select-Sql {
     if (Use-Sql $SqlConnection) { return }
     Warn 'The -SqlConnection given did not connect; asking instead.'
   } elseif ($saved) {
-    Say ('dl-agent already has a SQL Server connection: ' + (Show-Sql $saved) + '.')
+    Say ($(if ($St.SqlFrom) { $St.SqlFrom } else { 'dl-agent already has a SQL Server connection' }) + ': ' + (Show-Sql $saved) + '.')
     if ((Read-Host 'Keep it? (Y/n)') -ne 'n') {
       if (Use-Sql $saved) { Add-Result 'sql-server' 'ok' 'kept the saved connection'; return }
       Warn 'The saved connection no longer connects; asking instead (Enter keeps each saved answer).'
@@ -549,5 +552,5 @@ export function benchScript(b: BenchScriptInput): string {
     `$SqlServicePattern = ${psQuote(SQL_SERVICE_PATTERN)}`,
     `$SqlBinaryPattern = ${psQuote(SQL_BINARY_PATTERN)}`,
   ].join('\n');
-  return BODY.split('__LEGACY__').join(LEGACY_BODY).split('__DATA__').join(data);
+  return BODY.split('__LEGACY__').join(LEGACY_BODY).split('__ARRIVAL__').join(ARRIVAL_LEGACY_SQL_BODY).split('__DATA__').join(data);
 }

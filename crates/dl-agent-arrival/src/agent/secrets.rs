@@ -197,8 +197,10 @@ impl Identity {
     }
 }
 
-/// `TenantKeyStore`: `TenantKey` from the settings when set, else the key file, else a new
-/// key written to the file. Loaded on first use and kept (a failure too, as `Lazy` does).
+/// `TenantKeyStore`: `TenantKey` from the settings when set, else the key file. Loaded on first
+/// use and kept (a failure too, as `Lazy` does). Unlike the .NET store it never makes a key on
+/// its own: a new key would leave the legal vault and the cloud data sealed by the old one
+/// unreadable. Only the enrol of a fresh install ([`TenantKeyStore::create`]) makes one.
 #[derive(Debug)]
 pub struct TenantKeyStore {
     configured: String,
@@ -216,14 +218,18 @@ impl TenantKeyStore {
         }
     }
 
-    /// The key vault, loading or creating the key on first use.
+    /// The key vault, loading the key on first use (never creating one).
     ///
     /// # Errors
-    /// [`Error::Crypto`] with why the key could not be had (never the key).
+    /// [`Error::Crypto`] with why the key could not be had (never the key), [`missing`] when
+    /// there is none.
     pub fn vault(&self) -> Result<&TenantKeyVault, Error> {
         self.vault
             .get_or_init(|| {
-                let key = self.load_or_create().map_err(|e| e.to_string())?;
+                let key = self
+                    .load_existing()
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| missing(&self.file))?;
                 TenantKeyVault::new(&key).map_err(|e| e.to_string())
             })
             .as_ref()
@@ -249,14 +255,30 @@ impl TenantKeyStore {
         }
     }
 
-    /// `LoadOrCreate`.
+    /// The key of a fresh install (the enrol plan `created`): a new key written to the file,
+    /// only when no key exists and `vault_dir` holds no file (a file there was sealed by a key
+    /// this install would not hold).
     ///
     /// # Errors
-    /// [`Error::Config`] for a configured key that is not base64; [`Error::Io`] or
-    /// [`Error::Crypto`] for the file.
-    pub fn load_or_create(&self) -> Result<Vec<u8>, Error> {
-        if let Some(key) = self.load_existing()? {
-            return Ok(key);
+    /// [`Error::Config`] when a key exists already or the vault holds a file; [`Error::Io`]
+    /// or [`Error::Crypto`] for the vault folder or the write.
+    pub fn create(&self, vault_dir: &Path) -> Result<Vec<u8>, Error> {
+        if self.load_existing()?.is_some() {
+            return Err(Error::Config(format!(
+                "a tenant key exists already ({}); a new one is never made over it",
+                if self.configured.trim().is_empty() {
+                    self.file.display().to_string()
+                } else {
+                    "Agent:TenantKey".to_string()
+                }
+            )));
+        }
+        if let Some(file) = first_file(vault_dir)? {
+            return Err(Error::Config(format!(
+                "the legal vault {} holds {}: a new tenant key could not open it; restore the key that sealed it",
+                vault_dir.display(),
+                file.display()
+            )));
         }
         let key = TenantKeyVault::new_key()?;
         if let Some(dir) = self.file.parent() {
@@ -271,10 +293,102 @@ impl TenantKeyStore {
     }
 }
 
+/// Why a store has no key, for the operator and the problem report.
+pub fn missing(file: &Path) -> String {
+    format!(
+        "no tenant key: {} does not exist and Agent:TenantKey is empty. The agent never makes a key on its own; restore the key file (or the escrowed key) and enrol again",
+        file.display()
+    )
+}
+
+/// The first file under `dir` (none when it does not exist).
+fn first_file(dir: &Path) -> Result<Option<std::path::PathBuf>, Error> {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = match std::fs::read_dir(&d) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(Error::io("legal vault", e)),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|e| Error::io("legal vault", e))?;
+            if entry
+                .file_type()
+                .map_err(|e| Error::io("legal vault", e))?
+                .is_dir()
+            {
+                stack.push(entry.path());
+            } else {
+                return Ok(Some(entry.path()));
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::contracts::values::to_base64;
+
+    fn temp(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "arr-key-{tag}-{}-{:016x}",
+            std::process::id(),
+            dl_rand::u64()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_store_never_makes_a_key_on_its_own() {
+        let dir = temp("none");
+        let file = dir.join("agent-tenant-key.bin");
+        let store = TenantKeyStore::new("", file.clone());
+        let e = store.vault().expect_err("no key").to_string();
+        assert!(e.contains("no tenant key"), "{e}");
+        assert!(!file.exists(), "nothing was written");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_key_is_created_only_with_none_and_an_empty_vault() {
+        let dir = temp("create");
+        let file = dir.join("data").join("agent-tenant-key.bin");
+        let vault = dir.join("vault");
+        std::fs::create_dir_all(vault.join("guests")).unwrap();
+        std::fs::write(vault.join("guests").join("a"), b"sealed").unwrap();
+        let e = TenantKeyStore::new("", file.clone())
+            .create(&vault)
+            .expect_err("the vault holds a file")
+            .to_string();
+        assert!(e.contains("legal vault"), "{e}");
+        assert!(!file.exists());
+
+        std::fs::remove_dir_all(&vault).unwrap();
+        let key = TenantKeyStore::new("", file.clone())
+            .create(&vault)
+            .unwrap();
+        let store = TenantKeyStore::new("", file.clone());
+        assert_eq!(
+            store.vault().unwrap().fingerprint(),
+            TenantKeyVault::new(&key).unwrap().fingerprint()
+        );
+        let e = TenantKeyStore::new("", file.clone())
+            .create(&vault)
+            .expect_err("a key exists")
+            .to_string();
+        assert!(e.contains("exists already"), "{e}");
+        let configured = to_base64(&[3u8; 32]);
+        assert!(
+            TenantKeyStore::new(&configured, dir.join("other.bin"))
+                .create(&vault)
+                .is_err(),
+            "a configured key is a key"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn token_round_trips_through_the_stored_form() {

@@ -52,6 +52,8 @@ fn hello_of(v: &Value) -> Option<AgentHello> {
         machine_name: text("machineName").expect("machineName"),
         pms_schema_fingerprint: text("pmsSchemaFingerprint"),
         procedures_report: text("proceduresReport"),
+        recent_problems: Vec::new(),
+        installations: text("installations"),
     })
 }
 

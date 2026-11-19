@@ -39,6 +39,9 @@ pub trait Sink: Send + Sync {
     fn metric(&self, key: &str, value: Value);
     /// A problem report.
     fn report(&self, severity: Severity, code: &str, message: &str, context: Map);
+    /// The cloud answered an authenticated exchange at `unix_seconds` (the supervisor's
+    /// watchdog restarts a link that stays silent while the cloud answers).
+    fn cloud_link_ok(&self, _unix_seconds: u64) {}
 }
 
 /// Counters published as metrics.
@@ -175,6 +178,8 @@ impl Health {
             s.transport_failures = 0;
             s.cloud = None;
         });
+        self.sink
+            .cloud_link_ok(u64::try_from(unix_seconds).unwrap_or(0));
     }
 
     /// A cloud exchange failed with `message` (never secret).
@@ -291,6 +296,8 @@ pub struct RecordingSink {
     pub reports: Mutex<Vec<(String, String)>>,
     /// Last value of each metric.
     pub metrics: Mutex<HashMap<String, Value>>,
+    /// Every [`Sink::cloud_link_ok`] time, in order.
+    pub cloud_links: Mutex<Vec<u64>>,
 }
 
 impl RecordingSink {
@@ -333,6 +340,12 @@ impl Sink for RecordingSink {
         let mut r = self.reports.lock().unwrap_or_else(PoisonError::into_inner);
         r.push((code.into(), message.into()));
     }
+    fn cloud_link_ok(&self, unix_seconds: u64) {
+        self.cloud_links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(unix_seconds);
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +374,8 @@ mod tests {
         assert!(sink.last_state().unwrap().0);
         h.cloud_failed(CloudFailure::ClockSkew, "clock");
         assert_eq!(sink.last_state(), Some((false, "clock".into())));
+        // Only answered exchanges feed the supervisor's link watchdog.
+        assert_eq!(*sink.cloud_links.lock().unwrap(), vec![1, 2]);
         h.publish_metrics();
         assert_eq!(
             sink.metrics.lock().unwrap().get("pms_latency_ms"),

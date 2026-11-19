@@ -1,6 +1,7 @@
-//! Sub-commands the module adds to `dl-agent`: `arrival-enroll` (enrolls the site the way
-//! Install.ps1 does, for an install without the .NET agent).
+//! Sub-commands the module adds to `dl-agent`: `arrival-enroll` (the fresh enrol of a site,
+//! keeping the removed .NET agent's tenant key and PMS connection).
 
 pub mod enroll;
+pub mod files;
 
 pub use enroll::arrival_enroll_tool;

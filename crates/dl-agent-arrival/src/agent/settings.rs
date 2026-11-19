@@ -1,6 +1,7 @@
 //! `AgentOptions`, read in place from the .NET install: `appsettings.json`, then
-//! `appsettings.Production.json` on top, `Agent` section. Keys match case-insensitively and
-//! arrays merge by index, as `Microsoft.Extensions.Configuration` binds them.
+//! `appsettings.Production.json` on top, then `Agent__*` environment variables, `Agent` section.
+//! Keys match case-insensitively and arrays merge by index, as `Microsoft.Extensions.Configuration`
+//! binds them.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,6 +9,7 @@ use std::path::Path;
 
 use dl_json::Value;
 
+use crate::agent::core_sql::PmsSource;
 use crate::contracts::Params;
 use crate::error::Error;
 use crate::stj;
@@ -24,8 +26,11 @@ pub const PRODUCTION_FILE: &str = "appsettings.Production.json";
 pub struct Settings {
     /// `CloudBaseUrl`.
     pub cloud_base_url: String,
-    /// `PmsConnectionString` (ADO form, plain text in the ACL-protected file).
+    /// `PmsConnectionString` (ADO form, plain text in the ACL-protected file), or the core's
+    /// `sql.json` connection once [`crate::agent::core_sql::apply`] took it.
     pub pms_connection_string: String,
+    /// Where `pms_connection_string` came from (not an appsetting).
+    pub pms_source: PmsSource,
     /// `IdentityFile`.
     pub identity_file: String,
     /// `TenantKey` (base64), wins over the key file when set.
@@ -66,6 +71,7 @@ impl Default for Settings {
         Settings {
             cloud_base_url: String::new(),
             pms_connection_string: String::new(),
+            pms_source: PmsSource::AppSettings,
             identity_file: "agent-identity.bin".into(),
             tenant_key: String::new(),
             tenant_key_file: "agent-tenant-key.bin".into(),
@@ -90,6 +96,7 @@ impl fmt::Debug for Settings {
                 "pms_connection_string",
                 &redact(&self.pms_connection_string),
             )
+            .field("pms_source", &self.pms_source)
             .field("identity_file", &self.identity_file)
             .field("tenant_key", &redact(&self.tenant_key))
             .field("tenant_key_file", &self.tenant_key_file)
@@ -130,6 +137,18 @@ impl Flat {
         }
         self.visit(String::new(), &v);
         Ok(())
+    }
+
+    /// Adds environment variables on top, as the host's environment provider does: `__` stands
+    /// for `:`. Only the `Agent` section is taken (`Agent__Watches__0__Operation`).
+    pub fn add_env<I: IntoIterator<Item = (String, String)>>(&mut self, vars: I) {
+        let prefix = format!("{}__", SECTION.to_lowercase());
+        for (name, value) in vars {
+            if name.to_lowercase().starts_with(&prefix) {
+                let path = name.replace("__", ":");
+                self.entries.insert(path.to_lowercase(), (path, value));
+            }
+        }
     }
 
     fn visit(&mut self, path: String, v: &Value) {
@@ -189,7 +208,9 @@ impl Flat {
 }
 
 impl Settings {
-    /// Reads `dir/appsettings.json` and `dir/appsettings.Production.json` (each optional).
+    /// Reads `dir/appsettings.json` and `dir/appsettings.Production.json` (each optional), then
+    /// this process's `Agent__*` environment variables (names or values that are not Unicode are
+    /// left out, as no .NET host could have read them either).
     ///
     /// # Errors
     /// [`Error::Io`] for an unreadable file, [`Error::Config`] for invalid JSON or values.
@@ -207,6 +228,10 @@ impl Settings {
                 Err(e) => return Err(Error::io(file, e)),
             }
         }
+        flat.add_env(
+            std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
+        );
         Settings::bind(&flat)
     }
 
@@ -319,6 +344,40 @@ mod tests {
         assert_eq!(s.snapshot_capacity, 2000);
         let dbg = format!("{s:?}");
         assert!(!dbg.contains("SMILE_FO"), "{dbg}");
+    }
+
+    #[test]
+    fn agent_environment_variables_override_both_files() {
+        let mut flat = Flat::new();
+        flat.add_json("a", SHIPPED).unwrap();
+        flat.add_env([
+            (
+                "AGENT__CloudBaseUrl".to_string(),
+                "https://env.example".to_string(),
+            ),
+            ("Agent__MaxConcurrency".to_string(), "8".to_string()),
+            (
+                "Agent__Watches__0__IntervalSeconds".to_string(),
+                "60".to_string(),
+            ),
+            (
+                "Agent__Watches__1__Operation".to_string(),
+                "hotel.info".to_string(),
+            ),
+            (
+                "Logging__LogLevel__Default".to_string(),
+                "Trace".to_string(),
+            ),
+            ("AgentX__CloudBaseUrl".to_string(), "https://no".to_string()),
+        ]);
+        let s = Settings::bind(&flat).unwrap();
+        assert_eq!(s.cloud_base_url, "https://env.example");
+        assert_eq!(s.max_concurrency, 8);
+        assert_eq!(s.watches.len(), 2);
+        assert_eq!(s.watches[0].operation, "dashboard.fo-command-center");
+        assert_eq!(s.watches[0].interval_seconds, 60);
+        assert_eq!(s.watches[1].operation, "hotel.info");
+        assert_eq!(flat.get("Logging:LogLevel:Default"), Some("Information"));
     }
 
     #[test]
