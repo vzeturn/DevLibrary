@@ -150,6 +150,9 @@ pub fn start_hub(
         .map_err(|e| Box::new(e.to_exception()))?;
     let mut options = ConnectOptions::new(hub_url(cloud_url));
     options.negotiate = false;
+    options.http = Some(Arc::new(
+        dl_http::Client::with_options(hub_client_options()),
+    ));
     // The .NET client (not in a browser) sends the token only as the upgrade's
     // `Authorization` header; `ConnectOptions::access_token` would also put it in the
     // URL query.
@@ -163,6 +166,15 @@ pub fn start_hub(
         }
         Box::new(connect_exception(&err))
     })
+}
+
+/// The HTTP client options of the order hub connection: the signalr defaults with the
+/// proxy of every other PDA cloud call ([`crate::transport::http::proxy`]).
+pub fn hub_client_options() -> dl_http::ClientOptions {
+    dl_http::ClientOptions {
+        proxy: crate::transport::http::proxy(),
+        ..dl_http::ClientOptions::default()
+    }
 }
 
 /// Acks through the live hub connection (`HubLink`).
@@ -578,4 +590,16 @@ pub fn services(
         deps,
         s.retry.clone(),
     ))])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_order_hub_uses_the_cloud_calls_proxy() {
+        let o = hub_client_options();
+        assert_eq!(o.proxy, crate::transport::http::proxy());
+        assert_eq!(o.timeout, dl_http::ClientOptions::default().timeout);
+    }
 }

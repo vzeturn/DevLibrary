@@ -4,9 +4,11 @@
 //!
 //! Over `dl_http` with the OS TLS stack. Settings of the C# handler kept: connect timeout
 //! 20 s, the caller's overall timeout (2 min for the service), no `User-Agent`, no
-//! decompression. The proxy comes from `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` (the C#
-//! handler uses the WinINet system proxy). Request bodies are buffered: a file upload is
-//! read into memory on every attempt instead of streamed.
+//! decompression. The proxy is the one dl-agent chose for the process ([`proxy`]:
+//! `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`, then WinHTTP, then the Internet Options), the
+//! closest match to the C# handler's system proxy (WPAD/PAC scripts and integrated proxy
+//! authentication are not followed). Request bodies are buffered: a file upload is read
+//! into memory on every attempt instead of streamed.
 
 use super::Error;
 use super::retry::{RetryPolicy, is_transient, parse_retry_after};
@@ -71,6 +73,14 @@ impl SyncResponse {
     }
 }
 
+/// The proxy of every PDA cloud call (HTTP, the command WebSocket, the order hub): the
+/// one dl-agent chose for this process (`dl_agent::proxy::current`), as the C# handler
+/// used the machine's proxy (`WebRequest.GetSystemWebProxy`) rather than only the
+/// environment.
+pub fn proxy() -> Proxy {
+    dl_agent::proxy::current().proxy.clone()
+}
+
 /// `SyncHttpClient.CreateHandler`: the client options of every cloud call with an
 /// overall `timeout`.
 pub fn client_options(timeout: Duration) -> ClientOptions {
@@ -79,7 +89,7 @@ pub fn client_options(timeout: Duration) -> ClientOptions {
         connect_timeout: Some(CONNECT_TIMEOUT),
         // HttpClient.MaxResponseContentBufferSize.
         max_body: i32::MAX as usize,
-        proxy: Proxy::FromEnv,
+        proxy: proxy(),
         user_agent: None,
         max_redirects: 0,
         danger_accept_invalid_certs: false,
@@ -474,3 +484,16 @@ impl std::fmt::Display for RequestFailure {
 }
 
 impl std::error::Error for RequestFailure {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cloud_calls_use_the_proxy_dl_agent_chose() {
+        let o = client_options(Duration::from_secs(5));
+        assert_eq!(o.proxy, dl_agent::proxy::current().proxy);
+        assert_eq!(o.timeout, Some(Duration::from_secs(5)));
+        assert_eq!(o.connect_timeout, Some(CONNECT_TIMEOUT));
+    }
+}

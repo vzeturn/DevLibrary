@@ -65,16 +65,22 @@ impl Module for PdaSyncModule {
 
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
         let host = settings::host_context(ctx.config(), ctx.data_dir()).map_err(Error::Config)?;
-        // The health record and the cloud's runtime settings carry no secret; the rolling
-        // logs, `secrets/` and the SQLite queues stay out of the bundle (the core takes
-        // single files, not a rolling log folder: plan §6 H2).
-        ctx.add_diagnostic_file(host.paths.status_file());
-        ctx.add_diagnostic_file(host.paths.runtime_config_file());
+        name_diagnostics(ctx, &host);
         let Some(identity) = wait_for_identity(ctx, &host)? else {
             return Ok(());
         };
         run_enrolled(ctx, host, identity)
     }
+}
+
+/// Names the module's files for the core diagnostics bundle, as the C# `diag` verb took
+/// them (`DiagnosticBundle.Export`): the health record, the cloud's runtime settings and
+/// the newest JSON-lines logs of `logs/` (service and tool runs; the core scrubs them
+/// again). `agent.json`, `secrets/` and the SQLite queues stay out.
+fn name_diagnostics(ctx: &ModuleContext, host: &HostContext) {
+    ctx.add_diagnostic_file(host.paths.status_file());
+    ctx.add_diagnostic_file(host.paths.runtime_config_file());
+    ctx.add_diagnostic_folder(host.paths.logs_dir());
 }
 
 /// Loads `agent.json`, staying degraded until it exists; `None` when stopped.
@@ -259,4 +265,25 @@ fn describe(s: &AgentStatus) -> String {
         out.push_str(h);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dl_json::Value;
+
+    #[test]
+    fn the_diagnostics_bundle_gets_status_runtime_config_and_the_log_folder() {
+        let dir = std::env::temp_dir().join(format!("pda-sync-diag-{}", dl_rand::u64()));
+        let ctx = ModuleContext::standalone(NAME, Value::Null, dir.clone());
+        let host = settings::host_context(ctx.config(), ctx.data_dir()).unwrap();
+        name_diagnostics(&ctx, &host);
+        let status = ctx.status();
+        assert_eq!(
+            status.diagnostic_files,
+            [host.paths.status_file(), host.paths.runtime_config_file()]
+        );
+        assert_eq!(status.diagnostic_folders, [host.paths.logs_dir()]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -16,6 +16,21 @@ pub fn normalize_lang(lang: &str) -> &'static str {
     }
 }
 
+/// The SAPI `Language` attributes (hex LCIDs) tried in order to pick a voice. The Go
+/// agent took the first installed voice of any culture of the language
+/// (`TwoLetterISOLanguageName`), so English tries US and UK first, then every other
+/// English LCID Windows ships voices for; Vietnamese is `42A`.
+pub fn voice_lcids(lang: &str) -> &'static [&'static str] {
+    if normalize_lang(lang) == LANG_EN {
+        &[
+            "409", "809", "C09", "1009", "1409", "1809", "1C09", "2009", "2409", "2809", "2C09",
+            "3009", "3409", "4009", "4409", "4809",
+        ]
+    } else {
+        &["42A"]
+    }
+}
+
 fn phrase_format(lang: &str, kind: &str) -> Option<&'static str> {
     Some(match (lang, kind) {
         (LANG_EN, "service_bill") => "Table %s requests the bill",
@@ -44,6 +59,19 @@ pub fn build_phrase(kind: &str, table: &str, lang: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voices_of_every_english_culture_are_tried_us_and_uk_first() {
+        let en = voice_lcids("en");
+        assert_eq!(en[..2], ["409", "809"]);
+        for lcid in en {
+            let v = u32::from_str_radix(lcid, 16).unwrap();
+            assert_eq!(v & 0x3ff, 0x09, "{lcid} is not English");
+        }
+        assert!(en.contains(&"C09") && en.contains(&"4009"));
+        assert_eq!(voice_lcids("vi"), ["42A"]);
+        assert_eq!(voice_lcids(""), ["42A"]);
+    }
 
     #[test]
     fn phrases_match_go() {
