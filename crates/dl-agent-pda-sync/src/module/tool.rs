@@ -31,6 +31,9 @@ use crate::util::console::{Stderr, Stdout};
 pub const ENROLL: &str = "pda-enroll";
 /// The grants sub-command name.
 pub const GRANTS: &str = "pda-grants";
+/// Where `pda-enroll` reads the one-time code when `--code` is absent, so an installer can
+/// keep it out of the process list.
+pub const CODE_ENV: &str = "DL_AGENT_PDA_CODE";
 
 /// `dl-agent pda-enroll`, to register with `App::tool`.
 pub fn pda_enroll_tool() -> Tool {
@@ -72,7 +75,8 @@ fn enroll_grammar(cmd: Command) -> Command {
         .arg(
             Arg::option("code")
                 .required()
-                .help("The one-time enrol code from the PDA admin"),
+                .env(CODE_ENV)
+                .help("The one-time enrol code from the PDA admin (default: DL_AGENT_PDA_CODE)"),
         )
         .arg(
             Arg::option("url")
@@ -180,6 +184,27 @@ mod tests {
         assert_eq!(a.database.as_deref(), Some("SMILE_POS"));
         assert_eq!(a.sql_instance, None);
         assert_eq!(crate::hosting::enroll::sql_auth(&o), "windows");
+    }
+
+    #[test]
+    fn the_code_may_come_from_the_environment() {
+        let tool = pda_enroll_tool();
+        let cmd = (tool.grammar)(Command::new(tool.name));
+        let m = cmd
+            .parse_from_with_env([ENROLL, "--url", "https://site.example"], |k| {
+                (k == CODE_ENV).then(|| "XYZ-789".to_string())
+            })
+            .unwrap_or_else(|e| panic!("{e}"));
+        let a = crate::hosting::enroll::args_from(&options_from(&m, true));
+        assert_eq!(a.code.as_deref(), Some("XYZ-789"));
+        // The command line still wins.
+        let m = cmd
+            .parse_from_with_env(
+                [ENROLL, "--code", "ARG-1", "--url", "https://x.example"],
+                |_| Some("ENV-2".to_string()),
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(m.value("code"), Some("ARG-1"));
     }
 
     #[test]
