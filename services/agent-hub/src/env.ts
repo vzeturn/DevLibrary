@@ -3,6 +3,8 @@ export interface Env {
   ARTIFACTS: R2Bucket;
   /** Bearer token for /admin (secret). */
   ADMIN_TOKEN: string;
+  /** Base64 AES-256 key (32 bytes, secret) sealing bench bundles at rest; bench is off without it. */
+  BENCH_KEY?: string;
   HEARTBEAT_SECONDS?: string;
   GATE_MIN_AGENTS?: string;
   GATE_SOAK_HOURS?: string;
