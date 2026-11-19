@@ -9,6 +9,7 @@ use dl_uuid::Uuid;
 
 use super::payload::LinkFolioPayload;
 use super::plan::{BookingPlan, PmsWriter, ProfileRequest, WriteError, Written};
+use super::preflight::PreflightInputs;
 use super::result::Ack;
 use super::room_diff::ExistingFolio;
 use super::travel_agent::TravelAgent;
@@ -112,6 +113,10 @@ pub struct Pms {
     pub fail_profile: Mutex<Option<i32>>,
     pub refuse: Mutex<Option<String>>,
     pub not_ported: Mutex<bool>,
+    /// What `read_extra_bed_inputs` answers (`None`: `FOLD_LEGACY`).
+    pub bed_inputs: Mutex<Option<PreflightInputs>>,
+    /// The last plan `write_booking` received.
+    pub last_plan: Mutex<Option<BookingPlan>>,
 }
 
 impl Pms {
@@ -142,9 +147,22 @@ impl PmsWriter for Pms {
         self.call(format!("lookup_nums {}", nums.len()));
         Ok(Vec::new())
     }
+    fn read_extra_bed_inputs(
+        &self,
+        fingerprint: Option<&str>,
+        code: Option<&str>,
+    ) -> Result<Option<PreflightInputs>, WriteError> {
+        self.call(format!(
+            "lookup_bed {} {}",
+            fingerprint.unwrap_or("-"),
+            code.unwrap_or("-")
+        ));
+        Ok(self.bed_inputs.lock().unwrap().clone())
+    }
     fn write_booking(&self, plan: &BookingPlan) -> Result<Written, WriteError> {
+        *self.last_plan.lock().unwrap() = Some(plan.clone());
         if *self.not_ported.lock().unwrap() {
-            return Err(WriteError::NotPorted("SMILE_SPECIAL extra beds"));
+            return Err(WriteError::NotPorted("an unported write"));
         }
         if let Some(code) = self.refuse.lock().unwrap().clone() {
             return Err(WriteError::Refused {

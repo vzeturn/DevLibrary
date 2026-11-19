@@ -235,7 +235,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         },
         agent_version(),
     );
-    if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker) {
+    if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker, &shared) {
         sync = sync.with_dispatcher(d);
     }
     let s = stop.clone();
@@ -272,6 +272,7 @@ fn dispatcher(
     smile: Option<Arc<TdsSmile>>,
     hub: &Arc<dyn HubApi>,
     tracker: &Arc<Tracker>,
+    shared: &Shared,
 ) -> Option<Arc<Dispatcher>> {
     if settings.read_only {
         return None;
@@ -290,6 +291,8 @@ fn dispatcher(
         default_breakfast_code: w.default_breakfast_code.clone(),
         extra_bed_mode: w.extra_bed_mode.clone(),
         extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+        hub_special_code: shared.hub_special_code.clone(),
+        smile_hotel_id: w.smile_hotel_id.clone(),
     });
     let gate = Arc::new(WriteGate::new(hub.clone(), tracker.clone()));
     log::warn(

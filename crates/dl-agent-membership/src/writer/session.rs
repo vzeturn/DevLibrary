@@ -115,6 +115,14 @@ impl Rec {
         }
     }
 
+    /// The first column as a date (an unnamed scalar such as `SELECT TOP (1) HotelDate`).
+    pub fn scalar_date(&self) -> Result<Option<Date>, SmileError> {
+        match self.0.first() {
+            None => Ok(None),
+            Some((_, v)) => Rec(vec![("_".to_owned(), v.clone())]).opt_date("_"),
+        }
+    }
+
     /// A nullable flag (`bit`, or an integer: non-zero is true).
     pub fn opt_bool(&self, col: &'static str) -> Result<Option<bool>, SmileError> {
         Ok(match self.value(col)? {

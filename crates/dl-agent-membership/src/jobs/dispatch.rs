@@ -20,10 +20,11 @@ pub use super::plan::{
 use super::plan::{ProfileFailure, classify, profile_unavailable, rule_string, summary};
 
 use super::JobAction;
-use super::beds::{BedDecision, decide_fold};
+use super::beds::{BedDecision, MODE_FOLD_LEGACY};
 use super::gate::{WriteGate, denied, is_gated};
 use super::guest::{self, split_full_name};
 use super::payload::{JobPayload, Room, parse_link_folio, parse_payload};
+use super::preflight::{PreflightInputs, decide_extra_bed};
 use super::result::{Ack, EXTRA_BED_LOCKED, FOLIO_NOT_FOUND, UNKNOWN};
 use super::room_diff::{DiffKind, ExistingFolio, diff};
 use super::travel_agent::TravelAgent;
@@ -200,8 +201,18 @@ impl Dispatcher {
         }
     }
 
-    fn decide(&self, room: &Room) -> BedDecision {
-        decide_fold(room, &self.settings.extra_bed_mode)
+    /// `Decide`: `FOLD_LEGACY` without inputs, whatever the mode (the map and the diff
+    /// only; the writer decides with the configured mode).
+    fn decide(room: &Room, inputs: Option<&PreflightInputs>) -> BedDecision {
+        decide_extra_bed(room, inputs, MODE_FOLD_LEGACY)
+    }
+
+    /// `ReadExtraBedInputsAsync` with the payload's fingerprint and special code.
+    fn bed_inputs(&self, p: &JobPayload) -> Result<Option<PreflightInputs>, WriteError> {
+        self.pms.read_extra_bed_inputs(
+            p.extra_bed_verified_fingerprint.as_deref(),
+            p.extra_bed_special_code.as_deref(),
+        )
     }
 
     fn create(&self, job: &Job, p: &JobPayload) -> Result<Ack, WriteError> {
@@ -211,6 +222,7 @@ impl Dispatcher {
             ..self.context(job, p)
         };
         let profile_number = self.profile_number(p)?;
+        let bed_inputs = self.bed_inputs(p)?;
         let booking = ctx.booking_id;
         let written = self.pms.write_booking(&BookingPlan {
             ctx,
@@ -220,6 +232,7 @@ impl Dispatcher {
             updates: Vec::new(),
             cancels: Vec::new(),
             note_folios: None,
+            extra_bed: bed_inputs.clone(),
         })?;
         let maps = written
             .created
@@ -230,6 +243,7 @@ impl Dispatcher {
                     *folio,
                     None,
                     p.rooms.iter().find(|r| r.room_item_id == *room),
+                    bed_inputs.as_ref(),
                 )
             })
             .collect::<Vec<_>>();
@@ -252,7 +266,10 @@ impl Dispatcher {
             }
             return self.create(job, p);
         }
-        let result = diff(&existing, &p.rooms, &|r| self.decide(r));
+        let bed_inputs = self.bed_inputs(p)?;
+        let result = diff(&existing, &p.rooms, &|r| {
+            Self::decide(r, bed_inputs.as_ref())
+        });
         if result.requires_manual {
             let reason = result.manual_reason.as_deref().unwrap_or("folio đã khoá");
             log::warn(
@@ -306,6 +323,7 @@ impl Dispatcher {
                     .filter_map(|d| d.existing.as_ref().map(|e| e.folio_num))
                     .collect()
             }),
+            extra_bed: bed_inputs.clone(),
         };
         let written = self.pms.write_booking(&plan)?;
         let mut maps: Vec<_> = written
@@ -317,17 +335,24 @@ impl Dispatcher {
                     *folio,
                     None,
                     p.rooms.iter().find(|r| r.room_item_id == *room),
+                    bed_inputs.as_ref(),
                 )
             })
             .collect();
         for d in result.of(DiffKind::Update) {
             if let (Some(e), Some(room)) = (&d.existing, &d.payload) {
-                maps.push(self.folio_map(d.room_item_id, e.folio_num, Some(e), Some(room)));
+                maps.push(self.folio_map(
+                    d.room_item_id,
+                    e.folio_num,
+                    Some(e),
+                    Some(room),
+                    bed_inputs.as_ref(),
+                ));
             }
         }
         for d in result.of(DiffKind::Unchanged) {
             if let Some(e) = d.existing.as_ref().filter(|e| e.beds.is_some()) {
-                maps.push(self.folio_map(d.room_item_id, e.folio_num, Some(e), None));
+                maps.push(self.folio_map(d.room_item_id, e.folio_num, Some(e), None, None));
             }
         }
         log::info(
@@ -640,9 +665,10 @@ impl Dispatcher {
         folio_num: Decimal,
         before: Option<&ExistingFolio>,
         written: Option<&Room>,
+        inputs: Option<&PreflightInputs>,
     ) -> super::result::RoomFolioMap {
         let beds = before.and_then(|b| b.beds.as_ref());
-        let decision = written.map(|r| self.decide(r));
+        let decision = written.map(|r| Self::decide(r, inputs));
         super::result::RoomFolioMap {
             extra_bed_written: decision.as_ref().map(|d| d.extra_bed_to_write),
             extra_bed_found: beds.and_then(|b| b.extra_bed),
@@ -659,3 +685,7 @@ impl Dispatcher {
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dispatch_bed_tests.rs"]
+mod bed_tests;

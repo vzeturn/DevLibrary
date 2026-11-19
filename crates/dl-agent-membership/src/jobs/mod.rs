@@ -5,6 +5,7 @@
 //! parses the payload, then hands SMILE writes to a [`dispatch::PmsWriter`]; every outcome
 //! becomes an [`result::Ack`] carrying the delivery's lease (`Attempts`).
 
+pub mod bed_terms;
 pub mod beds;
 pub mod dispatch;
 #[cfg(test)]
@@ -13,6 +14,7 @@ pub mod gate;
 pub mod guest;
 pub mod payload;
 pub mod plan;
+pub mod preflight;
 pub mod result;
 pub mod room_diff;
 pub mod travel_agent;
