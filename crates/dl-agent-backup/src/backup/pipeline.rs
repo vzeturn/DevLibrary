@@ -8,6 +8,9 @@
 //!   [`Error::RecoveryModel`].
 //! - When the server is remote and the agent cannot see the file it wrote, the error says
 //!   so instead of a bare "stat" failure.
+//! - The copy sent to a destination is sealed under the tenant's backup data key
+//!   ([`crate::crypto::envelope`]) when the hub serves one; the key id goes into the result
+//!   and the report.
 
 use std::fs::File;
 use std::io::Read;
@@ -20,16 +23,30 @@ use dl_tds::CancelToken;
 
 use super::{BackupResult, BackupType, Params, Steps, file_safe};
 use crate::Error;
+use crate::crypto::envelope::{self, BackupKeys, NoKeys};
 use crate::sql::{BackupOptions, Connector, SqlConn, quote};
-use crate::upload::Uploaders;
+use crate::upload::{Destination, Uploaders};
 
 /// Go's fallback when the instance's backup directory cannot be read.
 pub const FALLBACK_DIR: &str = "C:\\Windows\\Temp";
 
-/// Runs one backup. `steps` gets every step's final status, also on failure.
+/// [`run_with`] without backup keys: the destination gets the plaintext `.bak`, as before.
 pub fn run(
     sql: &dyn Connector,
     uploaders: &dyn Uploaders,
+    p: &Params,
+    cancel: &CancelToken,
+    steps: &mut Steps,
+) -> Result<BackupResult, Error> {
+    run_with(sql, uploaders, &NoKeys, p, cancel, steps)
+}
+
+/// Runs one backup. `steps` gets every step's final status, also on failure. With a
+/// destination, the uploaded copy is sealed under `keys.current()` when there is one.
+pub fn run_with(
+    sql: &dyn Connector,
+    uploaders: &dyn Uploaders,
+    keys: &dyn BackupKeys,
     p: &Params,
     cancel: &CancelToken,
     steps: &mut Steps,
@@ -111,37 +128,13 @@ pub fn run(
         Some(t0),
     );
 
-    let t0 = Instant::now();
-    let mut cloud_file_path = String::new();
-    match &p.destination {
-        Some(dest) => {
-            steps.set(
-                "upload",
-                "running",
-                format!("Uploading directly to {}", dest.provider),
-                None,
-            );
-            let sent = uploaders
-                .open(dest)
-                .and_then(|u| u.upload(Path::new(&path), cancel, &mut |_, _| {}));
-            match sent {
-                Ok(cloud) => {
-                    steps.set(
-                        "upload",
-                        "done",
-                        format!("Upload complete: {cloud}"),
-                        Some(t0),
-                    );
-                    cloud_file_path = cloud;
-                }
-                Err(e) => {
-                    steps.set("upload", "error", e.to_string(), Some(t0));
-                    return Err(e);
-                }
-            }
+    let (cloud_file_path, key_id) = match &p.destination {
+        Some(dest) => upload(uploaders, keys, dest, &path, cancel, steps)?,
+        None => {
+            steps.set("upload", "skipped", "No cloud destination configured", None);
+            (String::new(), String::new())
         }
-        None => steps.set("upload", "skipped", "No cloud destination configured", None),
-    }
+    };
 
     let t0 = Instant::now();
     if cloud_file_path.is_empty() {
@@ -165,7 +158,91 @@ pub fn run(
         bytes,
         checksum,
         options: options.reason,
+        key_id,
     })
+}
+
+/// Seals the file under the tenant key (when the hub has one) and uploads it. Returns the
+/// cloud path and the key id (empty when the copy went up unencrypted).
+fn upload(
+    uploaders: &dyn Uploaders,
+    keys: &dyn BackupKeys,
+    dest: &Destination,
+    path: &str,
+    cancel: &CancelToken,
+    steps: &mut Steps,
+) -> Result<(String, String), Error> {
+    let t0 = Instant::now();
+    steps.set("encrypt", "running", "Fetching the tenant backup key", None);
+    let key = match keys.current() {
+        Ok(k) => k,
+        Err(e) => {
+            steps.set("encrypt", "error", e.to_string(), Some(t0));
+            return Err(e);
+        }
+    };
+    let (file, key_id) = match key {
+        Some(k) => {
+            let sealed = format!("{path}.dlbk");
+            if let Err(e) = envelope::seal_file(Path::new(path), Path::new(&sealed), &k, cancel) {
+                steps.set("encrypt", "error", e.to_string(), Some(t0));
+                return Err(e);
+            }
+            steps.set(
+                "encrypt",
+                "done",
+                format!("Encrypted with tenant backup key {}", k.id),
+                Some(t0),
+            );
+            (sealed, k.id)
+        }
+        None => {
+            steps.set(
+                "encrypt",
+                "skipped",
+                "The hub serves no tenant backup key; uploading unencrypted",
+                None,
+            );
+            (path.to_owned(), String::new())
+        }
+    };
+
+    let t0 = Instant::now();
+    steps.set(
+        "upload",
+        "running",
+        format!("Uploading directly to {}", dest.provider),
+        None,
+    );
+    let sent = uploaders
+        .open(dest)
+        .and_then(|u| u.upload(Path::new(&file), cancel, &mut |_, _| {}));
+    if !key_id.is_empty()
+        && let Err(e) = std::fs::remove_file(&file)
+    {
+        // The sealed copy is only a staging file; a leftover does not fail the backup.
+        steps.set(
+            "cleanup-sealed",
+            "error",
+            format!("remove {file}: {e}"),
+            None,
+        );
+    }
+    match sent {
+        Ok(cloud) => {
+            steps.set(
+                "upload",
+                "done",
+                format!("Upload complete: {cloud}"),
+                Some(t0),
+            );
+            Ok((cloud, key_id))
+        }
+        Err(e) => {
+            steps.set("upload", "error", e.to_string(), Some(t0));
+            Err(e)
+        }
+    }
 }
 
 /// Picks the file path and the `WITH` options, and refuses a log backup in SIMPLE recovery.

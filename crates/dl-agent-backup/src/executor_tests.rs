@@ -47,7 +47,9 @@ fn a_successful_job_is_recorded_counted_and_reported() {
     let names: Vec<String> = steps(r).into_iter().map(|s| s.0).collect();
     assert_eq!(
         names,
-        ["connect", "backup", "checksum", "upload", "cleanup"]
+        [
+            "connect", "backup", "checksum", "encrypt", "upload", "cleanup"
+        ]
     );
     assert!(rig.codes().is_empty());
 }

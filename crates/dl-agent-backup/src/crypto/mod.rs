@@ -8,6 +8,7 @@
 //! own code (`tests/fixtures/credentials.json`).
 
 pub mod aes;
+pub mod envelope;
 pub mod gcm;
 
 use dl_encoding::base64::URL_SAFE_NO_PAD;
