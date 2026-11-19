@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-einvoice: per-tenant collect profile from the hub config (`collect_profile.pos_item_name`,
+  default `till`); `iname1` takes POS line names from `ItemDef.IName1` (RT-0204 port, opt-in). Golden
+  drift guard against MM-EINVOICE (`$MMEI_REPO`).
 - Update lanes (docs/decisions/0001-update-lanes.md, PROTOCOL.md §5.1, §5.2, §6.4). Canary is
   the fast lane for test machines: the hub answers canary heartbeats with a 15 s interval
   (`CANARY_HEARTBEAT_SECONDS`), 5 s while an update is on probation, and dl-agent on canary
@@ -239,6 +242,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent-einvoice: keep `origin_folio_number` and `number_cover` on swapped POS-charge lines (port of
+  MM-EINVOICE RT-0215); golden vectors refreshed.
 - `dl-agent-membership` reports the released dl-agent version to the Membership hub
   (heartbeat, enroll, User-Agent) instead of the crate's own 0.2.1.
 - `dl-rand`: Windows 7 builds (`*-win7-windows-*`) take entropy from `RtlGenRandom`;

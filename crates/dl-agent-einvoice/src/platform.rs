@@ -3,6 +3,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::profile::CollectProfile;
+
 use dl_http::{ClientOptions, Method, Request, Url};
 use dl_json::Value;
 use dl_time::OffsetDateTime;
@@ -53,6 +55,8 @@ pub struct HubConfig {
     pub collect_sources: String,
     /// Fold tax into the service charge when recomputing (legacy sites).
     pub recalc_tax_into_sc: bool,
+    /// Per-tenant collect choices (`collect_profile`); every key defaults to the old behaviour.
+    pub collect_profile: CollectProfile,
 }
 
 /// One per-item outcome of `/invoices:push`.
@@ -282,6 +286,7 @@ impl Platform {
                 .get("recalc_tax_into_sc")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            collect_profile: CollectProfile::parse(v.get("collect_profile")),
         })
     }
 

@@ -424,6 +424,9 @@ fn enrich_pos_charges(
             }
             if let Some(fo) = &first.origin {
                 org.folio_link = fo.folio_link.clone();
+                // Keep the folio the charge posted to (printed as FolioNo).
+                org.origin_folio_number = fo.origin_folio_number.clone();
+                org.number_cover = fo.number_cover;
             }
             ln.origin = Some(org);
             repl.push(ln);
