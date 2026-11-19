@@ -1,7 +1,8 @@
 //! Which agent copies this machine holds (`AgentHello.Installations`): Windows services whose
 //! binary is the old .NET agent or dl-agent, and those processes running now. After the
 //! rollout (old agents removed, dl-agent enrolled fresh) it reads
-//! `services=1 [dl-agent -> ...] processes=MM.Arrival.Agent.exe:0 dl-agent.exe:1`.
+//! `services=1 [dl-agent -> ...] processes=1`: the old .NET agent's format, which the cloud parses
+//! (`processes` counts both agents' processes, so an old agent still running reads as 2).
 //! Processes come from `dl_winsvc::process` (one system call, no `tasklist` to start or parse).
 
 use dl_winsvc::process::{self, Process};
@@ -21,11 +22,10 @@ pub fn summarize(services: &[(String, String)], processes: &[Process]) -> String
         .map(|(n, p)| format!("{n} -> {}", p.trim()))
         .collect();
     let text = format!(
-        "services={} [{}] processes={OLD_BINARY}:{} {BINARY}:{}",
+        "services={} [{}] processes={}",
         services.len(),
         list.join("; "),
-        count(OLD_BINARY),
-        count(BINARY)
+        count(OLD_BINARY) + count(BINARY)
     );
     text.chars().take(MAX_LENGTH).collect()
 }
@@ -124,7 +124,7 @@ mod tests {
         let text = summarize(&s, &p);
         assert_eq!(
             text,
-            "services=1 [dl-agent -> \"C:\\Program Files\\DevLibrary\\dl-agent.exe\" service] processes=MM.Arrival.Agent.exe:1 dl-agent.exe:1"
+            "services=1 [dl-agent -> \"C:\\Program Files\\DevLibrary\\dl-agent.exe\" service] processes=2"
         );
         assert!(old_agent_left(&s, &p));
         assert!(!old_agent_left(&s, &p[..2]));

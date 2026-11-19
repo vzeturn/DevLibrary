@@ -43,6 +43,20 @@ pub const SERVER_RESTARTS: [(&str, &[u32]); 3] = [
     ("Microsoft-Windows-Kernel-Power", &[41]),
 ];
 
+/// Service exit code of a restart the agent asks for after installing an update
+/// (`dl_agent::update::RESTART_EXIT_CODE`): SCM logs it as error 7024, but it is expected.
+pub const RESTART_EXIT: &str = "75";
+
+/// Whether an SCM event is the service ending with the update-restart exit code.
+fn is_update_restart(e: &RawEvent) -> bool {
+    e.id == 7024
+        && e.message
+            .trim_end_matches(['.', ' ', '\r', '\n'])
+            .rsplit([' ', '%', ':'])
+            .next()
+            .is_some_and(|code| code == RESTART_EXIT)
+}
+
 /// One event as `wevtutil` rendered it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawEvent {
@@ -260,8 +274,15 @@ pub fn classify(log: &str, e: &RawEvent, own_before: &str) -> Option<Imported> {
         }),
         // Every state change of an agent's service: "entered the stopped state" answers
         // "when did it stop", and the removal of the old agent shows here too.
-        "System" if e.provider == SCM => mentions(&e.message)
-            .then(|| make(name, format!("{SCM} (Windows log)"), condense(&e.message))),
+        "System" if e.provider == SCM => mentions(&e.message).then(|| {
+            // Exit 75 is the agent restarting itself into a new version, not a failure.
+            let level = if is_update_restart(e) {
+                "Information"
+            } else {
+                name
+            };
+            make(level, format!("{SCM} (Windows log)"), condense(&e.message))
+        }),
         "System" => SERVER_RESTARTS
             .iter()
             .any(|(p, ids)| *p == e.provider && ids.contains(&e.id))
@@ -443,6 +464,37 @@ mod tests {
         };
         assert!(classify("Application", &own, before).is_some());
         assert!(classify("Application", &own, "2026-11-18T00:00:00.0000000Z").is_none());
+    }
+
+    #[test]
+    fn the_update_restart_exit_is_not_a_problem() {
+        let ev = |message: &str| RawEvent {
+            provider: SCM.into(),
+            id: 7024,
+            level: 2,
+            at: "2026-11-19T13:06:44.6804764Z".into(),
+            message: message.into(),
+        };
+        let before = "2026-11-19T00:00:00.0000000Z";
+        for m in [
+            "The DevLibrary Agent service terminated with the following service-specific error: %%75",
+            "The DevLibrary Agent service terminated with the following service-specific error: 75.",
+        ] {
+            assert_eq!(
+                classify("System", &ev(m), before).unwrap().level,
+                "Information"
+            );
+        }
+        let real = "The DevLibrary Agent service terminated with the following service-specific error: %%1";
+        assert_eq!(
+            classify("System", &ev(real), before).unwrap().level,
+            "Error"
+        );
+        let other = "The DevLibrary Agent service terminated with the following service-specific error: %%175";
+        assert_eq!(
+            classify("System", &ev(other), before).unwrap().level,
+            "Error"
+        );
     }
 
     #[test]
