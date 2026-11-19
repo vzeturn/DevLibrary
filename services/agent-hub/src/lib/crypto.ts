@@ -23,6 +23,43 @@ export function fromBase64(text: string): Uint8Array | null {
   }
 }
 
+export function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** URL-safe random token (base64url, no padding) carrying `bytes * 8` bits. */
+export function randomToken(bytes = 32): string {
+  return toBase64(crypto.getRandomValues(new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+const SEALED_PREFIX = 'v1.';
+
+/** Imports a base64 AES-256 key (32 bytes); null when the secret is missing or malformed. */
+export async function importAesKey(secret: string | undefined): Promise<CryptoKey | null> {
+  const raw = secret ? fromBase64(secret.trim()) : null;
+  if (!raw || raw.length !== 32) return null;
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+/** AES-256-GCM with a random 96-bit IV; `aad` binds the ciphertext to its row. Output `v1.<iv>.<ct>`. */
+export async function seal(key: CryptoKey, plain: string, aad: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: encoder.encode(aad) }, key, encoder.encode(plain));
+  return `${SEALED_PREFIX}${toBase64(iv)}.${toBase64(new Uint8Array(ct))}`;
+}
+
+/** Reverses {@link seal}; throws when the text is malformed, the key differs or the AAD does not match. */
+export async function unseal(key: CryptoKey, sealed: string, aad: string): Promise<string> {
+  const parts = sealed.startsWith(SEALED_PREFIX) ? sealed.slice(SEALED_PREFIX.length).split('.') : [];
+  const iv = parts.length === 2 ? fromBase64(parts[0] ?? '') : null;
+  const ct = parts.length === 2 ? fromBase64(parts[1] ?? '') : null;
+  if (!iv || iv.length !== 12 || !ct) throw new Error('sealed value is malformed');
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: encoder.encode(aad) }, key, ct);
+  return new TextDecoder().decode(plain);
+}
+
 /** Compares two secrets in time independent of where they differ (hashes equalise length). */
 export async function constantTimeEqual(a: string, b: string): Promise<boolean> {
   const [ha, hb] = await Promise.all([

@@ -19,7 +19,9 @@ fn main() {
         .tool(dl_agent_pms::pms_enroll_tool())
         .module(dl_agent_pms_device::pms_device_module())
         .module(dl_agent_hotellink::hotellink_module())
-        .tool(dl_agent_hotellink::hl_enroll_tool());
+        .tool(dl_agent_hotellink::hl_enroll_tool())
+        .module(dl_agent_arrival::arrival_module())
+        .tool(dl_agent_arrival::arrival_enroll_tool());
     let app = app.module(backup_module()).tool(backup_enroll_tool());
     std::process::exit(dl_agent::cli::main(app));
 }

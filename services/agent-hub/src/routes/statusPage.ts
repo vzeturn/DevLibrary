@@ -1,8 +1,10 @@
 import type { Env } from '../env';
 import { listReleases } from '../repo/releases';
 import { agentsView } from '../services/admin';
+import { latestSelftestPerAgent } from '../repo/selftest';
 import { listRequirements } from '../repo/sites';
 import { gateStatus } from '../services/releases';
+import type { SelftestCheck, SelftestSummary } from '../services/selftest';
 import { requirementOf, siteReadiness } from '../services/sites';
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -79,6 +81,20 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
     }
   }
 
+  const selftestRows = (await latestSelftestPerAgent(env.DB)).map((r) => {
+    const sum = JSON.parse(r.summary_json) as SelftestSummary;
+    const failed = (JSON.parse(r.checks_json) as SelftestCheck[]).filter((c) => c.status === 'fail');
+    const counts = `<span class="ok">${sum.pass}</span> / <span class="warn">${sum.warn}</span> / <span class="bad">${sum.fail}</span> / <span class="muted">${sum.skip}</span>`;
+    const list = failed.length
+      ? failed
+          .map((c) => `<span class="bad">${esc(c.module)} · ${esc(c.title || c.id)}</span>${c.detail ? `: ${esc(c.detail)}` : ''}${c.remedy ? ` <span class="muted">→ ${esc(c.remedy)}</span>` : ''}`)
+          .join('<br>')
+      : '<span class="muted">—</span>';
+    return `<tr><td>${esc(r.tenant_id)}</td><td>${esc(r.site_id)}</td><td>${esc(r.hostname)}</td>
+      <td>${esc(when(r.received_at, now))} <span class="muted">(${esc(r.trigger)})</span></td><td>${esc(r.agent_version)}</td>
+      <td>${counts}</td><td class="wrapcell">${list}</td></tr>`;
+  });
+
   const empty = (cols: number, text: string): string => `<tr><td colspan="${cols}" class="muted">${text}</td></tr>`;
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent hub</title><style>${STYLE}</style></head>
@@ -92,5 +108,9 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
 <h2>Site sẵn sàng cho sản phẩm</h2><div class="wrap"><table><thead><tr><th>Sản phẩm</th><th>Khách hàng</th><th>Chi nhánh</th>
 <th>Máy</th><th>Khảo sát</th><th>Kết quả</th></tr></thead>
 <tbody>${siteRows.join('') || empty(6, 'Chưa sản phẩm nào đặt yêu cầu cho site.')}</tbody></table></div>
+<h2>Tự kiểm tra</h2><p class="sub">Lần chạy gần nhất của mỗi agent: đạt / cảnh báo / lỗi / bỏ qua.</p>
+<div class="wrap"><table><thead><tr><th>Khách hàng</th><th>Chi nhánh</th><th>Máy</th><th>Lần chạy</th><th>Phiên bản</th>
+<th>Kết quả</th><th>Mục lỗi</th></tr></thead>
+<tbody>${selftestRows.join('') || empty(7, 'Chưa agent nào gửi kết quả tự kiểm tra.')}</tbody></table></div>
 </main></body></html>`;
 }

@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { nowSeconds, type AppEnv } from '../env';
-import { commandResultBody, enrollBody, heartbeatBody, reportsBody } from '../domain/schemas';
+import { commandResultBody, enrollBody, heartbeatBody, MAX_SELFTEST_BYTES, reportsBody, selftestBody } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { requireSignedAgent } from '../middleware/signature';
 import { commandResult, heartbeat, reports } from '../services/agentApi';
 import { enroll } from '../services/enroll';
 import { manifestText } from '../services/releases';
+import { storeSelftest } from '../services/selftest';
 
 const CHANNELS = new Set(['canary', 'stable']);
 
@@ -27,6 +28,14 @@ agentRoutes.post('/heartbeat', async (c) => {
 agentRoutes.post('/reports', async (c) => {
   const body = validate(reportsBody, parseJson(c.get('rawBody')));
   return c.json(await reports(c.env, c.get('agent'), body.reports, nowSeconds()));
+});
+
+/** `dl-agent selftest` uploads its run here (the hub keeps the last 20 per agent). */
+agentRoutes.post('/agent/selftest', async (c) => {
+  const raw = c.get('rawBody');
+  if (new TextEncoder().encode(raw).byteLength > MAX_SELFTEST_BYTES) throw new HttpError(413, 'selftest_too_large');
+  const body = validate(selftestBody, parseJson(raw));
+  return c.json(await storeSelftest(c.env, c.get('agent'), body, nowSeconds()));
 });
 
 agentRoutes.post('/commands/:id/result', async (c) => {

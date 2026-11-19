@@ -17,6 +17,8 @@ All notable changes are listed here. The format follows
   `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode`. `read_only` still
   defaults to `true`. Not yet ported: earn reporting, SMILE_SPECIAL extra-bed rows, the
   checkout / walk-in scanners and the extra-bed terms sync (those jobs are left un-acked).
+- `agent-hub`: bench bundles for a test PC (RT-0164). `POST/GET /admin/bench`, `DELETE /admin/bench/:id` mint a demo-tenant enrolment code and a one-line `irm https://<hub>/bench/<token> | iex` (256-bit token, SHA-256 stored, steps sealed with AES-256-GCM under `BENCH_KEY`, limited fetches and lifetime). The PowerShell 5.1 script lists the older per-product agents without touching them, prompts once for SQL Server, applies optional `sql_fixups` to the restored copy in a transaction, runs `install.ps1 -Channel canary` (no `-Replace`), `sql-add` per database, each `dl-agent <setup>` step with its env for that process only (`{{SQL:<Db>}}`, `{{BENCH_DIR}}`), then `dl-agent selftest`, and writes a masked log under `%ProgramData%\dl-agent`.
+- `agent-hub`: `POST /v1/agent/selftest` (signed, ≤ 256 KB, ≤ 500 checks, newest 20 runs per agent), `GET /admin/agents/:id/selftest`, and a "Tự kiểm tra" section on the `/admin` status page with pass/warn/fail/skip counts and the failed checks. Migration `0004_bench_selftest.sql`.
 
 - `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
@@ -36,6 +38,20 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-arrival`: the Azolo Check-In site agent (`MM.Arrival.Agent`) as an opt-in dl-agent
+  module (`modules.arrival.enabled = true`; optional `install_dir`, `utc_offset_minutes`). It reads
+  the .NET install in place (appsettings, DPAPI `agent-identity.bin` and `agent-tenant-key.bin`,
+  `vault/`, the 48 h `agent-idempotency.jsonl`), so a site switches without enrolling again. Sealed
+  poll / results link with the replay window, the `srCI_*` operation catalog (compiled in; a change
+  ships with a dl-agent release) through `dl-tds` with parameters only, snapshots and deltas,
+  idempotent `checkin.*` writes, the legal vault, the procedure-bundle installer and the watches,
+  byte-compatible with the .NET golden outputs. `degraded` while not enrolled, when the cloud is
+  unreachable for longer than one back-off, refuses the key or the clock, and while the PMS is down;
+  stop gives running requests 5 s and flushes the journal. Metrics (requests ok / failed / refused,
+  in flight, snapshots, last poll, PMS latency), rate-limited reports `arrival_cloud_failed`,
+  `arrival_auth_failed`, `arrival_clock_skew`, `arrival_pms_failed`, `arrival_op_refused`,
+  `arrival_proc_install_failed`; sub-command `dl-agent arrival-enroll` (token and PMS connection
+  string from the environment or stdin). The crate is left out of `cargo wasm`.
 - `dl-agent-membership` (M1, read side): the Azolo Membership agent (`MM.Membership.Agent`) as an
   opt-in dl-agent module (`modules.membership.enabled = true`). It reads the .NET installer's
   `config.dpapi`, sends the heartbeat with the SMILE identity, reads the hub's sync-config, and

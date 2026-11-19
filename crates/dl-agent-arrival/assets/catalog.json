@@ -1,0 +1,3474 @@
+{
+  "version": 4,
+  "operations": [
+    {
+      "name": "auth.login-user",
+      "kind": "write",
+      "procedure": "srCI_LoginUser",
+      "parameters": [
+        {
+          "name": "ClerkID",
+          "type": "String",
+          "required": true,
+          "maxLength": 30
+        },
+        {
+          "name": "Password",
+          "type": "String",
+          "required": true,
+          "maxLength": 500
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.confirmations",
+      "kind": "read",
+      "procedure": "srCI_GuestConfirmation",
+      "parameters": [
+        {
+          "name": "sFolioNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Sts",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 200,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.list-checkin",
+      "kind": "read",
+      "procedure": "srCI_ListCheckIn",
+      "parameters": [
+        {
+          "name": "ConfirmNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.list-online",
+      "kind": "read",
+      "procedure": "srCI_LstCheckInOnline",
+      "parameters": [
+        {
+          "name": "sInfo",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "PageNumber",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PageSize",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.registration",
+      "kind": "read",
+      "procedure": "srCI_GuestRegitration",
+      "parameters": [
+        {
+          "name": "Confirmation",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum",
+            "IdAddition"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.search-by-confirm",
+      "kind": "read",
+      "procedure": "srCI_PortalSearchByConfirm",
+      "parameters": [
+        {
+          "name": "ConfirmNum",
+          "type": "String",
+          "required": true,
+          "maxLength": 30
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "booking.update-contact",
+      "kind": "write",
+      "procedure": "srCI_UpdContractBooking",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Phone",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "Email",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "Note",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "booking.list-checkin"
+      ],
+      "deferrable": true
+    },
+    {
+      "name": "checkin.folio",
+      "kind": "write",
+      "procedure": "srCI_CheckIn",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "CheckInAll",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "booking.search-by-confirm",
+        "booking.list-checkin",
+        "booking.list-online",
+        "dashboard.fo-command-center",
+        "folio.room-info"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "checkin.online",
+      "kind": "write",
+      "procedure": "srCI_OnlineCheckIn",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "booking.search-by-confirm",
+        "booking.list-checkin",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "clerk.by-touchpass",
+      "kind": "write",
+      "procedure": "srCI_GetClerkByTouchPass",
+      "parameters": [
+        {
+          "name": "TouchPass",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "clerk.list",
+      "kind": "read",
+      "procedure": "srCI_GetAllClerks",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "ClerkID"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 300,
+      "maxRows": 1000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "clerk.update-touchpass",
+      "kind": "write",
+      "procedure": "srCI_UpdateClerkTouchPass",
+      "parameters": [
+        {
+          "name": "ClerkID",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        },
+        {
+          "name": "TouchPass",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        },
+        {
+          "name": "Signature",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "clerk.list"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "dashboard.fo-command-center",
+      "kind": "read",
+      "procedure": "srCI_FoCommandCenterPms",
+      "parameters": [
+        {
+          "name": "HotelDate",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "ActivityFolios",
+          "type": "String",
+          "required": false,
+          "maxLength": 400
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "email.mark-folio-sent",
+      "kind": "write",
+      "procedure": "srCI_MarkFolioMailSent",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "email.unsend-folios"
+      ],
+      "deferrable": true
+    },
+    {
+      "name": "email.unsend-folios",
+      "kind": "read",
+      "procedure": "srCI_GetUnsendMailFolio",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.assign-room",
+      "kind": "write",
+      "procedure": "srCI_AssignRoomToFolio",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 10
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.room-status",
+        "folio.room-info",
+        "booking.list-checkin",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "folio.balance-codes",
+      "kind": "read",
+      "procedure": "srCI_GetBalanceCode",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Code"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.bill",
+      "kind": "read",
+      "procedure": "srCI_InformationBill",
+      "parameters": [
+        {
+          "name": "sFolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "sBalanceCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.breakfast",
+      "kind": "read",
+      "procedure": "srCI_GetFolioBreakfast",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "VNo"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "BreakfastCode"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.checkout",
+      "kind": "write",
+      "procedure": "srCI_CheckoutFolio",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.search",
+        "folio.search-advance",
+        "folio.room-info",
+        "folio.guest-count",
+        "booking.list-checkin",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "folio.guest-count",
+      "kind": "read",
+      "procedure": "srCI_GetFolioGuestCount",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.guest-names",
+      "kind": "read",
+      "procedure": "srCI_FoGuestNames",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "IdAddition"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.guest-profiles",
+      "kind": "read",
+      "procedure": "srCI_GetFolioGuestProfiles",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "IdAddition"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.mark-no-show",
+      "kind": "write",
+      "procedure": "srCI_MarkFolioNoShow",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.search",
+        "folio.search-advance",
+        "folio.room-info",
+        "folio.guest-count",
+        "booking.list-checkin",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "folio.print-breakfast-voucher",
+      "kind": "write",
+      "procedure": "srCI_PrintBreakfastVoucher",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "AdditionID",
+          "type": "Int",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "GuestName",
+          "type": "String",
+          "required": false,
+          "maxLength": 4000
+        },
+        {
+          "name": "PrintBy",
+          "type": "String",
+          "required": false,
+          "maxLength": 4000
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.breakfast"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "folio.room-info",
+      "kind": "read",
+      "procedure": "srCI_FolioInformation",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 20,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.room-status",
+      "kind": "read",
+      "procedure": "srCI_CheckRoomStatusToCheckIn",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 10
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "ShareFolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.search",
+      "kind": "read",
+      "procedure": "srCI_SearchAllFolio",
+      "parameters": [
+        {
+          "name": "sInfo",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "ClientFolioNum",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomType",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Cruise",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "GroupID",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "SearchSts",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PageNumber",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PageSize",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.search-advance",
+      "kind": "read",
+      "procedure": "srCI_SearchAdvance",
+      "parameters": [
+        {
+          "name": "NoShow",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Reserved",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Canceled",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "InHouse",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "ArrivalToday",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "CheckOutToday",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "CheckOut",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "sNumInfo",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "FirstName",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "LastName",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "CompanyID",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "GroupID",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "CountryID",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "ArrivalDateFrom",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "ArrivalDateTo",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "DepartureDateFrom",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "DepartureDateTo",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "HotelDate",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Exactly",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomType",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "MemberID",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "ExtCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "PageNumber",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PageSize",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.set-vip-level",
+      "kind": "write",
+      "procedure": "srCI_SetFolioVipLevel",
+      "parameters": [
+        {
+          "name": "folioNum",
+          "type": "Long",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "vipLevel",
+          "type": "Int",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "clerkId",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "guest.additional-names"
+      ],
+      "deferrable": true
+    },
+    {
+      "name": "folio.special-services",
+      "kind": "read",
+      "procedure": "srCI_GetFolioSpecialServices",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 200,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.trace",
+      "kind": "read",
+      "procedure": "srCI_GetFolioTrace",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 20,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "folio.update-guest-count",
+      "kind": "write",
+      "procedure": "srCI_UpdateFolioGuestCount",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "NumAdult",
+          "type": "Int",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "NumChild",
+          "type": "Int",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.guest-count",
+        "folio.search",
+        "folio.search-advance",
+        "folio.room-info",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "folio.update-trace",
+      "kind": "write",
+      "procedure": "srCI_UpdateFolioTrace",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "Note",
+          "type": "String",
+          "required": false,
+          "maxLength": 1048576
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "folio.trace"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "group.arriving-on",
+      "kind": "read",
+      "procedure": "srCI_GroupsArrivingOn",
+      "parameters": [
+        {
+          "name": "ArrivalDate",
+          "type": "Date",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "HotelDate",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "GroupCode"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "group.auto-assign",
+      "kind": "read",
+      "procedure": "srCI_GroupAutoAssign",
+      "parameters": [
+        {
+          "name": "GroupCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        },
+        {
+          "name": "FolioNumsJson",
+          "type": "String",
+          "required": true,
+          "maxLength": 1048576
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "group.checkin-progress",
+      "kind": "read",
+      "procedure": "srCI_GroupCheckinProgress",
+      "parameters": [
+        {
+          "name": "GroupCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "group.confirmations",
+      "kind": "read",
+      "procedure": "srCI_GroupConfirmation",
+      "parameters": [
+        {
+          "name": "Groupcode",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "group.folios",
+      "kind": "read",
+      "procedure": "srCI_GroupFolios",
+      "parameters": [
+        {
+          "name": "GroupCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.add-picture",
+      "kind": "write",
+      "procedure": "srCI_AddInforGuest",
+      "parameters": [
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "ProfileID",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Image",
+          "type": "Binary",
+          "required": false,
+          "maxLength": 12582912
+        },
+        {
+          "name": "IsAvata",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "guest.id-pictures"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "guest.additional-name-ids",
+      "kind": "read",
+      "procedure": "srCI_GetAdditionalNameIdsByFolio",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "IdAddition"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.additional-names",
+      "kind": "read",
+      "procedure": "srCI_GetAdditionalNamesByFolio",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "IdAddition"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.id-pictures",
+      "kind": "read",
+      "procedure": "srCI_GetImageByGuest",
+      "parameters": [
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "ProfileID",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "seq"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 10,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.names-by-folios",
+      "kind": "read",
+      "procedure": "srCI_GetGuestNamesByFolios",
+      "parameters": [
+        {
+          "name": "FolioNums",
+          "type": "String",
+          "required": true,
+          "maxLength": 1048576
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 5000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.pictures",
+      "kind": "read",
+      "procedure": "srCI_ListDetailPicture",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "guest.remove-picture",
+      "kind": "write",
+      "procedure": "srCI_RemoveImage",
+      "parameters": [
+        {
+          "name": "Seq",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "guest.id-pictures"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "guest.update-by-confirmation",
+      "kind": "write",
+      "procedure": "srCI_UpdGuestByConfirmation",
+      "parameters": [
+        {
+          "name": "XMLDetails",
+          "type": "String",
+          "required": false,
+          "maxLength": 1048576
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "booking.list-checkin",
+        "booking.registration"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "guest.update-info",
+      "kind": "write",
+      "procedure": "srCI_UpdGuestInfor",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "XMLDetails",
+          "type": "Xml",
+          "required": true,
+          "maxLength": 65536
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "booking.search-by-confirm",
+        "booking.list-checkin",
+        "folio.room-info"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "guest.upsert-additional-name",
+      "kind": "write",
+      "procedure": "srCI_UpsertAdditionalName",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FolioSubNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "ConfirmNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "LastName",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "FirstName",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Title",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "Gender",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "BirthDate",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PassportNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "NationalityCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 3
+        },
+        {
+          "name": "MobileNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Email",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Occupation",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Address1",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "IsChild",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "VisaNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Province",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "VisaDateA",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "CompanyName",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "Address2",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "Address3",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "Address4",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "PostalCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "Country",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "TeleNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "FaxNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "LanguageCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 2
+        },
+        {
+          "name": "WebSite",
+          "type": "String",
+          "required": false,
+          "maxLength": 35
+        },
+        {
+          "name": "ArrivalTime",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "DepartureTime",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "AOriginCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "ACancelNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "AProfileNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "ConfirmPrintFlag",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "VIPLevel",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "SmokerFlag",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "NewspaperCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 2
+        },
+        {
+          "name": "SequenceNum",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Geographic1Code",
+          "type": "String",
+          "required": false,
+          "maxLength": 3
+        },
+        {
+          "name": "Geographic2Code",
+          "type": "String",
+          "required": false,
+          "maxLength": 3
+        },
+        {
+          "name": "ResidenceCard",
+          "type": "String",
+          "required": false,
+          "maxLength": 30
+        },
+        {
+          "name": "Purpose",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "EntryDateFrom",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "EntryDateTo",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "EntryFrom",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "EntryPort",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "IsSuedBy",
+          "type": "String",
+          "required": false,
+          "maxLength": 40
+        },
+        {
+          "name": "Remark",
+          "type": "String",
+          "required": false,
+          "maxLength": 1000
+        },
+        {
+          "name": "IsVNResident",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "IsTransfer",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "DocType",
+          "type": "String",
+          "required": false,
+          "maxLength": 30
+        },
+        {
+          "name": "DocIssueDate",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "VisaFree",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PassportType",
+          "type": "String",
+          "required": false,
+          "maxLength": 30
+        },
+        {
+          "name": "Religion",
+          "type": "String",
+          "required": false,
+          "maxLength": 30
+        },
+        {
+          "name": "TakeCareC",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "TakeCareP",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "ClearFirstName",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "guest.additional-names",
+        "booking.list-checkin",
+        "booking.registration",
+        "folio.room-info"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "guest.upsert-profile",
+      "kind": "write",
+      "procedure": "srCI_UpsertGuestProfile",
+      "parameters": [
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "LastName",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "FirstName",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Title",
+          "type": "String",
+          "required": false,
+          "maxLength": 10
+        },
+        {
+          "name": "NationalCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "PassportNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "BirthDate",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Email",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "PhoneNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "Gender",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Occupation",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Address1",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "ClearFirstName",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "guest.additional-names",
+        "profile.search",
+        "profile.detail",
+        "profile.booker-search",
+        "folio.guest-profiles"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "hotel.date",
+      "kind": "read",
+      "procedure": "srCI_GetHotelDate",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "hotel.info",
+      "kind": "read",
+      "procedure": "srCI_HotelInfo",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 21600,
+      "maxRows": 5,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "hotel.set-signature",
+      "kind": "write",
+      "procedure": "srCI_SetSignatureHotel",
+      "parameters": [
+        {
+          "name": "Signature",
+          "type": "Binary",
+          "required": false,
+          "maxLength": 12582912
+        },
+        {
+          "name": "AvataHotel",
+          "type": "Binary",
+          "required": false,
+          "maxLength": 12582912
+        },
+        {
+          "name": "SignatureName",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "hotel.info"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "housekeeping.create-maintenance",
+      "kind": "write",
+      "procedure": "srCI_HousekeepingCreateMaintenance",
+      "parameters": [
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 20
+        },
+        {
+          "name": "BeginTime",
+          "type": "DateTime",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "AssignStaff",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "Notes",
+          "type": "String",
+          "required": false,
+          "maxLength": 4000
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "housekeeping.maintenance"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "housekeeping.maintenance",
+      "kind": "read",
+      "procedure": "srCI_HousekeepingMaintenance",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "nSeq"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "housekeeping.rooms",
+      "kind": "read",
+      "procedure": "srCI_HousekeepingRooms",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "RoomCode"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 3000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "housekeeping.update-room-status",
+      "kind": "write",
+      "procedure": "srCI_HousekeepingUpdateRoomStatus",
+      "parameters": [
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 20
+        },
+        {
+          "name": "Clean",
+          "type": "Bool",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "Inspected",
+          "type": "Bool",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "ClerkID",
+          "type": "String",
+          "required": true,
+          "maxLength": 100
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "housekeeping.rooms"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "notifications.folio-candidates",
+      "kind": "read",
+      "procedure": "srCI_NotificationFolioCandidates",
+      "parameters": [
+        {
+          "name": "hotelToday",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "palette.search",
+      "kind": "read",
+      "procedure": "srCI_PaletteSearch",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "String",
+          "required": true,
+          "maxLength": 200
+        },
+        {
+          "name": "typesCsv",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        },
+        {
+          "name": "top",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "hotelDate",
+          "type": "Date",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Id"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "Id"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "Id"
+          ]
+        },
+        {
+          "columns": null,
+          "keyColumns": [
+            "Id"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "profile.booker-search",
+      "kind": "read",
+      "procedure": "srCI_BookerInfo",
+      "parameters": [
+        {
+          "name": "SearchInfo",
+          "type": "String",
+          "required": false,
+          "maxLength": 100
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "ProfileNumber"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 200,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "profile.detail",
+      "kind": "read",
+      "procedure": "srCI_GetProfileDetail",
+      "parameters": [
+        {
+          "name": "ProfileNumber",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "profile.search",
+      "kind": "read",
+      "procedure": "srCI_SearchClientMasterV2Paging",
+      "parameters": [
+        {
+          "name": "SearchInfo",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "Page",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "PageSize",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "ProfileNumber"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "profile.stays",
+      "kind": "read",
+      "procedure": "srCI_GetProfileStays",
+      "parameters": [
+        {
+          "name": "ProfileNumber",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "reference.countries",
+      "kind": "read",
+      "procedure": "srCI_Country",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Code"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 86400,
+      "maxRows": 400,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "reference.dropdowns",
+      "kind": "read",
+      "procedure": "srCI_GetAllDropdownData",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        },
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 21600,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "reference.vip-levels",
+      "kind": "read",
+      "procedure": "srCI_GetVipLevels",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Code"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 3600,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.arrivals-by-day",
+      "kind": "read",
+      "procedure": "srCI_ReportArrivalsByDay",
+      "parameters": [
+        {
+          "name": "from",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "to",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Date"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.cancellations",
+      "kind": "read",
+      "procedure": "srCI_ReportCancellations",
+      "parameters": [
+        {
+          "name": "From",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "To",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 10000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.clerk-names",
+      "kind": "read",
+      "procedure": "srCI_ReportClerkNames",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": [
+            "ClerkID",
+            "UserName"
+          ],
+          "keyColumns": [
+            "ClerkID"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 21600,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.market-segment",
+      "kind": "read",
+      "procedure": "srCI_ReportMarketSegment",
+      "parameters": [
+        {
+          "name": "From",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "To",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 5000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.nationality",
+      "kind": "read",
+      "procedure": "srCI_ReportNationality",
+      "parameters": [
+        {
+          "name": "from",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "to",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Nationality"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "report.occupancy",
+      "kind": "read",
+      "procedure": "srCI_ReportOccupancy",
+      "parameters": [
+        {
+          "name": "from",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "to",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Date"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 60,
+      "maxRows": 500,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "retention.expired-folio-candidates",
+      "kind": "read",
+      "procedure": "srCI_Retention_GetExpiredFolioCandidates",
+      "parameters": [
+        {
+          "name": "RetentionDays",
+          "type": "Int",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "Top",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "Skip",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "roomtype.images",
+      "kind": "read",
+      "procedure": "srCI_GetImageRoomType",
+      "parameters": [
+        {
+          "name": "RoomTypeCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 21600,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "roomtype.set-images",
+      "kind": "write",
+      "procedure": "srCI_AddLstImgRoomType",
+      "parameters": [
+        {
+          "name": "RoomTypeCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "ListPathImageRoomType",
+          "type": "String",
+          "required": false,
+          "maxLength": 1048576
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "roomtype.images"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "settings.ci-online",
+      "kind": "read",
+      "procedure": "srCI_GetCIOnlineSettings",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "SettingName"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 300,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "settings.ci-online-update",
+      "kind": "write",
+      "procedure": "srCI_UpdateCIOnlineSetting",
+      "parameters": [
+        {
+          "name": "SettingName",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        },
+        {
+          "name": "SettingValue",
+          "type": "String",
+          "required": true,
+          "maxLength": 50
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "settings.ci-online"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "signature.fo-remove",
+      "kind": "write",
+      "procedure": "srCI_RemoveSign",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "Seq",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOGuestCheck",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOHouseKeeping",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FODeposit",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOGroupConfirmation",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOConfirmation",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FORegistrationCard",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "signature.guest",
+        "signature.registration-card",
+        "signature.regcard",
+        "signature.management"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "signature.fo-save",
+      "kind": "write",
+      "procedure": "srCI_FOSignature",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "SignatureGuest",
+          "type": "Binary",
+          "required": false,
+          "maxLength": 12582912
+        },
+        {
+          "name": "SignaturePath",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        },
+        {
+          "name": "FOGuestCheck",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOHouseKeeping",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FODeposit",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOGroupConfirmation",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FOConfirmation",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FORegistrationCard",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FORegistrationCard_CheckOut",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FORegistrationCard_CHECKEDBY",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "FORegistrationCardName",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "signature.guest",
+        "signature.registration-card",
+        "signature.regcard",
+        "signature.management"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "signature.guest",
+      "kind": "read",
+      "procedure": "srCI_GetSignatureGuest",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Seq"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 50,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "signature.management",
+      "kind": "read",
+      "procedure": "srCI_SignatureManagement",
+      "parameters": [
+        {
+          "name": "StartDate",
+          "type": "Date",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "NumDays",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomType",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 30,
+      "maxRows": 2000,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "signature.pos-save",
+      "kind": "write",
+      "procedure": "srCI_POSSignature",
+      "parameters": [
+        {
+          "name": "CheckNo",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RVCNo",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "SignatureGuest",
+          "type": "Binary",
+          "required": false,
+          "maxLength": 12582912
+        },
+        {
+          "name": "SignaturePath",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        },
+        {
+          "name": "POSGuestCheck",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "signature.regcard",
+      "kind": "read",
+      "procedure": "srCI_REGCardSign",
+      "parameters": [
+        {
+          "name": "Folionum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "IdAddition",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "signature.registration-card",
+      "kind": "read",
+      "procedure": "srCI_RegistrationCard",
+      "parameters": [
+        {
+          "name": "FolioNum",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "Seq"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 1,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "walkin.available-rooms",
+      "kind": "read",
+      "procedure": "srCI_WalkInAvailableRooms",
+      "parameters": [
+        {
+          "name": "ArrivalDate",
+          "type": "Date",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "DepartureDate",
+          "type": "Date",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomType",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "RoomCode"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 200,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "walkin.create-reservation",
+      "kind": "write",
+      "procedure": "srCI_WalkInCreateReservation",
+      "parameters": [
+        {
+          "name": "ArrivalDate",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "DepartureDate",
+          "type": "Date",
+          "required": true,
+          "maxLength": 0
+        },
+        {
+          "name": "RoomTypeCode",
+          "type": "String",
+          "required": true,
+          "maxLength": 20
+        },
+        {
+          "name": "RoomCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "NumAdult",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "NumChild",
+          "type": "Int",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "RateAmount",
+          "type": "Decimal",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "LastName",
+          "type": "String",
+          "required": false,
+          "maxLength": 60
+        },
+        {
+          "name": "FirstName",
+          "type": "String",
+          "required": false,
+          "maxLength": 60
+        },
+        {
+          "name": "IsMale",
+          "type": "Bool",
+          "required": false,
+          "maxLength": 0
+        },
+        {
+          "name": "NationalityCode",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        },
+        {
+          "name": "PassportNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Email",
+          "type": "String",
+          "required": false,
+          "maxLength": 400
+        },
+        {
+          "name": "MobileNum",
+          "type": "String",
+          "required": false,
+          "maxLength": 50
+        },
+        {
+          "name": "Notice",
+          "type": "String",
+          "required": false,
+          "maxLength": 500
+        },
+        {
+          "name": "ClerkID",
+          "type": "String",
+          "required": false,
+          "maxLength": 3
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": []
+        }
+      ],
+      "cacheTtlSeconds": 0,
+      "maxRows": 1,
+      "invalidates": [
+        "walkin.available-rooms",
+        "walkin.reserved-today",
+        "palette.search",
+        "booking.list-checkin",
+        "dashboard.fo-command-center"
+      ],
+      "deferrable": false
+    },
+    {
+      "name": "walkin.reserved-today",
+      "kind": "read",
+      "procedure": "srCI_WalkInReservedToday",
+      "parameters": [
+        {
+          "name": "SearchTerm",
+          "type": "String",
+          "required": false,
+          "maxLength": 200
+        },
+        {
+          "name": "HotelDate",
+          "type": "String",
+          "required": false,
+          "maxLength": 20
+        }
+      ],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "FolioNum"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 15,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    },
+    {
+      "name": "walkin.room-types",
+      "kind": "read",
+      "procedure": "srCI_WalkInRoomTypes",
+      "parameters": [],
+      "resultSets": [
+        {
+          "columns": null,
+          "keyColumns": [
+            "RoomTypeCode"
+          ]
+        }
+      ],
+      "cacheTtlSeconds": 21600,
+      "maxRows": 100,
+      "invalidates": null,
+      "deferrable": false
+    }
+  ]
+}

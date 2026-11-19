@@ -20,6 +20,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-agent-arrival"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-cli",
+ "dl-decimal",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-rand",
+ "dl-tds",
+ "dl-time",
+ "dl-uuid",
+ "dl-winsvc",
+]
+
+[[package]]
 name = "dl-agent-backup"
 version = "0.2.1"
 dependencies = [
@@ -42,6 +61,7 @@ name = "dl-agent-bin"
 version = "0.2.1"
 dependencies = [
  "dl-agent",
+ "dl-agent-arrival",
  "dl-agent-backup",
  "dl-agent-einvoice",
  "dl-agent-hotellink",
