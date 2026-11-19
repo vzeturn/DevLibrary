@@ -6,6 +6,10 @@
 //! variable `DL_AGENT_EINVOICE_TOKEN` (the argument wins), so an installer can keep it off
 //! the command line. `--sql-auth windows` (or `MMEI_SQL_AUTH=windows`) seals a DSN without
 //! a SQL login: the collector then signs in with the service account (SSPI).
+//!
+//! `--switch` is the unattended switch from the MM-EInvoice Go agent ([`super::switch`]):
+//! enrol afresh unless this dl-agent sealed the `config.enc` itself. Every enrolment takes
+//! the old agent's SQL connection and collect window as defaults ([`super::previous`]).
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -15,6 +19,7 @@ use dl_agent::tool::{Tool, ToolContext};
 use dl_cli::{Arg, Command, Matches};
 
 use super::ping::Ping;
+use super::switch::{self, Found};
 use super::{EnrollOptions, HideInput, TOKEN_ENV, enroll, vn_midnight};
 use crate::agent_config::AgentConfig;
 use crate::module::settings::default_config_dir;
@@ -55,6 +60,9 @@ fn grammar(cmd: Command) -> Command {
         .arg(Arg::option("collect-from").help("Collect bills dated from YYYY-MM-DD (Vietnam time)"))
         .arg(Arg::option("config-dir").help("Where config.enc lives (default: the module's)"))
         .arg(Arg::flag("force").help("Enroll again although config.enc already opens"))
+        .arg(Arg::flag("switch").help(
+            "Switch from the MM-EInvoice Go agent: enroll again unless this dl-agent sealed config.enc",
+        ))
 }
 
 /// What the command line asked for.
@@ -70,6 +78,9 @@ pub(super) struct Args {
     pub collect_from: Option<String>,
     pub config_dir: Option<PathBuf>,
     pub force: bool,
+    pub switch: bool,
+    /// Where the enrolment is recorded for `--switch` (the module's data folder).
+    pub record_dir: Option<PathBuf>,
 }
 
 impl Args {
@@ -86,12 +97,16 @@ impl Args {
             collect_from: m.value("collect-from").map(str::to_owned),
             config_dir: m.value("config-dir").map(PathBuf::from),
             force: m.flag("force"),
+            switch: m.flag("switch"),
+            record_dir: None,
         }
     }
 }
 
-fn run(_ctx: &ToolContext<'_>, m: &Matches) -> Result<(), Error> {
-    let args = Args::from_matches(m);
+fn run(ctx: &ToolContext<'_>, m: &Matches) -> Result<(), Error> {
+    let mut args = Args::from_matches(m);
+    // The supervisor's folder for the module (`<data>/modules/einvoice`).
+    args.record_dir = Some(ctx.data_dir.join("modules").join(crate::module::NAME));
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut out = std::io::stdout();
@@ -125,7 +140,19 @@ pub(super) fn run_args<'a>(
     env: &'a dyn Fn(&str) -> Option<String>,
 ) -> Result<(), String> {
     let config_dir = args.config_dir.clone().unwrap_or_else(default_config_dir);
-    if !args.force && already_enrolled(&config_dir)? {
+    if args.switch && !args.force {
+        match switch::found(&config_dir, args.record_dir.as_deref()) {
+            Found::Ours => {
+                say!(out, "da co cau hinh E-Invoice cua dl-agent, giu nguyen\n");
+                return Ok(());
+            }
+            Found::Other(why) => say!(
+                out,
+                "Switching from the earlier E-Invoice agent ({why}): enrolling afresh.\n"
+            ),
+            Found::Nothing => {}
+        }
+    } else if !args.force && already_enrolled(&config_dir)? {
         say!(out, "da co cau hinh E-Invoice, giu nguyen\n");
         return Ok(());
     }
@@ -135,8 +162,28 @@ pub(super) fn run_args<'a>(
         .as_deref()
         .map(|d| vn_midnight(Some(d)))
         .transpose()?;
+    let previous = match super::previous::find(&config_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            say!(
+                out,
+                "Earlier config.enc does not open ({e}): enrolling without its SQL connection.\n"
+            );
+            None
+        }
+    };
+    let previous_dir = previous.as_ref().map(|p| p.dir.clone());
+    // Shortens the reader's lifetime so `out` is free again after `enroll`.
+    #[allow(
+        clippy::needless_match,
+        reason = "the re-coercion shortens the trait object's lifetime"
+    )]
+    let input: Option<&mut dyn BufRead> = match input {
+        Some(i) => Some(i),
+        None => None,
+    };
     enroll(EnrollOptions {
-        config_dir,
+        config_dir: config_dir.clone(),
         platform_url: args.platform_url.clone(),
         enroll_token: token,
         agent_host: device_name(),
@@ -145,14 +192,24 @@ pub(super) fn run_args<'a>(
         sql_password: args.sql_password.clone(),
         sql_auth: args.sql_auth.clone(),
         collect_from,
+        previous,
         prompt_sql: args.sql_prompt,
         input,
         hide_input,
-        out,
+        out: &mut *out,
         agent_version: heartbeat_version(),
         ping,
         env,
-    })
+    })?;
+    if let Some(dir) = &args.record_dir
+        && let Err(e) = switch::record(&config_dir, dir, previous_dir.as_ref())
+    {
+        say!(
+            out,
+            "Warning: could not record the enrolment ({e}); a later --switch run enrolls again.\n"
+        );
+    }
+    Ok(())
 }
 
 /// `--token` wins; otherwise `DL_AGENT_EINVOICE_TOKEN`, which keeps the token off the

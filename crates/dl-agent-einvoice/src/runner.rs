@@ -4,11 +4,9 @@
 use std::time::{Duration, Instant};
 
 use crate::agent_config::AgentConfig;
-use crate::fo::FoRows;
 use crate::log::{self, V};
 use crate::outbox::Outbox;
 use crate::platform::{ApiError, Heartbeat, Platform};
-use crate::pos::PosError;
 use crate::sql::{CollectKey, Sql, WritebackApply};
 
 /// Errors of one cycle, and whether the platform said this install was replaced.
@@ -160,46 +158,7 @@ impl Runner {
         key: &CollectKey,
         timeout: Duration,
     ) -> Result<crate::domain::CollectedInvoice, String> {
-        let rules = self.cfg.rules();
-        let inv = if key.source == "POS" {
-            let raw = self.sql.fetch_pos_raw(&key.id, timeout)?;
-            crate::collect_pos(&raw, &rules)?
-        } else {
-            let rows: FoRows = self.sql.fetch_fo_rows(&key.id, timeout)?;
-            for d in &rows.detail {
-                if !rows.lines.iter().any(|l| l.line_key == d.parent_line_key) {
-                    log::warn(
-                        "agent: orphaned detail item dropped (no parent line)",
-                        &[
-                            ("source_ref", V::S(&key.source_ref())),
-                            ("line_key", V::S(&d.parent_line_key)),
-                            ("icode", V::S(&d.icode)),
-                        ],
-                    );
-                }
-            }
-            let mut fetch = |check_no: &str| -> Result<_, PosError> {
-                let raw = self
-                    .sql
-                    .fetch_pos_raw(check_no, timeout)
-                    .map_err(PosError::Invalid)?;
-                let r = crate::enrich_check(&raw, &rules);
-                match &r {
-                    Err(PosError::NotPosCheck) => log::debug(
-                        "agent: fo pos-charge ref is not a POS check",
-                        &[("check_no", V::S(check_no))],
-                    ),
-                    Err(PosError::Invalid(e)) => log::warn(
-                        "agent: fo pos-charge enrich skipped (fetch failed)",
-                        &[("check_no", V::S(check_no)), ("err", V::S(e))],
-                    ),
-                    Ok(_) => {}
-                }
-                r
-            };
-            crate::fo::collect(&key.id, &rows, &rules, &mut fetch)?
-        };
-        Ok(inv)
+        crate::fetch::collected(&self.sql, &self.cfg.rules(), key, timeout)
     }
 
     /// Collects one source; returns the items and the SQL and item failures.

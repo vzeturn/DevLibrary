@@ -56,7 +56,9 @@ shared by every module on the site.
 ## 3. Module requirements (port list)
 
 - **einvoice**: collect FO/POS via procs, TCVN3, VAT apportion, push, poll write-back + ack, trn-types,
-  provider egress relay (allow-listed VNPT hosts), proc install with SQL 2008 rewrite. Rust port exists → move.
+  provider egress relay (allow-listed VNPT hosts), proc install with SQL 2008 rewrite. Built as `dl-agent-einvoice`: FO/POS collect, outbox, relay, write-back,
+  switch from Go (`einvoice-enroll --switch`), hub checks (`status`, `selftest`, `collect_dry_run`, `writeback_probe`);
+  Windows checks pending on the SR bench.
 - **pda-sync**: TDS capture (open checks 2 s, closed ledger keyset, masters 120 s, shadow hashes), outbox
   2 GB with 424 parking, blobs, staff sync, exactly-once commands (`order.*`, `kds.*`, `reservation.*`,
   `sync.*`) in one SQL tx with log row, WebSocket + long-poll fallback, SignalR print relay (TCP 9100 +

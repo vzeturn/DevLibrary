@@ -13,7 +13,9 @@ macro_rules! say {
 
 mod exchange;
 mod ping;
+mod previous;
 mod prompt;
+mod switch;
 mod tool;
 
 #[cfg(test)]
@@ -32,7 +34,9 @@ use crate::platform::Platform;
 
 pub use exchange::exchange_token;
 pub use ping::{Ping, PingError, ping_dsn, ping_negotiated};
+pub use previous::Previous;
 pub use prompt::HideInput;
+pub use switch::ENROLLED_FILE;
 pub use tool::einvoice_enroll_tool;
 
 use prompt::{Prompter, prompt_sql, split_server_address};
@@ -95,8 +99,12 @@ pub struct EnrollOptions<'a> {
     /// `--sql-auth`: `sql` (a SQL login) or `windows` (integrated authentication as the
     /// service account, no user or password); empty = `MMEI_SQL_AUTH`, then `sql`.
     pub sql_auth: String,
-    /// `--collect-from` (None = the tenant's Hub value, then today).
+    /// `--collect-from` (None = the tenant's Hub value, then the earlier enrolment's, then
+    /// today).
     pub collect_from: Option<OffsetDateTime>,
+    /// An earlier enrolment of this site (the Go agent's `config.enc`): its SQL connection
+    /// fills what the flags and `MMEI_SQL_*` leave open.
+    pub previous: Option<Previous>,
     /// `--sql-prompt`: ask for the connection and test it before spending the token.
     pub prompt_sql: bool,
     /// Where the answers come from (standard input); required with `prompt_sql`.
@@ -130,6 +138,7 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
         sql_password,
         sql_auth,
         collect_from: collect_from_flag,
+        previous,
         prompt_sql: prompted,
         input,
         hide_input,
@@ -154,7 +163,20 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| def.to_owned())
     };
-    let windows_auth = match pick(&sql_auth, "MMEI_SQL_AUTH", "sql")
+    let prev_fo = previous.as_ref().and_then(|p| p.fo.clone());
+    let prev_pos = previous.as_ref().and_then(|p| p.pos.clone());
+    if let (Some(p), Some(_)) = (&previous, &prev_fo) {
+        say!(
+            out,
+            "Earlier enrolment found in {}: its SQL connection and collect window are the defaults.\n",
+            p.dir.display()
+        );
+    }
+    let prev_auth = match &prev_fo {
+        Some(d) if d.user.is_empty() => "windows",
+        _ => "sql",
+    };
+    let windows_auth = match pick(&sql_auth, "MMEI_SQL_AUTH", prev_auth)
         .to_ascii_lowercase()
         .as_str()
     {
@@ -167,33 +189,65 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
         }
     };
     // SSMS forms (`host\instance`, `host,port`) work here as at the prompt.
-    let (host, port_or_inst) =
-        split_server_address(&pick(&sql_host, "MMEI_SQL_HOST", DEFAULT_SQL_HOST));
+    let (host, port, instance) = match (pick(&sql_host, "MMEI_SQL_HOST", ""), &prev_fo) {
+        (h, Some(d)) if h.is_empty() => (d.host.clone(), d.port.clone(), d.instance.clone()),
+        (h, _) => {
+            let h = if h.is_empty() {
+                DEFAULT_SQL_HOST.into()
+            } else {
+                h
+            };
+            let (host, port_or_inst) = split_server_address(&h);
+            if port_or_inst.chars().all(|c| c.is_ascii_digit()) {
+                (host, port_or_inst, String::new())
+            } else {
+                (host, String::new(), port_or_inst)
+            }
+        }
+    };
     // Windows authentication: a DSN without a user name logs in through SSPI.
     let (user, password) = if windows_auth {
         (String::new(), String::new())
     } else {
+        let prev_user = prev_fo.as_ref().map_or("", |d| d.user.as_str());
+        let user = pick(
+            &sql_user,
+            "MMEI_SQL_USER",
+            if prev_user.is_empty() {
+                DEFAULT_SQL_USER
+            } else {
+                prev_user
+            },
+        );
+        // The earlier password only goes with the earlier login.
+        let prev_password = prev_fo
+            .as_ref()
+            .filter(|d| d.user == user && !d.password.is_empty())
+            .map_or(default_sql_password(), |d| d.password.as_str());
         (
-            pick(&sql_user, "MMEI_SQL_USER", DEFAULT_SQL_USER),
-            pick(&sql_password, "MMEI_SQL_PASSWORD", default_sql_password()),
+            user,
+            pick(&sql_password, "MMEI_SQL_PASSWORD", prev_password),
         )
     };
-    let base = |database: &str| {
-        let mut d = Dsn {
-            host: host.clone(),
-            database: database.to_owned(),
-            user: user.clone(),
-            password: password.clone(),
-            ..Dsn::default()
-        };
-        if port_or_inst.chars().all(|c| c.is_ascii_digit()) {
-            d.port = port_or_inst.clone();
-        } else {
-            d.instance = port_or_inst.clone();
-        }
-        d
+    let database = |prev: &Option<Dsn>, def: &str| {
+        prev.as_ref()
+            .map(|d| d.database.clone())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| def.to_owned())
     };
-    let (mut fo, mut pos) = (base(FO_DATABASE), base(POS_DATABASE));
+    let base = |database: String| Dsn {
+        host: host.clone(),
+        port: port.clone(),
+        instance: instance.clone(),
+        database,
+        user: user.clone(),
+        password: password.clone(),
+        ..Dsn::default()
+    };
+    let (mut fo, mut pos) = (
+        base(database(&prev_fo, FO_DATABASE)),
+        base(database(&prev_pos, POS_DATABASE)),
+    );
     if prompted {
         let Some(input) = input else {
             return Err("agent: prompted enroll needs an interactive console".into());
@@ -271,8 +325,13 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
         }
     }
 
-    // Precedence: -collect-from > the tenant's Hub value > today.
-    let mut collect_from = vn_midnight(None)?;
+    // Precedence: -collect-from > the tenant's Hub value > the earlier enrolment's > today.
+    // The earlier window keeps the bills the old agent had not collected yet in reach;
+    // `MMEI_Collected` keeps the ones it had from being sent twice.
+    let mut collect_from = match previous.as_ref().and_then(|p| p.collect_from) {
+        Some(t) => t,
+        None => vn_midnight(None)?,
+    };
     let mut collect_sources = String::new();
     let mut recalc = true; // default on; the Hub config overrides it when reachable
     match collect_from_flag {

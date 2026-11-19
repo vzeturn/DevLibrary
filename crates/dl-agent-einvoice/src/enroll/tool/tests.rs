@@ -289,3 +289,51 @@ fn a_sql_login_keeps_its_user_and_an_unknown_auth_is_refused() {
     assert_eq!(exchanges.load(Ordering::SeqCst), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn switch_enrolls_over_the_go_agent_once_and_keeps_its_sql_connection() {
+    let (url, exchanges) = fake_platform();
+    let (dir, rec) = (temp_dir(), temp_dir());
+    // The Go agent's config.enc: another device and key, its own SQL connection.
+    let go = AgentConfig {
+        config_dir: dir.clone(),
+        device_id: dl_uuid::Uuid::new_v4(),
+        api_key: "go-agent-key".into(),
+        sql_dsn: "sqlserver://smile:GoPw-789@GOSRV?database=SMILE_FO".into(),
+        pos_sql_dsn: "sqlserver://smile:GoPw-789@GOSRV?database=SMILE_POS".into(),
+        ..AgentConfig::default()
+    };
+    go.save().unwrap();
+    let a = Args {
+        switch: true,
+        record_dir: Some(rec.clone()),
+        sql_password: String::new(),
+        ..args(&dir, &url)
+    };
+    let r = run_tool(&a);
+    assert!(r.result.is_ok(), "{:?}\n{}", r.result, r.out);
+    assert!(
+        r.out.contains("Switching from the earlier E-Invoice agent"),
+        "{}",
+        r.out
+    );
+    let cfg = load(&dir);
+    assert_eq!(cfg.api_key, API_KEY);
+    assert_ne!(cfg.device_id, go.device_id, "a fresh device");
+    assert!(cfg.sql_dsn.contains("GOSRV") && cfg.sql_dsn.contains("GoPw-789"));
+    for secret in [TOKEN, "GoPw-789", API_KEY, "go-agent-key"] {
+        assert!(!r.out.contains(secret), "{secret} printed:\n{}", r.out);
+    }
+    assert!(rec.join(crate::enroll::ENROLLED_FILE).exists());
+
+    // The installer passes --switch on every run: the next one keeps what the first made.
+    let again = run_tool(&a);
+    assert!(again.result.is_ok(), "{:?}", again.result);
+    assert_eq!(
+        again.out,
+        "da co cau hinh E-Invoice cua dl-agent, giu nguyen\n"
+    );
+    assert_eq!(exchanges.load(Ordering::SeqCst), 1, "token spent again");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&rec);
+}

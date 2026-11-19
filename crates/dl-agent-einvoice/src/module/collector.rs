@@ -7,12 +7,21 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
 use dl_agent::report::Severity;
+use dl_agent::sql::transport::Rung;
 use dl_agent::supervisor::ModuleContext;
-use dl_json::Map;
+use dl_json::{Map, Value};
 use dl_winsvc::StopSignal;
 
+use crate::agent_config::AgentConfig;
+use crate::log::{self, V};
+use crate::profile::PosItemName;
 use crate::runner::{CycleResult, Runner};
+use crate::sql::StepDown;
 use crate::stats::Stats;
+
+/// The last cycle's summary in the module's data directory, read by the self-test (which
+/// may run in another process, `dl-agent selftest`).
+pub const LAST_CYCLE_FILE: &str = "last_cycle.json";
 
 /// How often a waiting thread looks at its triggers.
 const TICK: Duration = Duration::from_millis(250);
@@ -55,6 +64,19 @@ pub struct Shared {
     pub replaced: AtomicBool,
     /// The last cycle's main problem (`None`: it went well).
     pub problem: Mutex<Option<String>>,
+    /// What the collector runs with after the hub's config: the dry run builds with it.
+    pub effective: Mutex<Option<Effective>>,
+    /// How each source reaches SQL Server ([`crate::sql::Sql::describe`]), as of the last cycle.
+    pub sql: Mutex<Value>,
+}
+
+/// The collector's config after the hub's refresh, and its POS item-name profile.
+#[derive(Debug, Clone)]
+pub struct Effective {
+    /// The sealed config with the hub's collect-from, sources and recalc applied.
+    pub cfg: AgentConfig,
+    /// The hub's `collect_profile.pos_item_name`.
+    pub pos_item_name: PosItemName,
 }
 
 impl Shared {
@@ -68,6 +90,30 @@ impl Shared {
 
     fn set_problem(&self, p: Option<String>) {
         *self.problem.lock().unwrap_or_else(PoisonError::into_inner) = p;
+    }
+
+    /// The collector's effective config (`None` before the module started one).
+    pub fn effective(&self) -> Option<Effective> {
+        self.effective
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Records the collector's effective config.
+    pub fn set_effective(&self, e: Effective) {
+        *self
+            .effective
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(e);
+    }
+
+    /// How each source reaches SQL Server, as of the last cycle.
+    pub fn sql(&self) -> Value {
+        self.sql
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -138,8 +184,78 @@ impl Collector {
         if res.pushed + res.errored > 0 {
             Stats::set(&s.last_push_at, now);
         }
+        for step in self.runner.sql.take_step_downs() {
+            report_step_down(&self.ctx, &step);
+        }
+        self.shared.set_effective(Effective {
+            cfg: self.runner.cfg.clone(),
+            pos_item_name: self.runner.sql.pos_item_name(),
+        });
+        *self
+            .shared
+            .sql
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = self.runner.sql.describe();
         let problem = report_cycle(&self.ctx, res, self.runner.config_stale_streak());
+        write_last_cycle(&self.ctx, res, now, problem.as_deref());
         self.shared.set_problem(problem);
+    }
+}
+
+/// Reports a connection that had to step down the transport ladder at runtime: the server
+/// started resetting the login handshake the sealed (or pinned) rung used.
+pub fn report_step_down(ctx: &ModuleContext, s: &StepDown) {
+    let clear = s.to == Rung::Unencrypted;
+    let msg = format!(
+        "{}: SQL Server reset the login at transport {} ({}); now connected with {}{}",
+        s.database,
+        s.from.name(),
+        s.cause,
+        s.to.name(),
+        if clear {
+            ": the SQL login travels unencrypted; install the TLS 1.2 update on SQL Server"
+        } else {
+            ""
+        }
+    );
+    let mut m = Map::new();
+    m.insert("database", s.database.as_str());
+    m.insert("from", s.from.name());
+    m.insert("to", s.to.name());
+    m.insert("cause", s.cause.as_str());
+    m.insert("unencrypted", clear);
+    ctx.report(Severity::Warning, "einvoice_sql_transport", &msg, m);
+    log::warn(
+        "einvoice SQL transport stepped down",
+        &[
+            ("database", V::S(&s.database)),
+            ("from", V::S(s.from.name())),
+            ("to", V::S(s.to.name())),
+            ("cause", V::S(&s.cause)),
+        ],
+    );
+}
+
+/// Writes [`LAST_CYCLE_FILE`] (temp file + rename); a failure is logged, never fatal.
+fn write_last_cycle(ctx: &ModuleContext, res: &CycleResult, at: u64, problem: Option<&str>) {
+    let mut m = Map::new();
+    m.insert("at", at);
+    m.insert("read", res.read);
+    m.insert("pushed", res.pushed);
+    m.insert("errored", res.errored);
+    m.insert("applied", res.applied);
+    m.insert("problem", problem.map_or(Value::Null, Value::from));
+    let path = ctx.data_dir().join(LAST_CYCLE_FILE);
+    let tmp = path.with_extension("json.tmp");
+    let body = dl_json::to_string(&Value::Object(m));
+    if let Err(e) = std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, &path)) {
+        log::warn(
+            "einvoice could not record the last cycle for the self-test",
+            &[
+                ("path", V::S(&path.display().to_string())),
+                ("error", V::S(&e.to_string())),
+            ],
+        );
     }
 }
 

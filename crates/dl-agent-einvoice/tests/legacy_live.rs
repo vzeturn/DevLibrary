@@ -4,60 +4,16 @@
 //! Server sysadmin URL in `MMEI_TEST_MSSQL_URL` (`sqlserver://sa:...@host:port`, no
 //! `database`); skipped otherwise. It creates and drops its own database.
 
+mod common;
+
 use std::time::Duration;
 
+use common::{SCHEMA, connect, exec};
 use dl_agent_einvoice::agent_config::AgentConfig;
 use dl_agent_einvoice::sql::Sql;
 use dl_tds::{Client, Config, Param};
 
 const DB: &str = "mmei_legacy_live_rs";
-
-/// The smallest SMILE-shaped schema `MMEI_SourceHash` reads (same as the Go test).
-const SCHEMA: &str = "
-CREATE TABLE dbo.BillInfor (BillID numeric PRIMARY KEY, FolioNum numeric, CompanyName nvarchar(200), VATCode varchar(20),
-  Address1 nvarchar(200), Address2 nvarchar(200), EMail varchar(100), BillSeri1 varchar(20), BillNumber1From numeric,
-  InvDate datetime, SubAmount money, ServiceCharge money, TaxAmount money, TotalAmount money, GuestName nvarchar(200),
-  BillNote nvarchar(max), Cancel bit, Printed int);
-CREATE TABLE dbo.GuestEveryDay (GuestID int, FolioNum numeric, FolioSubNum int, IsAdditionalName bit, ProfileID int);
-CREATE TABLE dbo.Profile (ProfileNumber int, Email varchar(100));
-CREATE TABLE dbo.TransactionCode (TransactionCode varchar(10), TransactionSubCode varchar(10), Description nvarchar(100), TransactionGroup int);
-CREATE TABLE dbo.TaxDef (TaxCode varchar(10), TaxRate money);
-CREATE TABLE dbo.FolioTransaction (TransactionID numeric PRIMARY KEY, BillID numeric, TransactionCode varchar(10),
-  TransactionSubCode int, Description nvarchar(200), Quantity money, SubAmount money, TaxAmount money, STaxCode varchar(10),
-  STaxAmount money, ServiceCharge money, TaxCode varchar(10), FolioBalanceCode varchar(2), isHKPost bit);
-CREATE TABLE dbo.ItemPosted (TrnID numeric, ICode varchar(20), IName nvarchar(100), Price money, Qty money, Amount money);
-CREATE TABLE dbo.ItemList (ICode varchar(20), IGroup varchar(20));
-CREATE TABLE dbo.ItemGroup (GroupCode varchar(20), GroupName nvarchar(100));
-CREATE TABLE dbo.Invoice (CheckNo numeric PRIMARY KEY, OpenTime datetime, CloseTime datetime, IYear int, IMonth int, IDay int,
-  SubTotal money, TaxTotal money, STaxTotal money, TotalBase money, Discount money, SurCharge money, InvStatus int,
-  Status int, TaxOmit int, RVC int, FolioNum numeric, ExRate money, BeforeTax money, Refund int);
-CREATE TABLE dbo.TaxTable (TCheckNo numeric, ClientVAT varchar(20), Company nvarchar(200), ClientName nvarchar(200),
-  Address nvarchar(200), InvContent nvarchar(200));
-CREATE TABLE dbo.Trn (TrnSeq numeric, CheckNo numeric, TrnCode int, ItemCode varchar(20), RVC int, TrnDesc nvarchar(100),
-  ItemPrice money, TrnQty money, BaseSub money, BaseTax money, TaxNo int, BaseSTax money, STaxNo int, BaseSrc money);
-CREATE TABLE dbo.ItemDef (ICode varchar(20), IUnit varchar(20));
-CREATE TABLE dbo.IUnitDef (UnitCode varchar(20), UnitName nvarchar(50));
-INSERT dbo.BillInfor (BillID, FolioNum, CompanyName, VATCode, InvDate, SubAmount, TotalAmount, BillNote, Cancel, Printed)
-  VALUES (7, 70, N'Công ty Ví Dụ', '0101243150', '2026-11-01T10:00:00', 100000, 110000, NULL, 0, 1);
-INSERT dbo.TransactionCode VALUES ('110', '0', N'Room', 1);
-INSERT dbo.TaxDef VALUES ('V10', 10);
-INSERT dbo.FolioTransaction VALUES (501, 7, '110', 0, N'Tiền phòng', 1, 100000, 10000, NULL, 0, 0, 'V10', 'R', 0);
-INSERT dbo.ItemPosted VALUES (501, 'RM', N'Phòng', 100000, 1, 100000);
-INSERT dbo.Invoice (CheckNo, CloseTime, IYear, IMonth, IDay, SubTotal, TotalBase, InvStatus, Status) VALUES (9, '2026-11-01T12:00:00', 2026, 11, 1, 50000, 55000, 0, 1);
-INSERT dbo.Trn VALUES (1, 9, 100, 'F1', 1, N'Phở', 50000, 1, 50000, 5000, 1, 0, 0, 50000);";
-
-fn connect(cfg: &Config) -> Client {
-    let mut c = Client::connect(&cfg.clone().with_connect_timeout(Duration::from_secs(30)))
-        .expect("connect");
-    c.set_timeout(Some(Duration::from_secs(120))).unwrap();
-    c
-}
-
-fn exec(c: &mut Client, sql: &str) {
-    if let Err(e) = c.batch(sql) {
-        panic!("{}: {e}", sql.trim().lines().next().unwrap_or(""));
-    }
-}
 
 #[test]
 fn legacy_install_at_compatibility_level_100() {

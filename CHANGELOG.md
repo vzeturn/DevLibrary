@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-einvoice: run-time SQL transport ladder from core (step-downs reported as `einvoice_sql_transport`); `sql_source = site` reads the machine's sql.json; hub check commands `status`, `selftest`, `collect_dry_run` and `writeback_probe` (both read-only) (RT-0164).
+- dl-agent-einvoice: `einvoice-enroll --switch` replaces the Go agent by a fresh enrolment; data continuity via SQL marks and idempotent write-back (RT-0164).
+- agent-hub: E-Invoice pilot script and bench helpers; install.ps1 (thin and legacy) clears `DL_AGENT_EINVOICE_TOKEN` after the setup (RT-0164).
 - Installer: `irm https://agent.pms.id.vn/install.ps1 | iex` installs, repairs or updates with prompts for what is missing (hidden SQL password, env-only when unattended); the script only downloads, checks SHA-256 and the Ed25519 release signature (`dl-agent verify-self`) and hands off to `dl-agent install`. New `dl-agent update`, `dl-agent install stable|canary|auto|x.y.z` (channel choice or version pin, reported in the heartbeat), `DL_AGENT_DISABLE_AUTOUPDATE=1`, `irm .../uninstall.ps1 | iex` / `dl-agent uninstall [--purge]`; hub serves `/install/manifest/...`, `/install/legacy.ps1`, `/uninstall.ps1` (RT-0164).
 
 - dl-agent-arrival: hub commands `status`, `vault_check`, `selftest`, `diagnostics`, `picture_probe`,
@@ -91,6 +94,7 @@ All notable changes are listed here. The format follows
 
 ### Changed
 
+- dl-agent-einvoice: enrolment no longer falls back to an unencrypted SQL connection for a SQL login to another computer (core rule: Windows login or local server only); an explicit or carried-over `encrypt=disable` is kept (RT-0164).
 - dl-agent-arrival: a failed SMILE_PICTURE phase names the missing grant; the install inventory lists
   processes through `dl_winsvc::process` instead of `tasklist`.
 

@@ -153,6 +153,26 @@ fn not_enrolled_idles_degraded_answers_commands_and_stops_promptly() {
     );
     let unknown = r.command("einvoice.reboot");
     assert!(!unknown.ok);
+    for kind in ["einvoice.collect_dry_run", "einvoice.writeback_probe"] {
+        let check = r.command(kind);
+        assert!(!check.ok, "{kind}");
+        assert!(
+            check
+                .output
+                .starts_with("module not collecting: not enrolled"),
+            "{kind}: {}",
+            check.output
+        );
+    }
+    let selftest = r.command("einvoice.selftest");
+    assert!(selftest.ok, "{}", selftest.output);
+    let v = dl_json::parse(&selftest.output).unwrap();
+    assert_eq!(
+        v.pointer("/summary/skip").and_then(Value::as_u64),
+        Some(1),
+        "only the config row, skipped: {}",
+        selftest.output
+    );
     assert!(r.codes().is_empty(), "not enrolled is not a problem report");
     // Stays degraded, never restarted as a failure.
     std::thread::sleep(Duration::from_millis(300));

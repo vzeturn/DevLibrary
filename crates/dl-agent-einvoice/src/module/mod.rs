@@ -9,20 +9,20 @@
 //! to end on its own.
 
 pub mod collector;
+mod commands;
 pub mod selftest;
 pub mod settings;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
 use dl_agent::Error;
-use dl_agent::command::Command;
 use dl_agent::report::Severity;
 use dl_agent::supervisor::{Factory, Module, ModuleContext};
-use dl_json::{Map, Value};
+use dl_json::Map;
 use dl_winsvc::StopSignal;
 
 use crate::agent_config::AgentConfig;
@@ -32,8 +32,8 @@ use crate::platform::Platform;
 use crate::relay::transport::HttpTransport;
 use crate::relay::{Exit, Worker};
 use crate::runner::Runner;
-use crate::sql::Sql;
-use collector::{Collector, RELAY_BUSY, Shared, exclusive};
+use collector::{Collector, Effective, RELAY_BUSY, Shared, exclusive};
+use commands::Env;
 use settings::Settings;
 
 /// The module name: config section, report module and command prefix.
@@ -74,7 +74,7 @@ impl Module for EinvoiceModule {
         let settings = Settings::from_config(ctx.config());
         let path = settings.config_dir.join(crate::agent_config::CONFIG_FILE);
         loop {
-            let Some(cfg) = wait_for_config(ctx, &settings.config_dir) else {
+            let Some(cfg) = wait_for_config(ctx, &settings) else {
                 return Ok(());
             };
             let watch = ConfigWatch::new(path.clone(), Instant::now());
@@ -142,7 +142,12 @@ impl ConfigWatch {
 }
 
 /// Loads `config.enc`, staying degraded until it exists and opens; `None` when stopped.
-fn wait_for_config(ctx: &ModuleContext, dir: &Path) -> Option<AgentConfig> {
+fn wait_for_config(ctx: &ModuleContext, settings: &Settings) -> Option<AgentConfig> {
+    let dir = settings.config_dir.as_path();
+    let env = Env {
+        settings,
+        shared: None,
+    };
     let mut detail = String::new();
     let mut next_check = Instant::now();
     loop {
@@ -168,7 +173,7 @@ fn wait_for_config(ctx: &ModuleContext, dir: &Path) -> Option<AgentConfig> {
             }
         }
         while let Some(cmd) = ctx.next_command() {
-            answer(ctx, &cmd, None, &detail);
+            commands::answer(ctx, &cmd, &env, &detail);
         }
         if ctx.stop().wait_timeout(TICK) {
             return None;
@@ -224,10 +229,21 @@ fn run_enrolled(
     })?;
     let relay_hub = Platform::new(&cfg.platform_base_url, &cfg.api_key, cfg.device_id);
     let cli = Platform::new(&cfg.platform_base_url, &cfg.api_key, cfg.device_id);
-    let sql = Sql::new(&cfg.sql_dsn, &cfg.pos_sql_dsn, cfg.sp_names());
+    let sql = settings.open_sql(ctx, &cfg).map_err(|e| {
+        let mut m = Map::new();
+        m.insert("config_dir", settings.config_dir.display().to_string());
+        ctx.report(Severity::Error, "einvoice_sql_source", &e, m);
+        ctx.set_degraded(&e);
+        Error::Module(e)
+    })?;
+    let shared = Arc::new(Shared::default());
+    shared.set_effective(Effective {
+        cfg: cfg.clone(),
+        pos_item_name: sql.pos_item_name(),
+    });
+    *shared.sql.lock().unwrap_or_else(PoisonError::into_inner) = sql.describe();
     let runner = Runner::new(sql, cli, outbox, cfg);
 
-    let shared = Arc::new(Shared::default());
     let stop = StopSignal::new();
     let collector = Collector::new(runner, interval, stop.clone(), shared.clone(), ctx.clone());
     let mut workers = vec![(
@@ -256,7 +272,11 @@ fn run_enrolled(
     ctx.set_running(&running);
     log::info("einvoice module started", &[("detail", V::S(&running))]);
 
-    let result = supervise(ctx, &shared, &stop, &mut workers, &running, &mut watch);
+    let env = Env {
+        settings,
+        shared: Some(&shared),
+    };
+    let result = supervise(ctx, &env, &stop, &mut workers, &running, &mut watch);
     stop.stop();
     finish(workers);
     result
@@ -265,12 +285,15 @@ fn run_enrolled(
 /// The module thread's loop: commands, metrics, health and worker crashes.
 fn supervise(
     ctx: &ModuleContext,
-    shared: &Shared,
+    env: &Env<'_>,
     stop: &StopSignal,
     workers: &mut Vec<(&'static str, JoinHandle<()>)>,
     running: &str,
     watch: &mut ConfigWatch,
 ) -> Result<Outcome, Error> {
+    let Some(shared) = env.shared else {
+        return Err(Error::Module("einvoice collector state missing".into()));
+    };
     let mut replaced = false;
     loop {
         let detail = if replaced {
@@ -279,7 +302,7 @@ fn supervise(
             shared.problem().unwrap_or_else(|| running.to_owned())
         };
         while let Some(cmd) = ctx.next_command() {
-            answer(ctx, &cmd, Some(shared), &detail);
+            commands::answer(ctx, &cmd, env, &detail);
         }
         for (k, v) in shared.stats.to_map().iter() {
             ctx.set_metric(k, v.clone());
@@ -354,29 +377,6 @@ fn finish(workers: Vec<(&'static str, JoinHandle<()>)>) {
         }
     }
     log::info("einvoice module stopped", &[]);
-}
-
-/// Answers `einvoice.status` and `einvoice.collect_now`.
-fn answer(ctx: &ModuleContext, cmd: &Command, shared: Option<&Shared>, detail: &str) {
-    let kind = cmd.kind.strip_prefix("einvoice.").unwrap_or(&cmd.kind);
-    match (kind, shared) {
-        ("status", _) => {
-            let mut m = shared.map(|s| s.stats.to_map()).unwrap_or_default();
-            m.insert("enrolled", shared.is_some());
-            m.insert("detail", detail);
-            ctx.complete(&cmd.id, true, &dl_json::to_string(&Value::Object(m)));
-        }
-        ("collect_now", Some(s)) => {
-            s.collect_now.store(true, Ordering::Relaxed);
-            ctx.complete(&cmd.id, true, "collect cycle queued");
-        }
-        ("collect_now", None) => ctx.complete(&cmd.id, false, detail),
-        _ => ctx.complete(
-            &cmd.id,
-            false,
-            &format!("unknown einvoice command {:?}", cmd.kind),
-        ),
-    }
 }
 
 #[cfg(test)]

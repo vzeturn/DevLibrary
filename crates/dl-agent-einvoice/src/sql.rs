@@ -1,13 +1,16 @@
 //! SQL Server access: the queries of `collectsource*.go`, `sqlsource.go`,
 //! `driftcheck.go` and `installsql*.go`, over dl-tds.
 //!
-//! One connection per source, opened lazily and reopened after a broken session.
+//! One connection per source, opened lazily and reopened after a broken session, down the
+//! transport ladder when the server resets the handshake (see [`conn`]).
 //! Parameters are sent through `sp_executesql` with the same names as the Go agent.
 
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
 
-use dl_tds::{Client, Config, Param, Row};
+use dl_agent::sql::SqlPool;
+use dl_json::Value;
+use dl_tds::{Client, Param, Row};
 use dl_time::{DateTime, OffsetDateTime};
 
 use crate::fo::{FoDetailRow, FoHeaderRow, FoLineRow, FoRows};
@@ -16,6 +19,12 @@ use crate::log::V;
 use crate::pos::{PosRawCheck, PosRawHeader, PosRawLine};
 use crate::pos_names;
 use crate::profile::PosItemName;
+
+mod conn;
+mod probe;
+use conn::Conn;
+pub use conn::StepDown;
+pub use probe::{BillMark, WindowBill, WritebackProbe};
 
 /// SQL Server's "Could not find stored procedure".
 const MISSING_PROCEDURE: i32 = 2812;
@@ -99,48 +108,6 @@ pub fn validate_sp_name(name: &str) -> Result<(), String> {
     }
 }
 
-struct Conn {
-    dsn: String,
-    client: Mutex<Option<Client>>,
-}
-
-impl Conn {
-    fn new(dsn: &str) -> Conn {
-        Conn {
-            dsn: dsn.to_owned(),
-            client: Mutex::new(None),
-        }
-    }
-
-    /// Runs `f` on a live connection, connecting first if needed. A connection that
-    /// broke (I/O error, protocol error) is dropped so the next call reconnects.
-    fn with<T>(
-        &self,
-        timeout: Duration,
-        f: impl FnOnce(&mut Client) -> Result<T, dl_tds::Error>,
-    ) -> Result<T, dl_tds::Error> {
-        let mut guard = self
-            .client
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if guard.as_ref().is_none_or(Client::is_broken) {
-            let cfg: Config = self.dsn.parse()?;
-            *guard = Some(Client::connect(
-                &cfg.with_connect_timeout(timeout.min(Duration::from_secs(30))),
-            )?);
-        }
-        let Some(c) = guard.as_mut() else {
-            unreachable!("connected above")
-        };
-        c.set_timeout(Some(timeout))?;
-        let r = f(c);
-        if c.is_broken() {
-            *guard = None;
-        }
-        r
-    }
-}
-
 /// The SMILE databases.
 pub struct Sql {
     fo: Conn,
@@ -162,11 +129,46 @@ impl Sql {
     /// for both (single-database installs).
     pub fn new(fo_dsn: &str, pos_dsn: &str, sp: SpNames) -> Sql {
         Sql {
-            fo: Conn::new(fo_dsn),
-            pos: (!pos_dsn.is_empty()).then(|| Conn::new(pos_dsn)),
+            fo: Conn::sealed(fo_dsn, "SMILE_FO"),
+            pos: (!pos_dsn.is_empty()).then(|| Conn::sealed(pos_dsn, "SMILE_POS")),
             sp,
             pos_item_name: PosItemName::default(),
         }
+    }
+
+    /// Through dl-agent's `sql.json` pools: `fo` for SMILE_FO, `pos` for SMILE_POS (`None`:
+    /// the FO database holds both).
+    pub fn site(fo: (&str, Arc<SqlPool>), pos: Option<(&str, Arc<SqlPool>)>, sp: SpNames) -> Sql {
+        Sql {
+            fo: Conn::site(fo.0, fo.1),
+            pos: pos.map(|(name, pool)| Conn::site(name, pool)),
+            sp,
+            pos_item_name: PosItemName::default(),
+        }
+    }
+
+    /// Transport step downs since the last call, FO first.
+    pub fn take_step_downs(&self) -> Vec<StepDown> {
+        let mut v = self.fo.take_step_downs();
+        if let Some(p) = &self.pos {
+            v.extend(p.take_step_downs());
+        }
+        v
+    }
+
+    /// How each source reaches SQL Server: `{"FO": {...}, "POS": {...}}` with database,
+    /// source (`config.enc` | `sql.json`), auth (`windows` | `sql`), sealed transport and the
+    /// rung in use (`null` before the first connection).
+    pub fn describe(&self) -> Value {
+        let mut m = dl_json::Map::new();
+        m.insert("FO", self.fo.describe());
+        m.insert("POS", self.conn("POS").describe());
+        Value::Object(m)
+    }
+
+    /// The database name of `source` (`FO` | `POS`).
+    pub fn database(&self, source: &str) -> &str {
+        self.conn(source).database()
     }
 
     /// The current POS line-name source (collect profile).
