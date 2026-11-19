@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent: the `collect_diagnostics` bundle also carries `survey.json` and the last self-test run (`state/selftest.last.json`), and a module can name a rolling log folder (`ModuleContext::add_diagnostic_folder`, plan hook H2) whose newest files go in within a budget; tests for hub failover over real loopback HTTP and for the whole fault-probation rollback trial (RT-0258).
+- dl-log: `scrub` also masks URL credentials, JWT-looking strings and fields whose name contains `password`/`secret` or has a `token`/`pwd`/`apikey` part (RT-0258).
+
 - dl-agent-speaker: the PDAOrder speaker as the opt-in `speaker` module of dl-agent (`modules.speaker.rvcList`): joins the PDA order hub per RVC with the enrolled `pda-sync` identity (no long-lived speaker JWT file), plays the embedded alert tones and speaks vi/en through Windows SAPI with the per-RVC `guest.speakerSoundMode` rules, hub commands `status` and `test`; no print relay (pda-sync relays, ADR 0026). Needs a PDA cloud change to accept the agent for `JoinRvc` and the sound-mode route (RT-0257).
 - dl-agent-membership: SMILE_SPECIAL extra beds on create and modify (agent-marked `Folio_Special` rows reconciled in the folio transaction, the .NET preflight and fold reasons, the hub's chosen special from sync-config), and with writes on the extra-bed terms and `SpecialService` catalogue reports (`api/agent/pms/extra-bed-terms`, `api/agent/pms/special-services`); new key `smile_hotel_id` (RT-0256).
 - dl-agent-pda-sync: the order, combo, covers, table, check-merge, line-move, KDS and reservation commands are tested live as `pda_sync` on SQL Server 2017 and 2022 (each delivered twice: one write, one `Pda_SyncCommandLog` row, the same answer; refused after a POS WIN change); the PDA cloud link is reported to the watchdog from the first accepted heartbeat, and Error site events reach the hub as problem reports (RT-0257).

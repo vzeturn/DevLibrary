@@ -781,3 +781,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent_lane_tests.rs"]
 mod lane_tests;
+
+#[cfg(test)]
+#[path = "agent_rollback_tests.rs"]
+mod rollback_tests;
