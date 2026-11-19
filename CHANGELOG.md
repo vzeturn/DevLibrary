@@ -29,6 +29,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `dl-agent-arrival`: `Encrypt=False` in the PMS connection string now means what it means in `Microsoft.Data.SqlClient`: the login is encrypted and the certificate is not checked (`TrustServerCertificate=true` is added unless the string sets it). `arrival-enroll`'s `Encrypt=False` step-down failed on a SQL Server 2022 self-signed certificate, and its KB3135244 hint now appears only for a failed TLS handshake, not a certificate error (RT-0164 test PC).
 - `dl-agent` probation no longer rolls back an update for a module that was already degraded or stopped when the update was installed (a site problem such as a missing enrolment or a revoked key); it rolled back and then reinstalled the same version every few minutes.
 - `dl-agent-einvoice`: a running module reloads `config.enc` when it is re-sealed. Before,
   `einvoice-enroll --force` left it pushing with the revoked key (HTTP 401) until the service

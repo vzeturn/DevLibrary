@@ -268,10 +268,14 @@ fn probe(io: &mut Io<'_>, pms: String) -> Result<String, String> {
             )?;
             let fallback = format!("{};Encrypt=False", pms.trim_end_matches(';'));
             let p = tds::probe(&fallback).map_err(|e| {
-                format!(
-                    "{}. The SQL Server and this machine share no TLS version: install the TLS 1.2 update on SQL Server 2008-2012 (KB3135244).",
+                if dl_agent::sql::transport::should_step_down(&e) {
+                    format!(
+                        "{}. The SQL Server and this machine share no TLS version: install the TLS 1.2 update on SQL Server 2008-2012 (KB3135244).",
+                        cannot(&e)
+                    )
+                } else {
                     cannot(&e)
-                )
+                }
             })?;
             say(io, &p.line())?;
             Ok(fallback)
