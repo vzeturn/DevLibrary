@@ -46,10 +46,11 @@ impl Sql for Fake {
         if self.deny.contains(&c.database()) {
             return Err(Failure {
                 message: format!(
-                    "Cannot open database \"{}\" requested by the login.",
+                    "Cannot open database \"{}\" that was requested by the login. Using the user default database \"master\" instead.",
                     c.database()
                 ),
-                number: Some(4060),
+                // What SQL Server 2017/2022 answer (seen live); older servers say 4060.
+                number: Some(4063),
             });
         }
         Ok(())

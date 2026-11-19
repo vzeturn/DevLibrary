@@ -17,8 +17,9 @@ use crate::Error;
 pub const SMILE_DATABASES: [&str; 3] = ["SMILE_FO", "SMILE_POS", "SMILE_BO"];
 
 /// SQL errors that mean "this login cannot get in": login failed (18456), untrusted
-/// domain (18452), cannot open database (4060), principal not a user (916), denied (229).
-const ACCESS_ERRORS: [i32; 5] = [18456, 18452, 4060, 916, 229];
+/// domain (18452), cannot open database (4060, or 4063 when the server would fall back to the
+/// login's default database), principal not a user (916), denied (229).
+const ACCESS_ERRORS: [i32; 6] = [18456, 18452, 4060, 4063, 916, 229];
 
 /// What the operator chose.
 #[derive(Clone)]
