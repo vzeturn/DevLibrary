@@ -117,7 +117,7 @@ fn heartbeat_is_signed_and_parsed() {
     let hub = FakeHub::default();
     hub.push(
         200,
-        r#"{"server_time": 1, "channel": "canary", "heartbeat_seconds": 5,
+        r#"{"server_time": 1, "channel": "canary", "heartbeat_seconds": 2,
         "config": {"version": 3, "body": {"log_level": "debug"}},
         "commands": [{"id": "c1", "kind": "restart"}, {"kind": "no-id"}], "update_check": true}"#,
     );
@@ -125,7 +125,7 @@ fn heartbeat_is_signed_and_parsed() {
     let c = HubClient::new(Box::new(hub.clone()), id.clone());
     let a = c.heartbeat(&json!({"agent_id": "agt_1"})).unwrap();
     assert_eq!(a.channel, "canary");
-    assert_eq!(a.heartbeat_seconds, 10, "clamped to the minimum");
+    assert_eq!(a.heartbeat_seconds, 5, "clamped to the minimum");
     assert_eq!(a.config.unwrap().version, 3);
     assert_eq!(a.commands.len(), 1);
     assert!(a.update_check);

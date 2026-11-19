@@ -24,11 +24,14 @@ use crate::{Error, Version, agent_version, current_target, now};
 pub const PRODUCT: &str = "dl-agent";
 /// Default probation after an update, in seconds.
 pub const PROBATION_SECONDS: u64 = 600;
+/// Probation on the canary channel (test machines, the fast lane of PROTOCOL.md §6.4).
+pub const CANARY_PROBATION_SECONDS: u64 = 120;
 /// Retry interval while the hub is unreachable, in seconds.
 pub const RETRY_SECONDS: u64 = 30;
 /// An unchanged site survey is sent again after this long (PROTOCOL.md §3).
 pub const SURVEY_RESEND_SECONDS: u64 = 24 * 3600;
-/// Least time between two update checks the hub asked for, in seconds.
+/// Least time between two update checks the hub asked for, in seconds (stable channel;
+/// canary checks on every heartbeat that asks, PROTOCOL.md §6.4).
 pub const UPDATE_CHECK_SECONDS: u64 = 300;
 /// How long a module gets to stop on restart or shutdown.
 pub const STOP_WAIT: Duration = Duration::from_secs(10);
@@ -400,7 +403,7 @@ impl Agent {
         if now >= until
             && self
                 .supervisor
-                .any_unhealthy_for_except(self.opts.probation_seconds, now, &skip)
+                .any_unhealthy_for_except(self.probation_seconds(), now, &skip)
         {
             if let Err(e) = self.roll_back("a module stayed unhealthy through probation") {
                 self.report(Severity::Critical, "rollback_failed", &e.to_string());
@@ -475,7 +478,7 @@ impl Agent {
                 return Some(exit);
             }
         }
-        if answer.update_check && now >= self.last_update_check + UPDATE_CHECK_SECONDS {
+        if answer.update_check && self.update_check_due(now) {
             self.last_update_check = now;
             match self.try_update(now, false) {
                 Ok(update_flow::Checked::Installed) => return Some(Exit::Restart),
@@ -761,3 +764,7 @@ mod update_flow;
 #[cfg(test)]
 #[path = "agent_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_lane_tests.rs"]
+mod lane_tests;

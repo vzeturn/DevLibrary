@@ -12,7 +12,7 @@ use crate::update::Pending;
 
 const HB_OK: &str = r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "commands": [], "update_check": false}"#;
 
-fn agent(d: &TestDir, hub: &FakeHub, modules: Vec<Factory>) -> Agent {
+pub(super) fn agent(d: &TestDir, hub: &FakeHub, modules: Vec<Factory>) -> Agent {
     let exe = d.0.join("bin").join("dl-agent");
     std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
     std::fs::write(&exe, b"old").unwrap();
@@ -25,13 +25,17 @@ fn agent(d: &TestDir, hub: &FakeHub, modules: Vec<Factory>) -> Agent {
     Agent::new(opts, id, Box::new(hub.clone()), modules).unwrap()
 }
 
-fn urls(hub: &FakeHub) -> Vec<String> {
+pub(super) fn urls(hub: &FakeHub) -> Vec<String> {
     hub.seen().into_iter().map(|s| s.url).collect()
 }
 
 fn signed_manifest(version: &str, bytes: &[u8], seed: u8) -> String {
+    signed_manifest_on("canary", version, bytes, seed)
+}
+
+pub(super) fn signed_manifest_on(channel: &str, version: &str, bytes: &[u8], seed: u8) -> String {
     let text = format!(
-        r#"{{"product":"dl-agent","channel":"canary","version":"{version}","published_at":10,
+        r#"{{"product":"dl-agent","channel":"{channel}","version":"{version}","published_at":10,
         "rollout_percent":100,"min_version":null,"allow_downgrade":false,"notes":"",
         "artifacts":[{{"target":"{}","url":"https://hub/v1/artifacts/k1","sha256":"{}","size":{}}}],
         "key_id":"rel-1","signature":"{}"}}"#,
@@ -164,7 +168,7 @@ fn signed_update_is_installed_and_put_on_probation() {
     let state = UpdateState::load(&a.opts.data_dir).unwrap();
     let p = state.pending.unwrap();
     assert_eq!(p.version.to_string(), "99.0.0");
-    assert_eq!(p.probation_until, 1000 + PROBATION_SECONDS);
+    assert_eq!(p.probation_until, 1000 + CANARY_PROBATION_SECONDS);
     let u = urls(&hub);
     assert_eq!(u[1], "https://hub/v1/releases/dl-agent/canary");
     assert_eq!(u[2], "https://hub/v1/artifacts/k1");
@@ -220,7 +224,7 @@ fn healthy_probation_commits() {
     a.supervisor.stop_all(STOP_WAIT);
 }
 
-struct Broken;
+pub(super) struct Broken;
 
 impl Module for Broken {
     fn name(&self) -> &str {
@@ -499,8 +503,9 @@ fn update_window_holds_the_check_and_update_now_overrides_it() {
     let hub = FakeHub::default();
     *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
     let new = b"new binary";
-    hub.push(200, HB_UPDATE)
-        .push(200, &signed_manifest("99.0.0", new, 7));
+    // The window holds stable agents; canary ones ignore it (agent_lane_tests.rs).
+    hub.push(200, r#"{"server_time": 0, "channel": "stable", "heartbeat_seconds": 60, "commands": [], "update_check": true}"#)
+        .push(200, &signed_manifest_on("stable", "99.0.0", new, 7));
     let mut a = agent(&d, &hub, Vec::new());
     // 1000 s after the epoch is 07:16 in UTC+7, outside 22:00–05:00.
     a.config.current.body =
@@ -513,10 +518,10 @@ fn update_window_holds_the_check_and_update_now_overrides_it() {
 
     hub.push(
         200,
-        r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60, "update_check": false,
+        r#"{"server_time": 0, "channel": "stable", "heartbeat_seconds": 60, "update_check": false,
         "commands": [{"id": "u1", "kind": "update_now"}]}"#,
     )
-    .push(200, &signed_manifest("99.0.0", new, 7))
+    .push(200, &signed_manifest_on("stable", "99.0.0", new, 7))
     .push(200, std::str::from_utf8(new).unwrap());
     assert_eq!(a.step(1060), Some(Exit::Restart));
     assert_eq!(std::fs::read(&a.opts.exe).unwrap(), new);

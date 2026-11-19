@@ -78,6 +78,13 @@ mod tests {
     }
 
     #[test]
+    fn bucket_matches_the_hub() {
+        // services/agent-hub/test/lanes.test.ts pins the same vector: the hub's staged
+        // rollout and the agent's rollout_percent check must pick the same agents.
+        assert_eq!(rollout_bucket("agent-1", "dl-agent", "1.4.0"), 14);
+    }
+
+    #[test]
     fn rollout_is_monotonic_and_spread() {
         let ids: Vec<String> = (0..1000).map(|i| format!("agent-{i}")).collect();
         let count = |p: u8| {

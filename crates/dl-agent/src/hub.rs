@@ -120,6 +120,10 @@ pub struct Enrolled {
     pub config: Option<RemoteConfig>,
 }
 
+/// Shortest heartbeat interval the agent accepts: the hub asks for 5 s from a canary agent on
+/// probation (PROTOCOL.md §5.1); agents up to 1.3.x floor it at 10 s.
+pub const MIN_HEARTBEAT_SECONDS: u64 = 5;
+
 /// What the hub answered to a heartbeat.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeartbeatAnswer {
@@ -154,7 +158,7 @@ impl HeartbeatAnswer {
                 .get("heartbeat_seconds")
                 .and_then(Value::as_u64)
                 .unwrap_or(60)
-                .clamp(10, 3600),
+                .clamp(MIN_HEARTBEAT_SECONDS, 3600),
             config,
             commands: v
                 .get("commands")
