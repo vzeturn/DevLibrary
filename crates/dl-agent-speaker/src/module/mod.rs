@@ -142,7 +142,7 @@ fn run_enrolled(
         std::thread::Builder::new()
             .name("speaker-modes".into())
             .spawn(move || {
-                let http = dl_http::Client::new();
+                let http = dl_http::Client::with_options(crate::hub::http_options());
                 loop {
                     let failed =
                         crate::fetch::refresh(&http, &base, &*tokens, &rt.settings.rvcs, &rt.cache);
