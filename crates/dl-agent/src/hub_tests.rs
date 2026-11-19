@@ -262,3 +262,29 @@ fn path_and_query_strips_host_and_fragment() {
     );
     assert!(path_and_query("https://h").is_err());
 }
+
+#[test]
+fn selftest_upload_is_signed() {
+    let id = identity(&["https://hub.example"]);
+    let hub = FakeHub::default();
+    hub.push(200, r#"{"accepted":true,"run_id":"r1"}"#);
+    let c = HubClient::new(Box::new(hub.clone()), id.clone());
+    assert!(c.selftest(&json!({"run_id": "r1", "checks": []})).unwrap());
+    let seen = hub.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].url, "https://hub.example/v1/agent/selftest");
+    assert!(seen.iter().all(|s| verify(&id, s)));
+}
+
+#[test]
+fn selftest_upload_to_an_older_hub_is_not_an_error() {
+    let hub = FakeHub::default();
+    hub.push(404, "{}");
+    let c = HubClient::new(Box::new(hub.clone()), identity(&["https://hub.example"]));
+    assert!(!c.selftest(&json!({"run_id": "r1"})).unwrap());
+    hub.push(400, r#"{"error":"bad_request"}"#);
+    assert!(matches!(
+        c.selftest(&json!({"run_id": "r1"})),
+        Err(Error::Status { code: 400, .. })
+    ));
+}

@@ -112,21 +112,72 @@ pub fn unregister(app: &App) {
     }
 }
 
+/// The recovery settings [`set_recovery`] applies: restart after 5 s, 10 s, 60 s and reset
+/// the failure counter daily.
+pub(crate) fn expected_recovery() -> ([dl_winsvc::scm::RecoveryAction; 3], Duration) {
+    use dl_winsvc::scm::RecoveryAction;
+    (
+        [
+            RecoveryAction::Restart(Duration::from_secs(5)),
+            RecoveryAction::Restart(Duration::from_secs(10)),
+            RecoveryAction::Restart(Duration::from_secs(60)),
+        ],
+        Duration::from_secs(86_400),
+    )
+}
+
 /// Windows service recovery: restart after 5 s, 10 s, 60 s; counter reset daily; exit codes
 /// other than 0 (update installed = 75) count as failures.
 pub fn set_recovery(service: &dl_winsvc::scm::Service) -> Result<(), Error> {
-    use dl_winsvc::scm::RecoveryAction;
-    let restart = [
-        RecoveryAction::Restart(Duration::from_secs(5)),
-        RecoveryAction::Restart(Duration::from_secs(10)),
-        RecoveryAction::Restart(Duration::from_secs(60)),
-    ];
+    let (restart, reset) = expected_recovery();
     service
-        .set_recovery_actions(&restart, Duration::from_secs(86_400))
+        .set_recovery_actions(&restart, reset)
         .map_err(cli::svc)?;
     service
         .set_recovery_on_non_crash_failures(true)
         .map_err(cli::svc)
+}
+
+/// Whether the watchdog schedule is registered: the scheduled task (Windows) or an enabled
+/// systemd timer (Linux). Read only.
+pub(crate) fn watchdog_present(app: &App) -> Result<bool, Error> {
+    let (tool, args): (&str, Vec<String>) = if cfg!(windows) {
+        (
+            "schtasks",
+            vec!["/Query".into(), "/TN".into(), task_name(app)],
+        )
+    } else if cfg!(target_os = "linux") {
+        let timer = format!("{}-watchdog.timer", app.service);
+        if !systemd_dir().join(&timer).exists() {
+            return Ok(false);
+        }
+        ("systemctl", vec!["is-enabled".into(), timer])
+    } else {
+        return Err(Error::Config(
+            "the watchdog runs on Windows and Linux (systemd)".into(),
+        ));
+    };
+    let out = Command::new(tool)
+        .args(&args)
+        .output()
+        .map_err(|e| Error::Config(format!("{tool}: {e}")))?;
+    Ok(out.status.success()
+        && (cfg!(windows) || String::from_utf8_lossy(&out.stdout).trim() == "enabled"))
+}
+
+/// The Windows service's recovery settings: restart actions, counter reset and whether
+/// non-crash failures count. `Ok(None)` off Windows.
+pub(crate) fn recovery(
+    app: &App,
+) -> Result<Option<(Vec<dl_winsvc::scm::RecoveryAction>, Duration, bool)>, Error> {
+    if !cfg!(windows) {
+        return Ok(None);
+    }
+    let manager = dl_winsvc::scm::Manager::connect_read_only().map_err(cli::svc)?;
+    let service = manager.open_read_only(&app.service).map_err(cli::svc)?;
+    let (actions, reset) = service.recovery_actions().map_err(cli::svc)?;
+    let non_crash = service.recovery_on_non_crash_failures().map_err(cli::svc)?;
+    Ok(Some((actions, reset, non_crash)))
 }
 
 /// At service start: puts back a deleted watchdog task and the recovery settings, so an
@@ -152,7 +203,8 @@ pub fn ensure(app: &App, dir: &Path) {
     }
 }
 
-fn probe(app: &App) -> Result<Service, Error> {
+/// The service as the service manager sees it (read only).
+pub(crate) fn probe(app: &App) -> Result<Service, Error> {
     if cfg!(windows) {
         use dl_winsvc::scm::{Manager, StartType, State};
         let manager = Manager::connect_read_only().map_err(cli::svc)?;

@@ -13,6 +13,7 @@
 
 pub mod commands;
 pub mod prepare;
+pub mod selftest;
 pub mod settings;
 
 use std::sync::Arc;

@@ -64,6 +64,11 @@ impl TrustedKeys {
         TrustedKeys::default()
     }
 
+    /// Whether no key is trusted (every manifest is then refused).
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
     /// Adds a key from its base64 form.
     pub fn with_key(mut self, key_id: &str, public_key_b64: &str) -> Result<TrustedKeys, Error> {
         let raw = B64

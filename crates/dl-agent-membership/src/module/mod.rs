@@ -3,6 +3,7 @@
 //! and reports their health, metrics and problems to dl-agent.
 
 pub mod scan;
+pub mod selftest;
 pub mod state;
 
 use std::sync::Arc;

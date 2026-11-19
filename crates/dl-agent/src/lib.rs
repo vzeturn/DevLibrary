@@ -13,6 +13,8 @@ pub mod identity;
 pub mod manifest;
 pub mod report;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod selftest;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod service_watch;
 pub mod sql;
 pub mod store;

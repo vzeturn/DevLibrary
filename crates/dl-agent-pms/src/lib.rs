@@ -33,6 +33,7 @@ pub mod telemetry;
 pub mod tools;
 pub mod wire;
 
+pub use module::selftest::pms_site_selftest;
 pub use module::{PmsSiteModule, pms_site_module};
 pub use tools::{pms_enroll_tool, pms_migrate_tool};
 

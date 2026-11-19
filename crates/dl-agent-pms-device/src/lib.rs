@@ -20,4 +20,5 @@ pub mod module;
 pub mod native;
 pub mod queue;
 
+pub use module::selftest::pms_device_selftest;
 pub use module::{Hooks, NAME, PmsDeviceModule, pms_device_module, pms_device_module_with};

@@ -194,6 +194,27 @@ fn field_mut<'a>(v: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
 /// `LoadConfig` without the template: `Ok(None)` when the file is missing. Plaintext
 /// secrets are encrypted and written back (seed-once). The config is not validated.
 pub fn load(path: &Path) -> Result<Option<LocalConfig>, String> {
+    let Some((cfg, v, plaintext)) = decode(path)? else {
+        return Ok(None);
+    };
+    if plaintext {
+        let mut enc = v;
+        encrypt_secrets(&mut enc)?;
+        write_atomic(path, dl_json::to_string_pretty(&enc).as_bytes())
+            .map_err(|e| format!("re-encrypt config {}: {e}", path.display()))?;
+    }
+    Ok(Some(cfg))
+}
+
+/// [`load`] without the seed-once write: plaintext secrets stay as they are on disk (the
+/// self-test reads the config, it never rewrites it).
+pub fn read(path: &Path) -> Result<Option<LocalConfig>, String> {
+    Ok(decode(path)?.map(|(cfg, _, _)| cfg))
+}
+
+/// The config with its secrets decrypted, the decrypted JSON, and whether any secret was
+/// stored in plaintext.
+fn decode(path: &Path) -> Result<Option<(LocalConfig, Value, bool)>, String> {
     let Some(mut v) = read_value(path)? else {
         return Ok(None);
     };
@@ -221,13 +242,7 @@ pub fn load(path: &Path) -> Result<Option<LocalConfig>, String> {
         *slot = Value::from(plain);
     }
     let cfg = LocalConfig::from_value(&v);
-    if plaintext {
-        let mut enc = v.clone();
-        encrypt_secrets(&mut enc)?;
-        write_atomic(path, dl_json::to_string_pretty(&enc).as_bytes())
-            .map_err(|e| format!("re-encrypt config {}: {e}", path.display()))?;
-    }
-    Ok(Some(cfg))
+    Ok(Some((cfg, v, plaintext)))
 }
 
 /// `encryptField` over every secret of `v` (already-encrypted and empty values stay).

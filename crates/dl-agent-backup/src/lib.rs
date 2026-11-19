@@ -34,3 +34,4 @@ mod testutil;
 pub use enroll::tool::backup_enroll_tool;
 pub use error::Error;
 pub use module::backup_module;
+pub use module::selftest::backup_selftest;

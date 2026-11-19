@@ -15,6 +15,7 @@
 pub mod commands;
 pub mod logger;
 pub mod prepare;
+pub mod selftest;
 pub mod settings;
 pub mod telemetry;
 

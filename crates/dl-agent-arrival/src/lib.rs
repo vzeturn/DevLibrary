@@ -21,4 +21,5 @@ mod error;
 
 pub use error::Error;
 pub use module::arrival_module;
+pub use module::selftest::arrival_selftest;
 pub use tools::arrival_enroll_tool;

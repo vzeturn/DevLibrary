@@ -10,6 +10,7 @@
 //! did not finish stays in the durable queue and is applied or re-acked on the next start.
 
 pub mod health;
+pub mod selftest;
 pub mod settings;
 #[cfg(test)]
 mod tests;
