@@ -55,7 +55,7 @@ the build's allowlist (`hub_urls::ALLOWED_HOSTS`: `agent.pms.id.vn`, `*.pms.id.v
 reported once per change as `hub_urls_ignored` (warning), so a tampered or mistyped
 `HUB_URLS` can never steer agents to a foreign host. The hub sets the list from `HUB_URLS`
 (a `wrangler.jsonc` var: it goes live with the next deploy); a fallback host (not the first) serves only `/healthz`, `/install.ps1`,
-`/install/*` and `/v1/*` and answers 404 for everything else, so the admin API stays on the
+`/uninstall.ps1`, `/install/*` and `/v1/*` and answers 404 for everything else, so the admin API stays on the
 primary host. The installer passes the same list to `enroll`, so a new agent can enrol while
 the primary host is down. Self-test row `core/hub_urls`: pass with a fallback, warn with one host.
 
@@ -316,13 +316,36 @@ On the `canary` channel (§5.1) the agent:
 The boot count, the failure cap (§6.2) and the rollback are exactly as on stable. Until the
 first heartbeat answer names its channel, the agent behaves as on `stable`.
 
-### 6.5 Local opt-out: the `no-update` file
+### 6.5 Local update controls: opt-out, pin, channel choice, update now
 
-If `<data dir>/no-update` exists, the agent ignores the hub's `update_check` (no manifest is
-fetched, nothing installs). It says so: the heartbeat carries `"update_blocked": "local"`
-while the file exists (absent otherwise), one `info` report `update_blocked_local` is sent per
-start, and `selftest` shows a warn row `core/no_update`. The `update_now` command still runs,
-as does `retry_update`. Hubs that do not know the field ignore it.
+All in the data directory (or the service's environment), set by the site's administrator:
+
+| Control | Effect | Heartbeat |
+|---------|--------|-----------|
+| `no-update` file | `update_check` is ignored (no manifest fetched, nothing installs) | `"update_blocked": "local"` |
+| env `DL_AGENT_DISABLE_AUTOUPDATE=1` (or `true`) | same as `no-update` | `"update_blocked": "env"` |
+| `update-pin` (`dl-agent install x.y.z`) | automatic updates hold at that version until `install stable\|canary\|auto` | `"update_blocked": "pinned"`, `"update_pin": "x.y.z"` |
+| `update-channel` (`dl-agent install stable\|canary`) | the agent follows this channel instead of the hub's assignment; `install auto` removes it | `"channel_choice": "canary"` |
+
+The fields are absent otherwise; hubs that do not know them ignore them. While updates are
+blocked one `info` report `update_blocked_local` is sent per start (its message names the reason
+and the way back) and `selftest` shows a warn row `core/no_update`. The `update_now` command still
+runs, as does `retry_update`: they are the operator's override.
+
+`dl-agent update` asks the running agent for the same `update_now` path: it writes
+`update-now.request`, the agent takes it within a second, checks its channel and installs a newer
+signed build, and answers in `update-now.result.json` (`ok`, `installed`, `from`, `to`,
+`channel`, `output`); the CLI prints from → to. It refuses while a version is pinned and exits 69
+when the service does not answer.
+
+The installer side (`/install.ps1`, PowerShell 2.0+): `GET /install/info/:product/:channel/:target`
+(optionally `?version=x.y.z`, found on either channel) gives version, size, SHA-256 and the hub
+clock as `key=value` lines; `GET /install/manifest/:product/:channel/:version` gives the signed
+release manifest as published, which `dl-agent verify-self` checks (Ed25519 with the keys built
+into the binary, product, target, size, SHA-256) before the download runs; `/install/legacy.ps1`
+is the previous installer for builds without `dl-agent install`; `/uninstall.ps1` removes the
+agent (`dl-agent uninstall`, plus what an older agent leaves). Each answers `Cache-Control:
+no-store`.
 
 ### 6.6 Rollback smoke test (fault build)
 

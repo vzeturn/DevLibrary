@@ -166,3 +166,49 @@ fn without_the_file_nothing_is_reported_blocked() {
     let a = agent(&d, &hub, Vec::new());
     assert!(a.heartbeat_body(1000).get("update_blocked").is_none());
 }
+
+#[test]
+fn a_local_update_request_installs_on_the_channel_chosen_here_and_answers() {
+    let d = TestDir::new("lane-local-update");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
+    let new = b"new binary";
+    let mut a = agent(&d, &hub, Vec::new());
+    crate::optout::set_channel(&a.opts.data_dir, Some("canary")).unwrap();
+    crate::optout::request_update(&a.opts.data_dir, 999).unwrap();
+    hub.push(200, &signed_manifest_on("canary", "99.0.0", new, 7))
+        .push(200, std::str::from_utf8(new).unwrap());
+    assert_eq!(a.step(1000), Some(Exit::Restart));
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), new);
+    assert_eq!(urls(&hub)[0], "https://hub/v1/releases/dl-agent/canary");
+    let r = crate::optout::read_update_result(&a.opts.data_dir)
+        .unwrap()
+        .unwrap();
+    assert!(r.ok && r.installed);
+    assert_eq!((r.to.as_str(), r.channel.as_str()), ("99.0.0", "canary"));
+    assert_eq!(r.from, a.opts.version.to_string());
+    // The request was taken once.
+    assert!(!crate::optout::take_update_request(&a.opts.data_dir).unwrap());
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn a_pin_holds_update_check_and_the_heartbeat_reports_it_and_the_channel_choice() {
+    let d = TestDir::new("lane-pin");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
+    let mut a = agent(&d, &hub, Vec::new());
+    let v: crate::Version = "1.2.3".parse().unwrap();
+    crate::optout::set_pin(&a.opts.data_dir, Some(&v)).unwrap();
+    crate::optout::set_channel(&a.opts.data_dir, Some("canary")).unwrap();
+    let body = a.heartbeat_body(1000);
+    assert_eq!(body["update_blocked"], dl_json::Value::from("pinned"));
+    assert_eq!(body["update_pin"], dl_json::Value::from("1.2.3"));
+    assert_eq!(body["channel_choice"], dl_json::Value::from("canary"));
+    hub.push(200, &hb("stable", true));
+    assert_eq!(a.step(1000), None);
+    assert_eq!(release_fetches(&hub), 0, "no manifest fetch while pinned");
+    // The channel chosen here wins over the hub's.
+    assert_eq!(a.channel, "canary");
+    a.supervisor.stop_all(STOP_WAIT);
+}

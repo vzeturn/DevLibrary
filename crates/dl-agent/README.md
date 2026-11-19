@@ -107,26 +107,70 @@ The executable lives in its own package because product modules depend on this l
 ## Installing on Windows
 
 Create an enrolment code on the hub (`POST /admin/enroll-codes` answers `install_command`), then
-on the site run in PowerShell as Administrator (PowerShell 2.0 / Windows 7 included):
+on the site, in PowerShell as Administrator:
+
+```text
+irm https://agent.pms.id.vn/install.ps1 | iex
+```
+
+PowerShell 5.1+ (Windows 10 / Server 2016 and later). It asks for what is missing: the
+enrolment code, then the SQL login ([1] Windows, [2] SQL; server, user and a hidden password).
+Options go through the scriptblock form:
+
+```text
+& ([scriptblock]::Create((irm https://agent.pms.id.vn/install.ps1))) canary -Code XXXX-XXXX -SqlPrompt
+```
+
+PowerShell 2.0 (Windows 7 / Server 2008 R2):
 
 ```text
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('https://agent.pms.id.vn/install.ps1'))) -Code 'XXXX-XXXX'
 ```
 
-Add `-SqlPrompt` when SQL Server is on another machine (asked and tested before the code is
-spent), `-Channel canary` for demo sites. Re-running the same line upgrades or repairs the
-install and keeps the identity. See `services/agent-hub/README.md` for every step.
+Unattended (RMM, SYSTEM): environment only, never a password on the command line:
+`DL_AGENT_ENROLL_CODE`, `DL_AGENT_CHANNEL`, `DL_AGENT_SQL_AUTH` (`windows`|`sql`),
+`DL_AGENT_SQL_SERVER`, `DL_AGENT_SQL_USER`, `DL_AGENT_SQL_PASSWORD`. Exit codes: 0 ok, 1 failed,
+65 build failed verification, 69 hub unreachable, 77 not Administrator, 78 configuration.
+
+The script only downloads, checks and hands off: size and SHA-256 against `/install/info`, then
+`verify-self` checks the Ed25519 release signature of `/install/manifest/...` (the installed
+agent does it when it knows the verb, else the download itself), then `<download> install --hub
+...` does the machine setup: Defender exclusion, older copies and `-Replace` services removed,
+program placed in `%ProgramFiles%\DevLibrary\<product>`, enrol unless already enrolled, SQL login,
+`-Setup`, service + watchdog task, wait for the first heartbeat. Re-running the line repairs or
+updates the install and keeps the identity. A build older than `dl-agent install` is installed by
+the previous script (`/install/legacy.ps1`) with the same options.
+
+The first argument picks what the machine follows: `stable` / `canary` (a local choice that wins
+over the hub's assignment), `auto` (the hub's channel again) or a version `x.y.z` (held there).
+`-Channel canary` only picks the build installed now. `-SqlPrompt` asks for the SQL login when SQL
+Server is on another machine. See `services/agent-hub/README.md` for the hub side.
+
+Remove: `irm https://agent.pms.id.vn/uninstall.ps1 | iex` (or `dl-agent uninstall`): tells the
+hub, removes the watchdog task, the service, the program and the Defender exclusion; the data
+folder (identity, spool, logs) stays unless `-Purge` (`--purge`).
 
 ## Commands
 
 | Command | Meaning |
 |---------|---------|
+| `--version` | print the version |
 | `enroll --hub URL[,URL] --code CODE [--force]` | register with the hub |
 | `run` | run in the console, or as the service when the SCM started it |
-| `install` / `uninstall [--purge]` | system service |
+| `install --hub URL[,URL] [stable\|canary\|auto\|x.y.z] [...]` | machine setup (what the one-line installer runs); prompts mask the password |
+| `install stable\|canary\|auto` | follow that channel (`auto`: the hub's) and update now; removes a pin |
+| `install x.y.z` | install that signed version and hold it (heartbeat `update_pin`) |
+| `install` | (re)register the service for this binary |
+| `update [--wait S]` | check the agent's channel and install a newer signed build now; prints from and to |
+| `verify-self --manifest F [--file EXE] [--target T] [--product P]` | check a build against its signed manifest; exit 65 when it does not match |
+| `uninstall [--purge] [--keep-files]` | remove the agent (see above); `--keep-files` keeps the program for an installer |
 | `status` | local state as JSON (no hub call) |
 | `sql-add NAME --connection CS [--max N]` | declare a database (or env `DL_AGENT_SQL_CONNECTION`); restart to apply |
 | `sql-test [NAME]` | connect to every (or one) declared database; exit 1 if any fails |
+
+Automatic updates stop with `DL_AGENT_DISABLE_AUTOUPDATE=1` in the service's environment or a
+`no-update` file in the data folder; `update` and the hub's `update_now` still install
+(PROTOCOL.md §6.5).
 
 ## Releasing
 

@@ -5,7 +5,15 @@ pub mod channel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_install;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_install_sql;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_install_win;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_sql;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_uninstall;
 pub mod command;
 pub mod config;
 mod error;

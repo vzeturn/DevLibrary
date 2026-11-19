@@ -115,18 +115,16 @@ fn dir_problem(_: &Path) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-/// A warning row while the `no-update` file keeps this agent from updating by itself.
+/// A warning row while a local control (the `no-update` file, `DL_AGENT_DISABLE_AUTOUPDATE`
+/// or a pinned version) keeps this agent from updating by itself.
 pub(crate) fn no_update(dir: &Path) -> Option<Check> {
-    crate::optout::blocked(dir).then(|| {
+    crate::optout::reason(dir).map(|why| {
         Check::timed(CORE, "no_update", "Automatic updates", || {
             Outcome::warn(format!(
-                "the {} file exists: this agent never updates by itself (update_now still works)",
-                crate::optout::FILE
+                "{}: this agent never updates by itself (update_now still works)",
+                crate::optout::describe(dir, why)
             ))
-            .remedy(format!(
-                "delete {} in the data directory to let the hub's updates through",
-                crate::optout::FILE
-            ))
+            .remedy(crate::optout::remedy(why))
         })
     })
 }
