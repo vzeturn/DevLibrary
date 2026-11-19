@@ -19,10 +19,14 @@ use crate::config::{AgentConfig, ConfigStore, Dpapi, Sealer};
 use crate::hub::gate::TokenGate;
 use crate::hub::{HubApi, HubClient};
 use crate::identity::{IdentityProbe, Snapshot, Tracker};
+use crate::jobs::dispatch::{DispatchSettings, Dispatcher};
+use crate::jobs::gate::WriteGate;
 use crate::log::{self, V};
 use crate::settings::Settings;
 use crate::smile::{SmileError, SmileHealth, TdsSmile};
 use crate::sync::{SyncSettings, SyncWorker};
+use crate::writer::folio::{FolioWriter, WriteOptions};
+use crate::writer::smile_writer::SmileWriter;
 use scan::{ScanDeps, ScanLoop};
 use state::{RateLimit, Shared};
 
@@ -77,31 +81,20 @@ impl Module for MembershipModule {
 
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
         let settings = Settings::from_config(ctx.config(), ctx.data_dir());
-        if !settings.read_only {
-            let why =
-                "read_only is false, but this build has no writers yet (M2): set read_only to true";
-            log::error(why, &[]);
-            ctx.set_degraded(why);
-            idle_until_stopped(ctx, why);
-            return Ok(());
+        if let Some(problem) = &settings.write.extra_bed_mode_problem {
+            log::warn(problem, &[]);
+        }
+        if !settings.read_only && !settings.pull_jobs {
+            log::warn(
+                "read_only is false but pull_jobs is false: no job is pulled, nothing is written",
+                &[],
+            );
         }
         let store = ConfigStore::new(settings.program_data_dir.clone(), self.sealer.clone());
         let Some(cfg) = wait_for_config(ctx, &store) else {
             return Ok(());
         };
         run_enrolled(ctx, cfg, &settings)
-    }
-}
-
-/// Answers commands until stopped.
-fn idle_until_stopped(ctx: &ModuleContext, detail: &str) {
-    loop {
-        while let Some(cmd) = ctx.next_command() {
-            answer(ctx, &cmd, None, detail);
-        }
-        if ctx.stop().wait_timeout(TICK) {
-            return;
-        }
     }
 }
 
@@ -162,6 +155,15 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>
         .map_err(|e| Error::Io("spawn membership worker", e))
 }
 
+/// Health, identity probe, scan sources and the writer's connection (the last two absent
+/// when the connection string is invalid).
+type SmileHandles = (
+    Arc<dyn SmileHealth>,
+    Arc<dyn IdentityProbe>,
+    Option<Arc<dyn scan::Sources>>,
+    Option<Arc<TdsSmile>>,
+);
+
 /// Runs the sync and scan threads until `ctx.stop()`.
 fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> Result<(), Error> {
     let gate = Arc::new(TokenGate::new(TOKEN_RETRY));
@@ -176,7 +178,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         .map_err(|e| Error::Config(format!("membership hub address: {e}")))?,
     );
     let shared = Arc::new(Shared::default());
-    let (health, probe, scan_src): (Arc<dyn SmileHealth>, Arc<dyn IdentityProbe>, _) = match (
+    let (health, probe, scan_src, write_smile): SmileHandles = match (
         TdsSmile::new(&cfg.smile_connection_string),
         TdsSmile::new(&cfg.smile_connection_string),
     ) {
@@ -190,11 +192,16 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
                 ],
             );
             let a = Arc::new(a);
-            (a.clone(), a, Some(Arc::new(b) as Arc<dyn scan::Sources>))
+            (
+                a.clone(),
+                a.clone(),
+                Some(Arc::new(b) as Arc<dyn scan::Sources>),
+                Some(a),
+            )
         }
         (Err(e), _) | (_, Err(e)) => {
             let s = Arc::new(NoSmile(e));
-            (s.clone(), s, None)
+            (s.clone(), s, None, None)
         }
     };
     let tracker = Arc::new(Tracker::new(probe));
@@ -204,6 +211,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             ("hotel_id", V::S(&cfg.hotel_id.to_string())),
             ("hub", V::S(cfg.hub_base_url.trim())),
             ("pull_jobs", V::B(settings.pull_jobs)),
+            ("read_only", V::B(settings.read_only)),
             ("folio_scan", V::B(settings.folio.enabled)),
         ],
     );
@@ -222,6 +230,9 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         },
         AGENT_VERSION,
     );
+    if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker) {
+        sync = sync.with_dispatcher(d);
+    }
     let s = stop.clone();
     let mut workers = vec![("sync", spawn("membership-sync", move || sync.run(&s))?)];
     if let Some(src) = scan_src {
@@ -246,6 +257,49 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
     stop.stop();
     finish(workers);
     result
+}
+
+/// The job dispatcher when writes are on (`read_only: false`) and SMILE is reachable by
+/// connection string; `None` keeps the M1 behaviour (jobs counted, never acked).
+fn dispatcher(
+    settings: &Settings,
+    cfg: &AgentConfig,
+    smile: Option<Arc<TdsSmile>>,
+    hub: &Arc<dyn HubApi>,
+    tracker: &Arc<Tracker>,
+) -> Option<Arc<Dispatcher>> {
+    if settings.read_only {
+        return None;
+    }
+    let Some(smile) = smile else {
+        log::error(
+            "read_only is false but the SMILE connection string is invalid: jobs are not run",
+            &[],
+        );
+        return None;
+    };
+    let w = &settings.write;
+    let folio = FolioWriter::new(WriteOptions {
+        write_lock_timeout_ms: w.write_lock_timeout_ms,
+        default_payment_code: w.default_payment_code.clone(),
+        default_breakfast_code: w.default_breakfast_code.clone(),
+        extra_bed_mode: w.extra_bed_mode.clone(),
+        extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+    });
+    let gate = Arc::new(WriteGate::new(hub.clone(), tracker.clone()));
+    log::warn(
+        "SMILE writes are ON: hub jobs are executed and acked (stop the .NET agent service)",
+        &[("extra_bed_mode", V::S(&w.extra_bed_mode))],
+    );
+    Some(Arc::new(Dispatcher::new(
+        Arc::new(SmileWriter::new(smile, folio)),
+        Some(gate),
+        DispatchSettings {
+            origin_code: cfg.origin_code.clone(),
+            member_discount_code: settings.smile.member_discount_code.clone(),
+            extra_bed_mode: w.extra_bed_mode.clone(),
+        },
+    )))
 }
 
 /// The module thread's loop: commands, reports, metrics, health and worker crashes.
