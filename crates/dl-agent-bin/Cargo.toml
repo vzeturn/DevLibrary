@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 dl-agent.workspace = true
+dl-agent-backup.workspace = true
 dl-agent-einvoice.workspace = true
 dl-agent-pms.workspace = true
 dl-agent-pms-device.workspace = true

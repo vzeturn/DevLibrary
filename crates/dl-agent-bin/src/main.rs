@@ -7,6 +7,7 @@
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 fn main() {
+    use dl_agent_backup::{backup_enroll_tool, backup_module};
     let app = dl_agent::cli::App::new("dl-agent", "DevLibrary Agent")
         .module(dl_agent_einvoice::einvoice_module())
         .tool(dl_agent_einvoice::einvoice_enroll_tool())
@@ -14,6 +15,7 @@ fn main() {
         .tool(dl_agent_pms::pms_migrate_tool())
         .tool(dl_agent_pms::pms_enroll_tool())
         .module(dl_agent_pms_device::pms_device_module());
+    let app = app.module(backup_module()).tool(backup_enroll_tool());
     std::process::exit(dl_agent::cli::main(app));
 }
 

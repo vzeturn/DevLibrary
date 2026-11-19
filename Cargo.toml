@@ -46,6 +46,7 @@ dl-agent = { path = "crates/dl-agent" }
 dl-agent-einvoice = { path = "crates/dl-agent-einvoice" }
 dl-agent-pms = { path = "crates/dl-agent-pms" }
 dl-agent-pms-device = { path = "crates/dl-agent-pms-device" }
+dl-agent-backup = { path = "crates/dl-agent-backup" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
