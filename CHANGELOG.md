@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Installer: `irm https://agent.pms.id.vn/install.ps1 | iex` installs, repairs or updates with prompts for what is missing (hidden SQL password, env-only when unattended); the script only downloads, checks SHA-256 and the Ed25519 release signature (`dl-agent verify-self`) and hands off to `dl-agent install`. New `dl-agent update`, `dl-agent install stable|canary|auto|x.y.z` (channel choice or version pin, reported in the heartbeat), `DL_AGENT_DISABLE_AUTOUPDATE=1`, `irm .../uninstall.ps1 | iex` / `dl-agent uninstall [--purge]`; hub serves `/install/manifest/...`, `/install/legacy.ps1`, `/uninstall.ps1` (RT-0164).
+
 - dl-agent-arrival: hub commands `status`, `vault_check`, `selftest`, `diagnostics`, `picture_probe`,
   `op_sweep` (always rolled back) and `install_procedures`, returning JSON without secrets; new selftest
   rows incl. `pms_source`; problem journal with `recentProblems` and `installations` in the hello.
