@@ -7,6 +7,7 @@ extern crate std;
 mod block;
 mod crc;
 mod hmac;
+mod md4;
 mod md5;
 mod sha1;
 mod sha256;
@@ -14,6 +15,7 @@ mod sha512;
 
 pub use crc::{Crc32, crc32};
 pub use hmac::{Hmac, pbkdf2};
+pub use md4::Md4;
 pub use md5::Md5;
 pub use sha1::Sha1;
 pub use sha256::{Sha224, Sha256};

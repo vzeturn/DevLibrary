@@ -5,11 +5,21 @@
 //! The first token goes into LOGIN7; each SSPI token the server answers with is passed to
 //! [`Negotiate::next`] and the result is sent back as an SSPI message (packet type 0x11)
 //! until the server sends LOGINACK.
+//!
+//! Which package runs ([`Negotiate::for_config`]):
+//! - `Integrated Security=SSPI` on Windows: SSPI Negotiate as the current account, always
+//!   (a `User ID`/`Password` in the same string is ignored, as Microsoft.Data.SqlClient does).
+//! - `Integrated Security=SSPI` elsewhere: portable NTLM ([`crate::ntlm`]) when the string
+//!   also gives `User ID=DOMAIN\user` and a password; otherwise [`Error::Unsupported`].
+//! - No integrated security and `User ID=DOMAIN\user`: portable NTLM on every OS, as
+//!   go-mssqldb does (the server sees a Windows login, `auth_scheme` = `NTLM`).
+//! - Anything else is a SQL login and needs no package.
 
 use std::net::IpAddr;
 
 use crate::Error;
 use crate::config::Config;
+use crate::ntlm::{Credentials, Ntlm};
 
 #[cfg(windows)]
 mod sys {
@@ -26,7 +36,7 @@ mod sys {
     impl Context {
         pub(crate) fn acquire() -> Result<Context, Error> {
             Err(Error::Unsupported(
-                "integrated authentication needs Windows (SSPI)",
+                "integrated authentication needs Windows (SSPI), or User ID=DOMAIN\\user with a password for NTLM",
             ))
         }
         pub(crate) fn initialize(&mut self, _target: &str) -> Result<Vec<u8>, Error> {
@@ -54,12 +64,40 @@ pub(crate) struct Negotiate(Inner);
 
 enum Inner {
     Os(sys::Context),
+    /// Portable NTLMv2 with credentials from the connection string.
+    Ntlm(Ntlm),
     /// A scripted package for the token-flow tests (any platform).
     #[cfg(test)]
     Fake(fake::Package),
 }
 
 impl Negotiate {
+    /// The package `cfg` logs in with, `None` for a SQL login (see the module docs).
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for integrated security outside Windows without
+    /// `DOMAIN\user` credentials, [`Error::Sspi`] if SSPI refuses.
+    pub(crate) fn for_config(cfg: &Config) -> Result<Option<Negotiate>, Error> {
+        let ntlm = || {
+            Credentials::from_login(cfg.user(), cfg.password())
+                .map(|c| Negotiate(Inner::Ntlm(Ntlm::new(c, cfg.workstation()))))
+        };
+        if !cfg.integrated_auth() {
+            return Ok(ntlm());
+        }
+        if !cfg!(windows)
+            && let Some(n) = ntlm()
+        {
+            return Ok(Some(n));
+        }
+        Negotiate::acquire().map(Some)
+    }
+
+    /// `true` for the portable NTLM package (explicit credentials).
+    pub(crate) fn is_ntlm(&self) -> bool {
+        matches!(self.0, Inner::Ntlm(_))
+    }
+
     /// Acquires the current user's outbound credentials.
     ///
     /// # Errors
@@ -76,6 +114,7 @@ impl Negotiate {
     pub(crate) fn initialize(&mut self, target: &str) -> Result<Vec<u8>, Error> {
         match &mut self.0 {
             Inner::Os(c) => c.initialize(target),
+            Inner::Ntlm(n) => Ok(n.initialize()),
             #[cfg(test)]
             Inner::Fake(p) => p.initialize(target),
         }
@@ -85,6 +124,7 @@ impl Negotiate {
     pub(crate) fn next(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
         match &mut self.0 {
             Inner::Os(c) => c.next(input),
+            Inner::Ntlm(n) => n.next(input),
             #[cfg(test)]
             Inner::Fake(p) => Ok(p.next(input)),
         }
@@ -94,6 +134,7 @@ impl Negotiate {
     pub(crate) fn is_done(&self) -> bool {
         match &self.0 {
             Inner::Os(c) => c.is_done(),
+            Inner::Ntlm(n) => n.is_done(),
             #[cfg(test)]
             Inner::Fake(p) => p.is_done(),
         }
@@ -264,7 +305,10 @@ mod tests {
     fn unsupported_outside_windows() {
         match Negotiate::acquire() {
             Err(Error::Unsupported(m)) => {
-                assert_eq!(m, "integrated authentication needs Windows (SSPI)")
+                assert_eq!(
+                    m,
+                    "integrated authentication needs Windows (SSPI), or User ID=DOMAIN\\user with a password for NTLM"
+                )
             }
             Err(e) => panic!("{e}"),
             Ok(_) => panic!("SSPI outside Windows"),

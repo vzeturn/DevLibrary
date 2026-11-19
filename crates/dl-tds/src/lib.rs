@@ -10,6 +10,7 @@ mod error;
 #[cfg(any(test, feature = "fake-server"))]
 pub mod fake;
 mod login;
+mod ntlm;
 mod packet;
 mod params;
 mod prelogin;

@@ -115,6 +115,11 @@ pub enum Error {
         /// Its `SECURITY_STATUS` (an HRESULT such as `0x8009030C`).
         status: i32,
     },
+    /// NTLM authentication with explicit Windows credentials (`User ID=DOMAIN\user`) could
+    /// not build its answer: the server's CHALLENGE is malformed or asks for something this
+    /// NTLMv2-only client does not do. A wrong password is [`Error::Server`] (18456), not this.
+    /// The message never contains credentials or token bytes.
+    Ntlm(&'static str),
 }
 
 /// Names of the SSPI status codes integrated authentication runs into most often.
@@ -220,6 +225,7 @@ impl fmt::Display for Error {
                 }
                 Ok(())
             }
+            Error::Ntlm(m) => write!(f, "NTLM authentication failed: {m}"),
         }
     }
 }

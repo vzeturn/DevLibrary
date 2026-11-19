@@ -1,6 +1,6 @@
 [package]
 name = "dl-hash"
-description = "SHA-1, SHA-2, MD5, HMAC, PBKDF2, CRC-32 and constant-time comparison."
+description = "SHA-1, SHA-2, MD5, MD4, HMAC, PBKDF2, CRC-32 and constant-time comparison."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -106,18 +106,25 @@ Every command gets exactly one result.
 `POST /v1/agent/diagnostics?command_id=<id>` (`Content-Type: application/zip`, the
 signature covers the zip bytes and the query). The zip holds `diagnostics.json` (agent,
 tenant, site, hub hosts, version, channel, uptime, clock skew, config version, update state,
-modules, spooled reports), `logs/<file>` (newest file first, the end of each, 6 MB in all),
+modules, spooled reports), `survey.json` (host and the latest survey of every database, §9.5),
+`logs/<file>` (newest file first, rotated files included, the end of each, 6 MB in all),
 `state/<file>` (`update.json`, `config.json`, `heartbeat.json`, `watchdog.json`,
-`watchdog-reports.json`, `reports.json`, `sql-installs.jsonl`, `sql-setup.last.json` when
-present), `modules/<module>/<file>` (the files a module named with
-`ModuleContext::add_diagnostic_file`, the last 512 KiB of each: e.g. `arrival`'s
-`agent-problems.json` and `dl-enroll.json`; only `.json`/`.jsonl`/`.log`/`.txt` names without
-`key`, `secret`, `identity`, `password` or `appsettings`) and `bundle.json` (what was taken
-from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed like the log (`Password=…` / `Pwd=…`
-with ADO.NET quoting, `Bearer …`, fields named like password/pwd/secret/token/authorization,
-`*_sealed` or ending in `key` (`tenant_key`, `hmac_key`, `key=`) → `[redacted]`; `r2_key`,
-`object_key`, `public_key`, `sort_key`, `cache_key`, `key_id` and `kid` stay readable);
-`identity.key` and `sql.json` are never included. Over 8 MB the log share is halved until it fits.
+`watchdog-reports.json`, `reports.json`, `sql-installs.jsonl`, `sql-setup.last.json`,
+`selftest.last.json` (the last self-test run) when present), `modules/<module>/<file>` (the
+files a module named with `ModuleContext::add_diagnostic_file`, the last 512 KiB of each: e.g.
+`arrival`'s `agent-problems.json` and `dl-enroll.json`; only `.json`/`.jsonl`/`.log`/`.txt`
+names without `key`, `secret`, `identity`, `password` or `appsettings`),
+`modules/<module>/<folder>/<file>` (a rolling log folder named with
+`ModuleContext::add_diagnostic_folder`: its newest allowed files, the end of each, at most
+2 MB or a quarter of the log share per folder; a folder named like
+`key`/`secret`/`identity`/`password`/`cert` is refused) and `bundle.json` (what was taken
+from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed
+like the log (`Password=…` / `Pwd=…` in any case with ADO.NET quoting, `Bearer …`, URL
+credentials `scheme://user:[redacted]@host`, JWT-looking `eyJ….….…` strings, fields whose
+name contains `password`/`passwd`/`secret`, has a `token`/`pwd`/`apikey` part, or ends in
+pwd/token/authorization, `*_sealed` or `key` (`tenant_key`, `hmac_key`, `key=`) →
+`[redacted]`; `r2_key`, `object_key`, `public_key`, `sort_key`, `cache_key`, `key_id` and
+`kid` stay readable); `identity.key` and `sql.json` are never included. Over 8 MB the log share is halved until it fits.
 
 The hub answers `{id, key, size, sha256}` (key `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip`),
 refuses more than 8 MB or a body without `Content-Length` (`413` / `411`, before the
@@ -367,6 +374,13 @@ machine:
 
 The fault build is for canary test machines only; publishing one to stable is a mistake the
 gate (`no_rollback`) already refuses.
+
+Steps 1–3 run on Linux as the test
+`agent::rollback_tests::a_fault_release_is_installed_rolled_back_at_the_end_of_probation_and_reported`
+(three agent lives on one temp install: install, fault probation and rollback, the restored
+build reporting `update_rolled_back` and `update.state = "rolled_back"`). Not covered there:
+the Windows service manager restarting the process between lives (exit code 75 and the
+recovery actions) and renaming a running `.exe`; those need the canary machine.
 
 ## 7. Problem reports
 

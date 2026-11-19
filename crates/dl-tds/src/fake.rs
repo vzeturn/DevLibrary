@@ -1,6 +1,8 @@
 //! A scripted TDS server on loopback for tests of the connection path: PRELOGIN encryption
 //! answers, a TLS handshake that never completes (as an engine that cannot speak the offered
-//! TLS versions), plain LOGIN7 with SSPI round trips, and `DONE` for every later request.
+//! TLS versions, see [`TlsPeer`]), plain LOGIN7 with SSPI round trips, a LOGINACK with the
+//! TDS and product version of the emulated server (SQL Server 2008 answers TDS 7.3), and
+//! scripted token streams (then `DONE`) for every later request.
 //!
 //! Enabled by the `fake-server` feature; not for production use.
 
@@ -16,6 +18,33 @@ const REPLY: u8 = 0x04;
 const ENCRYPT_ON: u8 = 1;
 const ENCRYPT_NOT_SUP: u8 = 2;
 
+/// TDS 7.4 (SQL Server 2012 and later), the default LOGINACK version.
+pub const TDS_74: u32 = 0x7400_0004;
+/// TDS 7.3B, the LOGINACK version of SQL Server 2008 R2.
+pub const TDS_73B: u32 = 0x730B_0003;
+/// TDS 7.3A, the LOGINACK version of SQL Server 2008.
+pub const TDS_73A: u32 = 0x730A_0003;
+
+/// How the server behaves when the client asks for encryption (and
+/// [`Script::never_encrypt`] is off). None of them completes a handshake: the fake has no
+/// TLS server, so a login over TLS is checked against a real server
+/// (`DL_TDS_TEST_TLS10_URL`, `tests/legacy_tls.rs`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TlsPeer {
+    /// Read the ClientHello, then close the connection.
+    #[default]
+    DropAfterHello,
+    /// Look at the ClientHello without reading it and close with it unread, so the client
+    /// sees a TCP reset in the middle of the handshake, as SQL Server 2008 (R2) without the
+    /// TLS 1.2 update answers a hello it cannot handle.
+    ResetOnHello,
+    /// A TLS 1.0-only engine: a ClientHello that does not offer TLS 1.0 is answered with a
+    /// TLS 1.0 ServerHello (the client must refuse it and alert); one that offers TLS 1.0
+    /// gets the reset of [`TlsPeer::ResetOnHello`] (SQL Server 2008 R2 RTM resets the
+    /// connection around the TLS 1.0 login).
+    Tls10Only,
+}
+
 /// How the server answers.
 #[derive(Clone, Debug, Default)]
 pub struct Script {
@@ -23,6 +52,15 @@ pub struct Script {
     pub sspi_challenges: Vec<Vec<u8>>,
     /// Answer `NOT_SUP` even when the client asks for encryption (an engine without TLS).
     pub never_encrypt: bool,
+    /// What happens when the client asks for encryption.
+    pub tls: TlsPeer,
+    /// TDS version in LOGINACK; `0` means [`TDS_74`].
+    pub tds_version: u32,
+    /// Product version `(major, minor, build)` in the PRELOGIN answer and LOGINACK;
+    /// `None` means SQL Server 2022 RTM-ish `16.0.4000`.
+    pub server_version: Option<(u8, u8, u16)>,
+    /// Token streams answered to the requests after login, in order; `DONE` afterwards.
+    pub responses: Vec<Vec<u8>>,
 }
 
 /// What one client connection did.
@@ -30,6 +68,14 @@ pub struct Script {
 pub struct Attempt {
     /// The `ENCRYPTION` byte of the client's PRELOGIN.
     pub client_encryption: u8,
+    /// The `INSTOPT` instance name of the client's PRELOGIN (empty for the default
+    /// instance).
+    pub instance: String,
+    /// The alert description the client sent after a [`TlsPeer::Tls10Only`] ServerHello
+    /// (`70` = protocol_version).
+    pub tls_alert: Option<u8>,
+    /// The TDS version the client's LOGIN7 asked for.
+    pub login_tds_version: u32,
     /// TLS versions the client's ClientHello offered (`0x0303` = TLS 1.2), lowest last;
     /// empty when no TLS handshake was attempted.
     pub tls_versions: Vec<u16>,
@@ -153,11 +199,29 @@ fn prelogin_option(msg: &[u8], wanted: u8) -> Option<&[u8]> {
     None
 }
 
-fn prelogin_reply(encryption: u8) -> Vec<u8> {
-    // VERSION (16.0.4000), ENCRYPTION, terminator; data at offset 11.
+fn prelogin_reply(encryption: u8, (major, minor, build): (u8, u8, u16)) -> Vec<u8> {
+    // VERSION, ENCRYPTION, terminator; data at offset 11.
+    let [b1, b2] = build.to_be_bytes();
     vec![
-        0x00, 0, 11, 0, 6, 0x01, 0, 17, 0, 1, 0xFF, 16, 0, 0x0F, 0xA0, 0, 0, encryption,
+        0x00, 0, 11, 0, 6, 0x01, 0, 17, 0, 1, 0xFF, major, minor, b1, b2, 0, 0, encryption,
     ]
+}
+
+/// A TLS 1.0 ServerHello record (TLS_RSA_WITH_AES_128_CBC_SHA, no extensions).
+fn tls10_server_hello() -> Vec<u8> {
+    let mut body = vec![0x03, 0x01];
+    body.extend_from_slice(&[0x5A; 32]); // random
+    body.extend_from_slice(&[0, 0x00, 0x2F, 0]); // no session id, suite, no compression
+    let mut hs = vec![0x02, 0, 0, body.len() as u8];
+    hs.extend_from_slice(&body);
+    let mut rec = vec![0x16, 0x03, 0x01, 0, hs.len() as u8];
+    rec.extend_from_slice(&hs);
+    rec
+}
+
+/// The description byte of a TLS alert record, if `rec` is one.
+fn alert_description(rec: &[u8]) -> Option<u8> {
+    (rec.first() == Some(&0x15)).then(|| rec.get(6).copied())?
 }
 
 /// TLS versions in a ClientHello: the `supported_versions` extension, else the legacy
@@ -225,18 +289,27 @@ fn serve(mut s: TcpStream, script: &Script, rec: &Recorder) -> io::Result<()> {
     let enc = prelogin_option(&msg, 0x01)
         .and_then(|v| v.first().copied())
         .unwrap_or(0);
-    rec.update(|a| a.client_encryption = enc);
+    let instance = prelogin_option(&msg, 0x02)
+        .map(|v| String::from_utf8_lossy(v.split(|&b| b == 0).next().unwrap_or(&[])).into_owned())
+        .unwrap_or_default();
+    rec.update(|a| {
+        a.client_encryption = enc;
+        a.instance = instance;
+    });
+    let version = script.server_version.unwrap_or((16, 0, 4000));
     if enc != ENCRYPT_NOT_SUP && !script.never_encrypt {
-        // Offer encryption, read the ClientHello, then drop: the handshake cannot finish.
-        send(&mut s, REPLY, &prelogin_reply(ENCRYPT_ON))?;
-        let (_, hello) = read_message(&mut s)?;
-        rec.update(|a| a.tls_versions = client_hello_versions(&hello));
-        return Ok(());
+        // Offer encryption, then fail the handshake the way `script.tls` says.
+        send(&mut s, REPLY, &prelogin_reply(ENCRYPT_ON, version))?;
+        return refuse_tls(s, script.tls, rec);
     }
-    send(&mut s, REPLY, &prelogin_reply(ENCRYPT_NOT_SUP))?;
+    send(&mut s, REPLY, &prelogin_reply(ENCRYPT_NOT_SUP, version))?;
     let (t, login) = read_message(&mut s)?;
     if t != LOGIN7 {
         return Ok(());
+    }
+    if let Some(v) = login.get(4..8) {
+        let v = u32::from_le_bytes([v[0], v[1], v[2], v[3]]);
+        rec.update(|a| a.login_tds_version = v);
     }
     if let Some((off, chars)) = field(&login, 40) {
         let user = login
@@ -269,17 +342,74 @@ fn serve(mut s: TcpStream, script: &Script, rec: &Recorder) -> io::Result<()> {
         .collect();
     let body_len = 1 + 4 + 1 + name.len() + 4;
     ack.extend_from_slice(&(body_len as u16).to_le_bytes());
-    ack.extend_from_slice(&[1, 0x74, 0, 0, 4, 20]);
+    let tds = if script.tds_version == 0 {
+        TDS_74
+    } else {
+        script.tds_version
+    };
+    ack.push(1);
+    ack.extend_from_slice(&tds.to_be_bytes());
+    ack.push(20);
     ack.extend_from_slice(&name);
-    ack.extend_from_slice(&[16, 0, 0x0F, 0xA0]);
+    let (major, minor, build) = version;
+    ack.extend_from_slice(&[major, minor]);
+    ack.extend_from_slice(&build.to_be_bytes());
     ack.extend_from_slice(&done());
-    send(&mut s, REPLY, &ack)?;
+    // Recorded first: a client that returns at LOGINACK must already see it.
     rec.update(|a| a.logged_in = true);
+    send(&mut s, REPLY, &ack)?;
+    let mut answers = script.responses.iter();
     while read_message(&mut s).is_ok() {
         rec.update(|a| a.requests += 1);
-        send(&mut s, REPLY, &done())?;
+        match answers.next() {
+            Some(r) => send(&mut s, REPLY, r)?,
+            None => send(&mut s, REPLY, &done())?,
+        }
     }
     Ok(())
+}
+
+/// Ends a TLS handshake the client started, as `peer` says.
+fn refuse_tls(mut s: TcpStream, peer: TlsPeer, rec: &Recorder) -> io::Result<()> {
+    if peer == TlsPeer::DropAfterHello {
+        let (_, hello) = read_message(&mut s)?;
+        rec.update(|a| a.tls_versions = client_hello_versions(&hello));
+        return Ok(());
+    }
+    let hello = peek_packet(&s)?;
+    let offered = client_hello_versions(&hello);
+    let tls10 = offered.contains(&0x0301);
+    rec.update(|a| a.tls_versions = offered);
+    if peer == TlsPeer::Tls10Only && !tls10 {
+        read_message(&mut s)?;
+        send(&mut s, PRELOGIN, &tls10_server_hello())?;
+        if let Ok((_, alert)) = read_message(&mut s) {
+            let d = alert_description(&alert);
+            rec.update(|a| a.tls_alert = d);
+        }
+        return Ok(());
+    }
+    // Returning closes the socket with the hello unread: the kernel answers with RST.
+    Ok(())
+}
+
+/// The payload of the first packet waiting on `s`, without consuming it.
+fn peek_packet(s: &TcpStream) -> io::Result<Vec<u8>> {
+    let mut buf = vec![0u8; 64 * 1024];
+    for _ in 0..500 {
+        let n = s.peek(&mut buf)?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        if n >= 8 {
+            let len = usize::from(u16::from_be_bytes([buf[2], buf[3]]));
+            if len >= 8 && n >= len {
+                return Ok(buf[8..len].to_vec());
+            }
+        }
+        thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Err(io::ErrorKind::TimedOut.into())
 }
 
 fn done() -> Vec<u8> {

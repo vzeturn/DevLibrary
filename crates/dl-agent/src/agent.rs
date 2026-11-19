@@ -772,7 +772,7 @@ mod hub_list;
 
 #[path = "agent_diag.rs"]
 mod diag;
-pub use diag::diagnostic_file_allowed;
+pub use diag::{diagnostic_file_allowed, diagnostic_folder_allowed};
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]
@@ -781,3 +781,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent_lane_tests.rs"]
 mod lane_tests;
+
+#[cfg(test)]
+#[path = "agent_rollback_tests.rs"]
+mod rollback_tests;

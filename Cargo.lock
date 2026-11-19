@@ -348,6 +348,7 @@ name = "dl-tds"
 version = "0.2.1"
 dependencies = [
  "dl-decimal",
+ "dl-hash",
  "dl-rand",
  "dl-time",
  "dl-tls",

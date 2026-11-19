@@ -1,13 +1,16 @@
 # dl-tds
 
 A SQL Server client (TDS 7.4, and TDS 8 with strict encryption) with no dependencies:
-login with SQL authentication or, on Windows, integrated authentication (SSPI), plain
+login with SQL authentication, on Windows integrated authentication (SSPI), and on every OS
+a `DOMAIN\user` Windows login over portable NTLMv2, plain
 batches, parameterised queries through
 `sp_executesql`, every common column type, multiple result sets, `RETURN` values, server
 messages and query cancellation. TLS goes through [`dl-tls`](../dl-tls) (SChannel on
 Windows, system OpenSSL on Linux).
 
-Tested against SQL Server 2022 (Linux container) on Windows and Linux, and compared value
+The login asks for TDS 7.4 and accepts what the server answers, including TDS 7.3 from
+SQL Server 2008 (`0x730A0003`) and 2008 R2 (`0x730B0003`); `Client::tds_version()` reports
+it. Tested against SQL Server 2022 (Linux container) on Windows and Linux, and compared value
 by value with go-mssqldb v1.10.0. It is written for code ported from Go's `database/sql`
 with go-mssqldb: connection strings, encryption defaults and the conversions of
 [`Row::get`](Row::get) follow go-mssqldb, so the same query reads the same data.
@@ -67,7 +70,9 @@ Server=.;Database=SMILE_POS;User Id=smile;Password=...;Encrypt=false;TrustServer
 ```
 
 - Host `.`, `(local)` and `localhost` mean 127.0.0.1. `host\INSTANCE` (or the URL path)
-  is resolved to a port through SQL Browser (UDP 1434). The default port is 1433.
+  is resolved to a port through SQL Browser (UDP 1434), and the instance name also goes into
+  PRELOGIN. An explicit port (`host\INSTANCE,port`) wins and skips the Browser. The default
+  port is 1433.
 - Keys are case-insensitive; URL values are percent-decoded.
 - `connection timeout` bounds connecting and login; `Client::set_timeout` bounds each
   request. A request that times out sends ATTENTION, so the connection stays usable.
@@ -117,10 +122,25 @@ The service principal name follows Microsoft.Data.SqlClient:
 (`GetAddrInfoW` with `AI_CANONNAME`, as SqlClient's `Dns.GetHostEntry`), and an IP address
 as given. When no SPN is registered for that name, Negotiate falls back to NTLM.
 
-Outside Windows `Client::connect` returns `Error::Unsupported("integrated authentication
-needs Windows (SSPI)")` before opening a socket; Kerberos and NTLM are not implemented
-by hand. SSPI failures are `Error::Sspi { function, status }`; error messages never
-contain tokens or passwords.
+Outside Windows `Integrated Security=SSPI` alone returns `Error::Unsupported("integrated
+authentication needs Windows (SSPI), or User ID=DOMAIN\user with a password for NTLM")`
+before opening a socket; with `User ID=DOMAIN\user;Password=...` in the same string it logs
+in with NTLM (below). On Windows SSPI as the current account stays the first choice and a
+user name in the string is ignored, as in Microsoft.Data.SqlClient. SSPI failures are
+`Error::Sspi { function, status }`; error messages never contain tokens or passwords.
+
+### Windows login with a user name and password (NTLM, any OS)
+
+`User ID=DOMAIN\user;Password=...` (a backslash in the user name, as go-mssqldb and
+SqlClient on Linux read it) is a Windows login with NTLMv2 implemented in the crate
+(MS-NLMP; MD4 and HMAC-MD5 from `dl-hash`), on every OS: the NEGOTIATE message goes into
+LOGIN7, the server's CHALLENGE is answered with AUTHENTICATE (NTLMv2 response, the server's
+target information echoed, `MsvAvFlags` + MIC when the server sends a timestamp), and the
+LOGIN7 user name and password stay empty. `sys.dm_exec_connections.auth_scheme` shows
+`NTLM`. Use a local Windows account as `MACHINE\user`. A CHALLENGE the client cannot answer
+is `Error::Ntlm`; a wrong password is the server's login error 18456. Not implemented: LM /
+NTLMv1, key exchange, signing and sealing (TDS does not use them), Kerberos with a password,
+and channel bindings (Extended Protection = Required refuses the login).
 
 ## Encryption
 
@@ -170,6 +190,13 @@ let client = match Client::connect(&cfg) {
 The OS can still refuse TLS 1.0: Windows administrators can disable it for every process
 with the SChannel `Protocols\TLS 1.0\Client` registry key, and the handshake then fails
 with `Error::Tls`.
+
+The `fake-server` feature's scripted server emulates these engines for tests
+(`dl_tds::fake::TlsPeer`): a TLS 1.0-only engine (its TLS 1.0 ServerHello is refused by the
+default transport with a `protocol_version` alert, `Error::Tls(Handshake)`), and a server that
+resets the connection in the middle of the handshake (`Error::Tls(Io(ConnectionReset))`);
+both are step-down errors for dl-agent's transport ladder. LOGINACK with TDS 7.3 and a
+`10.50` product version emulates SQL Server 2008 R2 after the unencrypted login.
 
 ## Types
 
@@ -247,10 +274,10 @@ NULLs, five collations): identical output, with two deliberate differences:
 
 ## Limits
 
-- SQL authentication everywhere; integrated authentication on Windows only (SSPI, the
-  current user; no explicit Windows user name/password, no Kerberos or NTLM on Linux or
-  macOS). No Azure AD / Entra ID (FEDAUTH) logins.
-- Integrated authentication sends no TLS channel bindings, so a server configured with
+- SQL authentication everywhere; integrated authentication as the current user on
+  Windows only (SSPI); explicit Windows credentials (`DOMAIN\user`) over NTLMv2 on every OS,
+  no Kerberos with explicit credentials. No Azure AD / Entra ID (FEDAUTH) logins.
+- Integrated authentication and NTLM send no TLS channel bindings, so a server configured with
   `Extended Protection = Required` may refuse it (the default, `Off`, works).
 - No reverse DNS for SPNs: a server given by IP address gets `MSSQLSvc/<ip>:<port>`, which
   usually means NTLM; use the host name or `ServerSPN` for Kerberos.
