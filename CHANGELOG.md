@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
+
 ### Fixed
 
 - `dl-agent` probation no longer rolls back an update for a module that was already degraded or stopped when the update was installed (a site problem such as a missing enrolment or a revoked key); it rolled back and then reinstalled the same version every few minutes.

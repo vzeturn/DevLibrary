@@ -1,11 +1,15 @@
 //! Where finished backups go. One [`Uploader`] per destination kind: a local (or mapped)
 //! folder, S3-compatible storage (AWS S3, Cloudflare R2, MinIO; multipart above 16 MiB) and
-//! Azure Blob (block blobs above 32 MiB). Google Drive and OneDrive need OAuth refresh and
-//! arrive in a later slice; until then a schedule targeting them fails with
-//! `backup_destination_unsupported`.
+//! Azure Blob (block blobs above 32 MiB), Google Drive (resumable uploads) and OneDrive
+//! (Graph upload sessions; parallel parts above 20 MiB). A provider this build does not know
+//! fails with `backup_destination_unsupported`; a new destination kind is one [`Kind`]
+//! variant, one arm in [`Real::open`] and one module.
 
 pub mod azure;
+pub mod gdrive;
 pub mod local;
+pub mod oauth;
+pub mod onedrive;
 pub mod s3;
 pub mod sharedkey;
 pub mod sigv4;
@@ -55,10 +59,8 @@ impl Uploaders for Real {
             Kind::Local => Ok(Box::new(local::Local::from_tokens(&dest.tokens)?)),
             Kind::S3 => Ok(Box::new(s3::S3::from_tokens(&dest.tokens)?)),
             Kind::Azure => Ok(Box::new(azure::Azure::from_tokens(&dest.tokens)?)),
-            Kind::Later => Err(Error::Unsupported(format!(
-                "destination {} is not supported by this agent version yet",
-                dest.provider
-            ))),
+            Kind::GoogleDrive => Ok(Box::new(gdrive::GDrive::from_tokens(&dest.tokens)?)),
+            Kind::OneDrive => Ok(Box::new(onedrive::OneDrive::from_tokens(&dest.tokens)?)),
             Kind::Unknown => Err(Error::Unsupported(format!(
                 "unknown destination provider {:?}",
                 dest.provider
@@ -76,8 +78,10 @@ pub enum Kind {
     S3,
     /// `AzureBlob`.
     Azure,
-    /// `GoogleDrive`, `OneDrive`: a later slice.
-    Later,
+    /// `GoogleDrive`.
+    GoogleDrive,
+    /// `OneDrive`.
+    OneDrive,
     /// Anything else.
     Unknown,
 }
@@ -89,7 +93,8 @@ impl Kind {
             "local" | "localfolder" | "folder" => Kind::Local,
             "awss3" | "s3" | "r2" | "cloudflarer2" => Kind::S3,
             "azureblob" | "azure" => Kind::Azure,
-            "googledrive" | "onedrive" => Kind::Later,
+            "googledrive" | "gdrive" => Kind::GoogleDrive,
+            "onedrive" => Kind::OneDrive,
             _ => Kind::Unknown,
         }
     }
@@ -280,21 +285,34 @@ mod tests {
         assert_eq!(Kind::of("AWSS3"), Kind::S3);
         assert_eq!(Kind::of("AzureBlob"), Kind::Azure);
         assert_eq!(Kind::of("LocalFolder"), Kind::Local);
-        assert_eq!(Kind::of("GoogleDrive"), Kind::Later);
-        assert_eq!(Kind::of("OneDrive"), Kind::Later);
+        assert_eq!(Kind::of("GoogleDrive"), Kind::GoogleDrive);
+        assert_eq!(Kind::of("OneDrive"), Kind::OneDrive);
         assert_eq!(Kind::of("Dropbox"), Kind::Unknown);
     }
 
     #[test]
-    fn drive_and_unknown_providers_are_unsupported() {
+    fn unknown_providers_are_unsupported() {
         // Go TestUpload_UnknownProvider skipped the upload; here the job fails clearly.
-        for p in ["GoogleDrive", "OneDrive", "Dropbox"] {
+        for p in ["Dropbox", "", "Box"] {
             let d = Destination {
                 provider: p.into(),
                 tokens: Value::Object(Map::new()),
             };
             let err = Real.open(&d).err().unwrap();
             assert_eq!(err.code(), "backup_destination_unsupported", "{p}");
+        }
+    }
+
+    #[test]
+    fn drive_destinations_need_their_oauth_tokens() {
+        for p in ["GoogleDrive", "OneDrive"] {
+            let d = Destination {
+                provider: p.into(),
+                tokens: Value::Object(Map::new()),
+            };
+            let err = Real.open(&d).err().unwrap();
+            assert_eq!(err.code(), "backup_upload_failed", "{p}");
+            assert!(err.to_string().contains("credentials incomplete"), "{p}");
         }
     }
 

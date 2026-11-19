@@ -238,7 +238,7 @@ fn unsupported_provider_fails_the_upload_step() {
     let err = run(
         &sql(),
         &FakeDest::default(),
-        &params(&dir, BackupType::Full, Some("googledrive")),
+        &params(&dir, BackupType::Full, Some("dropbox")),
         &CancelToken::new(),
         &mut steps,
     )
