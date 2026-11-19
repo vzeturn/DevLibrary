@@ -1,8 +1,9 @@
 //! One session per SMILE database, reached one of two ways:
 //!
 //! - **sealed** (default): the connection string sealed in `config.enc` at enrolment. The
-//!   dl-agent transport ladder (as sealed → TLS 1.0 → unencrypted, PROTOCOL.md §9.4) runs at
-//!   run time too, so a server that starts resetting the TLS handshake after enrolment is
+//!   dl-agent transport ladder (as sealed → TLS 1.0 → unencrypted, PROTOCOL.md §9.4; the
+//!   unencrypted rung only for Windows authentication or a server on this computer, so a SQL
+//!   login to another machine ends at TLS 1.0 with `sql_tls_unavailable`) runs at run time too, so a server that starts resetting the TLS handshake after enrolment is
 //!   still reached. The rung saved at enrolment (`tlsmin=1.0`, `encrypt=disable`) is the top
 //!   of the ladder, so a site never climbs back above what enrolment found. Each step down is
 //!   kept for [`Sql::take_step_downs`](super::Sql::take_step_downs) and reported once.

@@ -42,7 +42,8 @@ it stays `disabled` until the hub's remote config enables it for the site.
 {"modules": {"einvoice": {
     "enabled": true,
     "config_dir": "C:\\ProgramData\\MM-EInvoice",
-    "poll_interval_seconds": 30
+    "poll_interval_seconds": 30,
+    "sql_source": "sealed"
 }}}
 ```
 
@@ -51,16 +52,20 @@ it stays `disabled` until the hub's remote config enables it for the site.
 | `enabled` | `false` | Run the module on this site. |
 | `config_dir` | the Go agent's: `%ProgramData%\MM-EInvoice` (else `$XDG_CONFIG_HOME` or `~/.config`, then `mm-einvoice-agent`) | Where the sealed `config.enc` lives. |
 | `poll_interval_seconds` | the sealed config's `poll_interval` (30 s) | Collect cycle interval. |
+| `sql_source` | `sealed` | `sealed`: the SQL connection strings sealed in `config.enc`. `site`: the databases declared in dl-agent's `sql.json` (`dl-agent sql-setup` / `sql-add`), which also allows Windows authentication as the service identity. A `site` source that does not resolve keeps the sealed one and files `einvoice_sql_source`. |
+| `fo_database` / `pos_database` | `SMILE_FO` / `SMILE_POS` | With `sql_source: site`: the `sql.json` database names. `pos_database: ""` = the FO database holds POS bills too. |
 
 The platform URL, API key, device id and SQL connection strings come from `config.enc`
-(DPAPI LocalMachine on Windows), written by the Go agent's enroll. A site that already
-runs the Go agent switches over without enrolling again: stop the Go service, enable the
-module.
+(DPAPI LocalMachine on Windows), sealed by `einvoice-enroll`. A site that runs the
+MM-EInvoice Go agent is switched by uninstalling that agent and enrolling afresh
+(`einvoice-enroll --switch`, below): a new device and key, only the SQL connection, collect
+window and the database marks carry over.
 
 ## Enrolling a new site
 
 `dl-agent einvoice-enroll --token T --platform-url URL [--sql-host H] [--sql-user U]
-[--sql-password P | --sql-prompt] [--collect-from YYYY-MM-DD] [--config-dir DIR] [--force]`
+[--sql-password P | --sql-prompt] [--collect-from YYYY-MM-DD] [--config-dir DIR] [--force]
+[--switch]` (the token may come from `DL_AGENT_EINVOICE_TOKEN` instead of the command line)
 is the port of `mmei-agent -enroll` (`src/enroll/`): it exchanges the one-time token, tests the
 FO and POS databases (falling back to TLS 1.0, then no encryption, for old SQL Servers),
 installs the collection procedures and seals `config.enc`. `install.ps1 -Setup einvoice-enroll`
@@ -69,6 +74,17 @@ runs it after the dl-agent enrolment, with the arguments from `DL_AGENT_SETUP_AR
 - **Already enrolled**: when `config.enc` in the config dir opens, it prints one line and exits
   0 without spending the token; a present but unreadable one is an error and is never
   overwritten. `--force` enrolls again.
+- **Switch from the Go agent** (`--switch`): the Go agent's `config.enc` has the same folder and
+  format, so the tool records the device id it sealed in `<data>/modules/einvoice/enrolled.json`.
+  With `--switch` a `config.enc` with that device id is kept (the token is not spent), any other
+  one is enrolled over: SQL host, login, password and collect window are read from it (or from a
+  `MM-EInvoice.bench-old-*` folder the SR bench moved aside) when the arguments give none. The
+  installer passes it on every run (`install.ps1 -Setup einvoice-enroll -Replace '*MM-EInvoice*','MMEI-Agent'`),
+  which removes the Go service only after the setup succeeded. The exchange revokes the Go
+  agent's key: if a setup fails after it, run the installer again with a fresh token.
+- **Data continuity**: the Go agent marks a bill `MMEI_Collected` only after a successful push, so
+  what was still in its `outbox.db` is collected again and the platform deduplicates it on
+  (tenant, source_ref) and the payload hash; write-back is idempotent (`tests/runtime_live.rs`).
 - `--config-dir` defaults to the module's own default; pass it when the remote config sets a
   custom `config_dir`.
 - **SQL password**: `--sql-password`, `MMEI_SQL_PASSWORD`, then the build default compiled in from
@@ -88,6 +104,14 @@ runs it after the dl-agent enrolment, with the arguments from `DL_AGENT_SETUP_AR
   has held still for one look, the workers stop and the module loads the new file. A
   replaced device recovers this way without a service restart; a removed file falls back to
   `not enrolled`.
+- **SQL at run time**: with `sql_source: sealed` the dl-agent transport ladder (as sealed →
+  TLS 1.0 → unencrypted, the last only for Windows authentication or a SQL Server on this
+  computer) runs at run time too, starting from the rung sealed at enrolment and never above it.
+  A rung that works is reused; three handshake failures in a row on it walk the ladder again.
+  Each step down files `einvoice_sql_transport` (warning) once, with the rung and the reason.
+  A dropped session fails that call and reconnects on the next. Enrolment keeps the Go
+  agent's own fallback (TLS 1.0, then `encrypt=disable` for any host), so an old server the
+  Go agent reached in clear is sealed `encrypt=disable` and stays on that one rung.
 - **Enrolled**: the collector (a cycle at once, then every interval) and the relay worker
   run on their own threads; the module is `running` once both are up and `degraded` while
   the last cycle failed to push, read SQL or write the outbox. Blocking calls cannot be
@@ -112,10 +136,18 @@ Problem reports: `einvoice_push_failed`, `einvoice_sql_failed`, `einvoice_outbox
 `einvoice_invoices_rejected`, `einvoice_config_stale`, `einvoice_relay_refused`,
 `einvoice_relay_call_failed`, `einvoice_relay_poll_failed`, `einvoice_relay_result_failed`
 (warning);
-`einvoice_device_replaced` (critical); `einvoice_config_unreadable` (error).
+`einvoice_device_replaced` (critical); `einvoice_config_unreadable`, `einvoice_sql_source`
+(error); `einvoice_sql_transport` (warning).
 
-Commands: `einvoice.status` (counters, `enrolled`, `detail` as JSON) and
-`einvoice.collect_now` (runs a cycle now).
+Commands (`POST /admin/commands`, `module: "einvoice"`):
+
+| kind | does | writes |
+|---|---|---|
+| `einvoice.status` | counters, health, `enrolled`, how SQL is reached (auth, login, rung), the effective collect settings | nothing |
+| `einvoice.collect_now` | queues one collect cycle | what a cycle writes |
+| `einvoice.selftest` | SQL auth mode and rung, procedures and their version, collect profile, last collect, outbox depth | nothing |
+| `einvoice.collect_dry_run` | `{from?, to?, sources?, limit?}`: fetches and builds the bills of a window, says which would be pushed | nothing |
+| `einvoice.writeback_probe` | `{source?, bill?}`: the write-back table and procedure, the login's rights, one bill's mark | nothing |
 
 ## Differences from the Go agent
 
@@ -126,8 +158,8 @@ Commands: `einvoice.status` (counters, `enrolled`, `detail` as JSON) and
 | Heartbeat `agent_version` | `""` | `dl-agent-<version>` |
 | Outbox | bbolt `outbox.db` | `outbox.json` in the module data dir. Items left in a Go `outbox.db` are collected again from SQL (their rows were not marked collected); write-back is idempotent. |
 | Logs | slog file | dl-agent's log (target `einvoice`); the heartbeat still carries the recent lines |
-| SQL | go-mssqldb | dl-tds, one connection per source from `config.enc` (not the dl-agent `sql` pools) |
-| Enroll, `-sql-prompt`, bootstrap | yes | not yet (slice E2); no SQL password in the source |
+| SQL | go-mssqldb | dl-tds, one connection per source from `config.enc` with the transport ladder at run time, or the dl-agent `sql` pools (`sql_source: site`) |
+| Enroll, `-sql-prompt`, bootstrap | yes | `einvoice-enroll` (`--sql-prompt`, `--switch`), run by `install.ps1 -Setup`; no SQL password in the source |
 | `config.enc` off Windows | AES with a hostname key | framed JSON (development only) |
 
 TCVN3 and money rounding stay the Go agent's code on purpose, so push items cannot drift
@@ -146,5 +178,7 @@ cargo test -p dl-agent-einvoice
 - `tests/module_lifecycle.rs`: the module under the real supervisor (opt-in, not
   enrolled, unreadable config, a cycle against a fake platform, commands, prompt stop).
 - Golden vectors (regenerate with the Go exporters, see `MM-EINVOICE/rust/agent/README.md`).
-- Live SQL Server: `MMEI_TEST_MSSQL_URL=sqlserver://sa:...@host:port` runs
-  `tests/legacy_live.rs`; skipped without it.
+- Live SQL Server: `MMEI_TEST_MSSQL_URL=sqlserver://sa:...@host:port?encrypt=disable` runs
+  `tests/legacy_live.rs`, `tests/pos_names_live.rs` and `tests/runtime_live.rs` (dry run and
+  probe write nothing, write-back is idempotent, a dropped session reconnects); skipped
+  without it. Each test creates and drops its own database.
