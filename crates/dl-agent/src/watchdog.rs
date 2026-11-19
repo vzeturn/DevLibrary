@@ -1,8 +1,9 @@
 //! External watchdog (PROTOCOL.md §6.3). The running agent writes `heartbeat.json` once a
 //! minute; the `watchdog` sub-command, started every few minutes by a scheduled task (Windows)
 //! or a systemd timer, looks at the service and that file and decides one action: start a
-//! stopped service, kill one stuck starting or stopping, or restart one whose loop hung or
-//! whose hub link went stale while the hub is reachable. Restarts back off from 1 h to 12 h.
+//! stopped service, kill one stuck starting or stopping, or restart one whose loop hung, whose
+//! hub link went stale while the hub is reachable, or one of whose modules' own cloud link
+//! ([`Link`]) went stale while that cloud answers. Restarts back off from 1 h to 12 h.
 //! It stays out of updates on probation (the agent rolls those back itself) and out of
 //! disabled or missing services.
 
@@ -46,12 +47,58 @@ pub struct Beat {
     pub channel: String,
     /// Hub clock minus local clock at the last heartbeat, in seconds.
     pub skew: i64,
+    /// The running modules' own cloud links (a module that talks to a cloud besides the hub).
+    pub links: Vec<Link>,
+}
+
+/// A module's own link to its cloud (`ModuleContext::set_cloud_link`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    /// Module that owns the link.
+    pub module: String,
+    /// Origin the module talks to (scheme, host and port only); the watchdog asks it before
+    /// restarting.
+    pub url: String,
+    /// Last successful exchange, unix seconds (0: none yet).
+    pub ok_at: u64,
+    /// When the module declared the link in this run.
+    pub since: u64,
+}
+
+impl Link {
+    /// Seconds since the link last worked, counted from when it was declared when it never did.
+    pub fn silent_for(&self, now: u64) -> u64 {
+        now.saturating_sub(self.ok_at.max(self.since))
+    }
+
+    fn to_json(&self) -> Value {
+        json!({"module": self.module, "url": self.url, "ok_at": self.ok_at, "since": self.since})
+    }
+
+    fn from_json(v: &Value) -> Option<Link> {
+        Some(Link {
+            module: v.get("module")?.as_str()?.into(),
+            url: v.get("url")?.as_str()?.into(),
+            ok_at: v.get("ok_at").and_then(Value::as_u64).unwrap_or(0),
+            since: v.get("since").and_then(Value::as_u64).unwrap_or(0),
+        })
+    }
+}
+
+/// `url` cut to its origin (`scheme://host[:port]`), without any user name or password.
+pub fn origin(url: &str) -> String {
+    let url = url.trim();
+    let (scheme, rest) = url.split_once("://").unwrap_or(("https", url));
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    format!("{}://{host}", scheme.to_ascii_lowercase())
 }
 
 impl Beat {
     fn to_json(&self) -> Value {
+        let links: Vec<Value> = self.links.iter().map(Link::to_json).collect();
         json!({"at": self.at, "hub_at": self.hub_at, "version": self.version, "pid": u64::from(self.pid),
-            "channel": self.channel, "skew": self.skew})
+            "channel": self.channel, "skew": self.skew, "links": links})
     }
 
     fn from_json(v: &Value) -> Option<Beat> {
@@ -70,6 +117,11 @@ impl Beat {
                 .unwrap_or("")
                 .into(),
             skew: v.get("skew").and_then(Value::as_i64).unwrap_or(0),
+            links: v
+                .get("links")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Link::from_json).collect())
+                .unwrap_or_default(),
         })
     }
 }
@@ -152,8 +204,8 @@ impl State {
     }
 }
 
-/// Decides this run's action and updates `state`. `hub_reachable` is asked only when the
-/// answer depends on it.
+/// Decides this run's action and updates `state`. `hub_reachable` and `link_reachable` are
+/// asked only when the answer depends on them.
 pub fn decide(
     state: &mut State,
     now: u64,
@@ -161,6 +213,7 @@ pub fn decide(
     beat: Option<&Beat>,
     update_pending: bool,
     hub_reachable: impl FnOnce() -> bool,
+    mut link_reachable: impl FnMut(&Link) -> bool,
 ) -> Action {
     if service != Service::Pending {
         state.pending_since = None;
@@ -195,6 +248,17 @@ pub fn decide(
                 format!(
                     "no hub heartbeat for {} min while the hub answers",
                     now.saturating_sub(b.hub_at) / 60
+                )
+            } else if let Some(l) = b
+                .links
+                .iter()
+                .find(|l| l.silent_for(now) >= STALE_SECONDS && link_reachable(l))
+            {
+                format!(
+                    "module {} cloud link silent for {} min while {} answers",
+                    l.module,
+                    l.silent_for(now) / 60,
+                    l.url
                 )
             } else {
                 state.backoff = MIN_BACKOFF_SECONDS;

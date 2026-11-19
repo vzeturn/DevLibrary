@@ -49,7 +49,7 @@ pub(super) fn signed_manifest_on(channel: &str, version: &str, bytes: &[u8], see
     m.to_json()
 }
 
-fn wait_running(a: &mut Agent) {
+pub(super) fn wait_running(a: &mut Agent) {
     let end = std::time::Instant::now() + Duration::from_secs(3);
     while !a.supervisor.all_running() && std::time::Instant::now() < end {
         a.supervisor.tick(&a.config.current);
@@ -587,6 +587,50 @@ fn heartbeat_file_tracks_the_loop_and_the_hub_link() {
     let b = watchdog::read_beat(&a.opts.data_dir).unwrap();
     assert_eq!(b.hub_at, 1031, "a hub success is written at once");
     a.supervisor.stop_all(STOP_WAIT);
+}
+
+struct Linked;
+
+impl Module for Linked {
+    fn name(&self) -> &str {
+        "linked"
+    }
+
+    fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
+        ctx.set_cloud_link("https://checkin.test/api/poll", 900);
+        ctx.set_running("polling");
+        while !ctx.stop().wait_timeout(Duration::from_millis(10)) {}
+        Ok(())
+    }
+}
+
+#[test]
+fn heartbeat_file_carries_the_running_modules_cloud_links() {
+    let d = TestDir::new("agent-beat-links");
+    let hub = FakeHub::default();
+    hub.push_down();
+    let mut a = agent(&d, &hub, vec![Arc::new(|| Box::new(Linked))]);
+    wait_running(&mut a);
+    a.step(1000);
+    let links = watchdog::read_beat(&a.opts.data_dir).unwrap().links;
+    assert_eq!(links.len(), 1, "{links:?}");
+    assert_eq!(
+        (
+            links[0].module.as_str(),
+            links[0].url.as_str(),
+            links[0].ok_at
+        ),
+        ("linked", "https://checkin.test", 900)
+    );
+    a.supervisor.stop_all(STOP_WAIT);
+    a.step(2000);
+    assert!(
+        watchdog::read_beat(&a.opts.data_dir)
+            .unwrap()
+            .links
+            .is_empty(),
+        "a stopped module's link is not watched"
+    );
 }
 
 #[test]

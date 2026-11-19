@@ -227,3 +227,29 @@ fn heartbeat_json_clips_long_fields() {
     assert_eq!(v.get("state").and_then(Value::as_str), Some("degraded"));
     assert_eq!(clip("ệệệ", 2), "ệệ");
 }
+
+#[test]
+fn cloud_link_keeps_its_start_and_shows_as_a_metric() {
+    let ctx = ModuleContext::standalone("arrival", Value::Null, std::env::temp_dir());
+    assert_eq!(ctx.status().link, None);
+    ctx.set_cloud_link("https://user:pw@checkin.test/api/poll", 0);
+    let first = ctx.status().link.expect("declared");
+    assert_eq!(
+        (first.module.as_str(), first.url.as_str(), first.ok_at),
+        ("arrival", "https://checkin.test", 0)
+    );
+    assert!(first.since > 0);
+    ctx.set_cloud_link("https://checkin.test/api/poll", first.since + 30);
+    let next = ctx.status().link.unwrap();
+    assert_eq!((next.since, next.ok_at), (first.since, first.since + 30));
+    assert_eq!(
+        ctx.status()
+            .metrics
+            .get("cloud_link_ok_at")
+            .and_then(Value::as_u64),
+        Some(first.since + 30)
+    );
+    ctx.clear_cloud_link();
+    assert_eq!(ctx.status().link, None);
+    assert!(ctx.status().metrics.get("cloud_link_ok_at").is_none());
+}

@@ -105,8 +105,11 @@ tenant, site, hub hosts, version, channel, uptime, clock skew, config version, u
 modules, spooled reports), `logs/<file>` (newest file first, the end of each, 6 MB in all),
 `state/<file>` (`update.json`, `config.json`, `heartbeat.json`, `watchdog.json`,
 `watchdog-reports.json`, `reports.json`, `sql-installs.jsonl`, `sql-setup.last.json` when
-present) and `bundle.json` (what was taken from each file, what was skipped, whether the
-`no-update` file exists). Every text is scrubbed like the log (`Password=…`, `Bearer …`,
+present), `modules/<module>/<file>` (the files a module named with
+`ModuleContext::add_diagnostic_file`, the last 512 KiB of each: e.g. `arrival`'s
+`agent-problems.json` and `dl-enroll.json`; only `.json`/`.jsonl`/`.log`/`.txt` names without
+`key`, `secret`, `identity`, `password` or `appsettings`) and `bundle.json` (what was taken
+from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed like the log (`Password=…`, `Bearer …`,
 fields named like password/secret/token/key/`*_sealed` → `[redacted]`); `identity.key` and
 `sql.json` are never included. Over 8 MB the log share is halved until it fits.
 
@@ -258,8 +261,11 @@ the hub send `Cache-Control: no-cache`; the hub serves artifacts with `no-store`
 
 ### 6.3 External watchdog
 
-The agent rewrites `heartbeat.json` (`{at, hub_at, version, pid}`) once a minute and at
-once after each successful hub heartbeat. `install` registers `<binary> watchdog`, run every
+The agent rewrites `heartbeat.json` (`{at, hub_at, version, pid, channel, skew, links}`) once
+a minute and at once after each successful hub heartbeat. `links` lists the running modules'
+own cloud links, `{module, url, ok_at, since}`: a module that talks to a cloud besides the hub
+calls `ModuleContext::set_cloud_link(url, last_ok)` after each exchange (only the origin is
+kept; also the metric `cloud_link_ok_at`) and `clear_cloud_link` when it stops using it. `install` registers `<binary> watchdog`, run every
 5 minutes: a scheduled task `"<display name> Watchdog"` as SYSTEM on Windows (put back and
 service recovery re-applied at each service start), a `<service>-watchdog.timer` on Linux.
 Each run takes at most one action:
@@ -272,10 +278,12 @@ Each run takes at most one action:
 | running | an update is on probation | none (the agent rolls back itself) |
 | running | loop beat ≥ 20 min old | restart |
 | running | hub beat ≥ 20 min old **and** the hub `/healthz` answers | restart |
+| running | a module's cloud link silent ≥ 20 min (since its last success, or since it was declared) **and** that origin answers below 500 | restart, even with the hub link up |
 
 Restarts back off 1 h, 2 h, 4 h … 12 h, reset by a healthy run. Every action leaves a report
 (`watchdog_started` warning, `watchdog_killed` / `watchdog_restarted` error,
-`watchdog_action_failed` critical) in `watchdog-reports.json`; the agent sends them after
+`watchdog_action_failed` critical) in `watchdog-reports.json`, with `last_loop_at`,
+`last_hub_at`, `version` and `link_<module>_ok_at` per link; the agent sends them after
 its next start. The watchdog logs to `logs/watchdog.log`; `uninstall` removes the task or
 timer first.
 

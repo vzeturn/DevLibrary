@@ -1,15 +1,17 @@
 //! The diagnostics bundle: what goes in, what never does, and the upload.
 
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use dl_json::json;
 use dl_zip::ZipArchive;
 
-use super::super::tests::agent;
+use super::super::tests::{agent, wait_running};
 use super::*;
 use crate::hub::tests_support::FakeHub;
 use crate::store::testdir::TestDir;
+use crate::supervisor::{Module, ModuleContext};
 
 /// Every entry of a zip: `(name, text)`.
 fn entries(zip: &[u8]) -> Vec<(String, String)> {
@@ -51,7 +53,7 @@ fn bundle_scrubs_secrets_and_leaves_out_key_files() {
     let diag =
         json!({"agent_id": "agt_1", "note": "Pwd=Hunter2;", "log_tail": ["password=Hunter2"]});
 
-    let zip = bundle(&diag, data, 1_763_460_000).unwrap();
+    let zip = bundle(&diag, data, &[], 1_763_460_000).unwrap();
     let all = entries(&zip);
     let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
@@ -95,7 +97,7 @@ fn logs_take_the_newest_tail_within_the_budget() {
         .set_modified(hour_ago)
         .unwrap();
 
-    let zip = bundle_with(&json!({}), &d.0, 1, 500).unwrap();
+    let zip = bundle_with(&json!({}), &d.0, &[], 1, 500).unwrap();
     let all = entries(&zip);
     let new = &all.iter().find(|(n, _)| n == "logs/new.log").unwrap().1;
     assert!(new.len() <= 500 && new.len() > 400, "{}", new.len());
@@ -174,4 +176,91 @@ fn a_failed_upload_fails_the_command_but_keeps_the_diagnostics() {
     hub.push(200, "{}");
     let (ok, out) = a.collect_diagnostics("c-2", 1000);
     assert!(!ok && out.contains("no key"), "{out}");
+}
+
+/// A module that keeps its state files in its own install folder, like `arrival`.
+struct Elsewhere(PathBuf);
+
+impl Module for Elsewhere {
+    fn name(&self) -> &str {
+        "arrival"
+    }
+
+    fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
+        for f in ["agent-problems.json", "dl-enroll.json", "gone.json"] {
+            ctx.add_diagnostic_file(self.0.join(f));
+        }
+        ctx.add_diagnostic_file(self.0.join("agent-identity.bin"));
+        ctx.set_running("ok");
+        while !ctx.stop().wait_timeout(Duration::from_millis(10)) {}
+        Ok(())
+    }
+}
+
+#[test]
+fn module_files_go_in_scrubbed_and_secret_files_never() {
+    let ctx = ModuleContext::standalone("arrival", Value::Null, std::env::temp_dir());
+    for refused in [
+        "data/agent-identity.bin",
+        "agent-tenant-key.bin",
+        "appsettings.Production.json",
+        "sql-password.txt",
+        "secret.json",
+        "notes.docx",
+    ] {
+        assert!(!ctx.add_diagnostic_file(refused), "{refused}");
+    }
+    assert!(ctx.add_diagnostic_file("data/dl-enroll.json"));
+    assert!(ctx.add_diagnostic_file("data/dl-enroll.json"));
+    assert_eq!(ctx.status().diagnostic_files.len(), 1);
+
+    let d = TestDir::new("diag-modules");
+    let install = d.0.join("MM-Arrival Agent").join("data");
+    write(
+        &install.join("agent-problems.json"),
+        r#"[{"key": "pms", "message": "login failed: Password=Hunter2;"}]"#,
+    );
+    write(
+        &install.join("dl-enroll.json"),
+        r#"{"identity_source": "fresh", "tenant_key": "imported"}"#,
+    );
+    write(&install.join("agent-identity.bin"), "IDENTITY-SECRET");
+    let hub = FakeHub::default();
+    let mut a = agent(
+        &d,
+        &hub,
+        vec![Arc::new({
+            let install = install.clone();
+            move || Box::new(Elsewhere(install.clone()))
+        })],
+    );
+    wait_running(&mut a);
+    hub.push(
+        200,
+        r#"{"id": "d1", "key": "diag/k.zip", "size": 1, "sha256": "ab"}"#,
+    );
+    let (ok, out) = a.collect_diagnostics("c-3", 1000);
+    a.supervisor.stop_all(crate::agent::STOP_WAIT);
+    assert!(ok, "{out}");
+    let all = entries(&hub.seen()[0].body);
+    let get = |name: &str| all.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone());
+    let problems = get("modules/arrival/agent-problems.json").expect("problem journal");
+    assert!(
+        problems.contains("login failed") && !problems.contains("Hunter2"),
+        "{problems}"
+    );
+    assert!(
+        get("modules/arrival/dl-enroll.json")
+            .unwrap()
+            .contains("imported")
+    );
+    assert!(
+        all.iter()
+            .all(|(n, t)| !n.contains("identity") && !t.contains("IDENTITY-SECRET"))
+    );
+    let index = get("bundle.json").unwrap();
+    assert!(
+        index.contains("modules/arrival/gone.json") && index.contains("not there"),
+        "{index}"
+    );
 }

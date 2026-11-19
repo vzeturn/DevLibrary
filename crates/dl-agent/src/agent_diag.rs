@@ -1,9 +1,10 @@
-//! `collect_diagnostics` (PROTOCOL.md §4.1): a zip of the diagnostics, the newest logs and
-//! the state files, every text scrubbed of secrets, uploaded to the hub.
+//! `collect_diagnostics` (PROTOCOL.md §4.1): a zip of the diagnostics, the newest logs, the
+//! state files and the files the modules named, every text scrubbed of secrets, uploaded to
+//! the hub.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use dl_json::{Value, json};
 use dl_zip::{Level, Method, Modified, Options, ZipWriter};
@@ -29,6 +30,25 @@ pub const STATE_FILES: [&str; 8] = [
     "sql-installs.jsonl",
     "sql-setup.last.json",
 ];
+
+/// Most bytes taken from one module file (its end).
+pub const MODULE_FILE_MAX: usize = 512 * 1024;
+
+/// Whether a module may name `path` for the bundle (`ModuleContext::add_diagnostic_file`):
+/// a text state file whose name does not suggest a secret.
+pub fn diagnostic_file_allowed(path: &Path) -> bool {
+    let name = file_name(path).to_ascii_lowercase();
+    let text = [".json", ".jsonl", ".log", ".txt"]
+        .iter()
+        .any(|e| name.ends_with(e));
+    let secret = ["key", "secret", "identity", "password", "appsettings"]
+        .iter()
+        .any(|w| name.contains(w));
+    text && !secret
+}
+
+/// The files the modules named, as `(entry name, path)`.
+pub(crate) type ModuleFiles = Vec<(String, PathBuf)>;
 
 fn zip_error(e: impl std::fmt::Display) -> Error {
     Error::Io(
@@ -74,10 +94,12 @@ fn file_name(p: &Path) -> String {
 }
 
 /// Builds the zip with at most `log_budget` log bytes: `diagnostics.json`, `logs/<file>`,
-/// `state/<file>` and `bundle.json` (what was taken from each file and what was left out).
+/// `state/<file>`, `modules/<module>/<file>` and `bundle.json` (what was taken from each file
+/// and what was left out).
 pub(crate) fn bundle_with(
     diagnostics: &Value,
     data_dir: &Path,
+    module_files: &[(String, PathBuf)],
     now: u64,
     log_budget: usize,
 ) -> Result<Vec<u8>, Error> {
@@ -123,6 +145,18 @@ pub(crate) fn bundle_with(
             Err(e) => index.push(json!({"file": format!("state/{name}"), "error": e.to_string()})),
         }
     }
+    for (entry, path) in module_files {
+        match tail(path, MODULE_FILE_MAX) {
+            Ok((text, size)) => {
+                add(entry, &text)?;
+                index.push(json!({"file": entry, "size": size, "taken": text.len() as u64}));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                index.push(json!({"file": entry, "skipped": "not there"}));
+            }
+            Err(e) => index.push(json!({"file": entry, "error": e.to_string()})),
+        }
+    }
     let no_update = data_dir.join("no-update").exists();
     add(
         "bundle.json",
@@ -135,10 +169,15 @@ pub(crate) fn bundle_with(
 
 /// [`bundle_with`] at [`LOG_BUDGET`], halving the log share until the zip fits
 /// [`MAX_BUNDLE_BYTES`].
-pub(crate) fn bundle(diagnostics: &Value, data_dir: &Path, now: u64) -> Result<Vec<u8>, Error> {
+pub(crate) fn bundle(
+    diagnostics: &Value,
+    data_dir: &Path,
+    module_files: &[(String, PathBuf)],
+    now: u64,
+) -> Result<Vec<u8>, Error> {
     let mut budget = LOG_BUDGET;
     loop {
-        let zip = bundle_with(diagnostics, data_dir, now, budget)?;
+        let zip = bundle_with(diagnostics, data_dir, module_files, now, budget)?;
         if zip.len() <= MAX_BUNDLE_BYTES {
             return Ok(zip);
         }
@@ -153,12 +192,26 @@ pub(crate) fn bundle(diagnostics: &Value, data_dir: &Path, now: u64) -> Result<V
 }
 
 impl Agent {
+    /// The files the modules named for the bundle, as `modules/<module>/<file name>`.
+    fn module_files(&self) -> ModuleFiles {
+        self.supervisor
+            .statuses()
+            .into_iter()
+            .flat_map(|s| {
+                s.diagnostic_files
+                    .into_iter()
+                    .filter(|p| diagnostic_file_allowed(p))
+                    .map(move |p| (format!("modules/{}/{}", s.name, file_name(&p)), p))
+            })
+            .collect()
+    }
+
     /// Runs `collect_diagnostics`: builds the bundle, uploads it and answers with where it
     /// went plus the diagnostics inline. A bundle that cannot be built or uploaded is a failed
     /// command whose output still carries the diagnostics and the error.
     pub(super) fn collect_diagnostics(&self, command_id: &str, now: u64) -> (bool, String) {
         let mut d = self.diagnostics(now);
-        let stored = bundle(&d, &self.opts.data_dir, now)
+        let stored = bundle(&d, &self.opts.data_dir, &self.module_files(), now)
             .and_then(|zip| self.hub.upload_diagnostics(&zip, command_id));
         let (ok, out) = match stored {
             Ok(stored) => {

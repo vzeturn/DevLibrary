@@ -93,6 +93,11 @@ pub struct ModuleStatus {
     pub metrics: Map,
     /// Unix seconds when it entered `Degraded` (0 otherwise).
     pub degraded_since: u64,
+    /// The module's own cloud link, when it has one ([`ModuleContext::set_cloud_link`]).
+    pub link: Option<crate::watchdog::Link>,
+    /// Files the module keeps outside its data directory that `collect_diagnostics` takes
+    /// ([`ModuleContext::add_diagnostic_file`]).
+    pub diagnostic_files: Vec<PathBuf>,
 }
 
 impl ModuleStatus {
@@ -105,6 +110,8 @@ impl ModuleStatus {
             last_error: String::new(),
             metrics: Map::new(),
             degraded_since: 0,
+            link: None,
+            diagnostic_files: Vec::new(),
         }
     }
 
@@ -218,6 +225,51 @@ impl ModuleContext {
     /// Publishes a metric for the heartbeat.
     pub fn set_metric(&self, key: &str, value: impl Into<Value>) {
         lock(&self.status).metrics.insert(key, value);
+    }
+
+    /// Declares the module's own cloud link (`url`, cut to its origin) and its last
+    /// successful exchange (unix seconds, 0 when none yet); call it after every exchange.
+    /// The external watchdog restarts the service when the link stays silent for
+    /// [`crate::watchdog::STALE_SECONDS`] while `url` answers, even with the hub link up.
+    /// Also published as the metric `cloud_link_ok_at`.
+    pub fn set_cloud_link(&self, url: &str, ok_at: u64) {
+        let url = crate::watchdog::origin(url);
+        let mut s = lock(&self.status);
+        let since = match &s.link {
+            Some(l) if l.url == url => l.since,
+            _ => now(),
+        };
+        s.link = Some(crate::watchdog::Link {
+            module: self.name.clone(),
+            url,
+            ok_at,
+            since,
+        });
+        s.metrics.insert("cloud_link_ok_at", ok_at);
+    }
+
+    /// Names a state file (problem journal, enrol record) for the diagnostics bundle, where
+    /// it goes scrubbed as `modules/<name>/<file>` (the last 512 KiB). Only `.json`, `.jsonl`,
+    /// `.log` and `.txt` files whose name does not suggest a secret (`key`, `secret`,
+    /// `identity`, `password`, `appsettings`) are taken; returns whether this one is.
+    pub fn add_diagnostic_file(&self, path: impl Into<PathBuf>) -> bool {
+        let path = path.into();
+        if !crate::agent::diagnostic_file_allowed(&path) {
+            dl_log::warn!("diagnostic file refused"; module = self.name.as_str(), file = %path.display());
+            return false;
+        }
+        let mut s = lock(&self.status);
+        if !s.diagnostic_files.contains(&path) {
+            s.diagnostic_files.push(path);
+        }
+        true
+    }
+
+    /// Withdraws the cloud link (the module stopped using it: not enrolled, turned off).
+    pub fn clear_cloud_link(&self) {
+        let mut s = lock(&self.status);
+        s.link = None;
+        s.metrics.remove("cloud_link_ok_at");
     }
 
     /// Records a problem report for this module.

@@ -11,7 +11,7 @@ use crate::hub::{HttpTransport, Transport};
 use crate::identity::Identity;
 use crate::report::{ProblemReport, Severity, Spool};
 use crate::update::UpdateState;
-use crate::watchdog::{self, Action, Service, State};
+use crate::watchdog::{self, Action, Link, Service, State};
 use crate::{Error, now};
 
 /// Minutes between watchdog runs.
@@ -308,6 +308,15 @@ fn hub_reachable(dir: &Path) -> bool {
     })
 }
 
+/// Whether a module's own cloud answers at all: any HTTP status short of a server error
+/// (its origin need not serve a health page). A 5xx or no answer means a restart would not help.
+fn link_reachable(link: &Link) -> bool {
+    matches!(
+        HttpTransport::new().send("GET", &link.url, &[], b""),
+        Ok((200..=499, _))
+    )
+}
+
 /// The `watchdog` sub-command: one look, at most one action. Returns the exit code.
 pub fn run(app: &App, dir: &Path) -> i32 {
     let at = now();
@@ -321,9 +330,15 @@ pub fn run(app: &App, dir: &Path) -> i32 {
     let beat = watchdog::read_beat(dir);
     let pending = UpdateState::load(dir).is_ok_and(|u| u.pending.is_some());
     let mut state = State::load(dir);
-    let action = watchdog::decide(&mut state, at, service, beat.as_ref(), pending, || {
-        hub_reachable(dir)
-    });
+    let action = watchdog::decide(
+        &mut state,
+        at,
+        service,
+        beat.as_ref(),
+        pending,
+        || hub_reachable(dir),
+        link_reachable,
+    );
     if let Err(e) = state.save(dir) {
         dl_log::warn!("cannot save the watchdog state"; error = %e);
     }
@@ -366,6 +381,9 @@ pub fn run(app: &App, dir: &Path) -> i32 {
             .with("last_loop_at", b.at.to_string())
             .with("last_hub_at", b.hub_at.to_string())
             .with("version", b.version.clone());
+        for l in &b.links {
+            report = report.with(&format!("link_{}_ok_at", l.module), l.ok_at.to_string());
+        }
     }
     if let Err(e) = Spool::open(dir.join(watchdog::REPORTS_FILE)).record(report) {
         dl_log::error!("cannot queue the watchdog report"; error = %e);

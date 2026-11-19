@@ -327,10 +327,22 @@ impl Agent {
             pid: std::process::id(),
             channel: self.channel.clone(),
             skew: self.hub.skew(),
+            links: self.module_links(),
         };
         if let Err(e) = watchdog::write_beat(&self.opts.data_dir, &beat) {
             dl_log::warn!("cannot write the heartbeat file"; error = %e);
         }
+    }
+
+    /// The cloud links of the modules that run now (a stopped one's link is not watched).
+    fn module_links(&self) -> Vec<watchdog::Link> {
+        use crate::supervisor::ModuleState as S;
+        self.supervisor
+            .statuses()
+            .into_iter()
+            .filter(|s| matches!(s.state, S::Starting | S::Running | S::Degraded))
+            .filter_map(|s| s.link)
+            .collect()
     }
 
     fn watch_config(&mut self, now: u64) {
@@ -757,6 +769,7 @@ mod hub_list;
 
 #[path = "agent_diag.rs"]
 mod diag;
+pub use diag::diagnostic_file_allowed;
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]
