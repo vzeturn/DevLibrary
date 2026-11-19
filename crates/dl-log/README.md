@@ -37,6 +37,9 @@ asynchronous writing and request-scoped context. No dependencies outside DevLibr
 - **Failure-safe**: sink errors go to an error hook, panics in sinks are contained, log
   lines are never torn between threads, and control characters in messages are escaped
   (no log injection).
+- **Secret scrubbing**: `scrub` / the `Redacted` format mask connection-string passwords
+  (`Password=` / `Pwd=`, any case, ADO.NET quoting), `Bearer` / `Basic` values, URL
+  credentials, JWT-looking strings and fields named like a password, secret, token or key.
 - Usable without globals: a `Logger` is a plain value you can pass around and test.
 - Builds for `wasm32-unknown-unknown` (in-memory and custom sinks).
 
