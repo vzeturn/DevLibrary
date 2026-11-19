@@ -33,8 +33,12 @@ use state::{RateLimit, Shared};
 
 /// The module name (the `modules.membership` section).
 pub const NAME: &str = "membership";
-/// What the agent calls itself to the hub (heartbeat `AgentVersion`, enroll, User-Agent).
-pub const AGENT_VERSION: &str = concat!("dl-agent/", env!("CARGO_PKG_VERSION"));
+/// What the agent calls itself to the hub (heartbeat `AgentVersion`, enroll, User-Agent):
+/// the released dl-agent version (`DL_AGENT_VERSION` at build), not this crate's own.
+pub fn agent_version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| format!("dl-agent/{}", dl_agent::agent_version()))
+}
 /// `TokenRejectedRetryMinutes`.
 pub const TOKEN_RETRY: Duration = Duration::from_secs(15 * 60);
 
@@ -173,7 +177,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             &cfg.hub_base_url,
             &cfg.agent_token,
             cfg.hotel_id,
-            AGENT_VERSION,
+            agent_version(),
             gate,
         )
         .map_err(|e| Error::Config(format!("membership hub address: {e}")))?,
@@ -229,7 +233,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             heartbeat: settings.heartbeat,
             capabilities: settings.capabilities.clone(),
         },
-        AGENT_VERSION,
+        agent_version(),
     );
     if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker) {
         sync = sync.with_dispatcher(d);
@@ -243,7 +247,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             tracker: tracker.clone(),
             shared: shared.clone(),
         };
-        let mut scans = ScanLoop::new(deps, settings, &cfg.hotel_id.to_string(), AGENT_VERSION);
+        let mut scans = ScanLoop::new(deps, settings, &cfg.hotel_id.to_string(), agent_version());
         let s = stop.clone();
         match spawn("membership-scan", move || scans.run(&s)) {
             Ok(h) => workers.push(("scan", h)),
