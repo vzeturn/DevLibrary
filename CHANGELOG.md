@@ -21,6 +21,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-tds`: `CancelToken` and `Client::set_cancel` stop a running request from another thread:
+  the client sends ATTENTION, the call returns `Error::Cancelled` within about 200 ms and later
+  requests fail the same way until a fresh token is set.
 - `dl-agent-pms-device`: the SMILE PMS device agent (`SmilePmsDeviceAgent`) as an opt-in dl-agent
   module (`modules.pms-device.enabled = true`; optional `appsettings_dir`, `overrides`). It reads the
   old service's `appsettings.json` / `appsettings.{env}.json` from its install folder and keeps

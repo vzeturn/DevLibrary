@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 mod browser;
+mod cancel;
 mod client;
 mod codepages;
 mod collation;
@@ -20,6 +21,7 @@ mod types;
 mod value;
 mod wire;
 
+pub use cancel::CancelToken;
 pub use client::Client;
 pub use collation::Collation;
 pub use config::{Config, Encrypt};
