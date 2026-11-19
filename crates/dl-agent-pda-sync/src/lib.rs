@@ -20,6 +20,8 @@ pub mod diagnostics;
 /// Composition root, background loops, `enroll` and `grants` (`Hosting/`); the Windows
 /// service, self-update and diagnostics bundle are dl-agent's.
 pub mod hosting;
+/// The dl-agent module, its tools, self-test and hub commands.
+pub mod module;
 /// SQLite outboxes and uploaders: batches, blobs, heartbeat (`Outbox/`).
 pub mod outbox;
 /// Print relay: hub jobs to spooler or raw TCP printers (`PrintRelay/`).
@@ -32,3 +34,7 @@ pub mod security;
 pub mod staff;
 /// Cloud HTTP client, request signing, token and enrollment (`Transport/`).
 pub mod transport;
+
+pub use module::selftest::pda_sync_selftest;
+pub use module::tool::{pda_enroll_tool, pda_grants_tool};
+pub use module::{PdaSyncModule, pda_sync_module};

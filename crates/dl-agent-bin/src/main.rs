@@ -31,7 +31,11 @@ fn main() {
     let app = app
         .module(backup_module())
         .tool(backup_enroll_tool())
-        .selftest(backup_selftest());
+        .selftest(backup_selftest())
+        .module(dl_agent_pda_sync::pda_sync_module())
+        .tool(dl_agent_pda_sync::pda_enroll_tool())
+        .tool(dl_agent_pda_sync::pda_grants_tool())
+        .selftest(dl_agent_pda_sync::pda_sync_selftest());
     std::process::exit(dl_agent::cli::main(app));
 }
 

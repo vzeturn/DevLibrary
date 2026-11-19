@@ -68,6 +68,7 @@ dependencies = [
  "dl-agent-einvoice",
  "dl-agent-hotellink",
  "dl-agent-membership",
+ "dl-agent-pda-sync",
  "dl-agent-pms",
  "dl-agent-pms-device",
 ]
@@ -148,7 +149,6 @@ dependencies = [
  "dl-winos",
  "dl-winsvc",
  "dl-ws",
- "dl-zip",
 ]
 
 [[package]]
