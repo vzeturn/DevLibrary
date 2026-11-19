@@ -19,6 +19,10 @@ export interface Env {
   MINOR_RAMP?: string;
   /** Hub base URLs handed to agents, primary first ("https://a,https://b"); also limits the fallback host to agent paths. */
   HUB_URLS?: string;
+  /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`); with ACCESS_AUD, names admins in the audit trail. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** Audience tag of the Access application in front of /admin. */
+  ACCESS_AUD?: string;
 }
 
 export interface AgentRow {
