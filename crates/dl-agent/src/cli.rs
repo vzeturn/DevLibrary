@@ -6,7 +6,6 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use dl_cli::{Arg, Command, Matches};
 use dl_json::Value;
@@ -132,18 +131,19 @@ pub fn command(app: &App) -> Command {
                 .about("Runs the agent (console, or as the service)")
                 .arg(data()),
         )
-        .subcommand(
-            Command::new("install")
-                .about("Installs and starts the system service")
-                .arg(data()),
-        )
+        .subcommand(crate::cli_install::install_grammar(data()))
+        .subcommand(crate::cli_install::update_grammar(data()))
+        .subcommand(crate::cli_install::verify_grammar(data()))
         .subcommand(
             Command::new("uninstall")
-                .about("Stops and removes the system service")
+                .about("Removes the service, the watchdog task and the installed files (the hub is told); the state directory stays")
                 .arg(
                     Arg::flag("purge")
                         .help("Also delete the state directory (identity, spool, logs)"),
                 )
+                .arg(Arg::flag("keep-files").help(
+                    "Keep the installed program files (an installer that replaces them next)",
+                ))
                 .arg(data()),
         )
         .subcommand(
@@ -198,8 +198,13 @@ pub fn main(app: App) -> i32 {
     let result = match name {
         "enroll" => enroll(&app, &dir, sub),
         "run" => return run(&app, &dir),
-        "install" => install(&app, &dir),
-        "uninstall" => uninstall(&app, &dir, sub.flag("purge")),
+        "install" => return crate::cli_install::main_install(&app, &dir, sub),
+        "update" => return crate::cli_install::main_update(&app, &dir, sub),
+        "verify-self" => return crate::cli_install::main_verify(&app, sub),
+        "uninstall" => {
+            let files = !sub.flag("keep-files");
+            return crate::cli_uninstall::main(&app, &dir, sub.flag("purge"), files);
+        }
         "watchdog" => {
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 eprintln!("cannot create {}: {e}", dir.display());
@@ -328,21 +333,32 @@ pub fn default_data_dir(service: &str) -> PathBuf {
 }
 
 fn enroll(app: &App, dir: &Path, m: &Matches) -> Result<(), Error> {
-    if Identity::exists(dir) && !m.flag("force") {
+    let hubs = crate::cli_install::split_hubs(m.value("hub").unwrap_or(""));
+    enroll_with(
+        app,
+        dir,
+        &hubs,
+        m.value("code").unwrap_or(""),
+        m.flag("force"),
+    )
+}
+
+/// Enrols this machine with `code` on `hubs` (first preferred) and saves the identity and
+/// first configuration in `dir`. An existing identity is replaced only with `force`.
+pub(crate) fn enroll_with(
+    app: &App,
+    dir: &Path,
+    hubs: &[String],
+    code: &str,
+    force: bool,
+) -> Result<(), Error> {
+    if Identity::exists(dir) && !force {
         return Err(Error::Config(format!(
             "{} is already enrolled; pass --force to replace it",
             dir.display()
         )));
     }
-    let hubs: Vec<String> = m
-        .value("hub")
-        .unwrap_or("")
-        .split(',')
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let code = m.value("code").unwrap_or("");
-    let enrolled = hub::enroll(&HttpTransport::new(), &hubs, code, &app.module_names())?;
+    let enrolled = hub::enroll(&HttpTransport::new(), hubs, code, &app.module_names())?;
     crate::error::io("create data dir", std::fs::create_dir_all(dir))?;
     enrolled.identity.save(dir)?;
     if let Some(config) = enrolled.config.clone() {
@@ -463,14 +479,21 @@ fn exe_path() -> Result<String, Error> {
     Ok(exe.display().to_string())
 }
 
-fn install(app: &App, dir: &Path) -> Result<(), Error> {
+/// Registers and starts the service for this binary (enrolled machines only); safe to run
+/// again. The one-line installer's machine setup is [`crate::cli_install_win`].
+pub(crate) fn install(app: &App, dir: &Path) -> Result<(), Error> {
     if !Identity::exists(dir) {
         return Err(Error::NotEnrolled);
     }
     let exe = exe_path()?;
     let data = dir.display().to_string();
     if cfg!(windows) {
-        install_windows(app, &exe, &data)
+        crate::cli_install_win::register_service(app, &exe, &data)?;
+        println!(
+            "service {} installed and started, watchdog task registered",
+            app.service
+        );
+        Ok(())
     } else if cfg!(target_os = "linux") {
         install_systemd(app, &exe, &data)
     } else {
@@ -484,25 +507,6 @@ pub(crate) fn svc(e: dl_winsvc::Error) -> Error {
     Error::Config(format!("service manager: {e}"))
 }
 
-fn install_windows(app: &App, exe: &str, data: &str) -> Result<(), Error> {
-    use dl_winsvc::scm::{Manager, ServiceConfig, StartType};
-    let bin = dl_winsvc::command_line(exe, &["run", "--data", data]);
-    let manager = Manager::connect().map_err(svc)?;
-    let cfg = ServiceConfig::new(&app.display, StartType::Automatic, &bin)
-        .with_description("DevLibrary shared agent: runs product modules, self-updates from the hub and reports problems.");
-    let service = manager.create(&app.service, &cfg).map_err(svc)?;
-    // Exit 75 (update installed, restart requested) and crashes both restart the service.
-    crate::service_watch::set_recovery(&service)?;
-    service.set_delayed_auto_start(true).map_err(svc)?;
-    service.start(&[]).map_err(svc)?;
-    crate::service_watch::register(app, exe, data)?;
-    println!(
-        "service {} installed and started, watchdog task registered",
-        app.service
-    );
-    Ok(())
-}
-
 /// The systemd unit for `exe run --data <data>`.
 pub fn systemd_unit(app: &App, exe: &str, data: &str) -> String {
     format!(
@@ -513,7 +517,7 @@ pub fn systemd_unit(app: &App, exe: &str, data: &str) -> String {
     )
 }
 
-fn systemctl(args: &[&str]) -> Result<(), Error> {
+pub(crate) fn systemctl(args: &[&str]) -> Result<(), Error> {
     let status = crate::error::io(
         "run systemctl",
         std::process::Command::new("systemctl").args(args).status(),
@@ -541,32 +545,6 @@ fn install_systemd(app: &App, exe: &str, data: &str) -> Result<(), Error> {
         "unit {} installed and started, watchdog timer enabled",
         app.service
     );
-    Ok(())
-}
-
-fn uninstall(app: &App, dir: &Path, purge: bool) -> Result<(), Error> {
-    // First, so the watchdog does not start the service again while it is removed.
-    crate::service_watch::unregister(app);
-    if cfg!(windows) {
-        let manager = dl_winsvc::scm::Manager::connect().map_err(svc)?;
-        let service = manager.open(&app.service).map_err(svc)?;
-        if let Err(e) = service.stop_and_wait(Duration::from_secs(30)) {
-            eprintln!("stop: {e}");
-        }
-        service.delete().map_err(svc)?;
-    } else if cfg!(target_os = "linux") {
-        systemctl(&["disable", "--now", &app.service])?;
-        crate::error::io("remove unit", std::fs::remove_file(unit_path(app)))?;
-        systemctl(&["daemon-reload"])?;
-    } else {
-        return Err(Error::Config(
-            "service uninstall is supported on Windows and Linux (systemd)".into(),
-        ));
-    }
-    if purge && dir.exists() {
-        crate::error::io("remove data dir", std::fs::remove_dir_all(dir))?;
-    }
-    println!("service {} removed", app.service);
     Ok(())
 }
 

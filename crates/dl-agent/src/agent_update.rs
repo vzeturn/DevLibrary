@@ -184,6 +184,44 @@ impl Agent {
         }
     }
 
+    /// `dl-agent update` on this machine (PROTOCOL.md §6.5): a request file in the data
+    /// directory runs the `update_now` path at once, on the channel chosen here when one is;
+    /// the answer goes to `update-now.result.json` for the CLI that waits for it.
+    pub(super) fn local_update(&mut self, now: u64) -> Option<Exit> {
+        let dir = self.opts.data_dir.clone();
+        match crate::optout::take_update_request(&dir) {
+            Ok(true) => {}
+            Ok(false) => return None,
+            Err(e) => {
+                self.report(Severity::Error, "update_request_failed", &e.to_string());
+                return None;
+            }
+        }
+        if let Some(c) = crate::optout::channel(&dir) {
+            self.channel = c;
+        }
+        let from = self.opts.version.to_string();
+        let (ok, output, exit) = self.update_now(now);
+        let to = match (&exit, &self.update.pending) {
+            (Some(_), Some(p)) => p.version.to_string(),
+            _ => String::new(),
+        };
+        dl_log::info!("local update request"; ok = ok, output = output.as_str());
+        let r = crate::optout::UpdateResult {
+            at: now,
+            ok,
+            installed: exit.is_some(),
+            from,
+            to,
+            channel: self.channel.clone(),
+            output,
+        };
+        if let Err(e) = crate::optout::write_update_result(&dir, &r) {
+            self.report(Severity::Error, "update_request_failed", &e.to_string());
+        }
+        exit
+    }
+
     /// The `retry_update` command: forgets failed attempts (of `version`, or all).
     pub(super) fn retry_update(&mut self, version: Option<&str>) -> (bool, String) {
         let before = self.update.failures.len();

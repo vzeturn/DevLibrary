@@ -27,6 +27,7 @@ describe('hub host list', () => {
     expect(primaryHost(LIST)).toBe('hub.test');
     expect(primaryHost('')).toBeNull();
     expect(servedOnFallback('/v1/heartbeat')).toBe(true);
+    expect(servedOnFallback('/uninstall.ps1')).toBe(true);
     expect(servedOnFallback('/admin/agents')).toBe(false);
   });
 

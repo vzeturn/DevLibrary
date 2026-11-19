@@ -201,12 +201,10 @@ impl Agent {
             if let Some(e) = &agent.sql.load_error {
                 agent.report(Severity::Critical, "sql_config_invalid", e);
             }
-            if crate::optout::blocked(&agent.opts.data_dir) {
-                agent.report(
-                    Severity::Info,
-                    "update_blocked_local",
-                    "automatic updates are off: the no-update file exists in the data directory (update_now still works)",
-                );
+            if let Some(why) = crate::optout::reason(&agent.opts.data_dir) {
+                let d = crate::optout::describe(&agent.opts.data_dir, why);
+                let msg = format!("automatic updates are off: {d} (update_now still works)");
+                agent.report(Severity::Info, "update_blocked_local", &msg);
             }
         })
     }
@@ -304,6 +302,9 @@ impl Agent {
         self.supervisor.tick(&self.config.current);
         self.watch_config(now);
         if let Some(exit) = self.watch_probation(now) {
+            return Some(exit);
+        }
+        if let Some(exit) = self.local_update(now) {
             return Some(exit);
         }
         if now >= self.next_heartbeat {
@@ -462,11 +463,10 @@ impl Agent {
             "uptime_seconds": now.saturating_sub(self.started_at), "config_version": self.config.current.version,
             "update": {"state": self.update_status.0, "version": self.update_status.1}, "modules": modules,
         });
-        if let (Some(why), Some(map)) = (
-            crate::optout::reason(&self.opts.data_dir),
-            body.as_object_mut(),
-        ) {
-            map.insert("update_blocked", why);
+        if let Some(map) = body.as_object_mut() {
+            for (k, v) in crate::optout::heartbeat_fields(&self.opts.data_dir) {
+                map.insert(k, v);
+            }
         }
         body
     }
@@ -508,7 +508,8 @@ impl Agent {
             self.survey_sent = Some((hash, now));
         }
         self.adopt_hub_urls(answer.hub_urls.as_ref());
-        self.channel = answer.channel;
+        // A channel chosen on this machine (dl-agent install stable|canary) wins.
+        self.channel = crate::optout::channel(&self.opts.data_dir).unwrap_or(answer.channel);
         self.heartbeat_seconds = answer.heartbeat_seconds;
         self.next_heartbeat = now + answer.heartbeat_seconds;
         if let Some(c) = answer.config {
