@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-speaker: the PDAOrder speaker as the opt-in `speaker` module of dl-agent (`modules.speaker.rvcList`): joins the PDA order hub per RVC with the enrolled `pda-sync` identity (no long-lived speaker JWT file), plays the embedded alert tones and speaks vi/en through Windows SAPI with the per-RVC `guest.speakerSoundMode` rules, hub commands `status` and `test`; no print relay (pda-sync relays, ADR 0026). Needs a PDA cloud change to accept the agent for `JoinRvc` and the sound-mode route (RT-0257).
 - dl-agent-membership: SMILE_SPECIAL extra beds on create and modify (agent-marked `Folio_Special` rows reconciled in the folio transaction, the .NET preflight and fold reasons, the hub's chosen special from sync-config), and with writes on the extra-bed terms and `SpecialService` catalogue reports (`api/agent/pms/extra-bed-terms`, `api/agent/pms/special-services`); new key `smile_hotel_id` (RT-0256).
 - dl-agent-pda-sync: the order, combo, covers, table, check-merge, line-move, KDS and reservation commands are tested live as `pda_sync` on SQL Server 2017 and 2022 (each delivered twice: one write, one `Pda_SyncCommandLog` row, the same answer; refused after a POS WIN change); the PDA cloud link is reported to the watchdog from the first accepted heartbeat, and Error site events reach the hub as problem reports (RT-0257).
 - dl-agent-pms: local op journal (request-key replay); commands `pms.status`, `pms.selftest`, `pms.op_dry_run`; first op `fo.hotelDate.get@1` (RT-0164, RT-0220).

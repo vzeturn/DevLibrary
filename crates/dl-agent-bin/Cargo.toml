@@ -23,6 +23,7 @@ dl-agent-pms-device.workspace = true
 dl-agent-hotellink.workspace = true
 dl-agent-arrival.workspace = true
 dl-agent-pda-sync.workspace = true
+dl-agent-speaker.workspace = true
 
 [lints]
 workspace = true

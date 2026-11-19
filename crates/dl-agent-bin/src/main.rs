@@ -39,6 +39,7 @@ fn main() {
         .tool(dl_agent_pda_sync::pda_enroll_tool())
         .tool(dl_agent_pda_sync::pda_grants_tool())
         .selftest(dl_agent_pda_sync::pda_sync_selftest());
+    let app = app.module(dl_agent_speaker::speaker_module());
     std::process::exit(dl_agent::cli::main(app));
 }
 
