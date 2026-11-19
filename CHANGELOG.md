@@ -95,6 +95,7 @@ All notable changes are listed here. The format follows
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
 ### Changed
+- `dl-agent pms-enroll`: the code may come from `DL_AGENT_PMS_CODE` instead of `--code`, so installers keep it out of the process list; `install.ps1` removes it after the setup step (RT-0164 / RT-0220).
 
 - dl-agent-pms: works only on SMILE_FO, SMILE_POS and SMILE_BO; each op runs on the database its `target_db` names; settings come from core `sql.json`, `databases.json` is the fallback. All site-side MM_PMS code (MM_OpLog, migrations, migrate frames) removed; `pms-migrate` is a retired stub (RT-0220).
 - dl-agent-einvoice: enrolment no longer falls back to an unencrypted SQL connection for a SQL login to another computer (core rule: Windows login or local server only); an explicit or carried-over `encrypt=disable` is kept (RT-0164).

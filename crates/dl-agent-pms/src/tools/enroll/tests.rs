@@ -85,6 +85,25 @@ fn grammar_takes_the_documented_flags() {
 }
 
 #[test]
+fn the_code_may_come_from_the_environment_and_the_argument_wins() {
+    let cmd = grammar(Command::new(NAME));
+    let env = |k: &str| (k == CODE_ENV).then(|| "FROM-ENV".to_owned());
+    let url = ["--cloud-url", "https://pms.example.com"];
+    let m = cmd
+        .parse_from_with_env([&[NAME][..], &url].concat(), env)
+        .unwrap();
+    assert_eq!(Args::from_matches(&m).code, "FROM-ENV");
+    let m = cmd
+        .parse_from_with_env([&[NAME][..], &url, &["--code", "C1"]].concat(), env)
+        .unwrap();
+    assert_eq!(Args::from_matches(&m).code, "C1");
+    assert!(
+        cmd.parse_from_with_env([&[NAME][..], &url].concat(), |_| None)
+            .is_err()
+    );
+}
+
+#[test]
 fn writes_a_new_config_sorted_restricted_and_never_prints_the_code() {
     let d = TempDir::new("new");
     let cfg = d.0.join("Agent").join("config.json");

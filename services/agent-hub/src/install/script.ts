@@ -55,7 +55,7 @@ param(
 $DlState = @{ Exit = 0; Extra = @($args); Done = $false }
 $MaxSkew = 240
 # Secret env a -Setup sub-command reads (DL_AGENT_SETUP_ARGS too): removed when the installer ends.
-$SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD', 'DL_AGENT_EINVOICE_TOKEN')
+$SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD', 'DL_AGENT_EINVOICE_TOKEN', 'DL_AGENT_PMS_CODE')
 # Secret env this script hands to the binary: removed when the installer ends.
 $HandoffSecrets = @('DL_AGENT_ENROLL_CODE', 'DL_AGENT_SQL_CONNECTION', 'DL_AGENT_SQL_LEGACY', 'DL_AGENT_SQL_LEGACY_FROM', 'DL_AGENT_SETUP_ARGS')
 
