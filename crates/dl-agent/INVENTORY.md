@@ -12,7 +12,7 @@ is a **module**. Business data still goes from the module to its own product clo
 | 1 | MM-EINVOICE | `cmd/agent` (Go, live) + `rust/agent` (Rust on DevLibrary, not shipped) | Go / Rust | SMILE_FO, SMILE_POS (read via procs, write-back `MMEI_Collected`) | `einvoice` |
 | 2 | SML-PDAOrder | `apps/sql-sync-agent` (.NET 10, live) | C# | SMILE_POS (capture, exactly-once commands), legacy `pda` schema | `pda-sync` |
 | 3 | SML-PDAOrder | `apps/speaker-agent` (Go, live) | Go | none (SignalR, WAV/SAPI, print relay) | `speaker` (fold into `pda-sync` print relay) |
-| 4 | SMILE-PMS | `apps/site-agent` (Go + Rust port on DevLibrary) | Go / Rust | **MM_PMS, SMILE_FO, SMILE_BO, SMILE_POS** (allow-listed procs, signed migrations) | `pms-site` |
+| 4 | SMILE-PMS | `apps/site-agent` (Go + Rust port on DevLibrary) | Go / Rust | SMILE_FO, SMILE_BO, SMILE_POS (allow-listed ops; MM_PMS is cloud-only) | `pms-site` |
 | 5 | SMILE-PMS | `apps/device-agent` (.NET 10 + Rust port) | C# / Rust | door locks (LockSDK x86), ESC/POS, serial, PC/SC, OPOS, SAPI | `pms-device` |
 | 6 | SmileCheckin | `src/MM.Arrival.Agent` (.NET 10, live) | C# | SMILE_FO (`srCI_*` procs), SMILE_PICTURE, LegalVault | `arrival` |
 | 7 | MM-MEMBERSHIP | `src/MM.Membership.Agent` (.NET 10, live at VIC-SGN, VICVT) | C# | SMILE_FO (jobs, checkout/availability/folio scanners) | `membership` |
@@ -68,9 +68,11 @@ shared by every module on the site.
   docs/plans/2026-11-19-pda-sync-plan.md.
 - **speaker**: SignalR `JoinRvc`, embedded WAV tones, SAPI vi/en, sound mode per RVC. Replace 365-day
   plaintext JWT with enrolled identity.
-- **pms-site**: WSS stream with JWT, allow-listed procs on MM_PMS/SMILE_FO/SMILE_BO/SMILE_POS, ≤ 8 ops in
-  flight, deadlock retry, result caps, signed migration bundles (backup gate, drift check, dry run),
-  OpLog purge. `databases.json` must move to DPAPI. FO/BO/POS request keys still missing.
+- **pms-site**: WSS stream with JWT, allow-listed ops on SMILE_FO/SMILE_BO/SMILE_POS only (`target_db` per op,
+  SMILE-only contract of SMILE-PMS ADR 2026-11-19), ≤ 8 ops in flight, deadlock retry, result caps, local op
+  journal for request-key replay; settings from core `sql.json` (`databases.json` only as fallback); commands
+  `pms.status`, `pms.selftest`, `pms.op_dry_run`; first op `fo.hotelDate.get@1`. MM_PMS on site removed.
+  Bench end-to-end pending.
 - **pms-device**: claim/result polling 1 s with durable outbox, locks (LockSDK x86 → 32-bit helper process),
   ESC/POS TCP/serial/spooler, PC/SC, OPOS IDispatch, SAPI. Needs enrollment (today: manual token).
 - **arrival**: HTTP/2 long poll with AES-GCM envelopes (HKDF per direction, ±120 s), snapshots/ETag,

@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-pms: local op journal (request-key replay); commands `pms.status`, `pms.selftest`, `pms.op_dry_run`; first op `fo.hotelDate.get@1` (RT-0164, RT-0220).
 - dl-agent-pda-sync: the PDAOrder SQL sync agent as the opt-in `pda-sync` module of dl-agent (SMILE_POS capture, outbox and blob upload, heartbeat, command channel with exactly-once site commands, staff sync, order grants monitor, print relay), with the `pda-enroll` and `pda-grants` tools, selftest rows and the hub commands `status`, `selftest` and `capture_dry_run`. Sites uninstall the old PdaSyncAgent and enrol fresh (docs/plans/2026-11-19-pda-sync-plan.md, RT-0164).
 - dl-agent-einvoice: run-time SQL transport ladder from core (step-downs reported as `einvoice_sql_transport`); `sql_source = site` reads the machine's sql.json; hub check commands `status`, `selftest`, `collect_dry_run` and `writeback_probe` (both read-only) (RT-0164).
 - dl-agent-einvoice: `einvoice-enroll --switch` replaces the Go agent by a fresh enrolment; data continuity via SQL marks and idempotent write-back (RT-0164).
@@ -95,6 +96,7 @@ All notable changes are listed here. The format follows
 
 ### Changed
 
+- dl-agent-pms: works only on SMILE_FO, SMILE_POS and SMILE_BO; each op runs on the database its `target_db` names; settings come from core `sql.json`, `databases.json` is the fallback. All site-side MM_PMS code (MM_OpLog, migrations, migrate frames) removed; `pms-migrate` is a retired stub (RT-0220).
 - dl-agent-einvoice: enrolment no longer falls back to an unencrypted SQL connection for a SQL login to another computer (core rule: Windows login or local server only); an explicit or carried-over `encrypt=disable` is kept (RT-0164).
 - dl-agent-arrival: a failed SMILE_PICTURE phase names the missing grant; the install inventory lists
   processes through `dl_winsvc::process` instead of `tasklist`.
