@@ -48,7 +48,7 @@ agentRoutes.post('/agent/selftest', async (c) => {
   return c.json(await storeSelftest(c.env, c.get('agent'), body, nowSeconds()));
 });
 
-/** `collect_diagnostics` uploads its zip here (PROTOCOL.md §4.1); `?command_id=` links it to the command. */
+/** `collect_diagnostics` uploads its zip here (PROTOCOL.md §4.1), once per open command named by `?command_id=`. */
 agentRoutes.post('/agent/diagnostics', async (c) => {
   const commandId = c.req.query('command_id') ?? null;
   return c.json(await storeDiagnostics(c.env, c.get('agent'), c.get('rawBytes'), commandId, nowSeconds()));

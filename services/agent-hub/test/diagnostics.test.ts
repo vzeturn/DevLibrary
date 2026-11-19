@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { sha256Hex } from '../src/lib/crypto';
 import { canonicalString } from '../src/middleware/signature';
-import { MAX_DIAGNOSTICS_BYTES } from '../src/services/diagnostics';
-import { admin, b64, enrollAgent, freshNonce, setNow, T0, testEnv, type TestAgent, type TestEnv } from './helpers';
+import { DIAGNOSTICS_WINDOW_SECONDS, MAX_DIAGNOSTICS_BYTES, MAX_DIAGNOSTICS_PER_WINDOW } from '../src/services/diagnostics';
+import { admin, b64, enrollAgent, freshNonce, heartbeatBody, setNow, signed, T0, testEnv, type TestAgent, type TestEnv } from './helpers';
 
 let env: TestEnv;
 let agent: TestAgent;
@@ -15,10 +15,19 @@ const zip = (size = 64, fill = 7): Uint8Array => {
   return b;
 };
 
-/** A signed binary upload, as the agent sends it (Content-Length set by the HTTP client). */
-async function upload(body: Uint8Array, opt: { who?: TestAgent; path?: string; length?: string | null } = {}): Promise<Response> {
+/** Queues a command for `who` and hands it out with a heartbeat; returns its id. */
+async function openCommand(who: TestAgent = agent, kind = 'collect_diagnostics'): Promise<string> {
+  const res = await admin(env, 'POST', '/admin/commands', { agent_id: who.id, kind });
+  expect(res.status).toBe(201);
+  const { id } = (await res.json()) as { id: string };
+  expect((await signed(env, who, 'POST', '/v1/heartbeat', heartbeatBody(who))).status).toBe(200);
+  return id;
+}
+
+/** A signed binary upload, as the agent sends it (Content-Length set by the HTTP client); by default for a fresh open command. */
+async function upload(body: Uint8Array, opt: { who?: TestAgent; path?: string; command?: string; length?: string | null } = {}): Promise<Response> {
   const who = opt.who ?? agent;
-  const path = opt.path ?? '/v1/agent/diagnostics?command_id=cmd-1';
+  const path = opt.path ?? `/v1/agent/diagnostics?command_id=${opt.command ?? (await openCommand(who))}`;
   const time = String(Math.floor(Date.now() / 1000));
   const nonce = freshNonce();
   const canonical = canonicalString('POST', path, time, nonce, await sha256Hex(body));
@@ -53,7 +62,8 @@ afterEach(() => vi.useRealTimers());
 describe('POST /v1/agent/diagnostics', () => {
   it('stores the zip in R2 under diag/<tenant>/<agent>/ with a row admin can list and download', async () => {
     const body = zip(300);
-    const res = await upload(body);
+    const command = await openCommand();
+    const res = await upload(body, { command });
     expect(res.status).toBe(200);
     const stored = (await res.json()) as Stored;
     expect(stored.key).toMatch(new RegExp(`^diag/acme/${agent.id}/${T0 * 1000}-[0-9a-f]{8}\\.zip$`));
@@ -69,7 +79,7 @@ describe('POST /v1/agent/diagnostics', () => {
       site_id: 'main',
       r2_key: stored.key,
       size: 300,
-      command_id: 'cmd-1',
+      command_id: command,
       agent_version: '1.0.0',
       created_at: T0,
     });
@@ -104,7 +114,7 @@ describe('POST /v1/agent/diagnostics', () => {
     expect(text.status).toBe(400);
     expect(await text.json()).toMatchObject({ error: 'not_a_zip' });
     const other = await enrollAgent(env, 'other');
-    const forged = await upload(zip(), { who: { ...agent, keys: other.keys } });
+    const forged = await upload(zip(), { who: { ...agent, keys: other.keys }, command: await openCommand() });
     expect(forged.status).toBe(401);
     const badCommand = await upload(zip(), { path: '/v1/agent/diagnostics?command_id=a%20b' });
     expect(badCommand.status).toBe(400);
@@ -139,5 +149,46 @@ describe('POST /v1/agent/diagnostics', () => {
     expect(list.diagnostics.map((d) => d.id)[0]).toBe(later.id);
     expect(list.diagnostics).toHaveLength(2);
     expect((await admin(env, 'GET', '/admin/diagnostics/nope/download')).status).toBe(404);
+  });
+
+  it('takes a bundle only for an open collect_diagnostics command of the same agent', async () => {
+    const refused = async (opt: { path?: string; command?: string }, status: number, error: string): Promise<void> => {
+      const res = await upload(zip(), opt);
+      expect(res.status, error).toBe(status);
+      expect(await res.json()).toMatchObject({ error });
+    };
+    await refused({ path: '/v1/agent/diagnostics' }, 400, 'command_id_required');
+    await refused({ path: '/v1/agent/diagnostics?command_id=' }, 400, 'command_id_required');
+    await refused({ command: 'cmd-unknown' }, 409, 'no_open_diagnostics_command');
+    const other = await enrollAgent(env, 'other');
+    await refused({ command: await openCommand(other) }, 409, 'no_open_diagnostics_command');
+    await refused({ command: await openCommand(agent, 'restart_module') }, 409, 'no_open_diagnostics_command');
+    const queued = (await (await admin(env, 'POST', '/admin/commands', { agent_id: agent.id, kind: 'collect_diagnostics' })).json()) as { id: string };
+    await refused({ command: queued.id }, 409, 'no_open_diagnostics_command'); // not handed out yet
+    const answered = await openCommand();
+    expect((await signed(env, agent, 'POST', `/v1/commands/${answered}/result`, { ok: false, output: 'x', finished_at: T0 })).status).toBe(200);
+    await refused({ command: answered }, 409, 'no_open_diagnostics_command');
+    expect(env.ARTIFACTS.store.size).toBe(0);
+  });
+
+  it('takes one bundle per command', async () => {
+    const command = await openCommand();
+    expect((await upload(zip(10, 1), { command })).status).toBe(200);
+    const again = await upload(zip(10, 2), { command });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ error: 'diagnostics_already_uploaded' });
+    expect(env.ARTIFACTS.store.size).toBe(1);
+  });
+
+  it('limits each agent to a few bundles an hour', async () => {
+    for (let i = 0; i < MAX_DIAGNOSTICS_PER_WINDOW; i++) expect((await upload(zip())).status).toBe(200);
+    const limited = await upload(zip());
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ error: 'diagnostics_rate_limited', max: MAX_DIAGNOSTICS_PER_WINDOW });
+    const other = await enrollAgent(env, 'other');
+    expect((await upload(zip(), { who: other })).status).toBe(200);
+    setNow(T0 + DIAGNOSTICS_WINDOW_SECONDS);
+    expect((await upload(zip())).status).toBe(200);
+    expect(env.ARTIFACTS.store.size).toBe(MAX_DIAGNOSTICS_PER_WINDOW + 2);
   });
 });

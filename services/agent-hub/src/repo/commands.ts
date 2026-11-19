@@ -59,6 +59,11 @@ export async function saveResult(
   return exists ? 'duplicate' : 'not_found';
 }
 
+/** One command of one agent, or null. */
+export async function agentCommand(db: D1Database, agentId: string, id: string): Promise<CommandRow | null> {
+  return db.prepare('SELECT * FROM commands WHERE id = ?1 AND agent_id = ?2').bind(id, agentId).first<CommandRow>();
+}
+
 export async function listCommands(db: D1Database, agentId: string | undefined): Promise<CommandRow[]> {
   const sql = `SELECT * FROM commands WHERE (?1 IS NULL OR agent_id = ?1) ORDER BY created_at DESC LIMIT 500`;
   return (await db.prepare(sql).bind(agentId ?? null).all<CommandRow>()).results;

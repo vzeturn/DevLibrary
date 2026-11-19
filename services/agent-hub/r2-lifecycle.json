@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "diag-30d",
+      "enabled": true,
+      "conditions": { "prefix": "diag/" },
+      "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 2592000 } }
+    }
+  ]
+}

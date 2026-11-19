@@ -6,7 +6,7 @@ export interface DiagnosticsRow {
   r2_key: string;
   size: number;
   sha256: string;
-  command_id: string | null;
+  command_id: string;
   agent_version: string;
   created_at: number;
 }
@@ -19,6 +19,20 @@ export async function insertDiagnostics(db: D1Database, row: DiagnosticsRow): Pr
     )
     .bind(row.id, row.agent_id, row.tenant_id, row.site_id, row.r2_key, row.size, row.sha256, row.command_id, row.agent_version, row.created_at)
     .run();
+}
+
+/** Whether a bundle was already stored for `commandId` (each command uploads once). */
+export async function diagnosticsForCommand(db: D1Database, commandId: string): Promise<boolean> {
+  return (await db.prepare('SELECT 1 AS x FROM diagnostics WHERE command_id = ?1').bind(commandId).first()) !== null;
+}
+
+/** Bundles an agent uploaded at or after `since`. */
+export async function countDiagnosticsSince(db: D1Database, agentId: string, since: number): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) AS n FROM diagnostics WHERE agent_id = ?1 AND created_at >= ?2')
+    .bind(agentId, since)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export interface DiagnosticsFilter {

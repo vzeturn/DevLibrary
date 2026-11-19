@@ -1,7 +1,8 @@
 -- Diagnostics bundles and the admin audit trail (RT-0164).
 
 -- One uploaded `collect_diagnostics` bundle; the zip itself is in R2 under `r2_key`
--- (diag/<tenant>/<agent>/<ms>.zip), never served on the agent artifact route.
+-- (diag/<tenant>/<agent>/<ms>.zip), never served on the agent artifact route. Each bundle
+-- answers one command (`command_id`, unique); an R2 lifecycle rule deletes diag/ after 30 days.
 CREATE TABLE diagnostics (
   id            TEXT PRIMARY KEY,
   agent_id      TEXT NOT NULL REFERENCES agents(id),
@@ -10,12 +11,13 @@ CREATE TABLE diagnostics (
   r2_key        TEXT NOT NULL UNIQUE,
   size          INTEGER NOT NULL,
   sha256        TEXT NOT NULL,
-  command_id    TEXT,
+  command_id    TEXT NOT NULL,
   agent_version TEXT NOT NULL,
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX diagnostics_by_agent ON diagnostics (agent_id, created_at DESC);
 CREATE INDEX diagnostics_by_tenant ON diagnostics (tenant_id, created_at DESC);
+CREATE UNIQUE INDEX diagnostics_by_command ON diagnostics (command_id);
 
 -- Every admin request that changes something (any method but GET/HEAD), written before the
 -- change runs; `status` is filled in when it finished (NULL: the Worker died mid-way).
