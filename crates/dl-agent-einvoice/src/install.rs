@@ -46,7 +46,7 @@ pub const SCRIPTS: &[(&str, &str)] = &[
     ),
 ];
 
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 const FO_STATIC_PRED: &str = "/*{{FO_STATIC_PRED}}*/1 = 1";
 const FO_GRP_EXPR: &str = "/*{{FO_GRP_EXPR}}*/''";
@@ -293,7 +293,28 @@ pub fn install_into(c: &mut Client) -> Result<(), String> {
         }
         run_script(c, name, &body)?;
     }
-    Ok(())
+    // The write-back procedure updates the marker table the collect set just created,
+    // so it goes last (`installWritebackSQLInto`).
+    install_writeback_into(c)
+}
+
+/// The agent's write-back procedure (`dbo.sp_ApplyInvoiceWriteback`): a copy of MM-EINVOICE
+/// `db/agent-sql/writeback.sql`. Written for SQL Server 2008+, so it needs no legacy rewrite.
+pub const WRITEBACK_SCRIPT: (&str, &str) = ("writeback.sql", include_str!("../sql/writeback.sql"));
+
+/// The procedure [`WRITEBACK_SCRIPT`] creates; any other configured name is DBA-owned.
+pub const DEFAULT_WRITEBACK_SP: &str = "sp_ApplyInvoiceWriteback";
+
+/// `isDefaultWritebackSP`: whether `name` (bare or `dbo.`-qualified) is the agent's own
+/// write-back procedure, the only one the agent may create or overwrite.
+pub fn is_default_writeback_sp(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    lower.strip_prefix("dbo.").unwrap_or(&lower) == DEFAULT_WRITEBACK_SP.to_ascii_lowercase()
+}
+
+/// `installWritebackSQLInto`: installs the write-back procedure. Idempotent.
+pub fn install_writeback_into(c: &mut Client) -> Result<(), String> {
+    run_script(c, WRITEBACK_SCRIPT.0, WRITEBACK_SCRIPT.1)
 }
 
 #[cfg(test)]
@@ -311,6 +332,34 @@ mod tests {
         names.sort();
         let ours: Vec<&str> = SCRIPTS.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, ours, "a script was added or removed: update SCRIPTS");
+    }
+
+    #[test]
+    fn writeback_procedure_installs_on_sql_server_2008() {
+        // RT-0164 test PC: the self-test found SMILE_FO without it; the port never shipped it.
+        let (name, body) = WRITEBACK_SCRIPT;
+        let batches = split_batches(body);
+        let (stub, alter) = batches
+            .iter()
+            .find_map(|b| rewrite_create_or_alter(b))
+            .unwrap_or_else(|| panic!("{name}: no CREATE OR ALTER"));
+        assert!(stub.contains("dbo.sp_ApplyInvoiceWriteback"), "{stub}");
+        assert!(alter.contains("ALTER PROCEDURE dbo.sp_ApplyInvoiceWriteback"));
+        assert!(crate::legacy::post2008_feature(body).is_none(), "{name}");
+    }
+
+    #[test]
+    fn only_the_default_writeback_name_is_ours() {
+        for n in [
+            "sp_ApplyInvoiceWriteback",
+            "dbo.sp_applyinvoicewriteback",
+            " DBO.SP_APPLYINVOICEWRITEBACK ",
+        ] {
+            assert!(is_default_writeback_sp(n), "{n}");
+        }
+        for n in ["sp_MyWriteback", "hotel.sp_ApplyInvoiceWriteback", ""] {
+            assert!(!is_default_writeback_sp(n), "{n}");
+        }
     }
 
     #[test]

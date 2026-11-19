@@ -28,6 +28,8 @@ All notable changes are listed here. The format follows
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
 ### Fixed
+- einvoice: the collector install now includes the write-back procedure `sp_ApplyInvoiceWriteback` (MM-EINVOICE `writeback.sql`, missing from the port); a site without it gets it on the first cycle or on SQL error 2812 at write-back, never under a DBA-owned name (RT-0164).
+- membership: connection string values in double quotes (`Server=".";Database="SMILE_FO"`, as the bench writes them) are unquoted like SqlClient does; the quoted host went to DNS (RT-0164).
 - membership: a failed SMILE connection reports dl-tds's full error (OS error code included) instead of only the I/O kind; login error 4063 (no user in the database) counts as SMILE unavailable (RT-0164).
 
 - `agent-hub`: running a bench link again on a PC whose dl-agent is already enrolled for the bench tenant keeps that agent and only runs the SQL registrations, steps, restart and self test (it used to install and enrol a second agent). New opt-in `sql_grant_service` (default `false`, test copies only): under Windows authentication the bench gives `NT AUTHORITY\SYSTEM` (the service account) a login, a user and `db_owner` in each of `sql_databases`, reporting each grant in the summary (RT-0164 test PC: every SQL module failed with `Cannot open database`).
