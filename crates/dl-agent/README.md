@@ -97,6 +97,7 @@ each product module is opt-in and stays `disabled` until the hub's remote config
 |---|---|---|
 | `sys`, `sql` | `dl-agent` | Built in, on by default: host facts, SQL Server bridge. |
 | `einvoice` | `dl-agent-einvoice` | Azolo E-Invoice: collects SMILE_FO / SMILE_POS bills, pushes them to the platform, writes invoice numbers back, relays VNPT portal calls. Reads the Go agent's `config.enc`; see its README. |
+| `membership` | `dl-agent-membership` | Azolo Membership (read side of `MM.Membership.Agent`): heartbeat with the SMILE identity, sync-config, availability, room inventory, room types and folio observations to the Membership hub; jobs counted, not executed yet. Reads the .NET installer's `config.dpapi`; sub-command `membership-enroll`. See its README. |
 | `pms-site` | `dl-agent-pms` | SMILE PMS site agent: enrolls, holds the stream to the PMS cloud, runs allow-listed ops and signed migrations on the hotel's SQL Server. Uses `SmilePmsAgent`'s config and state, so a site switches without re-enrolling; sub-commands `pms-enroll`, `pms-migrate`. See its README. |
 | `pms-device` | `dl-agent-pms-device` | SMILE PMS device agent: claims device commands from the PMS API, drives door-lock encoders (LockSDK on the x86 build) and POS hardware (raw-TCP and serial printers, spooler, card readers, OPOS, speech), posts the results through an outbox. Reads `SmilePmsDeviceAgent`'s appsettings, token file and outbox where they are; commands `pms-device.status`, `pms-device.flush_outbox`. See its README. |
 

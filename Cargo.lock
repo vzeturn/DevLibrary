@@ -45,6 +45,7 @@ dependencies = [
  "dl-agent-backup",
  "dl-agent-einvoice",
  "dl-agent-hotellink",
+ "dl-agent-membership",
  "dl-agent-pms",
  "dl-agent-pms-device",
 ]
@@ -81,6 +82,24 @@ dependencies = [
  "dl-tds",
  "dl-time",
  "dl-winos",
+ "dl-winsvc",
+]
+
+[[package]]
+name = "dl-agent-membership"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-cli",
+ "dl-decimal",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-tds",
+ "dl-time",
+ "dl-uuid",
  "dl-winsvc",
 ]
 

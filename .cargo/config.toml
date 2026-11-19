@@ -2,4 +2,4 @@
 # cargo check-all : the same lint gate CI runs
 check-all = "clippy --workspace --all-targets -- -D warnings"
 # cargo wasm : build every library for the browser
-wasm = "build --workspace --exclude dl-bench --exclude dl-agent-einvoice --exclude dl-agent-pms --exclude dl-agent-pms-device --exclude dl-agent-backup --exclude dl-agent-bin --target wasm32-unknown-unknown --profile min-size"
+wasm = "build --workspace --exclude dl-bench --exclude dl-agent-einvoice --exclude dl-agent-membership --exclude dl-agent-pms --exclude dl-agent-pms-device --exclude dl-agent-backup --exclude dl-agent-bin --target wasm32-unknown-unknown --profile min-size"

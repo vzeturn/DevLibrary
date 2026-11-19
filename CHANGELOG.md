@@ -26,6 +26,17 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-membership` (M1, read side): the Azolo Membership agent (`MM.Membership.Agent`) as an
+  opt-in dl-agent module (`modules.membership.enabled = true`). It reads the .NET installer's
+  `config.dpapi`, sends the heartbeat with the SMILE identity, reads the hub's sync-config, and
+  posts availability, room inventory, room types and folio observations (the folio cursor moves
+  only after a 2xx). Jobs are pulled only with `pull_jobs: true` and are counted, never executed
+  or acked; `read_only: false` is refused until the writers (M2) exist. New tool
+  `dl-agent membership-enroll --hub-url <https origin>` (code from `DL_AGENT_MEMBERSHIP_TOKEN` or
+  stdin, SMILE from `DL_AGENT_MEMBERSHIP_SMILE`; `--force` to replace). Reports
+  `membership_hub_failed`, `membership_auth_failed`, `membership_smile_failed`,
+  `membership_db_identity_changed`, `membership_scan_failed`. The crate is left out of
+  `cargo wasm`.
 - `dl-agent-backup`: the SRBackup Go agent as an opt-in dl-agent module
   (`modules.backup.enabled = true`; optional `backup_dir`, `concurrency`, `stop_grace_seconds`,
   `poll_interval_seconds`). Hub config polling, cron schedules in the schedule's time zone, a

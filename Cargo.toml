@@ -44,6 +44,7 @@ dl-serial = { path = "crates/dl-serial" }
 dl-pcsc = { path = "crates/dl-pcsc" }
 dl-agent = { path = "crates/dl-agent" }
 dl-agent-einvoice = { path = "crates/dl-agent-einvoice" }
+dl-agent-membership = { path = "crates/dl-agent-membership" }
 dl-agent-pms = { path = "crates/dl-agent-pms" }
 dl-agent-pms-device = { path = "crates/dl-agent-pms-device" }
 dl-agent-backup = { path = "crates/dl-agent-backup" }
