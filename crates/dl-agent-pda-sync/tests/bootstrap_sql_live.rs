@@ -162,7 +162,11 @@ fn a_live_enroll_bootstraps_a_real_server_and_the_preflight_reads_it() {
             .contains("TmpInvoice")
     );
     let info: SqlServerInfo = admin.server_info(&instance, &ctx).unwrap();
-    assert!(info.major() >= 16, "{info}");
+    // Any supported server (the live runs use the 2017 and 2022 containers).
+    assert!(
+        info.major() >= dl_agent_pda_sync::bootstrap::preflight::MIN_MAJOR,
+        "{info}"
+    );
     assert!(!info.edition.trim().is_empty() && !info.product_level.trim().is_empty());
     assert!(
         !info.integrated_security_only,
