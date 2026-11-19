@@ -114,6 +114,15 @@ pub fn execute(app: &App, dir: &Path, trigger: Trigger, only: Option<&str>, args
     }
 }
 
+/// Keeps `run` as [`super::LAST_RUN_FILE`] in `dir` for the diagnostics bundle. A file that
+/// cannot be written is logged: the run itself is still answered and uploaded.
+pub fn save_last(run: &Run, dir: &Path) {
+    let text = dl_json::to_string_pretty(&run.to_json());
+    if let Err(e) = std::fs::write(dir.join(super::LAST_RUN_FILE), text) {
+        dl_log::warn!("selftest: cannot keep the last run"; error = %e);
+    }
+}
+
 /// Sends the run to the hub (`Ok(false)`: the hub is too old to take it).
 pub fn upload(run: &Run, dir: &Path) -> Result<bool, Error> {
     let identity = Identity::load(dir)?;
@@ -169,6 +178,7 @@ pub fn hook(app: &App, dir: &Path) -> SelfTestHook {
     SelfTestHook(Arc::new(move |args: &Value| {
         let only = args.get("module").and_then(Value::as_str);
         let run = execute(&app, &dir, Trigger::Command, only, args);
+        save_last(&run, &dir);
         let note = upload_note(&run, &dir);
         dl_log::info!("selftest finished"; run_id = %run.run_id, summary = %dl_json::to_string(&run.summary()), upload = %note);
         (!run.failed(), command_output(&run, &note))

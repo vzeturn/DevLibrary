@@ -27,7 +27,7 @@ use dl_json::{Map, Value, json};
 
 use crate::supervisor::ModuleContext;
 
-pub use execute::{command_output, execute, hook, upload};
+pub use execute::{command_output, execute, hook, save_last, upload};
 pub use runner::{Stalled, bounded};
 pub use sanitize::sanitize;
 
@@ -35,6 +35,8 @@ pub use sanitize::sanitize;
 pub const COMMAND: &str = crate::sys_module::SELFTEST;
 /// Module name of the agent's own checks.
 pub const CORE: &str = "core";
+/// The last run, kept in the data directory for the diagnostics bundle (`state/`).
+pub const LAST_RUN_FILE: &str = "selftest.last.json";
 /// The agent's report spool in the data directory.
 pub(crate) const SPOOL_FILE: &str = "reports.json";
 /// Most checks one run uploads (the hub caps it too).

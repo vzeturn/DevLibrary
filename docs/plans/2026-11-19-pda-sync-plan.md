@@ -232,7 +232,7 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 ## 6. Core hooks needed (for the core slice)
 
 - **H1. Long-running module commands.** `capture_dry_run` can take minutes on a large site. It needs a way to keep the command leased or to report progress (`ctx.progress(id, …)`), or an assurance that a late `complete` is accepted.
-- **H2. Diagnostics include list per module.** Done on main as `ModuleContext::add_diagnostic_file`; the module names `status.json` and `runtime-config.json`. Still missing: a way to name a rolling log folder (the core takes single files), for B5.
+- **H2. Diagnostics include list per module.** Done on main as `ModuleContext::add_diagnostic_file`; the module names `status.json` and `runtime-config.json`. A rolling log folder is named with `ModuleContext::add_diagnostic_folder` (RT-0258); `pda-sync` still has to call it for B5.
 - **H3. Module-owned SQL login.** `pda-sync` uses its own least-privilege `pda_sync` login with the bootstrap grants, not the core `sql.json` pools. The core SQL selftest and the survey should be able to skip `SMILE_POS` for this module, or take a per-module credential. The new core `sql/setup.rs` could later host the server-level login scripts (010/020).
 - **H4. Installer step** (hub install script, core-owned). Call the B3 uninstall before the service install, on sites where `PdaSyncAgent` exists.
 

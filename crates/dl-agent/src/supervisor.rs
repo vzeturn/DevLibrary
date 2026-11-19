@@ -98,6 +98,9 @@ pub struct ModuleStatus {
     /// Files the module keeps outside its data directory that `collect_diagnostics` takes
     /// ([`ModuleContext::add_diagnostic_file`]).
     pub diagnostic_files: Vec<PathBuf>,
+    /// Rolling log folders `collect_diagnostics` takes, newest files first
+    /// ([`ModuleContext::add_diagnostic_folder`]).
+    pub diagnostic_folders: Vec<PathBuf>,
 }
 
 impl ModuleStatus {
@@ -112,6 +115,7 @@ impl ModuleStatus {
             degraded_since: 0,
             link: None,
             diagnostic_files: Vec::new(),
+            diagnostic_folders: Vec::new(),
         }
     }
 
@@ -261,6 +265,24 @@ impl ModuleContext {
         let mut s = lock(&self.status);
         if !s.diagnostic_files.contains(&path) {
             s.diagnostic_files.push(path);
+        }
+        true
+    }
+
+    /// Names a rolling log folder for the diagnostics bundle: its newest `.log`, `.txt`,
+    /// `.json` and `.jsonl` files go in scrubbed as `modules/<name>/<folder>/<file>`, the end
+    /// of each, within a share of the bundle's log budget. A folder whose name suggests a
+    /// secret is refused, and so is each file inside whose name does
+    /// ([`Self::add_diagnostic_file`] rules); returns whether this folder is taken.
+    pub fn add_diagnostic_folder(&self, path: impl Into<PathBuf>) -> bool {
+        let path = path.into();
+        if !crate::agent::diagnostic_folder_allowed(&path) {
+            dl_log::warn!("diagnostic folder refused"; module = self.name.as_str(), folder = %path.display());
+            return false;
+        }
+        let mut s = lock(&self.status);
+        if !s.diagnostic_folders.contains(&path) {
+            s.diagnostic_folders.push(path);
         }
         true
     }

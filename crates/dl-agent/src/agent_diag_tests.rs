@@ -4,7 +4,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use dl_json::json;
+use dl_json::{Value, json};
 use dl_zip::ZipArchive;
 
 use super::super::tests::{agent, wait_running};
@@ -53,7 +53,11 @@ fn bundle_scrubs_secrets_and_leaves_out_key_files() {
     let diag =
         json!({"agent_id": "agt_1", "note": "Pwd=Hunter2;", "log_tail": ["password=Hunter2"]});
 
-    let zip = bundle(&diag, data, &[], 1_763_460_000).unwrap();
+    let inputs = Inputs {
+        diagnostics: diag,
+        ..Inputs::default()
+    };
+    let zip = bundle(&inputs, data, 1_763_460_000).unwrap();
     let all = entries(&zip);
     let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
@@ -97,7 +101,7 @@ fn logs_take_the_newest_tail_within_the_budget() {
         .set_modified(hour_ago)
         .unwrap();
 
-    let zip = bundle_with(&json!({}), &d.0, &[], 1, 500).unwrap();
+    let zip = bundle_with(&Inputs::default(), &d.0, 1, 500).unwrap();
     let all = entries(&zip);
     let new = &all.iter().find(|(n, _)| n == "logs/new.log").unwrap().1;
     assert!(new.len() <= 500 && new.len() > 400, "{}", new.len());
@@ -265,4 +269,178 @@ fn module_files_go_in_scrubbed_and_secret_files_never() {
         index.contains("modules/arrival/gone.json") && index.contains("not there"),
         "{index}"
     );
+}
+
+/// A module like `pda-sync`: a status file plus a rolling log folder in its own install dir.
+struct Rolling(PathBuf);
+
+impl Module for Rolling {
+    fn name(&self) -> &str {
+        "pda-sync"
+    }
+
+    fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
+        ctx.add_diagnostic_file(self.0.join("status.json"));
+        ctx.add_diagnostic_folder(self.0.join("logs"));
+        ctx.add_diagnostic_folder(self.0.join("keys"));
+        ctx.set_running("ok");
+        while !ctx.stop().wait_timeout(Duration::from_millis(10)) {}
+        Ok(())
+    }
+}
+
+fn age(path: &std::path::Path, secs: u64) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(secs))
+        .unwrap();
+}
+
+/// Every secret shape planted in every source the bundle reads; none may survive.
+const JWT: &str = "eyJhbGciOiJFZERTQSJ9.eyJhZ2VudCI6ImFndF8xIn0.U0lHTkFUVVJFX0xFQUs";
+
+#[test]
+fn the_bundle_has_every_source_and_no_planted_secret_survives() {
+    let d = TestDir::new("diag-full");
+    let hub = FakeHub::default();
+    let install = d.0.join("PdaSync");
+    let mut a = agent(
+        &d,
+        &hub,
+        vec![Arc::new({
+            let install = install.clone();
+            move || Box::new(Rolling(install.clone()))
+        })],
+    );
+    let data = a.opts.data_dir.clone();
+    let logs = data.join("logs");
+    write(
+        &logs.join("agent.log"),
+        &format!(
+            "INFO current\nWARN sql Server=db;uid=sa;PASSWORD='Plant''A';\nINFO token {JWT}\n"
+        ),
+    );
+    write(
+        &logs.join("agent.log.1"),
+        "INFO rotated\nWARN proxy http://op:PlantB@proxy:3128 refused\n",
+    );
+    age(&logs.join("agent.log.1"), 3600);
+    write(
+        &data.join("config.json"),
+        r#"{"version": 7, "body": {"modules": {"pda-sync": {"cloud_url": "https://cloud.test",
+        "api_token": "PlantC", "client_secret": "PlantD", "conn": "Data Source=x;Pwd=PlantE;"}}}}"#,
+    );
+    write(&data.join("identity.key"), "PlantF");
+    write(&data.join("sql.json"), r#"{"password_sealed": "PlantG"}"#);
+    write(
+        &data.join(crate::selftest::LAST_RUN_FILE),
+        r#"{"run_id": "r1", "checks": [{"id": "sql", "status": "fail", "detail": "login failed for sa, pwd=PlantH"}]}"#,
+    );
+    write(
+        &install.join("status.json"),
+        r#"{"state": "running", "refresh_token": "PlantI"}"#,
+    );
+    let pda_logs = install.join("logs");
+    write(
+        &pda_logs.join("pda-2026-11-19.log"),
+        "today Bearer PlantJ\n",
+    );
+    write(
+        &pda_logs.join("pda-2026-11-18.log"),
+        "yesterday password=PlantK\n",
+    );
+    age(&pda_logs.join("pda-2026-11-18.log"), 86_400);
+    write(&pda_logs.join("tenant-key.json"), "PlantL");
+    write(&install.join("keys").join("agent.log"), "PlantM");
+    a.sql.pools.set_survey(
+        "SMILE_POS",
+        json!({"engine": {"version": "10.50"}, "connection": "Server=relay;Password=PlantN"}),
+    );
+    wait_running(&mut a);
+    hub.push(
+        200,
+        r#"{"id": "d1", "key": "diag/k.zip", "size": 1, "sha256": "ab"}"#,
+    );
+    let (ok, out) = a.collect_diagnostics("c-full", 1000);
+    a.supervisor.stop_all(crate::agent::STOP_WAIT);
+    assert!(ok, "{out}");
+    let all = entries(&hub.seen()[0].body);
+    let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+    for want in [
+        "diagnostics.json",
+        "survey.json",
+        "logs/agent.log",
+        "logs/agent.log.1",
+        "state/config.json",
+        "state/selftest.last.json",
+        "modules/pda-sync/status.json",
+        "modules/pda-sync/logs/pda-2026-11-19.log",
+        "modules/pda-sync/logs/pda-2026-11-18.log",
+        "bundle.json",
+    ] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+    assert!(
+        names
+            .iter()
+            .all(|n| !n.contains("identity") && !n.contains("sql.json") && !n.contains("key")),
+        "{names:?}"
+    );
+    let get = |name: &str| all.iter().find(|(n, _)| n == name).unwrap().1.clone();
+    assert!(get("logs/agent.log").contains("current"));
+    assert!(get("logs/agent.log.1").contains("rotated"));
+    assert!(get("survey.json").contains("10.50"));
+    assert!(get("state/selftest.last.json").contains("login failed"));
+    let diag = dl_json::parse(&get("diagnostics.json")).unwrap();
+    assert_eq!(diag["modules"][1]["state"].as_str(), Some("running"));
+    let text: String = all.iter().map(|(n, t)| format!("{n}\n{t}\n")).collect();
+    for plant in [
+        "PlantA", "PlantB", "PlantC", "PlantD", "PlantE", "PlantF", "PlantG", "PlantH", "PlantI",
+        "PlantJ", "PlantK", "PlantL", "PlantM", "PlantN", JWT,
+    ] {
+        assert!(!text.contains(plant), "{plant} leaked");
+    }
+    assert!(!out.contains("Plant"), "{out}");
+}
+
+#[test]
+fn module_folders_take_the_newest_files_within_their_share() {
+    let ctx = ModuleContext::standalone("pda-sync", Value::Null, std::env::temp_dir());
+    for refused in ["keys", "secrets", "identity", "certs", ""] {
+        assert!(!ctx.add_diagnostic_folder(refused), "{refused}");
+    }
+    assert!(ctx.add_diagnostic_folder("PdaSync/logs"));
+    assert!(ctx.add_diagnostic_folder("PdaSync/logs"));
+    assert_eq!(ctx.status().diagnostic_folders.len(), 1);
+
+    let d = TestDir::new("diag-folder");
+    let dir = d.0.join("logs");
+    let lines: String = (0..100).map(|i| format!("line {i:03}\n")).collect();
+    for (i, name) in ["c.log", "b.log", "a.log"].iter().enumerate() {
+        write(&dir.join(name), &lines);
+        age(&dir.join(name), 60 * i as u64);
+    }
+    let inputs = Inputs {
+        module_folders: vec![
+            ("modules/pda-sync/logs".into(), dir),
+            ("modules/pda-sync/gone".into(), d.0.join("gone")),
+        ],
+        ..Inputs::default()
+    };
+    // A 4000-byte log budget leaves 1000 bytes for the folder: c.log whole, b.log's end.
+    let zip = bundle_with(&inputs, &d.0, 1, 4000).unwrap();
+    let all = entries(&zip);
+    let get = |name: &str| all.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone());
+    assert_eq!(get("modules/pda-sync/logs/c.log").unwrap().len(), 900);
+    let b = get("modules/pda-sync/logs/b.log").unwrap();
+    assert!(b.len() <= 100 && b.ends_with("line 099\n"), "{b}");
+    assert!(get("modules/pda-sync/logs/a.log").is_none());
+    let index = get("bundle.json").unwrap();
+    assert!(
+        index.contains("modules/pda-sync/logs/a.log") && index.contains("log budget used up"),
+        "{index}"
+    );
+    assert!(index.contains("modules/pda-sync/gone") && index.contains("not there"));
 }

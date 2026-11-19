@@ -103,6 +103,16 @@ each product module is opt-in and stays `disabled` until the hub's remote config
 | `arrival` | `dl-agent-arrival` | Azolo Check-In site agent: polls the Check-In cloud outbound only over sealed envelopes, answers its requests from the hotel's SMILE PMS through the fixed `srCI_*` operation catalog, keeps the legal vault and the idempotency journal, installs the procedure bundle. Reads `MM.Arrival.Agent`'s appsettings, identity, tenant key, vault and journal where they are; sub-command `arrival-enroll`. See its README. |
 | `speaker` | `dl-agent-speaker` | PDAOrder staff alerts: joins the PDA order hub per RVC with the `pda-sync` enrolment and plays the RVC's tone and vi/en SAPI phrase for guest orders and service calls; no print relay. See its README. |
 
+A module adds its own files to the `collect_diagnostics` bundle with
+`ModuleContext::add_diagnostic_file` (one state file) and `add_diagnostic_folder` (a rolling
+log folder, newest files first within a budget); both refuse names that suggest a secret and
+everything is scrubbed (PROTOCOL.md §4.1).
+
+Linux tests cover hub failover over loopback HTTP (`hub::failover_tests`) and the whole
+`--fault probation` rollback trial (`agent::rollback_tests`, PROTOCOL.md §6.6). Only a
+Windows canary machine checks the service manager restart between lives and the swap of a
+running `.exe`.
+
 The executable lives in its own package because product modules depend on this library.
 
 ## Installing on Windows

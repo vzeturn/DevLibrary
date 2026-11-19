@@ -544,3 +544,7 @@ pub fn hostname() -> String {
 #[cfg(test)]
 #[path = "hub_tests.rs"]
 pub(crate) mod tests_support;
+
+#[cfg(test)]
+#[path = "hub_failover_tests.rs"]
+mod failover_tests;

@@ -6,7 +6,7 @@ use std::path::Path;
 use dl_cli::{Arg, Command, Matches};
 use dl_json::{Value, json};
 
-use super::execute::{execute, module_defaults, upload_note};
+use super::execute::{execute, module_defaults, save_last, upload_note};
 use super::{CORE, Run, Status, Trigger};
 use crate::cli::{App, EXIT_CONFIG};
 
@@ -86,6 +86,9 @@ pub fn main(app: &App, dir: &Path, m: &Matches) -> i32 {
         return EXIT_CONFIG;
     }
     let run = execute(app, dir, trigger, only, &Value::Null);
+    if dir.is_dir() {
+        save_last(&run, dir);
+    }
     let note = if m.flag("no-upload") {
         "not uploaded (--no-upload)".to_string()
     } else {
