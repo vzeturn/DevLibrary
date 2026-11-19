@@ -1,0 +1,108 @@
+[
+  {
+    "kind": "proc",
+    "text": "PostOneTransaction",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "String",
+        "value": "5001"
+      },
+      {
+        "name": "BillAmount",
+        "type": "Decimal",
+        "value": "-150000"
+      },
+      {
+        "name": "BillExRate",
+        "type": "Decimal",
+        "value": "1"
+      },
+      {
+        "name": "TransactionCode",
+        "type": "String",
+        "value": "DSC"
+      },
+      {
+        "name": "TransactionSubCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "sTransactionDate",
+        "type": "String",
+        "value": "2026-12-01"
+      },
+      {
+        "name": "RoomCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "RefNumber",
+        "type": "String",
+        "value": "MMV:abc"
+      },
+      {
+        "name": "TransactionAmount",
+        "type": "Decimal",
+        "value": "-150000"
+      },
+      {
+        "name": "FolioBalanceCode",
+        "type": "String",
+        "value": "A"
+      },
+      {
+        "name": "MealPeriodNumber",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "Comment",
+        "type": "String",
+        "value": "Membership voucher discount"
+      },
+      {
+        "name": "sSystemTime",
+        "type": "String",
+        "value": "14:05:09"
+      },
+      {
+        "name": "OriginAmount",
+        "type": "Decimal",
+        "value": "-150000"
+      },
+      {
+        "name": "OriginCurrency",
+        "type": "String",
+        "value": "VND"
+      },
+      {
+        "name": "OriginFolioNumber",
+        "type": "String",
+        "value": "5001"
+      },
+      {
+        "name": "PostingClerkID",
+        "type": "String",
+        "value": "MEM"
+      },
+      {
+        "name": "NumberCover",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "OriginRoom",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "Discount",
+        "type": "Decimal",
+        "value": "150000"
+      }
+    ]
+  }
+]

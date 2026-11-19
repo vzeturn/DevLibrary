@@ -1,0 +1,165 @@
+[
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "Folio"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "FolioRate"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "AdditionalName"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "Folio_Special"
+      }
+    ]
+  },
+  {
+    "kind": "batch",
+    "text": "SET LOCK_TIMEOUT 10000",
+    "params": []
+  },
+  {
+    "kind": "batch",
+    "text": "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; BEGIN TRANSACTION",
+    "params": []
+  },
+  {
+    "kind": "proc",
+    "text": "sp_getapplock",
+    "params": [
+      {
+        "name": "Resource",
+        "type": "String",
+        "value": "SMILE_FolioNumber"
+      },
+      {
+        "name": "LockMode",
+        "type": "String",
+        "value": "Exclusive"
+      },
+      {
+        "name": "LockOwner",
+        "type": "String",
+        "value": "Transaction"
+      },
+      {
+        "name": "LockTimeout",
+        "type": "Int32",
+        "value": "10000"
+      }
+    ]
+  },
+  {
+    "kind": "proc",
+    "text": "sp_getapplock",
+    "params": [
+      {
+        "name": "Resource",
+        "type": "String",
+        "value": "SMILE_CancelNumber"
+      },
+      {
+        "name": "LockMode",
+        "type": "String",
+        "value": "Exclusive"
+      },
+      {
+        "name": "LockOwner",
+        "type": "String",
+        "value": "Transaction"
+      },
+      {
+        "name": "LockTimeout",
+        "type": "Int32",
+        "value": "10000"
+      }
+    ]
+  },
+  {
+    "kind": "proc",
+    "text": "GetCancelNum",
+    "params": []
+  },
+  {
+    "kind": "text",
+    "text": "UPDATE Folio SET CancelNum = @CancelNum, CancelTime = GETDATE(), CancelClerkID = @CancelClerkID, LastChangeTime = GETDATE(), LastChangeClerkID = @LastChangeClerkID WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "CancelNum",
+        "type": "Decimal",
+        "value": "301"
+      },
+      {
+        "name": "CancelClerkID",
+        "type": "AnsiString",
+        "value": "APP"
+      },
+      {
+        "name": "LastChangeClerkID",
+        "type": "AnsiString",
+        "value": "APP"
+      },
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "4000"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "UPDATE AdditionalName SET ACancelNum = @CancelNum WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "4000"
+      },
+      {
+        "name": "CancelNum",
+        "type": "Decimal",
+        "value": "301"
+      }
+    ]
+  },
+  {
+    "kind": "batch",
+    "text": "COMMIT TRANSACTION",
+    "params": []
+  },
+  {
+    "kind": "batch",
+    "text": "SET LOCK_TIMEOUT -1",
+    "params": []
+  }
+]
