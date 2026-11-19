@@ -39,6 +39,16 @@ pub trait TokenSource: Send + Sync {
     fn invalidate(&self);
 }
 
+/// The HTTP client options of every PDA cloud call of the module (order hub, sound
+/// modes): the dl-http defaults with the proxy dl-agent chose for the process, the one
+/// `pda-sync` uses for the token exchange.
+pub fn http_options() -> dl_http::ClientOptions {
+    dl_http::ClientOptions {
+        proxy: dl_agent_pda_sync::transport::http::proxy(),
+        ..dl_http::ClientOptions::default()
+    }
+}
+
 /// `NextBackoff`: the web client's reconnect schedule by how long the outage has lasted.
 pub fn next_backoff(elapsed: Duration) -> Duration {
     let s = elapsed.as_secs_f64();
@@ -190,6 +200,7 @@ impl HubLink {
     fn options(&self, token: &str) -> ConnectOptions {
         let mut o = ConnectOptions::new(self.settings.hub_url.clone());
         o.negotiate = true;
+        o.http = Some(Arc::new(dl_http::Client::with_options(http_options())));
         o.timeout = self.settings.call_timeout;
         o.headers
             .push(("Authorization".to_owned(), format!("Bearer {token}")));
@@ -293,6 +304,13 @@ fn close_text(reason: &CloseReason) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hub_and_sound_modes_use_the_pda_sync_proxy() {
+        let o = super::http_options();
+        assert_eq!(o.proxy, dl_agent_pda_sync::transport::http::proxy());
+        assert_eq!(o.timeout, dl_http::ClientOptions::default().timeout);
+    }
+
     use super::*;
 
     #[test]

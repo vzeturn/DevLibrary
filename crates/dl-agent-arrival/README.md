@@ -81,7 +81,15 @@ its fingerprint. It does nothing when an identity exists unless `--force` is giv
 - Reports (rate-limited; no guest data, no SQL text, no keys): `arrival_cloud_failed`,
   `arrival_auth_failed`, `arrival_clock_skew`, `arrival_pms_failed`, `arrival_op_refused`,
   `arrival_proc_install_failed`.
-- No module commands; the .NET updater, self-care and diagnostics are dl-agent's job.
+- Commands (`<name>` or `arrival.<name>`, answers without secrets): `status`, `vault_check`,
+  `selftest`, `diagnostics`, `picture_probe`, `op_sweep` (every catalog operation inside a
+  rolled-back transaction) and `install_procedures` (`force`); all but `status` run one at a
+  time on their own thread.
+- The hello carries the problem journal (`agent-problems.json`, with the Windows event log
+  history imported once per start) and the install inventory, as the .NET agent's did. The
+  .NET updater and self-care (service recovery, watchdog task) are dl-agent's job.
+- The cloud is reached through the dl-agent core's proxy choice (environment, WinHTTP,
+  Internet Options).
 
 The catalog and the procedure bundle are compiled in: a change reaches the sites with a dl-agent
 release.

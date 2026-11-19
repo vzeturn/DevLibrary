@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use dl_http::{Client, ClientOptions, Request, Response, Url};
+use dl_http::{Client, ClientOptions, Proxy, Request, Response, Url};
 use dl_json::{ToJson, Value};
 
 use super::{CommandQueue, DeviceApiError, QueueError, StaleClaim, StaleClaimReason};
@@ -49,13 +49,26 @@ impl std::fmt::Debug for ApiCommandQueue {
 
 impl ApiCommandQueue {
     /// A queue for `options` (ApiBaseUrl, AgentId, Adapter). Like the .NET HttpClient it
-    /// sends no `User-Agent`, times out after [`HTTP_TIMEOUT`] and takes the proxy from
-    /// `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`.
+    /// sends no `User-Agent` and times out after [`HTTP_TIMEOUT`]; the proxy comes from
+    /// `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` (see [`ApiCommandQueue::with_proxy`]).
     pub fn new(options: &AgentOptions, token: Arc<TokenFile>, clock: Arc<dyn Clock>) -> Self {
+        Self::with_proxy(options, token, clock, Proxy::FromEnv)
+    }
+
+    /// [`ApiCommandQueue::new`] through `proxy`. The module passes dl-agent's proxy choice
+    /// (environment, then WinHTTP, then Internet Options), which covers the Windows system
+    /// proxy the .NET `SocketsHttpHandler` used.
+    pub fn with_proxy(
+        options: &AgentOptions,
+        token: Arc<TokenFile>,
+        clock: Arc<dyn Clock>,
+        proxy: Proxy,
+    ) -> Self {
         let client = Client::with_options(ClientOptions {
             timeout: Some(HTTP_TIMEOUT),
             connect_timeout: None,
             user_agent: None,
+            proxy,
             ..ClientOptions::default()
         });
         ApiCommandQueue {

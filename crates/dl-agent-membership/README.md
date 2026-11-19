@@ -167,9 +167,16 @@ command resumes. Re-running never double-earns (the hub dedups by `CONF:{Confirm
 
 ## Not ported yet
 
-The TCVN3 decoding of
-legacy text, `SmileDiagnostics`, the SMILE
-schema probe, the earn-pair drift check and the inventory fallback.
+- The `vouchers` array of `RedeemVoucher` jobs (several vouchers per booking, each posted at
+  the hub's `AppliedAmount`, MM-MEMBERSHIP `58a4524`): the module reads only the single
+  `voucher`, so a job with several vouchers goes to the front desk (manual) and a single
+  `PercentOff` voucher is computed from the live folios' rate as the .NET agent did before.
+- `SmileDiagnostics`: a hub request for a diagnostics run (`X-MM-Run-Diagnostics: 1`) is
+  logged, not answered; nothing is run after a failed job.
+- The SMILE schema probe's start-up log, the earn-pair 24 h drift check and the inventory
+  fallback.
+
+Guest names are TCVN3-encoded on write (`writer/tcvn3.rs`) and decoded with `dl-vn` on read.
 Off Windows `config.dpapi` cannot be opened (no DPAPI); tests use a plain sealer.
 
 ## Tests

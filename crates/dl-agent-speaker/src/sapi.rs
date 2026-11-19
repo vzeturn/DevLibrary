@@ -133,12 +133,7 @@ fn spawn() -> std::io::Result<Sender<Job>> {
 
 /// Selects the first installed voice for `lang`; keeps the default voice otherwise.
 fn pick_voice(voice: &Object, lang: &str) {
-    let lcids: &[&str] = if lang == crate::phrase::LANG_EN {
-        &["409", "809"]
-    } else {
-        &["42A"]
-    };
-    for lcid in lcids {
+    for lcid in crate::phrase::voice_lcids(lang) {
         let found = (|| -> Result<Option<Object>, dl_winos::Error> {
             let voices: Object = voice
                 .call(

@@ -157,7 +157,12 @@ impl PmsDeviceModule {
             None => Arc::from(adapters::pos::router()),
         };
         let token = Arc::new(TokenFile::new(o.token_file.clone()));
-        let queue: Arc<dyn CommandQueue> = Arc::new(ApiCommandQueue::new(o, token, clock.clone()));
+        let queue: Arc<dyn CommandQueue> = Arc::new(ApiCommandQueue::with_proxy(
+            o,
+            token,
+            clock.clone(),
+            dl_agent::proxy::current().proxy.clone(),
+        ));
         let outbox = ResultOutbox::new(o.outbox_directory(), log.clone());
         let reporter = |q: &Arc<dyn CommandQueue>| {
             ResultReporter::new(q.clone(), outbox.clone(), clock.clone(), log.clone())

@@ -100,7 +100,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 1 | Service host, SCM recovery | ✅ | dl-agent core; the port's service code is dropped |
 | 2 | Self-update | ✅ | dl-agent core; `AutoUpdate` forced off in the module |
 | 3 | Problem reports, site events | ✅ | State changes report through `ctx.report`; every Error site event goes on as a problem report with its own code, at most once per code per 15 min (`reporting/module_reports.rs`, B5); the PDA cloud link is declared to the watchdog from the first accepted heartbeat (`reporting/cloud_link.rs`) |
-| 4 | Diagnostic bundle | 🟡 | Core bundle with `status.json` and `runtime-config.json`; the log file is B5 |
+| 4 | Diagnostic bundle | ✅ | Core bundle with `status.json`, `runtime-config.json` and the newest logs of `logs/` (`add_diagnostic_folder`, RT-0260) |
 | 5 | Installer takeover | ❌ | Replaced by uninstall + fresh enrol (owner rule); the hub step is B3 |
 | 6 | Hub product gate | ❌ | B3 |
 | 7 | Module skeleton, config, opt-in | ✅ | `src/module/{mod,settings}.rs`, unit tests |

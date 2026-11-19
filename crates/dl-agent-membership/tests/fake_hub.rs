@@ -117,7 +117,16 @@ fn heartbeat_and_sync_config_carry_the_token_and_the_hotel() {
             Some(&*format!("Bearer {TOKEN}"))
         );
         assert_eq!(req.header("X-Hotel-Id"), Some(HOTEL));
+        let id = req.header("X-Correlation-Id").expect("X-Correlation-Id");
+        assert_eq!(id.len(), 32, "{id}");
     }
+    let ids: Vec<_> = r
+        .hub
+        .requests()
+        .iter()
+        .filter_map(|q| q.header("X-Correlation-Id").map(str::to_owned))
+        .collect();
+    assert_ne!(ids[0], ids[1], "one fresh id per request");
     let hb = &r.hub.to("/api/agent/heartbeat")[0];
     assert!(
         hb.header("Content-Type")
