@@ -52,19 +52,45 @@ impl std::fmt::Debug for TdsExecutor {
 }
 
 /// The connection string as `Microsoft.Data.SqlClient` 4+ reads it: an ADO string without an
-/// `Encrypt` key gets `Encrypt=true` (its default, certificate checked); everything else is
-/// left as written. `TrustServerCertificate` is never added.
+/// `Encrypt` key gets `Encrypt=true` (its default, certificate checked). `Encrypt=False`
+/// encrypts the login only and SqlClient never checks the certificate then, so it gets
+/// `TrustServerCertificate=true` unless the string sets that key (dl-tds checks it otherwise,
+/// and a SQL Server 2022 self-signed certificate fails: RT-0164 test PC). Everything else is
+/// left as written.
 pub fn with_sqlclient_defaults(connection: &str) -> String {
     let trimmed = connection.trim();
-    if trimmed.contains("://") || has_key(trimmed, "encrypt") {
+    if trimmed.contains("://") {
         return trimmed.to_string();
     }
+    let add = match key_value(trimmed, "encrypt") {
+        None => "Encrypt=true",
+        Some(v) if is_login_only(&v) && !has_key(trimmed, "trustservercertificate") => {
+            "TrustServerCertificate=true"
+        }
+        Some(_) => return trimmed.to_string(),
+    };
     let sep = if trimmed.is_empty() || trimmed.ends_with(';') {
         ""
     } else {
         ";"
     };
-    format!("{trimmed}{sep}Encrypt=true")
+    format!("{trimmed}{sep}{add}")
+}
+
+/// SqlClient's `Encrypt=False` / `Optional` spellings.
+fn is_login_only(value: &str) -> bool {
+    ["false", "no", "0", "optional"]
+        .iter()
+        .any(|v| value.eq_ignore_ascii_case(v))
+}
+
+/// The trimmed value of the last `key` in an ADO connection string (case-insensitive key).
+fn key_value(connection: &str, key: &str) -> Option<String> {
+    connection
+        .split(';')
+        .filter_map(|part| part.split_once('='))
+        .rfind(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.trim().to_string())
 }
 
 /// Opens one session outside the pool (installer, probe), walking the same TLS ladder;
@@ -380,14 +406,29 @@ mod tests {
             with_sqlclient_defaults("Server=.;Database=PMS;User Id=u;Password=p"),
             "Server=.;Database=PMS;User Id=u;Password=p;Encrypt=true"
         );
+        // Login-only encryption never checks the certificate in SqlClient (RT-0164 test PC).
         assert_eq!(
             with_sqlclient_defaults("Server=.;Encrypt=False;"),
-            "Server=.;Encrypt=False;"
+            "Server=.;Encrypt=False;TrustServerCertificate=true"
         );
         assert_eq!(
             with_sqlclient_defaults("Server=.; encrypt = no"),
-            "Server=.; encrypt = no"
+            "Server=.; encrypt = no;TrustServerCertificate=true"
         );
+        assert_eq!(
+            with_sqlclient_defaults("Server=.;Encrypt=False;TrustServerCertificate=False"),
+            "Server=.;Encrypt=False;TrustServerCertificate=False"
+        );
+        assert_eq!(
+            with_sqlclient_defaults("Server=.;Encrypt=True"),
+            "Server=.;Encrypt=True"
+        );
+        let cfg: dl_tds::Config = with_sqlclient_defaults(
+            "Server=.;Integrated Security=true;Database=SMILE_FO;Encrypt=False",
+        )
+        .parse()
+        .unwrap();
+        assert!(cfg.trust_server_certificate());
         assert!(
             !with_sqlclient_defaults("Server=.;TrustServerCertificate=True")
                 .contains("Trust=True;")
