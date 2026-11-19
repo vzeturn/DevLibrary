@@ -60,6 +60,8 @@ struct Bases {
 /// `HubClient`.
 pub struct HubClient {
     http: dl_http::Client,
+    /// Ends the call in flight (the 25 s long poll included) when the module stops.
+    cancel: dl_http::Cancel,
     hotel_id: String,
     token: String,
     version: String,
@@ -114,6 +116,7 @@ impl HubClient {
         });
         HubClient {
             http,
+            cancel: dl_http::Cancel::new(),
             hotel_id: hotel_id.to_owned(),
             token: token.to_owned(),
             version: version.to_owned(),
@@ -156,6 +159,17 @@ impl HubClient {
         let mut st = self.st();
         if let Some(i) = st.all.iter().position(|u| u == base) {
             st.active = i;
+        }
+    }
+
+    /// Ends the call in flight at once and fails every later call (Go: the runner's
+    /// context is cancelled on stop). One-way: a stopped runner is never restarted.
+    pub fn cancel(&self) {
+        if let Err(e) = self.cancel.cancel() {
+            crate::log::warn(
+                "closing the hub connection on stop failed",
+                &[("error", crate::log::V::S(&e.to_string()))],
+            );
         }
     }
 
@@ -215,7 +229,14 @@ impl HubClient {
         let mut errs: Vec<String> = Vec::new();
         for base in self.bases() {
             let req = self.build(&base, method, path, body, extra, &hash)?;
-            match self.http.request(&req) {
+            match self.http.request_with_cancel(&req, &self.cancel) {
+                // Stopping: no fallback base, the caller is on its way out.
+                Err(dl_http::Error::Cancelled) => {
+                    return Err(Error::new(
+                        Kind::Hub,
+                        format!("hub {m} {path}: cancelled (module stopping)"),
+                    ));
+                }
                 Err(e) => errs.push(format!("{m} {base}{path}: {e}")),
                 Ok(resp) => {
                     self.mark_active(&base);

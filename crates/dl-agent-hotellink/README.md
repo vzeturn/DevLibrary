@@ -31,6 +31,14 @@ file again every 30 s.
 State lives in `<data dir>/hotellink/`. On first start the Go agent's unfinished
 `queue.jsonl` (next to `config.json`) is imported once.
 
+`sql.connectionStringOverride` may be written the SqlClient way, as the Go install guide
+shows: `Server=h;Database=SMILE_FO;User Id=…;Password=…;Encrypt=false;TrustServerCertificate=true;`.
+`TrustServerCertificate` (also `Trust Server Certificate`) takes `true/false/yes/no` in any
+case; `Encrypt=false` (`no`, `optional`) is dl-tds `Encrypt::Off`: the login packet is
+encrypted when the server supports TLS, the whole session when the server requires it. As in
+SqlClient the certificate is then not checked unless `TrustServerCertificate=false` is
+written (`src/config/sqlclient.rs`).
+
 ## Enrolling
 
 ```
@@ -54,6 +62,10 @@ has a token is kept unless `--force` is passed.
   `hl_pms_failed`, `hl_reconcile_failed`, `hl_manual_conflict`. Reports carry no guest
   names, SQL text or token.
 - Commands: `hl.status`, `hl.sync-mapping` (also as `hotellink.*`).
+- Stop: the hub call in flight (the 25 s long poll included) is cut at once; a SQL call in
+  flight finishes (up to 5 s are waited for it). Unfinished jobs stay in the queue.
+- PMS breaker (Go: 5 failures, 30 s cooldown doubling to 5 min): while it is open, jobs stay
+  queued and, when the hub hands back only held jobs, the next poll waits 5 s.
 
 ## Tests
 
@@ -64,4 +76,7 @@ HL_AGENT_TEST_SQL="server=127.0.0.1,14333;user id=sa;password=...;database=maste
 ```
 
 The SQL tests create `SMILE_FO` and load `tests/fixtures/smile-schema.sql` (a copy of
-SMILE-HLAPI `go/deploy/smile-schema.sql`).
+SMILE-HLAPI `go/deploy/smile-schema.sql`). The same gate runs the end-to-end tests in
+`src/e2e/` (database `SMILE_FO_E2E`, `--lib e2e -- --test-threads=1`): booking and mapping
+command to SQL and back to the hub, ack replay after a crash, and the PMS breaker with SQL
+down (a local TCP relay plays the outage).

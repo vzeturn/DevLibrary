@@ -253,6 +253,7 @@ pub(crate) fn fast() -> Timings {
         cfg_refresh: Duration::from_secs(300),
         supervise: Duration::from_millis(1),
         avail_interval: |_| Duration::from_millis(10),
+        ..Timings::default()
     }
 }
 
@@ -298,4 +299,29 @@ pub(super) fn wait_until(cond: impl Fn() -> bool, msg: &str) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("{msg}");
+}
+
+/// A hub whose job poll stays open (up to 30 s, until `release`); everything else answers
+/// `{"ok":true}` at once. Returns the hub, the poll count and the release flag.
+pub(crate) fn holding_hub() -> (
+    FakeHub,
+    Arc<std::sync::atomic::AtomicUsize>,
+    Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let polls = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(AtomicBool::new(false));
+    let (p, r) = (polls.clone(), release.clone());
+    let hub = FakeHub::start(move |req| {
+        if req.method == "GET" && req.path.starts_with("/api/agent/jobs?") {
+            p.fetch_add(1, Ordering::SeqCst);
+            let end = Instant::now() + Duration::from_secs(30);
+            while !r.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            return (200, r#"{"jobs":[]}"#.into());
+        }
+        (200, r#"{"ok":true}"#.into())
+    });
+    (hub, polls, release)
 }

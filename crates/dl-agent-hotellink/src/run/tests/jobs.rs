@@ -382,3 +382,45 @@ fn holds_mapping_cmds_when_pms_down() {
         "PMS down sets pmsOk=false"
     );
 }
+
+/// The hub hands a held job back on every poll; with the breaker open the loop waits
+/// `breaker_poll_wait` between polls instead of polling again at once.
+#[test]
+fn held_jobs_slow_the_poll_while_the_breaker_is_open() {
+    use std::sync::atomic::AtomicUsize;
+    let polls = Arc::new(AtomicUsize::new(0));
+    let p = polls.clone();
+    let job = save_job().to_json();
+    let fake = crate::testhub::FakeHub::start(move |req| {
+        if req.method == "GET" && req.path.starts_with("/api/agent/jobs?") {
+            p.fetch_add(1, Ordering::SeqCst);
+            return (200, format!(r#"{{"jobs":[{job}]}}"#));
+        }
+        (200, r#"{"ok":true}"#.into())
+    });
+    let repo = FakeRepo::new();
+    repo.st().hotel_date = Some(day(2026, 6, 1));
+    let parts = Parts {
+        hub: HubClient::new(&fake.url, "h1", "tok", "test", ""),
+        repo: repo.clone(),
+        queue: FileQueue::open(&temp_dir("run-held").join("queue.jsonl")).expect("queue"),
+        state_dir: temp_dir("run-held-state"),
+        legacy_policy_dir: None,
+    };
+    let t = Timings {
+        breaker_cooldown: Duration::from_secs(60),
+        breaker_poll_wait: Duration::from_millis(200),
+        ..fast()
+    };
+    let r = Arc::new(Runner::with(parts, t, Arc::new(OffsetDateTime::now_utc)));
+    for _ in 0..5 {
+        r.breaker.on_failure();
+    }
+    let running = start(r);
+    wait_until(|| polls.load(Ordering::SeqCst) >= 1, "first poll");
+    std::thread::sleep(Duration::from_secs(1));
+    let n = polls.load(Ordering::SeqCst);
+    assert!((2..=8).contains(&n), "{n} polls in about 1 s");
+    assert!(repo.st().inserted.is_empty(), "held, not applied");
+    assert_eq!(running.r.queue.pending().len(), 1);
+}

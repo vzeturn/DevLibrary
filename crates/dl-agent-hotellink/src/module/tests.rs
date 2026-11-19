@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -14,7 +15,8 @@ use crate::config::{self, LocalConfig};
 use crate::jobqueue::FileQueue;
 use crate::jobqueue::tests::temp_dir;
 use crate::reconcile::tests::{FakeRepo, day, save_job};
-use crate::run::tests::{Hub, fast};
+use crate::run::Timings;
+use crate::run::tests::{Hub, fast, holding_hub};
 
 fn write_config(dir: &Path, hub_url: &str) -> PathBuf {
     let path = dir.join("config.json");
@@ -55,6 +57,16 @@ impl Drop for Started {
 }
 
 fn start(dir: &Path, hub_url: &str, repo: &Arc<FakeRepo>, grace: Duration) -> Started {
+    start_with(dir, hub_url, repo, grace, fast())
+}
+
+fn start_with(
+    dir: &Path,
+    hub_url: &str,
+    repo: &Arc<FakeRepo>,
+    grace: Duration,
+    timings: Timings,
+) -> Started {
     let path = write_config(dir, hub_url);
     let cfg = load(&path);
     let ctx = ModuleContext::standalone(NAME, Value::Null, dir.join("data"));
@@ -63,7 +75,7 @@ fn start(dir: &Path, hub_url: &str, repo: &Arc<FakeRepo>, grace: Duration) -> St
     let h = std::thread::spawn(move || {
         let w = Wiring {
             repo,
-            timings: fast(),
+            timings,
             grace,
         };
         run_configured(&c, &cfg, &path, w)
@@ -184,4 +196,28 @@ fn not_configured_reasons() {
     std::fs::write(&path, r#"{"hubUrl":"http://x","hotelId":"h1","token":""}"#).expect("write");
     let e = usable(&path).err().unwrap_or_default();
     assert!(e.starts_with("not configured: config has no token"), "{e}");
+}
+
+/// The hub holds the 25 s long poll open; the stop cuts it and the runner thread (with its
+/// loop threads) ends long before the 10 s grace, so `run_configured` returns in < 2 s.
+#[test]
+fn stop_cuts_the_long_poll_and_ends_the_runner_threads() {
+    let (hub, polls, release) = holding_hub();
+    let repo = FakeRepo::new();
+    let dir = temp_dir("mod-longpoll");
+    let timings = Timings {
+        poll_wait_sec: 25,
+        ..fast()
+    };
+    let mut m = start_with(&dir, &hub.url, &repo, Duration::from_secs(10), timings);
+    let end = Instant::now() + Duration::from_secs(10);
+    while polls.load(Ordering::SeqCst) == 0 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(polls.load(Ordering::SeqCst), 1, "one poll held open");
+    std::thread::sleep(Duration::from_millis(300));
+    let took = m.stop();
+    release.store(true, Ordering::SeqCst);
+    assert!(took < Duration::from_secs(2), "stop took {took:?}");
+    assert_eq!(polls.load(Ordering::SeqCst), 1, "no poll after the stop");
 }

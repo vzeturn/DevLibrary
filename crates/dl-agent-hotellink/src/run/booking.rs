@@ -16,6 +16,8 @@ use crate::log::{self, V};
 /// What the poll answer is worth to the loop.
 enum Next {
     Continue,
+    /// Jobs came back while the breaker is open: they stay held, so poll again later.
+    Held,
     Stop,
 }
 
@@ -29,6 +31,12 @@ impl Runner {
             self.drain_pending();
             match self.poll_once() {
                 Ok(Next::Continue) => backoff = self.t.backoff_start,
+                Ok(Next::Held) => {
+                    backoff = self.t.backoff_start;
+                    if self.stop.sleep(self.t.breaker_poll_wait) {
+                        return;
+                    }
+                }
                 Ok(Next::Stop) => return,
                 Err(e) => {
                     if self.stop.is_stopped() || self.superseded(&e) {
@@ -87,6 +95,11 @@ impl Runner {
                 );
             }
             self.process_job(job, hotel_date);
+        }
+        // The hub hands pending jobs out again on every poll without waiting; with the PMS
+        // down they would come straight back (Go polls again at once here).
+        if !poll.jobs.is_empty() && self.breaker.state() == "open" {
+            return Ok(Next::Held);
         }
         Ok(Next::Continue)
     }

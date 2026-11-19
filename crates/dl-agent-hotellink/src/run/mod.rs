@@ -91,6 +91,15 @@ pub struct Timings {
     pub supervise: Duration,
     /// Availability interval for the hub's minutes (`max(min, 1)` minutes).
     pub avail_interval: fn(i64) -> Duration,
+    /// PMS breaker: consecutive failures that open it (Go `breaker.New(5, …)`).
+    pub breaker_threshold: u32,
+    /// PMS breaker: first cooldown (Go 30 s), doubled per failed probe.
+    pub breaker_cooldown: Duration,
+    /// PMS breaker: longest cooldown (Go 5 min).
+    pub breaker_max: Duration,
+    /// The wait before the next poll when the hub handed back only jobs the open breaker
+    /// holds (Go has none and polls again at once).
+    pub breaker_poll_wait: Duration,
 }
 
 fn minutes(m: i64) -> Duration {
@@ -107,6 +116,10 @@ impl Default for Timings {
             cfg_refresh: Duration::from_secs(5 * 60),
             supervise: Duration::from_secs(2),
             avail_interval: minutes,
+            breaker_threshold: 5,
+            breaker_cooldown: Duration::from_secs(30),
+            breaker_max: Duration::from_secs(300),
+            breaker_poll_wait: Duration::from_secs(5),
         }
     }
 }
@@ -237,7 +250,7 @@ pub struct Parts {
 }
 
 impl Runner {
-    /// `NewRunner`: breaker 5 failures, 30 s cooldown up to 5 min.
+    /// `NewRunner`: breaker 5 failures, 30 s cooldown up to 5 min ([`Timings::default`]).
     pub fn new(p: Parts) -> Runner {
         Runner::with(p, Timings::default(), system_clock())
     }
@@ -250,7 +263,7 @@ impl Runner {
             repo: p.repo,
             rec,
             queue: p.queue,
-            breaker: Breaker::new(5, Duration::from_secs(30), Duration::from_secs(300)),
+            breaker: Breaker::new(t.breaker_threshold, t.breaker_cooldown, t.breaker_max),
             beats: LoopBeats::default(),
             avail_interval_min: AtomicI64::new(0),
             err_ring: Mutex::new(Vec::new()),
@@ -268,9 +281,12 @@ impl Runner {
         self.stats.clone()
     }
 
-    /// Stops every loop at its next check (calls in flight finish).
+    /// Stops every loop: the sleeps wake up and the hub call in flight (the long poll
+    /// included) is cut off. A SQL call in flight finishes first (its transaction is never
+    /// cut in half).
     pub fn stop(&self) {
         self.stop.stop();
+        self.hub.cancel();
     }
 
     /// Whether the runner was told to stop.
@@ -395,7 +411,7 @@ impl Runner {
             &[],
         );
         self.stats.superseded.store(true, Ordering::SeqCst);
-        self.stop.stop();
+        self.stop();
         true
     }
 

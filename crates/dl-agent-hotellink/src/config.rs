@@ -51,10 +51,12 @@ impl std::fmt::Debug for SqlConfig {
 }
 
 impl SqlConfig {
-    /// `ConnString`: the override, or a go-mssqldb string (`dl-tds` reads the same keys).
+    /// `ConnString`: the override (an ADO.NET string read with SqlClient's rules for
+    /// `Encrypt` and `TrustServerCertificate`, see [`sqlclient`]), or a go-mssqldb string
+    /// (`dl-tds` reads the same keys).
     pub fn conn_string(&self) -> String {
         if !self.connection_string_override.is_empty() {
-            return self.connection_string_override.clone();
+            return sqlclient::to_tds(&self.connection_string_override);
         }
         let mut parts = vec![
             format!("server={}", self.server),
@@ -366,5 +368,6 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+pub mod sqlclient;
 #[cfg(test)]
 mod tests;
