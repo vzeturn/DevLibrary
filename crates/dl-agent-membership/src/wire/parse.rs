@@ -149,15 +149,30 @@ pub fn sync_config(body: &[u8]) -> Result<SyncConfig, DecodeError> {
     })
 }
 
-/// One pulled job: only what M1 needs to count and log it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One pulled job (`SyncJobDto`).
+#[derive(Clone, PartialEq, Eq)]
 pub struct Job {
     /// `JobId`.
     pub job_id: String,
     /// `Action`, as the hub sent it (name or number).
     pub action: String,
-    /// `Attempts`.
+    /// `BookingId`.
+    pub booking_id: Option<Uuid>,
+    /// `PayloadJson` (guest data: never logged).
+    pub payload_json: String,
+    /// `Attempts` (the delivery's lease token).
     pub attempts: i64,
+}
+
+impl std::fmt::Debug for Job {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Job")
+            .field("job_id", &self.job_id)
+            .field("action", &self.action)
+            .field("booking_id", &self.booking_id)
+            .field("attempts", &self.attempts)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Parses a jobs list (`[{JobId, Action, BookingId, PayloadJson, Attempts}]`).
@@ -175,6 +190,8 @@ pub fn jobs(body: &[u8]) -> Result<Vec<Job>, DecodeError> {
                 Some(other) => other.to_string(),
                 None => String::new(),
             },
+            booking_id: uuid_prop(j, "BookingId"),
+            payload_json: str_prop(j, "PayloadJson").unwrap_or_default(),
             attempts: int_prop(j, "Attempts").unwrap_or(0),
         })
         .collect())

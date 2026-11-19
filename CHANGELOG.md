@@ -8,6 +8,15 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-membership` (M2, write side): with `read_only: false` and `pull_jobs: true` the
+  module executes and acks hub jobs against SMILE with the .NET agent's SQL: create / modify /
+  cancel folios under the folio and cancel applocks (replay lookup, hand-entered duplicate
+  guard, TCVN3 names, AdditionalName placeholders), member profiles under the profile applock,
+  link folio (`LINK_TARGET_CHANGED`), voucher and reward discounts via `PostOneTransaction`,
+  travel agent reads, all behind the DB-identity write gate. New keys `write_lock_timeout_ms`,
+  `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode`. `read_only` still
+  defaults to `true`. Not yet ported: earn reporting, SMILE_SPECIAL extra-bed rows, the
+  checkout / walk-in scanners and the extra-bed terms sync (those jobs are left un-acked).
 - `agent-hub`: bench bundles for a test PC (RT-0164). `POST/GET /admin/bench`, `DELETE /admin/bench/:id` mint a demo-tenant enrolment code and a one-line `irm https://<hub>/bench/<token> | iex` (256-bit token, SHA-256 stored, steps sealed with AES-256-GCM under `BENCH_KEY`, limited fetches and lifetime). The PowerShell 5.1 script lists the older per-product agents without touching them, prompts once for SQL Server, applies optional `sql_fixups` to the restored copy in a transaction, runs `install.ps1 -Channel canary` (no `-Replace`), `sql-add` per database, each `dl-agent <setup>` step with its env for that process only (`{{SQL:<Db>}}`, `{{BENCH_DIR}}`), then `dl-agent selftest`, and writes a masked log under `%ProgramData%\dl-agent`.
 - `agent-hub`: `POST /v1/agent/selftest` (signed, ≤ 256 KB, ≤ 500 checks, newest 20 runs per agent), `GET /admin/agents/:id/selftest`, and a "Tự kiểm tra" section on the `/admin` status page with pass/warn/fail/skip counts and the failed checks. Migration `0004_bench_selftest.sql`.
 

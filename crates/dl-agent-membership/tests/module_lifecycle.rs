@@ -152,14 +152,14 @@ fn not_enrolled_idles_degraded_answers_status_and_stops_promptly() {
 }
 
 #[test]
-fn read_only_false_is_refused_until_the_writers_exist() {
+fn read_only_false_is_accepted_and_waits_for_enrolment_like_m1() {
     let dir = TestDir::new("rw");
     let mut r = rig(
         plain_module(),
         json!({"enabled": true, "read_only": false, "program_data_dir": dir.0.display().to_string()}),
     );
     let st = r.tick_until(3000, |s| s.state == ModuleState::Degraded);
-    assert!(st.detail.starts_with("read_only is false"), "{}", st.detail);
+    assert!(st.detail.starts_with("not enrolled"), "{}", st.detail);
     assert!(r.stop() < Duration::from_secs(2));
 }
 

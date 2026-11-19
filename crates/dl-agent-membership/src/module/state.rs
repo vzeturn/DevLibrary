@@ -107,10 +107,14 @@ pub struct Stats {
     pub heartbeat_last: Option<OffsetDateTime>,
     /// Heartbeats that failed.
     pub heartbeat_failures: u64,
-    /// Jobs pulled (counted, never executed or acknowledged).
+    /// Jobs pulled.
     pub jobs_seen: u64,
     /// Jobs in the last pull, left for the hub to lease again.
     pub jobs_left: u64,
+    /// Jobs executed (written or failed) and sent to the hub.
+    pub jobs_executed: u64,
+    /// Job acks the hub accepted.
+    pub jobs_acked: u64,
     /// Per scanner.
     pub scans: BTreeMap<&'static str, ScanStat>,
 }
@@ -226,6 +230,8 @@ impl Shared {
         m.insert("scans.paused", h.identity_changed.is_some());
         m.insert("jobs.seen", s.jobs_seen);
         m.insert("jobs.left", s.jobs_left);
+        m.insert("jobs.executed", s.jobs_executed);
+        m.insert("jobs.acked", s.jobs_acked);
         for (name, st) in &s.scans {
             m.insert(format!("{name}.runs"), st.runs);
             m.insert(format!("{name}.rows"), st.rows);
