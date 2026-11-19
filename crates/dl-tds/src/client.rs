@@ -3,11 +3,12 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dl_tls::{TlsStream, Verify};
 
 use crate::Error;
+use crate::cancel::CancelToken;
 use crate::config::{Config, Encrypt};
 use crate::login::{Login, TDS_74, TDS_80};
 use crate::packet::{self, MessageReader};
@@ -20,6 +21,8 @@ use crate::token::{self, DONE, DONE_ATTN, LoginAck, Session};
 
 /// How long to wait for the server to acknowledge an ATTENTION (go-mssqldb uses 5 s).
 const CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a request with a [`CancelToken`] looks at the token while it waits.
+const CANCEL_POLL: Duration = Duration::from_millis(200);
 /// Most SSPI round trips after LOGIN7 (NTLM needs 1, Kerberos 0 or 1).
 const MAX_SSPI_ROUNDS: usize = 8;
 
@@ -97,6 +100,7 @@ pub struct Client {
     timeout: Option<Duration>,
     login_ack: LoginAck,
     encrypted: bool,
+    cancel: Option<CancelToken>,
 }
 
 impl fmt::Debug for Client {
@@ -347,6 +351,7 @@ impl Client {
             timeout: cfg.timeout(),
             login_ack: LoginAck::default(),
             encrypted,
+            cancel: None,
         };
         let ack = client.finish_login(negotiate.as_mut())?;
         client.login_ack = ack;
@@ -437,6 +442,14 @@ impl Client {
         if let Some(n) = self.session.packet_size.take() {
             self.packet_size = n;
         }
+    }
+
+    /// Lets another thread stop this client's requests: once `token` is cancelled, a request
+    /// that is waiting for the server sends ATTENTION and returns [`Error::Cancelled`]
+    /// within about 200 ms, and later requests fail the same way until a fresh token is set.
+    /// `None` removes the token. The read timeout ([`Client::set_timeout`]) still applies.
+    pub fn set_cancel(&mut self, token: Option<CancelToken>) {
+        self.cancel = token;
     }
 
     /// Changes the read/write timeout for later requests (`None` = wait forever).
@@ -576,17 +589,20 @@ impl Client {
         if self.broken {
             return Err(Error::Broken);
         }
+        if self.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+            return Err(Error::Cancelled);
+        }
         let mut framed = Vec::with_capacity(payload.len() + 64);
         packet::frame(ptype, payload, self.packet_size, &mut framed);
         if let Err(e) = write_packets(&mut self.stream, &framed).and_then(|_| self.stream.flush()) {
             self.broken = true;
             return Err(Error::Io(e));
         }
-        let (rtype, msg) = match self.reader.read_message(&mut self.stream) {
+        let (rtype, msg) = match self.read_reply() {
             Ok(m) => m,
-            Err(Error::Io(e)) if is_timeout(&e) => {
+            Err(e @ (Error::Timeout | Error::Cancelled)) => {
                 self.cancel();
-                return Err(Error::Timeout);
+                return Err(e);
             }
             Err(e) => {
                 self.broken = true;
@@ -612,6 +628,45 @@ impl Client {
             Some(e) => Err(e),
             None => Ok(resp.results),
         }
+    }
+
+    /// Reads the reply to the request just sent. A timeout comes back as [`Error::Timeout`],
+    /// a fired [`CancelToken`] as [`Error::Cancelled`]; the caller then sends ATTENTION.
+    fn read_reply(&mut self) -> Result<(u8, Vec<u8>), Error> {
+        let Some(token) = self.cancel.clone() else {
+            return match self.reader.read_message(&mut self.stream) {
+                Err(Error::Io(e)) if is_timeout(&e) => Err(Error::Timeout),
+                r => r,
+            };
+        };
+        // Wait in short slices so the token is seen promptly; the reader keeps a partial
+        // message across the slices.
+        let deadline = self.timeout.map(|t| Instant::now() + t);
+        let outcome = loop {
+            if token.is_cancelled() {
+                break Err(Error::Cancelled);
+            }
+            let slice = match deadline {
+                Some(d) => d.saturating_duration_since(Instant::now()).min(CANCEL_POLL),
+                None => CANCEL_POLL,
+            };
+            if slice.is_zero() {
+                break Err(Error::Timeout);
+            }
+            if let Err(e) = self.stream.tcp().set_read_timeout(Some(slice)) {
+                break Err(Error::Io(e));
+            }
+            match self.reader.read_message(&mut self.stream) {
+                Err(Error::Io(e)) if is_timeout(&e) => continue,
+                r => break r,
+            }
+        };
+        let timeout = self.timeout;
+        if let Err(e) = self.stream.tcp().set_read_timeout(timeout) {
+            self.broken = true;
+            return Err(Error::Io(e));
+        }
+        outcome
     }
 
     /// Sends ATTENTION and drains the response until the server acknowledges it.

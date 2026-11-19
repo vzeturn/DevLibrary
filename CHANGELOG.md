@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
+- `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
+
 ### Fixed
 
 - `dl-agent` probation no longer rolls back an update for a module that was already degraded or stopped when the update was installed (a site problem such as a missing enrolment or a revoked key); it rolled back and then reinstalled the same version every few minutes.
@@ -35,6 +40,39 @@ All notable changes are listed here. The format follows
   `arrival_auth_failed`, `arrival_clock_skew`, `arrival_pms_failed`, `arrival_op_refused`,
   `arrival_proc_install_failed`; sub-command `dl-agent arrival-enroll` (token and PMS connection
   string from the environment or stdin). The crate is left out of `cargo wasm`.
+- `dl-agent-membership` (M1, read side): the Azolo Membership agent (`MM.Membership.Agent`) as an
+  opt-in dl-agent module (`modules.membership.enabled = true`). It reads the .NET installer's
+  `config.dpapi`, sends the heartbeat with the SMILE identity, reads the hub's sync-config, and
+  posts availability, room inventory, room types and folio observations (the folio cursor moves
+  only after a 2xx). Jobs are pulled only with `pull_jobs: true` and are counted, never executed
+  or acked; `read_only: false` is refused until the writers (M2) exist. New tool
+  `dl-agent membership-enroll --hub-url <https origin>` (code from `DL_AGENT_MEMBERSHIP_TOKEN` or
+  stdin, SMILE from `DL_AGENT_MEMBERSHIP_SMILE`; `--force` to replace). Reports
+  `membership_hub_failed`, `membership_auth_failed`, `membership_smile_failed`,
+  `membership_db_identity_changed`, `membership_scan_failed`. The crate is left out of
+  `cargo wasm`.
+- `dl-agent-backup`: the SRBackup Go agent as an opt-in dl-agent module
+  (`modules.backup.enabled = true`; optional `backup_dir`, `concurrency`, `stop_grace_seconds`,
+  `poll_interval_seconds`). Hub config polling, cron schedules in the schedule's time zone, a
+  sealed durable queue with leases, three attempts and a dead letter, one backup per SQL Server
+  instance at a time, restore requests and hub commands (once each), discovery, retention, and a
+  sealed report outbox that survives hub outages. Credentials are opened with the agent master key
+  (re-fetched once on a failed decrypt); a `credentialError` fails only that work, with a report.
+  SQL through dl-tds (SQL login or SSPI), names and paths as parameters, `COMPRESSION` /
+  `CHECKSUM` only where the edition supports them (recorded in the job's steps), a log backup on
+  SIMPLE recovery fails with `backup_recovery_model`. Uploads to a local folder, S3 / R2 (SigV4,
+  multipart) and Azure Blob (Shared Key or SAS, block lists); Google Drive and OneDrive report
+  `backup_destination_unsupported` for now. `degraded` while not enrolled, when the hub stays
+  unreachable past one back-off or rejects the agent; stop gives a running `BACKUP`
+  `stop_grace_seconds`, then cancels it and keeps the job queued. Metrics (queue and outbox depth,
+  jobs ok / failed / dead-lettered, bytes uploaded, last success per database), rate-limited
+  reports `backup_hub_failed`, `backup_auth_failed`, `backup_sql_failed`, `backup_upload_failed`,
+  `backup_credential_error`, `backup_destination_unsupported`, `backup_recovery_model`; commands
+  `backup.status`, `backup.run-now`; sub-command `dl-agent backup-enroll --hub-url <origin>` (key
+  from `DL_AGENT_BACKUP_KEY` or stdin). The crate is left out of `cargo wasm`.
+- `dl-tds`: `CancelToken` and `Client::set_cancel` stop a running request from another thread:
+  the client sends ATTENTION, the call returns `Error::Cancelled` within about 200 ms and later
+  requests fail the same way until a fresh token is set.
 - `dl-agent-pms-device`: the SMILE PMS device agent (`SmilePmsDeviceAgent`) as an opt-in dl-agent
   module (`modules.pms-device.enabled = true`; optional `appsettings_dir`, `overrides`). It reads the
   old service's `appsettings.json` / `appsettings.{env}.json` from its install folder and keeps

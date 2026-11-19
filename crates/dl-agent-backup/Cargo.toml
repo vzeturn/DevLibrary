@@ -1,0 +1,28 @@
+[package]
+name = "dl-agent-backup"
+description = "SQL Server backup module for dl-agent: runs the SRBackup hub's schedules (backup, upload, retention, restore) on the site."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-json.workspace = true
+dl-hash.workspace = true
+dl-encoding.workspace = true
+dl-uuid.workspace = true
+dl-rand.workspace = true
+dl-tds.workspace = true
+dl-http.workspace = true
+dl-winsvc.workspace = true
+dl-log.workspace = true
+dl-cli.workspace = true
+dl-winos.workspace = true
+
+[lints]
+workspace = true

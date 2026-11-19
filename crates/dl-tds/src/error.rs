@@ -96,6 +96,10 @@ pub enum Error {
     /// with an ATTENTION packet; the connection is still usable unless the cancellation
     /// itself failed (then [`Client::is_broken`](crate::Client::is_broken) is `true`).
     Timeout,
+    /// The request was stopped through a [`CancelToken`](crate::CancelToken). Like
+    /// [`Error::Timeout`] it was cancelled with an ATTENTION packet and the connection is
+    /// still usable unless [`Client::is_broken`](crate::Client::is_broken) says otherwise.
+    Cancelled,
     /// The connection is unusable after an earlier I/O, TLS or protocol failure.
     Broken,
     /// The SQL Server Browser (UDP 1434) did not return a TCP port for the instance.
@@ -201,6 +205,7 @@ impl fmt::Display for Error {
             Error::ColumnNotFound(c) => write!(f, "column {c} not found"),
             Error::Param { name, message } => write!(f, "parameter @{name}: {message}"),
             Error::Timeout => f.write_str("request timed out and was cancelled"),
+            Error::Cancelled => f.write_str("request was cancelled by the caller"),
             Error::Broken => f.write_str("connection is broken"),
             Error::Browser(m) => write!(f, "SQL Server Browser: {m}"),
             Error::Unsupported(m) => write!(f, "not supported: {m}"),
