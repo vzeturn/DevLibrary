@@ -9,7 +9,7 @@ use dl_json::{Value, json};
 
 use super::{
     CORE, Check, MODULE_TIMEOUT, Outcome, PROBE_TIMEOUT, Run, Status, Trigger, checks_core,
-    checks_hub, legacy, run_id, runner,
+    checks_hub, checks_state, legacy, run_id, runner,
 };
 use crate::cli::App;
 use crate::command::MAX_OUTPUT;
@@ -68,6 +68,7 @@ pub fn execute(app: &App, dir: &Path, trigger: Trigger, only: Option<&str>, args
     let mut checks = Vec::new();
     if only.is_none_or(|o| o == CORE) {
         let (identity, id) = checks_core::identity(app, dir);
+        let hub_urls = checks_state::hub_urls(id.as_ref());
         let (service, state) = checks_core::service(app);
         let (hub, link) = checks_hub::hub(app, dir, id, state, trigger);
         checks.push(checks_hub::version(app, &link.channel));
@@ -77,8 +78,15 @@ pub fn execute(app: &App, dir: &Path, trigger: Trigger, only: Option<&str>, args
         checks.push(service);
         checks.push(checks_core::watchdog(app));
         checks.push(hub);
+        checks.push(hub_urls);
+        checks.push(checks_state::proxy());
         checks.push(checks_hub::clock(link.skew));
         checks.push(checks_hub::update(app, &link));
+        checks.push(checks_state::update_state(
+            dir,
+            &app.version,
+            crate::fault::COMPILED,
+        ));
         checks.extend(checks_core::no_update(dir));
         checks.push(checks_hub::spool(dir, &link));
         checks.extend(checks_core::databases(dir, &site, args));

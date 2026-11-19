@@ -41,6 +41,29 @@ does not verify.
 | `GET  /v1/releases/{product}/{channel}` | → signed Manifest (§5); `404` when no release |
 | `GET  <artifact url>` | binary, size and SHA-256 come from the manifest |
 
+### 2.1 Hub hosts and fallback
+
+The enrol answer and every heartbeat answer may carry `hub_urls`: the hub's hosts in order of
+preference, at most 5, each `https://` (`http://` only for localhost). The agent keeps the
+list in `identity.json` (the host that answered is kept even if the list leaves it out) and
+sends each call to the host that last worked, moving down the list on a transport error or a
+5xx. A missing, empty or unusable list changes nothing; the agent warns once. The hub sets the
+list from `HUB_URLS`; a fallback host (not the first) serves only `/healthz`, `/install.ps1`,
+`/install/*` and `/v1/*` and answers 404 for everything else, so the admin API stays on the
+primary host. The installer passes the same list to `enroll`, so a new agent can enrol while
+the primary host is down. Self-test row `core/hub_urls`: pass with a fallback, warn with one host.
+
+### 2.2 Proxy
+
+The agent reads the proxy once per start: `HTTPS_PROXY` / `HTTP_PROXY` (with `NO_PROXY`),
+else the WinHTTP setting (`netsh winhttp set proxy`), else the Internet Options of the
+service account (`ProxyEnable`, `ProxyServer` as `host:port` or `http=…;https=…`,
+`ProxyOverride` with `*` wildcards and `<local>`; machine-wide under the
+`ProxySettingsPerUser = 0` policy). Only `http://` proxies are used, `https` goes through
+`CONNECT`. Credentials come from the proxy URL or from `DL_AGENT_PROXY_USER` /
+`DL_AGENT_PROXY_PASSWORD` (Basic). Self-test row `core/proxy` names the source and the proxy
+and says `credentials yes/no`, never the password; a setting that cannot be used is a warning.
+
 ## 3. Heartbeat
 
 ```json

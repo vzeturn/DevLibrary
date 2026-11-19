@@ -12,6 +12,7 @@
 
 pub(crate) mod checks_core;
 mod checks_hub;
+mod checks_state;
 pub mod cli;
 mod execute;
 mod legacy;

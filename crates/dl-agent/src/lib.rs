@@ -16,6 +16,7 @@ pub mod hub_urls;
 pub mod identity;
 pub mod manifest;
 pub mod optout;
+pub mod proxy;
 pub mod report;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod selftest;

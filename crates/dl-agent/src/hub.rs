@@ -48,6 +48,7 @@ impl HttpTransport {
             max_body: 200 * 1024 * 1024,
             user_agent: Some(format!("dl-agent/{}", crate::agent_version())),
             max_redirects: 3,
+            proxy: crate::proxy::current().proxy.clone(),
             ..dl_http::ClientOptions::default()
         };
         HttpTransport {
