@@ -128,6 +128,7 @@ All notable changes are listed here. The format follows
   processes through `dl_winsvc::process` instead of `tasklist`.
 
 ### Fixed
+- dl-agent-arrival, dl-agent-membership: the Check-In cloud and the Membership hub are reached through the dl-agent core's proxy choice (environment, WinHTTP, Internet Options) instead of the environment only, as the .NET agents used the machine's proxy; Membership hub calls carry a fresh `X-Correlation-Id` like the .NET `AgentCorrelationHandler` (RT-0260).
 - dl-agent-arrival: the SCM "terminated unexpectedly" event logged with an update restart (exit 75, same instant) is information, no longer a problem that turns selftest `last_problem` to warn.
 - dl-agent-arrival: the self-test's `last_problem` warns only for a problem of the last 24 h; an older one is shown as history with `pass` (RT-0164).
 - dl-agent-backup selftest: the BACKUP permission check covers only databases a schedule backs up; the other databases the hub lists on the server (MM_*, test copies) no longer fail it (RT-0164).
