@@ -1,8 +1,9 @@
 //! The agent's self-update flow (PROTOCOL.md §6): fetch and verify the manifest, apply the
 //! site policy (window, auto off) and the failure cap, install, and roll back.
 
-use super::{Agent, Exit, now};
+use super::{Agent, CANARY_PROBATION_SECONDS, Exit, UPDATE_CHECK_SECONDS, now};
 use crate::Error;
+use crate::channel::Channel;
 use crate::current_target;
 use crate::manifest::Manifest;
 use crate::report::{ProblemReport, Severity};
@@ -20,8 +21,32 @@ pub(super) enum Checked {
 }
 
 impl Agent {
+    /// Canary agents run on test machines and take the fast lane (PROTOCOL.md §6.4): an
+    /// update check on every heartbeat that asks for one, a short probation, and no hold by
+    /// the site's window or `auto: false`. The failure cap and rollback are the same on both
+    /// channels, so a bad build still rolls back.
+    pub(super) fn fast_lane(&self) -> bool {
+        self.channel == Channel::Canary.as_str()
+    }
+
+    /// Probation for an update installed now, and how long a module may stay unhealthy in it.
+    pub(super) fn probation_seconds(&self) -> u64 {
+        if self.fast_lane() {
+            self.opts.probation_seconds.min(CANARY_PROBATION_SECONDS)
+        } else {
+            self.opts.probation_seconds
+        }
+    }
+
+    /// Whether to act on the hub's `update_check` now: stable checks at most once per
+    /// `UPDATE_CHECK_SECONDS`, canary on every heartbeat.
+    pub(super) fn update_check_due(&self, now: u64) -> bool {
+        self.fast_lane() || now >= self.last_update_check + UPDATE_CHECK_SECONDS
+    }
+
     /// Fetches, verifies and installs the release for this agent's channel. `forced` (the
-    /// `update_now` command) skips the site's window and `auto: false`, not the failure cap.
+    /// `update_now` command) skips the site's window and `auto: false`, not the failure cap;
+    /// so does the canary channel.
     pub(super) fn try_update(&mut self, now: u64, forced: bool) -> Result<Checked, Error> {
         if self.update.pending.is_some() {
             return Ok(Checked::Held("an update is still on probation".into()));
@@ -57,7 +82,7 @@ impl Agent {
         if let Some(e) = bad {
             self.report(Severity::Warning, "update_policy_invalid", &e.to_string());
         }
-        if let Some(reason) = policy.hold(&m, now, forced) {
+        if let Some(reason) = policy.hold(&m, now, forced || self.fast_lane()) {
             return Ok(self.defer(format!("{version} waits: {reason}")));
         }
         let bytes = self.hub.download(&artifact.url)?;
@@ -67,7 +92,7 @@ impl Agent {
         self.update.pending = Some(Pending {
             version: version.clone(),
             previous_version: current.clone(),
-            probation_until: now + self.opts.probation_seconds,
+            probation_until: now + self.probation_seconds(),
             boots: 0,
             unhealthy_before: self.supervisor.unhealthy_names(),
         });

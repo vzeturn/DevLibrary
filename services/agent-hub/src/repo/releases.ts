@@ -1,5 +1,6 @@
 import type { Channel } from '../env';
 import type { GateAgent } from '../domain/gate';
+import type { Bump } from '../domain/lanes';
 
 export interface ReleaseRow {
   product: string;
@@ -103,7 +104,7 @@ export async function fingerprintsFor(db: D1Database, version: string, errorsOnl
 
 export async function insertPromotion(
   db: D1Database,
-  p: { id: string; product: string; version: string; forced: boolean; reason: string | null; checks: string; promoted_at: number },
+  p: { id: string; product: string; version: string; forced: boolean; bump: Bump; reason: string | null; checks: string; promoted_at: number },
   stable: ReleaseRow,
 ): Promise<void> {
   await db.batch([
@@ -117,10 +118,10 @@ export async function insertPromotion(
       .bind(stable.product, stable.version, stable.manifest, stable.published_at, stable.created_at),
     db
       .prepare(
-        `INSERT INTO promotions (id, product, version, forced, reason, checks, promoted_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+        `INSERT INTO promotions (id, product, version, forced, reason, checks, promoted_at, bump)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
       )
-      .bind(p.id, p.product, p.version, p.forced ? 1 : 0, p.reason, p.checks, p.promoted_at),
+      .bind(p.id, p.product, p.version, p.forced ? 1 : 0, p.reason, p.checks, p.promoted_at, p.bump),
   ]);
 }
 

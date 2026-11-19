@@ -1,5 +1,6 @@
-import { intVar, type Channel, type Env } from '../env';
+import type { Channel, Env } from '../env';
 import { evaluateGate, type GateResult } from '../domain/gate';
+import { gateRules } from '../domain/lanes';
 import { manifest as manifestSchema, type Manifest } from '../domain/schemas';
 import { uuidv7 } from '../lib/crypto';
 import { HttpError, parseJson, validate } from '../lib/http';
@@ -12,14 +13,17 @@ import {
   previousVersion,
   putRelease,
 } from '../repo/releases';
+import { laneConfig, releaseLane, type LaneStatus } from './lanes';
 import { requirementOf, siteReadiness } from './sites';
 
 export interface GateStatus extends GateResult {
   product: string;
   version: string;
   previous_version: string | null;
+  /** Set by the release's bump (PROTOCOL §5.2). */
   min_agents: number;
   soak_hours: number;
+  lane: LaneStatus;
 }
 
 export interface PromoteRequest {
@@ -54,8 +58,8 @@ export async function manifestText(env: Env, product: string, channel: Channel):
 export async function gateStatus(env: Env, product: string, version: string, now: number): Promise<GateStatus> {
   const canary = await getRelease(env.DB, product, version, 'canary');
   if (!canary) throw new HttpError(404, 'release_not_found');
-  const minAgents = intVar(env.GATE_MIN_AGENTS, 1);
-  const soakHours = intVar(env.GATE_SOAK_HOURS, 2);
+  const lane = await releaseLane(env, product, version, now);
+  const { minAgents, soakHours } = gateRules(laneConfig(env), lane.bump);
   const previous = await previousVersion(env.DB, product, version, canary.published_at);
   const [agents, errorFingerprints, previousFingerprints] = await Promise.all([
     gateAgents(env.DB, product, version),
@@ -78,7 +82,7 @@ export async function gateStatus(env: Env, product: string, version: string, now
     previousFingerprints,
     unreadySites,
   });
-  return { product, version, previous_version: previous, min_agents: minAgents, soak_hours: soakHours, ...result };
+  return { product, version, previous_version: previous, min_agents: minAgents, soak_hours: soakHours, lane, ...result };
 }
 
 export interface PromoteAnswer {
@@ -102,6 +106,7 @@ export async function promote(env: Env, product: string, version: string, req: P
       product,
       version,
       forced,
+      bump: gate.lane.bump,
       reason: req.reason?.trim() || null,
       checks: JSON.stringify(gate.checks),
       promoted_at: now,

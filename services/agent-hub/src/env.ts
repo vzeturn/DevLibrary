@@ -6,8 +6,17 @@ export interface Env {
   /** Base64 AES-256 key (32 bytes, secret) sealing bench bundles at rest; bench is off without it. */
   BENCH_KEY?: string;
   HEARTBEAT_SECONDS?: string;
+  /** Heartbeat cadence cap for canary agents, the fast lane (default 15). */
+  CANARY_HEARTBEAT_SECONDS?: string;
   GATE_MIN_AGENTS?: string;
+  /** Fallback for GATE_SOAK_HOURS_PATCH (deployments from before the update lanes). */
   GATE_SOAK_HOURS?: string;
+  /** Canary soak before a patch / minor / major may be promoted (defaults 2 / 24 / 72). */
+  GATE_SOAK_HOURS_PATCH?: string;
+  GATE_SOAK_HOURS_MINOR?: string;
+  GATE_SOAK_HOURS_MAJOR?: string;
+  /** Minor rollout ramp after promotion, "hours:percent,…" (default "0:10,24:50,48:100"). */
+  MINOR_RAMP?: string;
 }
 
 export interface AgentRow {

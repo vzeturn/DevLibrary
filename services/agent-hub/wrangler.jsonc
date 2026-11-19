@@ -16,8 +16,13 @@
   "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
     "HEARTBEAT_SECONDS": "60",
+    // Update lanes (docs/decisions/0001-update-lanes.md): canary beats fast, stable soaks by bump.
+    "CANARY_HEARTBEAT_SECONDS": "15",
     "GATE_MIN_AGENTS": "1",
-    "GATE_SOAK_HOURS": "2"
+    "GATE_SOAK_HOURS_PATCH": "2",
+    "GATE_SOAK_HOURS_MINOR": "24",
+    "GATE_SOAK_HOURS_MAJOR": "72",
+    "MINOR_RAMP": "0:10,24:50,48:100"
   },
   // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`; `BENCH_KEY` (base64 of 32 random bytes) enables /admin/bench.
   "observability": { "enabled": true }
