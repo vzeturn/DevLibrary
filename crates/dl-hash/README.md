@@ -1,6 +1,6 @@
 # dl-hash
 
-SHA-1, SHA-2 (224/256/384/512), MD5, HMAC, PBKDF2, CRC-32 and constant-time comparison.
+SHA-1, SHA-2 (224/256/384/512), MD5, MD4 (for NTLM only), HMAC, PBKDF2, CRC-32 and constant-time comparison.
 `#![no_std]`, no dependencies, no `unsafe`, builds for `wasm32-unknown-unknown`.
 
 Part of [DevLibrary](https://github.com/vzeturn/DevLibrary). Used by `dl-otp`, `dl-jwt`
@@ -90,7 +90,7 @@ println!("{}", digest.iter().map(|b| format!("{b:02x}")).collect::<String>());
 | Item | Purpose |
 |---|---|
 | `Digest` trait | `OUTPUT_LEN`, `BLOCK_LEN`, `update`, `chain`, `finalize`, `digest` |
-| `Sha1`, `Sha224`, `Sha256`, `Sha384`, `Sha512`, `Md5` | Hash functions |
+| `Sha1`, `Sha224`, `Sha256`, `Sha384`, `Sha512`, `Md5`, `Md4` | Hash functions (`Md4` only for NTLM's `NTOWFv2`) |
 | `Hmac<D>` | `new(key)`, `update`, `chain`, `finalize`, `verify(tag)`, `mac(key, data)` |
 | `pbkdf2::<D>(password, salt, iterations, out)` | Key derivation (panics if `iterations == 0`) |
 | `Crc32`, `crc32(data)` | Streaming and one-shot CRC-32 |
@@ -101,6 +101,8 @@ println!("{}", digest.iter().map(|b| format!("{b:02x}")).collect::<String>());
 - **SHA-1 and MD5 are broken for collision resistance.** They are here because protocols
   require them (HMAC-SHA1 in TOTP, legacy vendor APIs, checksums). HMAC-SHA1 is still
   considered secure as a MAC.
+- **MD4 is completely broken.** It is here only because NTLM (MS-NLMP `NTOWFv2`, used by
+  `dl-tds` for `DOMAIN\user` logins) hashes the password with it.
 - Do not hash passwords with a bare SHA-256; use `pbkdf2` with a random salt and a high
   iteration count.
 - The code is constant-time with respect to the data being hashed, but it has not been
@@ -127,7 +129,7 @@ Hardware acceleration (SHA-NI, ARMv8 crypto extensions) is on the roadmap.
 ## Standards
 
 - [FIPS 180-4](https://csrc.nist.gov/pubs/fips/180-4/upd1/final) (SHA-1, SHA-2)
-- [RFC 1321](https://www.rfc-editor.org/rfc/rfc1321) (MD5)
+- [RFC 1321](https://www.rfc-editor.org/rfc/rfc1321) (MD5), [RFC 1320](https://www.rfc-editor.org/rfc/rfc1320) (MD4)
 - [RFC 2104](https://www.rfc-editor.org/rfc/rfc2104), [RFC 2202](https://www.rfc-editor.org/rfc/rfc2202), [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231) (HMAC and its test vectors)
 - [RFC 8018](https://www.rfc-editor.org/rfc/rfc8018), [RFC 6070](https://www.rfc-editor.org/rfc/rfc6070) (PBKDF2 and its test vectors)
 
