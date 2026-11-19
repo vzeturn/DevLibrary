@@ -40,8 +40,8 @@ Notes:
   processes, a service pointing elsewhere), optionally declares and tests SQL Server first (`-SqlPrompt`
   for a server on another machine, or `-SqlName`/`-SqlConnection`) so the code is not spent on a site that
   cannot reach its database, chooses the SQL login (`[1] Windows [2] SQL login`, or unattended
-  `-SqlAuth windows|sql -SqlServer -SqlUser` with the password in `-SqlPassword` or env
-  `DL_AGENT_SQL_PASSWORD`; Enter keeps what this machine saved, else what the old Check-In agent used,
+  `-SqlAuth windows|sql -SqlServer -SqlUser` with the password only from env
+  `DL_AGENT_SQL_PASSWORD` or, run interactively, a hidden prompt, never a parameter; Enter keeps what this machine saved, else what the old Check-In agent used,
   through the `Get-ArrivalLegacySql` hook of `installScript`), tested on every SMILE database before it is
   saved, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
   replaces it), runs an optional product setup sub-command (`-Setup`, secrets through env
@@ -63,14 +63,26 @@ Notes:
   over 8 MB or without `Content-Length` before checking the signature, stores the zip in R2 as
   `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip` and a `diagnostics` row (agent, tenant, site, size,
   SHA-256, command id, agent version), and answers `{id, key, size, sha256}`; the command result carries
-  the same. Bundles are never served on `/v1/artifacts/*`; admins list and download them. Nothing prunes
-  them yet.
+  the same. Only an open `collect_diagnostics` command of the same agent (handed out, not answered)
+  may upload, once (`command_id` required and unique: `400 command_id_required`,
+  `409 no_open_diagnostics_command`, `409 diagnostics_already_uploaded`), and at most 4 bundles per
+  agent an hour (`429 diagnostics_rate_limited`). Bundles are never served on `/v1/artifacts/*`;
+  admins list and download them. Retention: the R2 lifecycle rule `diag-30d` deletes `diag/` objects
+  after 30 days (see Production).
 - Admin audit: every admin request that changes something (any method but GET/HEAD, after auth) is
-  written to `admin_audit` before it runs — time, actor (`Cf-Access-Authenticated-User-Email`, else
-  `admin-token`), method, path with query, body with secrets replaced by `[redacted]` (JSON fields named
-  like password/secret/token/api key/private key/authorization/`*_sealed`, `Password=` in connection
-  strings, `Bearer`/`Basic` values; cut at 4 000 characters) — and its status and error code once it
-  finished. If the row cannot be written the change is refused with `503 audit_unavailable`.
+  written to `admin_audit` before it runs — time, actor, method, path with query, body with secrets
+  replaced by `[redacted]` (JSON fields named like password/pwd/secret/token/authorization/credential,
+  `*_sealed` or ending in `key` such as `tenant_key`/`hmac_key`/`api-key`, but not `r2_key`,
+  `object_key`, `public_key`, `sort_key`, `cache_key`, `key_id`, `kid`; `Password=`/`Pwd=` in
+  connection strings with ADO.NET quoting; `name=value` text pairs with such names; `Bearer`/`Basic`
+  values; cut at 4 000 characters) — and its status and error code once it finished. The actor is the
+  e-mail (or `service-token:<client id>`) of a verified Cloudflare Access token
+  (`Cf-Access-Jwt-Assertion`: RS256 by the team's keys, `aud` = `ACCESS_AUD`, `iss` =
+  `https://<ACCESS_TEAM_DOMAIN>`, unexpired); without those vars or a valid token it is `admin-token`
+  (the `Cf-Access-Authenticated-User-Email` header alone is never trusted). If the row cannot be
+  written the change is refused with `503 audit_unavailable`, except the kill switches (release
+  pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and log the would-be row
+  (`admin_audit_write_failed`, `fail_open: true`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
 
 ## Bench (test PC)
@@ -165,6 +177,16 @@ Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0
   public half `rel-2026:jz7z7AVXs8ArKexwiZimYtGICV9cXrie6v7Cuulw3CI=` baked into builds with
   `DL_AGENT_RELEASE_KEYS`).
 - Redeploy: `pnpm typecheck && pnpm test`, then `pnpm db:migrate` (remote) and `pnpm deploy`.
+  Apply migration `0007_diagnostics_audit.sql` (`pnpm db:migrate`) **before** deploying the Worker
+  that has the admin audit: until the table exists every admin change except the kill switches
+  answers `503 audit_unavailable`. `HUB_URLS` is a `wrangler.jsonc` var, so a changed list goes live
+  with that deploy (agents keep only allow-listed hosts, PROTOCOL.md §2.1).
+- Audit actor (optional vars, both or neither): `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`)
+  and `ACCESS_AUD` (the admin Access application's audience tag), e.g. in `wrangler.jsonc` `vars`.
+- Diagnostics retention (run once, by the operator):
+  `wrangler r2 bucket lifecycle add agent-hub-artifacts diag-30d diag/ --expire-days 30`
+  (check with `wrangler r2 bucket lifecycle list agent-hub-artifacts`; the same rule as JSON is
+  `r2-lifecycle.json`, for `wrangler r2 bucket lifecycle set`, which replaces every rule of the bucket).
 - Bench needs `BENCH_KEY` (32 random bytes, base64): `openssl rand -base64 32 | wrangler secret put BENCH_KEY`.
   Rotating it makes every existing bundle unreadable (`500 bench_unreadable`); revoke them first.
 - Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,

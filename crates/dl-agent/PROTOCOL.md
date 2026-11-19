@@ -121,7 +121,13 @@ with ADO.NET quoting, `Bearer …`, fields named like password/pwd/secret/token/
 
 The hub answers `{id, key, size, sha256}` (key `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip`),
 refuses more than 8 MB or a body without `Content-Length` (`413` / `411`, before the
-signature check) and anything that is not a zip (`400 not_a_zip`). The command result is
+signature check) and anything that is not a zip (`400 not_a_zip`). It takes a bundle only for
+an open `collect_diagnostics` command of the same agent: `command_id` is required
+(`400 command_id_required`), the command must have been handed out and not answered yet
+(`409 no_open_diagnostics_command`), and each command uploads once
+(`409 diagnostics_already_uploaded`). An agent stores at most 4 bundles an hour
+(`429 diagnostics_rate_limited`). An R2 lifecycle rule deletes `diag/` objects after 30 days
+(the D1 row stays; its download then answers `404 diagnostics_object_missing`). The command result is
 `{ok:true, output:{uploaded:{id, r2_key, size, sha256}, diagnostics:{…}}}` (the hub's `key`
 renamed so the scrub keeps it); when the bundle
 cannot be built or uploaded it is `{ok:false, output:{upload_error, diagnostics:{…, log_tail}}}`.
@@ -226,8 +232,10 @@ Two operator stops, both kept in the hub (migration `0006_kill_switch.sql`):
   `tenant_not_found`, `hold_not_found`.
 
 Other tenants are untouched. Agents need no change: they only see `update_check` false.
-The hub keeps no separate audit log for admin calls (none of its admin routes has one); the
-admin bearer token is the audit boundary.
+Every admin change is written to `admin_audit` before it runs (hub README "Admin audit"); a
+change whose row cannot be written is refused with `503 audit_unavailable`, except these kill
+switches (release pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and
+leave the would-be row in the Worker log (`admin_audit_write_failed`, `fail_open: true`).
 
 ## 6. Update, probation and rollback (agent side)
 
