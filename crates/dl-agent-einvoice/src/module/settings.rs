@@ -4,18 +4,30 @@
 //! {"modules": {"einvoice": {
 //!     "enabled": true,
 //!     "config_dir": "C:\\ProgramData\\MM-EInvoice",
-//!     "poll_interval_seconds": 30
+//!     "poll_interval_seconds": 30,
+//!     "sql_source": "sealed",
+//!     "fo_database": "SMILE_FO",
+//!     "pos_database": "SMILE_POS"
 //! }}}
 //! ```
 //!
 //! `enabled` is read by the supervisor (the module is opt-in). The sealed `config.enc`
-//! (platform URL, API key, SQL connection strings) stays where the Go agent wrote it, so a
-//! site that already runs the Go agent switches over without enrolling again.
+//! (platform URL, API key, SQL connection strings) lives in `config_dir`.
+//!
+//! `sql_source` picks how SMILE_FO / SMILE_POS are reached: `sealed` (default) uses the
+//! connection strings sealed in `config.enc` at enrolment; `site` uses the databases declared
+//! in dl-agent's `sql.json` (`dl-agent sql-setup` / `sql-add`: Windows or SQL authentication,
+//! pinned transport) named by `fo_database` and `pos_database` (`""` = the FO database holds
+//! POS bills too; absent = `SMILE_POS` when the sealed config has a POS database).
 
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dl_agent::supervisor::ModuleContext;
 use dl_json::Value;
+
+use crate::agent_config::AgentConfig;
+use crate::sql::Sql;
 
 /// The module's settings.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +36,24 @@ pub struct Settings {
     pub config_dir: PathBuf,
     /// Overrides the sealed config's poll interval when set.
     pub poll_interval: Option<Duration>,
+    /// How the SMILE databases are reached.
+    pub sql: SqlSource,
+}
+
+/// How the module reaches SMILE_FO / SMILE_POS.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SqlSource {
+    /// The connection strings sealed in `config.enc` (default; every Go-era enrolment).
+    #[default]
+    Sealed,
+    /// dl-agent's `sql.json` databases.
+    Site {
+        /// The SMILE_FO database name in `sql.json`.
+        fo: String,
+        /// The SMILE_POS database name; `Some("")` = FO holds POS bills; `None` = follow the
+        /// sealed config (`SMILE_POS` when it has a POS database).
+        pos: Option<String>,
+    },
 }
 
 impl Settings {
@@ -40,9 +70,58 @@ impl Settings {
             .and_then(Value::as_u64)
             .filter(|s| *s > 0)
             .map(Duration::from_secs);
+        let text = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_owned())
+        };
+        let sql = match text("sql_source").as_deref() {
+            Some("site") => SqlSource::Site {
+                fo: text("fo_database")
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "SMILE_FO".into()),
+                pos: text("pos_database"),
+            },
+            _ => SqlSource::Sealed,
+        };
         Settings {
             config_dir,
             poll_interval,
+            sql,
+        }
+    }
+}
+
+impl Settings {
+    /// The SMILE connections for `cfg`, through the source this section picks.
+    ///
+    /// # Errors
+    /// A `site` database that `sql.json` does not declare.
+    pub fn open_sql(&self, ctx: &ModuleContext, cfg: &AgentConfig) -> Result<Sql, String> {
+        match &self.sql {
+            SqlSource::Sealed => Ok(Sql::new(&cfg.sql_dsn, &cfg.pos_sql_dsn, cfg.sp_names())),
+            SqlSource::Site { fo, pos } => {
+                let pool = |name: &str| {
+                    ctx.sql(name).map_err(|e| {
+                        format!(
+                            "sql_source is site but sql.json has no usable database {name}: {e}; \
+                             declare it with dl-agent sql-setup, or set sql_source back to sealed"
+                        )
+                    })
+                };
+                let pos = match pos.as_deref() {
+                    Some(name) => name.to_owned(),
+                    None if cfg.pos_sql_dsn.is_empty() => String::new(),
+                    None => "SMILE_POS".to_owned(),
+                };
+                let fo_pool = pool(fo)?;
+                let pos_pool = if pos.is_empty() {
+                    None
+                } else {
+                    Some((pos.as_str(), pool(&pos)?))
+                };
+                Ok(Sql::site((fo, fo_pool), pos_pool, cfg.sp_names()))
+            }
         }
     }
 }
@@ -100,5 +179,34 @@ mod tests {
         assert_eq!(s.poll_interval, None);
         let s = Settings::from_config(&json!({"poll_interval_seconds": "30"}));
         assert_eq!(s.poll_interval, None);
+    }
+
+    #[test]
+    fn sql_source_defaults_to_the_sealed_config() {
+        assert_eq!(Settings::from_config(&Value::Null).sql, SqlSource::Sealed);
+        let s = Settings::from_config(&json!({"sql_source": "other"}));
+        assert_eq!(s.sql, SqlSource::Sealed);
+    }
+
+    #[test]
+    fn site_sql_names_the_databases() {
+        let s = Settings::from_config(&json!({"sql_source": "site"}));
+        assert_eq!(
+            s.sql,
+            SqlSource::Site {
+                fo: "SMILE_FO".into(),
+                pos: None
+            }
+        );
+        let s = Settings::from_config(&json!({
+            "sql_source": " site ", "fo_database": "FO2", "pos_database": ""
+        }));
+        assert_eq!(
+            s.sql,
+            SqlSource::Site {
+                fo: "FO2".into(),
+                pos: Some(String::new())
+            }
+        );
     }
 }

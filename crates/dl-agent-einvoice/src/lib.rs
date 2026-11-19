@@ -13,8 +13,10 @@
 pub mod agent_config;
 pub mod config;
 pub mod domain;
+pub mod dryrun;
 pub mod dsn;
 pub mod enroll;
+pub mod fetch;
 pub mod fo;
 pub mod gojson;
 pub mod install;
