@@ -10,6 +10,7 @@ import { saveHeartbeat } from '../repo/heartbeats';
 import { latestRelease } from '../repo/releases';
 import { upsertReports } from '../repo/reports';
 import type { ConfigView } from './config';
+import { heartbeatSeconds, stableOffered } from './lanes';
 
 export interface WireCommand {
   id: string;
@@ -46,16 +47,19 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
   }));
   const config = await getConfig(env.DB, agent.id);
   const release = await latestRelease(env.DB, hb.product, channel);
+  // Canary is offered every newer release at once; stable by the release's lane (§5.2).
+  const newer = release !== null && compareVersions(release.version, hb.version) > 0;
+  const updateCheck = newer && (channel === 'canary' || (await stableOffered(env, agent, release, now)));
 
   return {
     server_time: now,
     channel,
-    heartbeat_seconds: agent.heartbeat_seconds,
+    heartbeat_seconds: heartbeatSeconds(env, agent, channel, hb),
     ...(config && config.version > hb.config_version
       ? { config: { version: config.version, body: JSON.parse(config.body) as unknown } }
       : {}),
     commands,
-    update_check: release !== null && compareVersions(release.version, hb.version) > 0,
+    update_check: updateCheck,
   };
 }
 

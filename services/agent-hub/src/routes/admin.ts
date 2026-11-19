@@ -16,6 +16,7 @@ import { setConfig } from '../services/config';
 import { benchView, createBench, revokeBenchBundle } from '../services/bench';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
+import { allowRelease, disallowRelease } from '../services/lanes';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
 import { renderStatusPage } from './statusPage';
@@ -40,6 +41,8 @@ const commandBody = z.object({
 });
 const configBody = z.object({ body: z.record(z.string(), z.unknown()) });
 const promoteBody = z.object({ manifest: z.string().min(2), force: z.boolean().optional(), reason: z.string().max(2000).optional() });
+/** A tenant (every site) or one site of it, opted in to a major release. */
+const allowBody = z.object({ tenant_id: id, site_id: id.optional() });
 const reportQuery = z.object({
   tenant_id: z.string().optional(),
   severity: severity.optional(),
@@ -134,6 +137,18 @@ adminRoutes.post('/releases/:product/:version/promote', async (c) => {
   const body = validate(promoteBody, await jsonBody(c.req));
   const { product, version } = c.req.param();
   return c.json(await promote(c.env, product, version, body, nowSeconds()));
+});
+/** Majors are never offered on their own (PROTOCOL §5.2): opt a tenant or a site in, or send update_now. */
+adminRoutes.post('/releases/:product/:version/allow', async (c) => {
+  const body = validate(allowBody, await jsonBody(c.req));
+  const { product, version } = c.req.param();
+  return c.json({ product, version, ...(await allowRelease(c.env, product, version, body, nowSeconds())) }, 201);
+});
+adminRoutes.delete('/releases/:product/:version/allow', async (c) => {
+  const body = validate(allowBody, await jsonBody(c.req));
+  const { product, version } = c.req.param();
+  await disallowRelease(c.env, product, version, body);
+  return c.json({});
 });
 
 adminRoutes.get('/products/:product/site-requirements', async (c) => {

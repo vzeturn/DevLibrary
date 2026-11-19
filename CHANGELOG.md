@@ -8,6 +8,22 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Update lanes (docs/decisions/0001-update-lanes.md, PROTOCOL.md §5.1, §5.2, §6.4). Canary is
+  the fast lane for test machines: the hub answers canary heartbeats with a 15 s interval
+  (`CANARY_HEARTBEAT_SECONDS`), 5 s while an update is on probation, and dl-agent on canary
+  installs on the first heartbeat after a publish (no 5-minute check spacing, no site window or
+  `auto: false` hold), with a 120 s probation; the failure cap and rollback are unchanged. The
+  agent now accepts heartbeat intervals down to 5 s (was 10 s). Stable releases roll out by
+  semver bump, recorded on the promotion (`bump`, migration `0005_update_lanes.sql`): a patch
+  soaks 2 h and reaches every stable agent at once; a minor soaks 24 h and ramps 10 → 50 →
+  100 % at 0 / 24 / 48 h after promotion (`MINOR_RAMP`), by the agent's own rollout bucket and
+  capped by the manifest's `rollout_percent`; a major soaks 72 h on at least 2 canary agents
+  and is offered only to tenants or sites opted in with
+  `POST /admin/releases/:product/:version/allow` (`DELETE` withdraws) or via `update_now`.
+  `GET /admin/releases/:product/:version/gate` adds `lane` (bump, current stable, rollout
+  percent, ramp, allowed tenants and sites). New hub vars `GATE_SOAK_HOURS_PATCH` (falls back
+  to `GATE_SOAK_HOURS`), `GATE_SOAK_HOURS_MINOR`, `GATE_SOAK_HOURS_MAJOR`. Promotions from
+  before the migration behave as a patch; 1.3.x agents keep working unchanged.
 - agent-hub installers reuse the SQL Server connection dl-agent already holds: the bench link
   offers it on a rerun or reinstall (Enter keeps it; a failed or declined one prefills the prompt,
   and an empty password keeps the saved one), and `install.ps1 -SqlPrompt` keeps the declared

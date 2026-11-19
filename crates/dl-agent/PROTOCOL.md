@@ -79,8 +79,8 @@ Channels: `canary` and `stable`. The hub decides an agent's channel:
 - everyone else is on `stable`.
 
 A release is published to `canary` first. It may be promoted to `stable` only when the
-**canary gate** passes: at least `min_agents` canary agents (default 1) have reported that
-version for at least `soak_hours` (default 2), every module on them is `running` (or
+**canary gate** passes: at least `min_agents` canary agents (default 1, at least 2 for a
+major) have reported that version for at least `soak_hours` (set by the bump, §5.2), every module on them is `running` (or
 `disabled` by config, an operator choice rather than a fault), no
 problem report with severity `error`/`critical` and a fingerprint not seen on the previous
 version arrived during the soak, no agent rolled the version back, and, when the product has
@@ -106,6 +106,50 @@ above, with artifacts in the order given. Agents refuse a manifest that is unsig
 by an unknown key, older (`published_at`) than the last one they accepted on that channel,
 or lower in version than the running one unless `allow_downgrade` is true.
 
+### 5.1 Canary: the fast lane
+
+Canary agents are test machines, so faults there must surface and be fixed within minutes.
+The hub answers a canary heartbeat with `heartbeat_seconds = min(agent's interval,
+CANARY_HEARTBEAT_SECONDS)` (default 15), and 5 s while the heartbeat reports
+`update.state = "probation"`, so a commit or a rollback shows at once (agents up to 1.3.x
+floor the interval at 10 s). Every canary release newer than the agent's version sets
+`update_check` on the next heartbeat; the agent installs it in that heartbeat (§6.4), so
+publish → install takes one heartbeat (≤ 15 s) plus the download. Stable agents keep their
+interval (default 60 s).
+
+### 5.2 Stable lanes by semver bump
+
+On promotion the hub compares the version with the current stable (the newest stable release
+other than this one) and records the **bump** on the promotion: `major`, `minor`, `patch`, or
+`initial` when there is no stable yet (treated as a patch). Promotions recorded before the
+lanes have no bump and behave as a patch, as they did. The bump sets the gate and who is
+offered the release, through `update_check`:
+
+| Bump | Gate (`GATE_SOAK_HOURS_*`, `min_agents`) | Stable agents offered (`update_check`) |
+|---|---|---|
+| `patch` / `initial` | soak 2 h | all at once; the site window holds it unless `urgent` |
+| `minor` | soak 24 h | a ramp after `promoted_at`: 10 % from 0 h, 50 % from 24 h, 100 % from 48 h (`MINOR_RAMP`, `"0:10,24:50,48:100"`) |
+| `major` | soak 72 h, at least 2 canary agents | never on its own: only agents of a tenant or site an admin opted in, or an agent sent `update_now` |
+
+The ramp picks agents with the same bucket the agent uses (§5), so the agents offered at
+10 % are still offered at 50 %; the manifest's `rollout_percent` stays the ceiling of every
+lane. `urgent` and `required` do not open a major to anyone. The hotfix lane is unchanged:
+an `urgent` patch installs outside the window, and `force` promotes past a failing gate.
+
+Admin API (bearer token):
+
+- `POST /admin/releases/:product/:version/allow` `{tenant_id, site_id?}` opts a tenant
+  (every site, stored as `site_id = "*"`) or one of its sites in to the release; `DELETE`
+  with the same body withdraws it. 404 `release_not_found` / `tenant_not_found` /
+  `allow_not_found`.
+- `GET /admin/releases/:product/:version/gate` adds `lane: {bump, current_stable,
+  promoted_at, rollout_percent, ramp, automatic, allowed:[{tenant_id, site_id, created_at}]}`;
+  `rollout_percent` is the share of stable agents offered the release now (null before
+  promotion and for a major), `automatic` is false for a major.
+
+The manifest endpoint serves only the latest stable release, so while a major (or a minor
+still ramping) is the latest stable, an agent not offered it gets no update until it is.
+
 ## 6. Update, probation and rollback (agent side)
 
 1. Download the artifact for the agent's target, check size and SHA-256, stage it.
@@ -124,6 +168,7 @@ or lower in version than the running one unless `allow_downgrade` is true.
 
 The remote configuration (§8) may carry
 `"update": {"auto": true, "window": {"from": "01:00", "to": "05:00", "utc_offset_minutes": 420}}`.
+On canary none of this holds a release (§6.4).
 `auto: false` holds every release that is not `required`; outside the window (local time,
 `from == to` means all day, may cross midnight; offset defaults to UTC+7) every release that
 is not `urgent` waits. A held release sets the update status `deferred` with the reason and
@@ -161,6 +206,20 @@ Restarts back off 1 h, 2 h, 4 h … 12 h, reset by a healthy run. Every action l
 `watchdog_action_failed` critical) in `watchdog-reports.json`; the agent sends them after
 its next start. The watchdog logs to `logs/watchdog.log`; `uninstall` removes the task or
 timer first.
+
+### 6.4 Canary fast lane (agent side)
+
+On the `canary` channel (§5.1) the agent:
+
+- checks for an update on every heartbeat that carries `update_check`, without the 5-minute
+  spacing stable agents keep between checks;
+- does not hold a release for the site window or `auto: false` (§6.1): a test machine takes
+  every build at once;
+- keeps probation to 120 s instead of 10 minutes, which is also how long a module may stay
+  degraded before the update counts as bad.
+
+The boot count, the failure cap (§6.2) and the rollback are exactly as on stable. Until the
+first heartbeat answer names its channel, the agent behaves as on `stable`.
 
 ## 7. Problem reports
 
