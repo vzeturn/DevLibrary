@@ -71,6 +71,10 @@ Server=.;Database=SMILE_POS;User Id=smile;Password=...;Encrypt=false;TrustServer
 - Keys are case-insensitive; URL values are percent-decoded.
 - `connection timeout` bounds connecting and login; `Client::set_timeout` bounds each
   request. A request that times out sends ATTENTION, so the connection stays usable.
+- `Client::set_cancel(Some(token))` lets another thread stop a request: after
+  `CancelToken::cancel` the client sends ATTENTION and returns `Error::Cancelled` within about
+  200 ms (a long `BACKUP` on service stop, for example). Later requests fail the same way until
+  a fresh token is set.
 
 ## Integrated authentication (Windows)
 

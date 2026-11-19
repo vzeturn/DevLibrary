@@ -1,0 +1,85 @@
+// Generator of the Azure Shared Key vectors in src/upload/sharedkey.rs (test-only key).
+// Run with the Go SDK azblob v1.6.0: copy this file to main.go in a module whose go.mod
+// requires github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.0 (as SRBackup agent
+// does), then `go run .`; it prints each request and its Authorization header. Kept as .txt
+// so no Go tooling sees it inside this Rust workspace.
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+)
+
+type capture struct{}
+
+func (capture) Do(req *http.Request) (*http.Response, error) {
+	fmt.Printf("REQ %s %s\n", req.Method, req.URL.EscapedPath())
+	fmt.Printf("QUERY %s\n", req.URL.RawQuery)
+	keys := make([]string, 0)
+	for k := range req.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Printf("H %s: %s\n", strings.ToLower(k), strings.Join(req.Header[k], ","))
+	}
+	fmt.Printf("CL %d\n", req.ContentLength)
+	status := 201
+	h := http.Header{}
+	body := ""
+	switch req.Method {
+	case "DELETE":
+		status = 202
+	case "GET":
+		status = 206
+		body = "hello"
+		h.Set("Content-Range", "bytes 0-4/5")
+		h.Set("Content-Length", "5")
+	}
+	return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+}
+
+func main() {
+	ctx := context.Background()
+	key := base64.StdEncoding.EncodeToString([]byte("dl-agent-backup test key, not a secret"))
+	fmt.Printf("KEY %s\n", key)
+	cred, err := azblob.NewSharedKeyCredential("devacct", key)
+	if err != nil {
+		panic(err)
+	}
+	opts := policy.ClientOptions{Transport: capture{}, Retry: policy.RetryOptions{MaxRetries: -1}, Telemetry: policy.TelemetryOptions{Disabled: true}}
+	c, err := azblob.NewClientWithSharedKeyCredential("https://devacct.blob.core.windows.net/", cred, &azblob.ClientOptions{ClientOptions: opts})
+	if err != nil {
+		panic(err)
+	}
+	if _, err := c.UploadBuffer(ctx, "backups", "db 1.bak", []byte("hello"), nil); err != nil {
+		panic(err)
+	}
+	bb := c.ServiceClient().NewContainerClient("backups").NewBlockBlobClient("db 1.bak")
+	id := base64.StdEncoding.EncodeToString([]byte("block-00000001"))
+	if _, err := bb.StageBlock(ctx, id, streaming.NopCloser(bytes.NewReader([]byte("hello"))), nil); err != nil {
+		panic(err)
+	}
+	if _, err := bb.CommitBlockList(ctx, []string{id}, nil); err != nil {
+		panic(err)
+	}
+	if _, err := c.DownloadStream(ctx, "backups", "db 1.bak", &blob.DownloadStreamOptions{Range: blob.HTTPRange{Offset: 0, Count: 5}}); err != nil {
+		panic(err)
+	}
+	if _, err := c.DeleteBlob(ctx, "backups", "db 1.bak", nil); err != nil {
+		panic(err)
+	}
+	_ = blockblob.CommitBlockListOptions{}
+}

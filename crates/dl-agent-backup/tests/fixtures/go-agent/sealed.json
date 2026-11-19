@@ -1,0 +1,7 @@
+{
+  "server_url": "https://backupapi.example.test",
+  "agent_id": "0b9f5a52-6a4e-4c47-9a0e-3f1d2c7b8e61",
+  "api_key": "enc:v1:3trimU6iYAtg7/Y7gTPfU62/OoY3dGver6HlJwck9pcWsbrWsOo4IdjVEX6rPRGfmU/A",
+  "master_key": "enc:v1:9k/IjSgCWwFIMt9XDYzA6Nau9VBOHemJP+XEF1opoQ/eom844okngOlSpwPM0RWJm20=",
+  "log_level": "info"
+}
