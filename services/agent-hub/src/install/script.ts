@@ -158,7 +158,8 @@ function Remove-OldCopies {
     Warn ('Stopping leftover process ' + $p.Id)
     Stop-Process -Id $p.Id -Force
   }
-  foreach ($f in @(($Exe + '.new'), ($Exe + '.download'))) { if (Test-Path $f) { Remove-Item $f -Force } }
+  # Not $Exe.download: it is the verified download that Move-Item installs next.
+  if (Test-Path ($Exe + '.new')) { Remove-Item ($Exe + '.new') -Force }
 }
 
 function Remove-Replaced {
