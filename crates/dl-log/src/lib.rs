@@ -7,6 +7,7 @@ mod level;
 mod logger;
 mod macros;
 mod record;
+mod redact;
 mod sink;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -27,6 +28,7 @@ pub use logger::{Logger, LoggerBuilder, flush, init, logger, set_level, shutdown
 pub use record::{
     Context, ContextGuard, ContextIter, Field, Fields, Key, Record, push_context, with_context,
 };
+pub use redact::{REDACTED, Redacted, scrub};
 pub use sink::{MemorySink, Sink, WriterSink};
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
