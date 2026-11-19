@@ -65,10 +65,15 @@ fn iname1_lookup_with_and_without_the_column() {
             names(&mut db, 5).is_empty(),
             "missing column keeps till names"
         );
+        // The ALTER runs alone: SQL Server compiles a batch before running it, so
+        // an INSERT in the same batch would still see the one-column table.
         exec(
             &mut db,
-            "ALTER TABLE dbo.ItemDef ADD IName1 nvarchar(100) NULL;
-             INSERT dbo.ItemDef VALUES ('B2', N'');
+            "ALTER TABLE dbo.ItemDef ADD IName1 nvarchar(100) NULL;",
+        );
+        exec(
+            &mut db,
+            "INSERT dbo.ItemDef VALUES ('B2', N'');
              UPDATE dbo.ItemDef SET IName1 = N'Tôm' WHERE ICode = 'A1';",
         );
         let m = names(&mut db, 5);
