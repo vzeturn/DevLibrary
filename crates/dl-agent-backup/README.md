@@ -96,7 +96,10 @@ the file, the error says so ("written by SQL Server on … but is not reachable 
 | `LocalFolder` | Copy to a local or mapped folder (`remoteFolderPath`). |
 | `AWSS3`, `S3`, `CloudflareR2`, `R2` | SigV4, multipart above 16 MiB, `endpoint` for R2/MinIO (https only). |
 | `AzureBlob` | `connectionString` (`conn:` Shared Key / SAS, or `sas:` URL), block blobs above 32 MiB; the stored path carries no SAS token. |
-| `GoogleDrive`, `OneDrive` | Not yet (OAuth refresh, slice B2b): the schedule fails with `backup_destination_unsupported`. |
+| `GoogleDrive` | OAuth refresh token (`clientId`, `clientSecret`, `refreshToken`, optional `accessToken` / `tokenExpiresAt`), resumable upload in 32 MiB chunks (multiples of 256 KiB, an interrupted chunk is resumed), path `gdrive://<folder>/<name>`. |
+| `OneDrive` | Same OAuth fields, Graph: simple PUT under 4 MiB, upload session in 10 MiB chunks (multiples of 320 KiB), above 20 MiB up to four parallel parts plus a `.odmanifest`; the redirect download carries no bearer token; path `onedrive://<path>`. |
+
+An unknown provider still fails with `backup_destination_unsupported`. A refreshed or rotated access token lives in memory only, as in the Go agent. A revoked grant is `backup_credential_error`.
 
 ## Reports, metrics, commands
 

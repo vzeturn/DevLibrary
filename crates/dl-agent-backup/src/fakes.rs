@@ -192,7 +192,7 @@ impl FakeDest {
 
 impl Uploaders for FakeDest {
     fn open(&self, dest: &Destination) -> Result<Box<dyn Uploader>, Error> {
-        if matches!(Kind::of(&dest.provider), Kind::Later | Kind::Unknown) {
+        if matches!(Kind::of(&dest.provider), Kind::Unknown) {
             return Real.open(dest);
         }
         if let Some(e) = &self.state().open_error {

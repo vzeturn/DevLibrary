@@ -103,7 +103,7 @@ impl Reports {
 
 /// Words that start a secret in a message; what follows them, up to the next separator, is
 /// replaced. Errors are written not to carry secrets; this is the second line of defence.
-const SECRET_MARKERS: [&str; 9] = [
+const SECRET_MARKERS: [&str; 10] = [
     "password=",
     "pwd=",
     "accountkey=",
@@ -113,6 +113,7 @@ const SECRET_MARKERS: [&str; 9] = [
     "secretaccesskey",
     "x-amz-signature=",
     "token=",
+    "client_secret=",
 ];
 
 /// `message` with anything after a secret marker replaced by `[redacted]`.
@@ -256,6 +257,10 @@ pub(crate) mod tests {
         assert_eq!(
             scrub("Authorization: Bearer eyJhbGci.x.y done"),
             "Authorization: Bearer [redacted] done"
+        );
+        assert_eq!(
+            scrub("grant_type=refresh_token&client_secret=S3CR3T&refresh_token=R"),
+            "grant_type=refresh_token&client_secret=[redacted]&refresh_token=[redacted]"
         );
         assert_eq!(scrub("Password=hunter2 ok"), "Password=[redacted] ok");
         assert_eq!(scrub("Bán hàng: lỗi 3201"), "Bán hàng: lỗi 3201");
