@@ -48,6 +48,8 @@ export interface SignOptions {
   agentId?: string;
   /** Send this body instead of the signed one (tampering). */
   sendBody?: string;
+  /** Another hub host (the fallback); the signature covers the path only. */
+  base?: string;
 }
 
 let nonceCounter = 0;
@@ -71,7 +73,7 @@ export async function signed(env: Env, agent: TestAgent, method: string, path: s
   };
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = opt.sendBody ?? text;
-  return app.request(`${URL_BASE}${path}`, init, env);
+  return app.request(`${opt.base ?? URL_BASE}${path}`, init, env);
 }
 
 export async function createTenant(env: Env, id: string, demo: boolean): Promise<void> {

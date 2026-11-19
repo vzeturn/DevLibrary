@@ -330,7 +330,12 @@ try {
   } else {
     if (-not $Code) { $Code = Read-Host 'Enrolment code' }
     if (-not $Code) { throw 'An enrolment code is needed (ask the hub admin).' }
-    $argv = @('enroll', '--hub', $Hub, '--data', $Data)
+    # -- hub fallback list (PROTOCOL.md §2.1): the hub's other hosts follow -Hub, so enrolment
+    #    still works while the primary host is down; the answer's hub_urls is what the agent keeps.
+    $hubArg = $Hub
+    foreach ($h in ('__HUBS__' -split ',')) { if ($h -and (($hubArg -split ',') -notcontains $h)) { $hubArg += ',' + $h } }
+    # -- end hub fallback list
+    $argv = @('enroll', '--hub', $hubArg, '--data', $Data)
     if ($enrolled) { $argv += '--force' }
     $env:DL_AGENT_ENROLL_CODE = $Code
     try { $ok = Invoke-Agent $argv } finally { Remove-Item Env:DL_AGENT_ENROLL_CODE -ErrorAction SilentlyContinue }
@@ -369,9 +374,9 @@ try {
 }
 `;
 
-/** The installer with this hub's origin as its default hub. */
-export function installScript(origin: string): string {
-  return SCRIPT.split('__HUB__').join(origin);
+/** The installer with this hub's origin as its default hub and `hubs` (HUB_URLS) as the enrolment fallbacks. */
+export function installScript(origin: string, hubs: readonly string[] = []): string {
+  return SCRIPT.split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
 }
 
 /** The one-liner an admin pastes (PowerShell 2.0 safe; the code stays out of the URL). */

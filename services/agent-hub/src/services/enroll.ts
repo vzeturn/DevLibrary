@@ -1,4 +1,5 @@
 import { intVar, type Env } from '../env';
+import { hubUrls } from '../domain/hubUrls';
 import { resolveChannel } from '../domain/channel';
 import type { EnrollBody } from '../domain/schemas';
 import { fromBase64, importEd25519, sha256Hex, uuidv7 } from '../lib/crypto';
@@ -14,6 +15,8 @@ export interface EnrollAnswer {
   channel: string;
   heartbeat_seconds: number;
   config: ConfigView;
+  /** Hub hosts, primary first (PROTOCOL §2.1); absent when HUB_URLS is not set. */
+  hub_urls?: string[];
 }
 
 /** Codes are typed by people: case and surrounding spaces do not matter. */
@@ -57,5 +60,12 @@ export async function enroll(env: Env, body: EnrollBody, now: number): Promise<E
     channel: resolveChannel(null, demo),
     heartbeat_seconds: heartbeatSeconds,
     config: await configView(env.DB, agentId),
+    ...withHubUrls(env),
   };
+}
+
+/** `{ hub_urls }` for an answer, or nothing when the hub has no list configured. */
+export function withHubUrls(env: Env): { hub_urls?: string[] } {
+  const urls = hubUrls(env.HUB_URLS);
+  return urls.length > 0 ? { hub_urls: urls } : {};
 }

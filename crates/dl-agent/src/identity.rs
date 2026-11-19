@@ -120,9 +120,16 @@ impl Identity {
     /// Saves the identity: public facts as JSON, the seed sealed (DPAPI machine scope on
     /// Windows, mode 0600 elsewhere).
     pub fn save(&self, dir: &Path) -> Result<(), Error> {
-        let (meta, key) = Identity::paths(dir);
+        let (_, key) = Identity::paths(dir);
         store::write_bytes(&key, &seal(self.key.seed(), ENTROPY)?)?;
         restrict_file(&key)?;
+        self.save_meta(dir)
+    }
+
+    /// Rewrites only the public facts (`identity.json`), e.g. after the hub sent a new
+    /// host list; the sealed key is left as it is.
+    pub fn save_meta(&self, dir: &Path) -> Result<(), Error> {
+        let (meta, _) = Identity::paths(dir);
         let v = json!({"agent_id": self.agent_id, "tenant": self.tenant, "site": self.site,
                        "hub_urls": self.hub_urls.clone(), "public_key": self.public_key()});
         store::write_json(&meta, &v)

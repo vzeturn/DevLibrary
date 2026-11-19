@@ -480,6 +480,7 @@ impl Agent {
         if let Some((_, hash)) = survey {
             self.survey_sent = Some((hash, now));
         }
+        self.adopt_hub_urls(answer.hub_urls.as_ref());
         self.channel = answer.channel;
         self.heartbeat_seconds = answer.heartbeat_seconds;
         self.next_heartbeat = now + answer.heartbeat_seconds;
@@ -633,7 +634,7 @@ impl Agent {
             .map(|(v, at)| json!({"version": v.to_string(), "at": *at}))
             .collect();
         json!({
-            "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": id.hub_urls.clone(),
+            "agent_id": id.agent_id, "tenant": id.tenant, "site": id.site, "hub_urls": self.hub.hub_urls(),
             "product": self.opts.product, "version": self.opts.version.to_string(), "target": current_target(), "hostname": self.hostname,
             "channel": self.channel, "uptime_seconds": now.saturating_sub(self.started_at), "clock_skew": self.hub.skew(),
             "config_version": self.config.current.version, "config_on_trial": self.config.trial_since.is_some(),
@@ -777,6 +778,9 @@ pub fn local_status(data_dir: &Path, product: &str, version: &Version) -> Value 
 
 #[path = "agent_update.rs"]
 mod update_flow;
+
+#[path = "agent_hub.rs"]
+mod hub_list;
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]

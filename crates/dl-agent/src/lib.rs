@@ -11,6 +11,7 @@ pub mod config;
 mod error;
 pub mod host;
 pub mod hub;
+pub mod hub_urls;
 pub mod identity;
 pub mod manifest;
 pub mod optout;

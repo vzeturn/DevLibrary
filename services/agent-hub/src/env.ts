@@ -17,6 +17,8 @@ export interface Env {
   GATE_SOAK_HOURS_MAJOR?: string;
   /** Minor rollout ramp after promotion, "hours:percent,…" (default "0:10,24:50,48:100"). */
   MINOR_RAMP?: string;
+  /** Hub base URLs handed to agents, primary first ("https://a,https://b"); also limits the fallback host to agent paths. */
+  HUB_URLS?: string;
 }
 
 export interface AgentRow {

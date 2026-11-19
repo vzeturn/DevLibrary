@@ -1,5 +1,6 @@
 //! Signed calls to the hub (PROTOCOL.md §1–§2), with fallback hosts and clock-skew repair.
 
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
 use dl_json::{Value, json};
@@ -139,6 +140,8 @@ pub struct HeartbeatAnswer {
     pub commands: Vec<Command>,
     /// A newer release exists on the agent's channel.
     pub update_check: bool,
+    /// The hub's host list, primary first, as sent (checked by [`crate::hub_urls::accept`]).
+    pub hub_urls: Option<Value>,
 }
 
 impl HeartbeatAnswer {
@@ -169,6 +172,7 @@ impl HeartbeatAnswer {
                 .get("update_check")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            hub_urls: v.get("hub_urls").filter(|u| !u.is_null()).cloned(),
         })
     }
 }
@@ -196,6 +200,7 @@ fn path_and_query(url: &str) -> Result<String, Error> {
 pub struct HubClient {
     transport: Box<dyn Transport>,
     identity: Identity,
+    urls: RwLock<Vec<String>>,
     preferred: AtomicUsize,
     skew: AtomicI64,
 }
@@ -205,6 +210,7 @@ impl HubClient {
     pub fn new(transport: Box<dyn Transport>, identity: Identity) -> HubClient {
         HubClient {
             transport,
+            urls: RwLock::new(identity.hub_urls.clone()),
             identity,
             preferred: AtomicUsize::new(0),
             skew: AtomicI64::new(0),
@@ -214,6 +220,36 @@ impl HubClient {
     /// The identity requests are signed with.
     pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The hub hosts in use, primary first.
+    pub fn hub_urls(&self) -> Vec<String> {
+        self.urls.read().map(|u| u.clone()).unwrap_or_default()
+    }
+
+    /// The host the last successful call went to.
+    pub fn current_url(&self) -> Option<String> {
+        let urls = self.hub_urls();
+        let at = self.preferred.load(Ordering::Relaxed);
+        urls.get(at % urls.len().max(1)).cloned()
+    }
+
+    /// Replaces the host list (from a hub answer); the host in use stays preferred when it
+    /// is still listed. `false` when the list did not change.
+    pub fn set_hub_urls(&self, urls: Vec<String>) -> bool {
+        let current = self.current_url();
+        let Ok(mut held) = self.urls.write() else {
+            return false;
+        };
+        if *held == urls || urls.is_empty() {
+            return false;
+        }
+        let at = current
+            .and_then(|c| urls.iter().position(|u| *u == c))
+            .unwrap_or(0);
+        *held = urls;
+        self.preferred.store(at, Ordering::Relaxed);
+        true
     }
 
     /// Hub clock minus local clock, learnt from `clock_skew` answers and heartbeats.
@@ -264,7 +300,7 @@ impl HubClient {
     /// A signed call to `path` on the first hub that answers; fallback hosts are tried on
     /// transport errors and 5xx answers, and the one that worked is used first next time.
     fn call(&self, method: &str, path: &str, body: &[u8]) -> Result<Vec<u8>, Error> {
-        let urls = &self.identity.hub_urls;
+        let urls = &self.hub_urls();
         let first = self.preferred.load(Ordering::Relaxed) % urls.len().max(1);
         let mut last = Error::Config("no hub URL".into());
         for i in 0..urls.len() {
@@ -350,8 +386,7 @@ impl HubClient {
     /// copy that would then fail the hash check.
     pub fn download(&self, url: &str) -> Result<Vec<u8>, Error> {
         let on_hub = self
-            .identity
-            .hub_urls
+            .hub_urls()
             .iter()
             .any(|h| url.starts_with(&format!("{}/", h.trim_end_matches('/'))));
         if on_hub {
@@ -396,13 +431,13 @@ pub fn enroll(
                         .map(str::to_string)
                         .ok_or_else(|| Error::Json(format!("enroll answer without {k}")))
                 };
-                let identity = Identity::new(
-                    &s("agent_id")?,
-                    &s("tenant")?,
-                    &s("site")?,
-                    hub_urls.to_vec(),
-                    key,
-                );
+                // The hub's own list (PROTOCOL §2.1) when it sends one, else what was given.
+                let urls = v
+                    .get("hub_urls")
+                    .and_then(|o| crate::hub_urls::accept(o, base))
+                    .unwrap_or_else(|| hub_urls.to_vec());
+                let identity =
+                    Identity::new(&s("agent_id")?, &s("tenant")?, &s("site")?, urls, key);
                 let config = match v.get("config") {
                     Some(c) if c.get("version").and_then(Value::as_u64).unwrap_or(0) > 0 => {
                         Some(RemoteConfig::from_json(c)?)

@@ -288,3 +288,47 @@ fn selftest_upload_to_an_older_hub_is_not_an_error() {
         Err(Error::Status { code: 400, .. })
     ));
 }
+
+#[test]
+fn a_new_host_list_keeps_the_host_in_use_and_falls_back_over_it() {
+    let hub = FakeHub::default();
+    hub.push_down().push(200, "{}").push_down().push(200, "{}");
+    let c = HubClient::new(Box::new(hub.clone()), identity(&["https://a", "https://b"]));
+    c.command_result(&CommandResult::new("c1", true, "ok", 1))
+        .unwrap();
+    assert_eq!(c.current_url().as_deref(), Some("https://b"));
+    // b is still listed: it stays the host in use.
+    assert!(c.set_hub_urls(vec!["https://c".into(), "https://b".into()]));
+    assert!(!c.set_hub_urls(vec!["https://c".into(), "https://b".into()]));
+    assert!(!c.set_hub_urls(Vec::new()));
+    c.command_result(&CommandResult::new("c2", true, "ok", 1))
+        .unwrap();
+    let urls: Vec<String> = hub.seen().into_iter().map(|s| s.url).collect();
+    assert_eq!(
+        urls[2..],
+        [
+            "https://b/v1/commands/c2/result".to_string(),
+            "https://c/v1/commands/c2/result".to_string()
+        ]
+    );
+    assert_eq!(c.hub_urls(), ["https://c", "https://b"]);
+}
+
+#[test]
+fn enroll_keeps_the_hub_host_list() {
+    let hub = FakeHub::default();
+    hub.push(
+        200,
+        r#"{"agent_id": "agt_9", "tenant": "t", "site": "s", "channel": "stable",
+        "hub_urls": ["https://agent.pms.id.vn", "https://agent-hub.example.workers.dev"]}"#,
+    );
+    let e = enroll(&hub, &["https://given.test".to_string()], "CODE", &[]).unwrap();
+    assert_eq!(
+        e.identity.hub_urls,
+        [
+            "https://agent.pms.id.vn",
+            "https://agent-hub.example.workers.dev",
+            "https://given.test"
+        ]
+    );
+}
