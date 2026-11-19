@@ -117,6 +117,22 @@ fn dir_problem(_: &Path) -> Result<Option<String>, String> {
 
 /// `identity.key` and `sql.json` readable by the service account and administrators only;
 /// the data directory owned by them (Windows) or not world-writable (Linux).
+/// A warning row while the `no-update` file keeps this agent from updating by itself.
+pub(crate) fn no_update(dir: &Path) -> Option<Check> {
+    crate::optout::blocked(dir).then(|| {
+        Check::timed(CORE, "no_update", "Automatic updates", || {
+            Outcome::warn(format!(
+                "the {} file exists: this agent never updates by itself (update_now still works)",
+                crate::optout::FILE
+            ))
+            .remedy(format!(
+                "delete {} in the data directory to let the hub's updates through",
+                crate::optout::FILE
+            ))
+        })
+    })
+}
+
 pub(crate) fn permissions(dir: &Path) -> Check {
     Check::timed(CORE, "permissions", "Private files locked down", || {
         let files: Vec<_> = ["identity.key", SQL_FILE]

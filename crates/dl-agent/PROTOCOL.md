@@ -150,6 +150,28 @@ Admin API (bearer token):
 The manifest endpoint serves only the latest stable release, so while a major (or a minor
 still ramping) is the latest stable, an agent not offered it gets no update until it is.
 
+### 5.3 Kill switch: pause a release, hold a tenant
+
+Two operator stops, both kept in the hub (migration `0006_kill_switch.sql`):
+
+- `POST /admin/releases/:product/:version/pause` (optional `{reason}`) and `.../resume`. A
+  paused release is never offered, on canary or stable: the heartbeat's `update_check` is
+  false for it, and the manifest endpoint and the installer serve the newest non-paused
+  release of the channel instead (an agent already on that or a newer version is offered
+  nothing). The pause survives a republish or a promotion. `GET .../gate` carries `paused` and
+  `paused_reason`; `GET /admin/releases` and the admin page show it. 404 `release_not_found`,
+  `release_not_paused`.
+- `POST /admin/tenants/:tenant/hold` `{site_id?, product?, reason?}` (`site_id` and `product`
+  default to `*`: every site, every product), `DELETE` with the same body, `GET` lists. An agent
+  of a held tenant or site gets `update_check` false and a 404 `no_release` from the manifest
+  endpoint. An `update_now` command that was handed to the agent and is not answered yet (at
+  most 10 minutes) opens the manifest again, so the operator's override works. 404
+  `tenant_not_found`, `hold_not_found`.
+
+Other tenants are untouched. Agents need no change: they only see `update_check` false.
+The hub keeps no separate audit log for admin calls (none of its admin routes has one); the
+admin bearer token is the audit boundary.
+
 ## 6. Update, probation and rollback (agent side)
 
 1. Download the artifact for the agent's target, check size and SHA-256, stage it.
@@ -220,6 +242,14 @@ On the `canary` channel (§5.1) the agent:
 
 The boot count, the failure cap (§6.2) and the rollback are exactly as on stable. Until the
 first heartbeat answer names its channel, the agent behaves as on `stable`.
+
+### 6.5 Local opt-out: the `no-update` file
+
+If `<data dir>/no-update` exists, the agent ignores the hub's `update_check` (no manifest is
+fetched, nothing installs). It says so: the heartbeat carries `"update_blocked": "local"`
+while the file exists (absent otherwise), one `info` report `update_blocked_local` is sent per
+start, and `selftest` shows a warn row `core/no_update`. The `update_now` command still runs,
+as does `retry_update`. Hubs that do not know the field ignore it.
 
 ## 7. Problem reports
 

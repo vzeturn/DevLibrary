@@ -3,6 +3,7 @@ import { listReleases } from '../repo/releases';
 import { agentsView } from '../services/admin';
 import { latestSelftestPerAgent } from '../repo/selftest';
 import { listRequirements } from '../repo/sites';
+import { holdsView } from '../services/holds';
 import { gateStatus } from '../services/releases';
 import type { SelftestCheck, SelftestSummary } from '../services/selftest';
 import { requirementOf, siteReadiness } from '../services/sites';
@@ -57,7 +58,9 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
   const releaseRows: string[] = [];
   for (const r of releases.filter((x) => x.channel === 'canary')) {
     let gate: string;
-    if (stable.has(`${r.product}@${r.version}`)) {
+    if (r.paused) {
+      gate = '<span class="bad">Đã tạm dừng — không phát cho agent nào</span>';
+    } else if (stable.has(`${r.product}@${r.version}`)) {
       gate = '<span class="ok">Đã lên stable</span>';
     } else {
       const g = await gateStatus(env, r.product, r.version, now);
@@ -95,6 +98,12 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
       <td>${counts}</td><td class="wrapcell">${list}</td></tr>`;
   });
 
+  const holdRows = (await holdsView(env)).map(
+    (h) => `<tr><td>${esc(h.tenant_id)}</td><td>${esc(h.site_id === '*' ? 'mọi chi nhánh' : h.site_id)}</td>
+      <td>${esc(h.product === '*' ? 'mọi sản phẩm' : h.product)}</td><td>${esc(when(h.created_at, now))}</td>
+      <td class="wrapcell">${esc(h.reason ?? '—')}</td></tr>`,
+  );
+
   const empty = (cols: number, text: string): string => `<tr><td colspan="${cols}" class="muted">${text}</td></tr>`;
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent hub</title><style>${STYLE}</style></head>
@@ -105,6 +114,8 @@ export async function renderStatusPage(env: Env, now: number): Promise<string> {
 <tbody>${agentRows || empty(8, 'Chưa có agent nào.')}</tbody></table></div>
 <h2>Bản phát hành (canary)</h2><div class="wrap"><table><thead><tr><th>Sản phẩm</th><th>Phiên bản</th><th>Phát hành</th>
 <th>Cổng canary</th></tr></thead><tbody>${releaseRows.join('') || empty(4, 'Chưa có bản phát hành nào.')}</tbody></table></div>
+<h2>Khách hàng bị giữ cập nhật</h2><div class="wrap"><table><thead><tr><th>Khách hàng</th><th>Chi nhánh</th><th>Sản phẩm</th>
+<th>Từ</th><th>Lý do</th></tr></thead><tbody>${holdRows.join('') || empty(5, 'Không khách hàng nào bị giữ.')}</tbody></table></div>
 <h2>Site sẵn sàng cho sản phẩm</h2><div class="wrap"><table><thead><tr><th>Sản phẩm</th><th>Khách hàng</th><th>Chi nhánh</th>
 <th>Máy</th><th>Khảo sát</th><th>Kết quả</th></tr></thead>
 <tbody>${siteRows.join('') || empty(6, 'Chưa sản phẩm nào đặt yêu cầu cho site.')}</tbody></table></div>

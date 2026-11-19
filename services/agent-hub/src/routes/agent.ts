@@ -46,7 +46,7 @@ agentRoutes.post('/commands/:id/result', async (c) => {
 agentRoutes.get('/releases/:product/:channel', async (c) => {
   const channel = c.req.param('channel');
   if (!CHANNELS.has(channel)) throw new HttpError(404, 'no_release');
-  const text = await manifestText(c.env, c.req.param('product'), channel as 'canary' | 'stable');
+  const text = await manifestText(c.env, c.req.param('product'), channel as 'canary' | 'stable', c.get('agent'), nowSeconds());
   return c.body(text, 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
 });
 

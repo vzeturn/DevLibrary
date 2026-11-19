@@ -41,8 +41,8 @@ shared by every module on the site.
 | Staged swap, previous kept, probation, rollback after 3 boots, failed-version blacklist | EINVOICE ADR-0017, Arrival ADR-001 | `update.rs`; failure cap 3 per 24 h, 9 for good, `retry_update` (PROTOCOL §6.2) |
 | Drain in-flight work before swap; maintenance window; urgent flag | Arrival LinkGate, Membership window | module `drain()`; site `update.window` / `update.auto`; signed manifest `urgent` / `required` (PROTOCOL §6.1) |
 | Canary channel for demo tenants, gate, staged rollout % | Membership PILOT/GENERAL, HL rollout % | `channel.rs` + hub gate |
-| Kill switch / pause / hold tenant | Membership ADR-0046, Arrival HoldTenants | hub release `paused`, agent override |
-| Local opt-out | PDA `AutoUpdate=false`, EINVOICE `no-update` | `no-update` file |
+| Kill switch / pause / hold tenant | Membership ADR-0046, Arrival HoldTenants | hub `POST /admin/releases/:product/:version/pause` + `/resume` (never offered, canary or stable) and `POST/DELETE /admin/tenants/:tenant/hold` (tenant or site, one product or all); the operator's `update_now` still works (PROTOCOL §5.3) |
+| Local opt-out | PDA `AutoUpdate=false`, EINVOICE `no-update` | `<data dir>/no-update` file: no self-update on `update_check`, `update_blocked: "local"` in the heartbeat, an info report `update_blocked_local` per start, a selftest warn row; `update_now` still works (PROTOCOL §6.5) |
 | Structured problem reports, fingerprint dedup, durable spool | PDA site events, Arrival problems.json | `report.rs` (PROTOCOL §7) |
 | Heartbeat with module health + metrics | PDA, Membership | PROTOCOL §3 |
 | Remote config + last-known-good | HL policy cache, PDA runtime-config | `config.rs` (PROTOCOL §8) |

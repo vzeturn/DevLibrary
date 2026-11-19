@@ -10,6 +10,7 @@ import { saveHeartbeat } from '../repo/heartbeats';
 import { latestRelease } from '../repo/releases';
 import { upsertReports } from '../repo/reports';
 import type { ConfigView } from './config';
+import { agentHeld } from './holds';
 import { heartbeatSeconds, stableOffered } from './lanes';
 
 export interface WireCommand {
@@ -48,7 +49,8 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
   const config = await getConfig(env.DB, agent.id);
   const release = await latestRelease(env.DB, hb.product, channel);
   // Canary is offered every newer release at once; stable by the release's lane (§5.2).
-  const newer = release !== null && compareVersions(release.version, hb.version) > 0;
+  // A held tenant or site is offered nothing (kill switch, PROTOCOL §5.3); update_now still works.
+  const newer = release !== null && compareVersions(release.version, hb.version) > 0 && !(await agentHeld(env, agent, hb.product));
   const updateCheck = newer && (channel === 'canary' || (await stableOffered(env, agent, release, now)));
 
   return {

@@ -1,4 +1,4 @@
-import type { Channel, Env } from '../env';
+import type { AgentRow, Channel, Env } from '../env';
 import { evaluateGate, type GateResult } from '../domain/gate';
 import { gateRules } from '../domain/lanes';
 import { manifest as manifestSchema, type Manifest } from '../domain/schemas';
@@ -13,6 +13,7 @@ import {
   previousVersion,
   putRelease,
 } from '../repo/releases';
+import { agentHeld, releasePause, updateNowActive } from './holds';
 import { laneConfig, releaseLane, type LaneStatus } from './lanes';
 import { requirementOf, siteReadiness } from './sites';
 
@@ -24,6 +25,9 @@ export interface GateStatus extends GateResult {
   min_agents: number;
   soak_hours: number;
   lane: LaneStatus;
+  /** Paused releases are never offered (PROTOCOL §5.3). */
+  paused: boolean;
+  paused_reason: string | null;
 }
 
 export interface PromoteRequest {
@@ -49,7 +53,10 @@ export async function publishCanary(env: Env, product: string, version: string, 
 }
 
 /** The manifest text exactly as published; the signature covers the agent's canonical form of it. */
-export async function manifestText(env: Env, product: string, channel: Channel): Promise<string> {
+export async function manifestText(env: Env, product: string, channel: Channel, agent?: AgentRow, now = 0): Promise<string> {
+  if (agent && (await agentHeld(env, agent, product)) && !(await updateNowActive(env, agent.id, now))) {
+    throw new HttpError(404, 'no_release');
+  }
   const row = await latestRelease(env.DB, product, channel);
   if (!row) throw new HttpError(404, 'no_release');
   return row.manifest;
@@ -73,6 +80,7 @@ export async function gateStatus(env: Env, product: string, version: string, now
         .filter((s) => !s.eligible)
         .map((s) => ({ agent_id: s.agent_id, reasons: s.reasons.map((r) => r.detail) }))
     : null;
+  const pause = await releasePause(env, product, version);
   const result = evaluateGate({
     minAgents,
     soakHours,
@@ -82,7 +90,7 @@ export async function gateStatus(env: Env, product: string, version: string, now
     previousFingerprints,
     unreadySites,
   });
-  return { product, version, previous_version: previous, min_agents: minAgents, soak_hours: soakHours, lane, ...result };
+  return { product, version, previous_version: previous, min_agents: minAgents, soak_hours: soakHours, lane, paused: pause !== null, paused_reason: pause?.reason ?? null, ...result };
 }
 
 export interface PromoteAnswer {

@@ -127,3 +127,42 @@ fn canary_probation_is_short_and_still_rolls_a_bad_build_back() {
     );
     a.supervisor.stop_all(STOP_WAIT);
 }
+
+#[test]
+fn the_no_update_file_stops_update_check_but_not_update_now() {
+    let d = TestDir::new("lane-no-update");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, r#"{"accepted": 0}"#.into()));
+    let new = b"new binary";
+    let mut a = agent(&d, &hub, Vec::new());
+    std::fs::write(a.opts.data_dir.join(crate::optout::FILE), b"").unwrap();
+    // The heartbeat says so, and an update_check is ignored.
+    assert_eq!(
+        a.heartbeat_body(1000)["update_blocked"],
+        dl_json::Value::from("local")
+    );
+    hub.push(200, &hb("stable", true));
+    assert_eq!(a.step(1000), None);
+    assert_eq!(
+        release_fetches(&hub),
+        0,
+        "no manifest fetch while opted out"
+    );
+    // update_now still installs.
+    let cmd = r#"{"server_time": 0, "channel": "stable", "heartbeat_seconds": 60, "update_check": false,
+        "commands": [{"id": "c1", "kind": "update_now", "args": {}, "expires_at": 99999}]}"#;
+    hub.push(200, cmd)
+        .push(200, &signed_manifest_on("stable", "99.0.0", new, 7))
+        .push(200, std::str::from_utf8(new).unwrap());
+    assert_eq!(a.step(1060), Some(Exit::Restart));
+    assert_eq!(std::fs::read(&a.opts.exe).unwrap(), new);
+    a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn without_the_file_nothing_is_reported_blocked() {
+    let d = TestDir::new("lane-no-block");
+    let hub = FakeHub::default();
+    let a = agent(&d, &hub, Vec::new());
+    assert!(a.heartbeat_body(1000).get("update_blocked").is_none());
+}
