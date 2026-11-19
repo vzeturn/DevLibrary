@@ -10,20 +10,37 @@ pub const REDACTED: &str = "[redacted]";
 
 /// Field names whose value is a secret wherever they appear (`name=value`, `name: value`,
 /// `"name":"value"`); matched without regard to case, as the end of a longer name too
-/// (`sql_password`, `x-api-key`).
-const SECRET_NAMES: [&str; 11] = [
+/// (`sql_password`, `x-api-key`, `tenant_key`, `DL_AGENT_ARRIVAL_TENANT_KEY`).
+const SECRET_NAMES: [&str; 7] = [
     "password",
     "pwd",
     "secret",
     "token",
-    "api_key",
-    "apikey",
-    "api-key",
-    "private_key",
-    "client_secret",
+    "key",
     "authorization",
     "_sealed",
 ];
+
+/// Names ending in `key` that hold no secret (an R2 object key, a public key); matched as the
+/// end of the name. `key_id` and `kid` do not end in `key` and are never scrubbed.
+const HARMLESS_NAMES: [&str; 7] = [
+    "r2_key",
+    "object_key",
+    "public_key",
+    "publickey",
+    "pubkey",
+    "sort_key",
+    "cache_key",
+];
+
+/// Connection-string keywords whose unquoted value runs to the next `;` (ADO.NET rules).
+const CONNECTION_PASSWORDS: [&str; 2] = ["password", "pwd"];
+
+/// Whether `name` (lower case) names a secret.
+fn is_secret_name(name: &str) -> bool {
+    SECRET_NAMES.iter().any(|s| name.ends_with(s))
+        && !HARMLESS_NAMES.iter().any(|h| name.ends_with(h))
+}
 
 /// A [`Format`] that renders with `inner` and then scrubs the line with [`scrub`].
 #[derive(Debug, Clone)]
@@ -45,8 +62,10 @@ fn is_name_byte(b: u8) -> bool {
 }
 
 /// `text` with every secret value replaced by [`REDACTED`]: values after a secret field
-/// name and `=` / `:` (quoted or up to `;`, `,`, `&`, whitespace or a closing bracket), and
-/// the token after `Bearer` / `Basic`. Borrowed when nothing was found.
+/// name and `=` / `:` (quoted, or up to `;`, `,`, `&`, whitespace or a closing bracket), and
+/// the token after `Bearer` / `Basic`. A connection-string `Password=` / `Pwd=` follows the
+/// ADO.NET rules: `"…"` or `'…'` with the quote doubled inside, or unquoted up to the next
+/// `;` (spaces and commas included). Borrowed when nothing was found.
 pub fn scrub(text: &str) -> Cow<'_, str> {
     let lower = text.to_ascii_lowercase();
     let b = text.as_bytes();
@@ -73,8 +92,9 @@ pub fn scrub(text: &str) -> Cow<'_, str> {
         }
         let end = i + b[i..].iter().take_while(|c| is_name_byte(**c)).count();
         let name = &lower[i..end];
-        if SECRET_NAMES.iter().any(|s| name.ends_with(s))
-            && let Some(v) = value_after(b, end)
+        let conn = CONNECTION_PASSWORDS.iter().any(|p| name.ends_with(p));
+        if is_secret_name(name)
+            && let Some(v) = value_after(b, end, conn)
         {
             cuts.push(v);
         }
@@ -108,16 +128,19 @@ pub fn scrub(text: &str) -> Cow<'_, str> {
 }
 
 /// The value span after a field name ending at `at`: skips a closing quote, spaces, then
-/// `=` or `:`, spaces and an opening quote. `None` when no separator follows or the value is
+/// `=` or `:`, spaces and an opening quote. `conn` (a connection-string password after `=`)
+/// takes an unquoted value up to `;`, a line end or an unescaped `"` (the end of a quoted
+/// log field), trailing spaces left out. `None` when no separator follows or the value is
 /// empty.
-fn value_after(b: &[u8], mut at: usize) -> Option<(usize, usize)> {
+fn value_after(b: &[u8], mut at: usize, conn: bool) -> Option<(usize, usize)> {
     if matches!(b.get(at), Some(b'"' | b'\'')) {
         at += 1;
     }
     while b.get(at) == Some(&b' ') {
         at += 1;
     }
-    if !matches!(b.get(at), Some(b'=' | b':')) {
+    let sep = *b.get(at)?;
+    if !matches!(sep, b'=' | b':') {
         return None;
     }
     at += 1;
@@ -128,10 +151,32 @@ fn value_after(b: &[u8], mut at: usize) -> Option<(usize, usize)> {
         Some(&q @ (b'"' | b'\'')) => {
             let s = at + 1;
             let mut e = s;
-            while e < b.len() && b[e] != q {
-                e += if b[e] == b'\\' { 2 } else { 1 };
+            while e < b.len() {
+                if b[e] == b'\\' {
+                    e += 2;
+                } else if b[e] == q && b.get(e + 1) == Some(&q) {
+                    // ADO.NET doubles a quote inside a quoted value.
+                    e += 2;
+                } else if b[e] == q {
+                    break;
+                } else {
+                    e += 1;
+                }
             }
             (s, e.min(b.len()))
+        }
+        _ if conn && sep == b'=' => {
+            let mut e = at;
+            while e < b.len() && !matches!(b[e], b';' | b'\n' | b'\r') {
+                if b[e] == b'"' && (e == at || b[e - 1] != b'\\') {
+                    break;
+                }
+                e += 1;
+            }
+            while e > at && b[e - 1] == b' ' {
+                e -= 1;
+            }
+            (at, e)
         }
         _ => {
             let e = at
@@ -187,11 +232,64 @@ mod tests {
     }
 
     #[test]
+    fn ado_net_quoting() {
+        assert_eq!(
+            scrub(r#"Server=h;Password="a""b";Database=x"#),
+            r#"Server=h;Password="[redacted]";Database=x"#
+        );
+        assert_eq!(
+            scrub("Server=h;Pwd='it''s;x';Database=x"),
+            "Server=h;Pwd='[redacted]';Database=x"
+        );
+        assert_eq!(
+            scrub("Server=h;Pwd=a b,c;Database=x"),
+            "Server=h;Pwd=[redacted];Database=x"
+        );
+        assert_eq!(scrub("Pwd=a b,c"), "Pwd=[redacted]");
+        assert_eq!(scrub("Password=a b \nnext"), "Password=[redacted] \nnext");
+        // Inside a quoted log field the field's closing quote ends the value.
+        assert_eq!(
+            scrub(r#"conn="Server=h;Password=a b,c" db=x"#),
+            r#"conn="Server=h;Password=[redacted]" db=x"#
+        );
+        assert_eq!(
+            scrub(r#"{"conn":"Server=h;Password=a b","name":"x"}"#),
+            r#"{"conn":"Server=h;Password=[redacted]","name":"x"}"#
+        );
+        assert_eq!(
+            scrub(r#"Password="""a";x=1"#),
+            r#"Password="[redacted]";x=1"#
+        );
+        // An empty quoted value is no secret; the next field stays.
+        assert_eq!(
+            scrub(r#"{"password":"","name":"x"}"#),
+            r#"{"password":"","name":"x"}"#
+        );
+    }
+
+    #[test]
+    fn names_ending_in_key_except_harmless_ones() {
+        assert_eq!(
+            scrub(r#"{"tenant_key":"tk-1","hmac_key":"h","key":"k","r2_key":"diag/a.zip"}"#),
+            r#"{"tenant_key":"[redacted]","hmac_key":"[redacted]","key":"[redacted]","r2_key":"diag/a.zip"}"#
+        );
+        assert_eq!(
+            scrub("DL_AGENT_ARRIVAL_TENANT_KEY=abc key=xyz key_id=7 kid=k1"),
+            "DL_AGENT_ARRIVAL_TENANT_KEY=[redacted] key=[redacted] key_id=7 kid=k1"
+        );
+        assert_eq!(
+            scrub(r#"{"public_key":"MCow","object_key":"o","private_key":"p"}"#),
+            r#"{"public_key":"MCow","object_key":"o","private_key":"[redacted]"}"#
+        );
+    }
+
+    #[test]
     fn plain_text_is_borrowed() {
         for t in [
             "heartbeat ok in 120 ms",
             "password reset requested",
             "tokens: 3",
+            "key_id=7 kid=k1 r2_key=diag/x.zip",
             "",
         ] {
             assert!(matches!(scrub(t), Cow::Borrowed(_)), "{t}");

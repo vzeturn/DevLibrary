@@ -215,11 +215,16 @@ impl Agent {
             .and_then(|zip| self.hub.upload_diagnostics(&zip, command_id));
         let (ok, out) = match stored {
             Ok(stored) => {
-                dl_log::info!("diagnostics bundle uploaded"; key = stored.get("key").and_then(Value::as_str).unwrap_or(""));
+                // The R2 object key goes out as `r2_key`: a bare `key` field is scrubbed.
+                let r2_key = stored.get("key").and_then(Value::as_str).unwrap_or("");
+                dl_log::info!("diagnostics bundle uploaded"; r2_key = r2_key);
                 if let Some(o) = d.as_object_mut() {
                     o.remove("log_tail");
                 }
-                (true, json!({"uploaded": stored, "diagnostics": d}))
+                let uploaded = json!({"id": stored.get("id").cloned().unwrap_or(Value::Null),
+                    "r2_key": r2_key, "size": stored.get("size").cloned().unwrap_or(Value::Null),
+                    "sha256": stored.get("sha256").cloned().unwrap_or(Value::Null)});
+                (true, json!({"uploaded": uploaded, "diagnostics": d}))
             }
             Err(e) => {
                 dl_log::warn!("diagnostics bundle not uploaded"; error = %e);

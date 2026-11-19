@@ -131,7 +131,7 @@ fn collect_diagnostics_uploads_the_zip_and_answers_with_its_key() {
     assert!(ok, "{out}");
     let v = dl_json::parse(&out).unwrap();
     assert_eq!(
-        v["uploaded"]["key"].as_str(),
+        v["uploaded"]["r2_key"].as_str(),
         Some("diag/acme/agt_1/1-abcd1234.zip")
     );
     assert_eq!(v["diagnostics"]["agent_id"].as_str(), Some("agt_1"));
@@ -249,10 +249,12 @@ fn module_files_go_in_scrubbed_and_secret_files_never() {
         problems.contains("login failed") && !problems.contains("Hunter2"),
         "{problems}"
     );
+    let enroll = get("modules/arrival/dl-enroll.json").unwrap();
     assert!(
-        get("modules/arrival/dl-enroll.json")
-            .unwrap()
-            .contains("imported")
+        enroll.contains(r#""identity_source": "fresh""#)
+            && enroll.contains(r#""tenant_key": "[redacted]""#)
+            && !enroll.contains("imported"),
+        "{enroll}"
     );
     assert!(
         all.iter()
