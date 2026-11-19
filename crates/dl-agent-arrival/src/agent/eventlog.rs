@@ -47,6 +47,9 @@ pub const SERVER_RESTARTS: [(&str, &[u32]); 3] = [
 /// (`dl_agent::update::RESTART_EXIT_CODE`): SCM logs it as error 7024, but it is expected.
 pub const RESTART_EXIT: &str = "75";
 
+/// SCM event "the service terminated unexpectedly" (with the recovery action taken).
+const UNEXPECTED_STOP: u32 = 7031;
+
 /// Whether an SCM event is the service ending with the update-restart exit code.
 fn is_update_restart(e: &RawEvent) -> bool {
     e.id == 7024
@@ -359,13 +362,30 @@ pub fn read(from: &str, to: &str, own_before: &str) -> Result<Vec<Imported>, Str
             ));
         }
         let xml = String::from_utf8_lossy(&out.stdout);
-        found.extend(
-            parse_rendered(&xml)
-                .iter()
-                .filter_map(|e| classify(log, e, own_before)),
-        );
+        found.extend(classify_all(log, &parse_rendered(&xml), own_before));
     }
     Ok(found)
+}
+
+/// [`classify`] over one log's events, plus the pairing a single event cannot see: SCM logs
+/// an update restart twice at the same instant (7024 with exit 75, then 7031 "terminated
+/// unexpectedly ... Restart the service"), and the 7031 half is no problem either.
+pub fn classify_all(log: &str, events: &[RawEvent], own_before: &str) -> Vec<Imported> {
+    let restarts: Vec<&str> = events
+        .iter()
+        .filter(|e| e.provider == SCM && is_update_restart(e))
+        .map(|e| e.at.as_str())
+        .collect();
+    events
+        .iter()
+        .filter_map(|e| {
+            let mut found = classify(log, e, own_before)?;
+            if e.provider == SCM && e.id == UNEXPECTED_STOP && restarts.contains(&e.at.as_str()) {
+                "Information".clone_into(&mut found.level);
+            }
+            Some(found)
+        })
+        .collect()
 }
 
 /// Imports what Windows recorded since the journal's mark (14 days on the first run).
@@ -495,6 +515,31 @@ mod tests {
             classify("System", &ev(other), before).unwrap().level,
             "Error"
         );
+    }
+
+    #[test]
+    fn the_unexpected_stop_paired_with_an_update_restart_is_not_a_problem() {
+        let ev = |id: u32, at: &str, message: &str| RawEvent {
+            provider: SCM.into(),
+            id,
+            level: 2,
+            at: at.into(),
+            message: message.into(),
+        };
+        let t = "2026-11-19T14:38:27.8649581Z";
+        let crash = "The DevLibrary Agent service terminated unexpectedly.  It has done this 13 time(s).  The following corrective action will be taken in 60000 milliseconds: Restart the service.";
+        let events = [
+            ev(
+                7024,
+                t,
+                "The DevLibrary Agent service terminated with the following service-specific error: %%75",
+            ),
+            ev(7031, t, crash),
+            ev(7031, "2026-11-19T15:00:00.0000000Z", crash),
+        ];
+        let got = classify_all("System", &events, "2026-11-19T00:00:00.0000000Z");
+        let levels: Vec<&str> = got.iter().map(|i| i.level.as_str()).collect();
+        assert_eq!(levels, ["Information", "Information", "Error"]);
     }
 
     #[test]
