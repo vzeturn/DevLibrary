@@ -6,6 +6,7 @@ use super::prompt::split_server_address;
 use super::*;
 use std::io::Read;
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -77,6 +78,7 @@ fn without_a_password_or_a_build_default_the_enroll_refuses_before_the_exchange(
         sql_password: String::new(),
         sql_auth: String::new(),
         collect_from: None,
+        previous: None,
         prompt_sql: false,
         input: None,
         hide_input: None,
@@ -91,6 +93,11 @@ fn without_a_password_or_a_build_default_the_enroll_refuses_before_the_exchange(
 }
 
 fn run(prompt: bool, stdin: &str, ping: Ping<'_>) -> Run {
+    run_with(prompt, stdin, ping, None)
+}
+
+/// `previous` set: no SQL flags at all, the earlier enrolment fills them.
+fn run_with(prompt: bool, stdin: &str, ping: Ping<'_>, previous: Option<Previous>) -> Run {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let (url, exchanges) = fake_platform();
     let dir = std::env::temp_dir().join(format!(
@@ -109,9 +116,14 @@ fn run(prompt: bool, stdin: &str, ping: Ping<'_>) -> Run {
         sql_host: String::new(),
         sql_user: String::new(),
         // The Go tests rely on the built-in password; test builds have none.
-        sql_password: if prompt { String::new() } else { "pw".into() },
+        sql_password: if prompt || previous.is_some() {
+            String::new()
+        } else {
+            "pw".into()
+        },
         sql_auth: String::new(),
         collect_from: None,
+        previous,
         prompt_sql: prompt,
         input: Some(&mut input),
         hide_input: None,
@@ -313,6 +325,58 @@ fn closed_input_is_an_error_not_a_loop() {
     let r = run(true, "10.0.0.1\n", &|_| Ok(()));
     assert_eq!(r.err.as_deref(), Some("agent: read answer: EOF"));
     assert_eq!(r.exchanges, 0);
+}
+
+#[test]
+fn the_earlier_enrolment_fills_the_connection_and_the_window() {
+    let since = vn_midnight(Some("2026-09-01")).unwrap();
+    let prev = Previous {
+        dir: PathBuf::from("C:/ProgramData/MM-EInvoice.bench-old-20261119090000"),
+        fo: previous::connection("sqlserver://smile:old%21pw@SRV/SQL2008?database=SMILE_FO_X"),
+        pos: previous::connection("sqlserver://smile:old%21pw@SRV/SQL2008?database=SMILE_POS"),
+        collect_from: Some(since),
+    };
+    let pinged = std::sync::Mutex::new(Vec::new());
+    let ping = |d: &Dsn| {
+        pinged.lock().unwrap().push(d.clone());
+        Ok(())
+    };
+    let r = run_with(false, "", &ping, Some(prev));
+    let cfg = ok(&r);
+    assert!(r.out.contains("Earlier enrolment found in"), "{}", r.out);
+    assert!(
+        !r.out.contains("old!pw"),
+        "no secret in the output: {}",
+        r.out
+    );
+    let fo = previous::connection(&cfg.sql_dsn).unwrap();
+    assert_eq!(
+        (fo.host.as_str(), fo.instance.as_str(), fo.database.as_str()),
+        ("SRV", "SQL2008", "SMILE_FO_X")
+    );
+    assert_eq!(
+        (fo.user.as_str(), fo.password.as_str()),
+        ("smile", "old!pw")
+    );
+    assert_eq!(
+        previous::connection(&cfg.pos_sql_dsn).unwrap().database,
+        "SMILE_POS"
+    );
+    // The fake platform's /config has no collect_from: the earlier window wins over today.
+    assert_eq!(cfg.collect_from, Some(since));
+    assert_eq!(pinged.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn an_earlier_windows_login_stays_windows() {
+    let prev = Previous {
+        fo: previous::connection("sqlserver://SRV?database=SMILE_FO"),
+        ..Previous::default()
+    };
+    let ok_ping = |_: &Dsn| Ok(());
+    let r = run_with(false, "", &ok_ping, Some(prev));
+    let fo = previous::connection(&ok(&r).sql_dsn).unwrap();
+    assert!(fo.user.is_empty() && fo.password.is_empty(), "{fo:?}");
 }
 
 #[test]
