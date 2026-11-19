@@ -40,6 +40,11 @@ impl std::fmt::Debug for Contact {
 }
 
 /// `JobVoucher`.
+///
+/// `sequence` and `applied_amount` come only from the `vouchers` array (voucher stacking,
+/// spec 2026-10-15 §3): the order of application and the amount the hub priced for this
+/// voucher, which the agent posts verbatim (the hub prices the whole stay; the folio only
+/// knows the first-night rate).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Voucher {
     /// `VoucherId`.
@@ -52,6 +57,10 @@ pub struct Voucher {
     pub value: Decimal,
     /// `MaxDiscountAmount`.
     pub max_discount_amount: Option<Decimal>,
+    /// `Sequence` (0 for the legacy single `voucher`).
+    pub sequence: i32,
+    /// `AppliedAmount` (`None` for the legacy single `voucher`, or a non-number).
+    pub applied_amount: Option<Decimal>,
 }
 
 /// `JobReward`.
@@ -174,6 +183,10 @@ pub struct JobPayload {
     pub extra_bed_verified_fingerprint: Option<String>,
     /// `ExtraBedSpecialCode`.
     pub extra_bed_special_code: Option<String>,
+    /// `StackedVouchers`: the `vouchers` array ordered by `sequence`; `None` when the key
+    /// is absent, not an array or empty (the legacy `voucher` then applies). Read it
+    /// through [`JobPayload::vouchers`].
+    pub stacked_vouchers: Option<Vec<Voucher>>,
 }
 
 impl JobPayload {
@@ -181,6 +194,17 @@ impl JobPayload {
     pub fn is_known_in_smile(&self) -> bool {
         self.expected_folios.as_ref().is_some_and(|f| !f.is_empty())
             || self.smile_confirm_num.is_some_and(Decimal::is_positive)
+    }
+
+    /// `Vouchers`: the vouchers to post, in application order — the `vouchers` array when
+    /// the hub sent a non-empty one (it wins over `voucher`), else the legacy single
+    /// `voucher`, else none.
+    pub fn vouchers(&self) -> &[Voucher] {
+        match (&self.stacked_vouchers, &self.voucher) {
+            (Some(stacked), _) if !stacked.is_empty() => stacked,
+            (_, Some(single)) => std::slice::from_ref(single),
+            _ => &[],
+        }
     }
 }
 
@@ -244,7 +268,31 @@ pub fn parse_payload(json: &str) -> Result<JobPayload, String> {
         special_requests: trimmed(&r, "specialRequests"),
         extra_bed_verified_fingerprint: trimmed(&r, "extraBedVerifiedFingerprint"),
         extra_bed_special_code: trimmed(&r, "extraBedSpecialCode"),
+        stacked_vouchers: parse_vouchers(&r)?,
     })
+}
+
+/// `JobPayloadParser.ParseVouchers`: the `vouchers` array ordered by `sequence` (stable,
+/// so equal sequences keep the hub's order). `None` when the key is absent, not an array
+/// or empty. An element that is not an object fails the parse (the .NET
+/// `FormatException`): dropping it would post the rest on the wrong base.
+fn parse_vouchers(r: &Value) -> Result<Option<Vec<Voucher>>, String> {
+    let Some(items) = prop(r, "vouchers").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    let mut list = Vec::with_capacity(items.len());
+    for v in items {
+        if !v.is_object() {
+            return Err("REDEEM payload has a `vouchers` entry that is not an object.".into());
+        }
+        list.push(Voucher {
+            sequence: get_i32(v, "Sequence").unwrap_or(0),
+            applied_amount: number(v, "AppliedAmount"),
+            ..parse_voucher(v)
+        });
+    }
+    list.sort_by_key(|v| v.sequence);
+    Ok((!list.is_empty()).then_some(list))
 }
 
 /// `JobPayloadParser.ParseLinkFolio`.
@@ -337,6 +385,8 @@ fn parse_voucher(v: &Value) -> Voucher {
         kind: get_string(v, "Type").unwrap_or_default(),
         value: number(v, "Value").unwrap_or(Decimal::ZERO),
         max_discount_amount: number(v, "MaxDiscountAmount"),
+        sequence: 0,
+        applied_amount: None,
     }
 }
 
@@ -485,3 +535,7 @@ fn get_date(v: &Value, name: &str) -> Date {
 #[cfg(test)]
 #[path = "payload_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "payload_vouchers_tests.rs"]
+mod vouchers_tests;

@@ -3,8 +3,8 @@
 //! `MEMBERSHIP_AGENT_TEST_SQL` holds an ADO connection string to a SQL Server whose login
 //! may create databases. The test builds a throw-away database from the SMILE fixture schema
 //! (with its stored procedures), runs hub jobs through the dispatcher and the real
-//! `SmileWriter` (create, replayed create, modify, cancel), posts a discount, checks every
-//! row it expects, and drops the database. Without the variable it returns at once. The
+//! `SmileWriter` (create, replayed create, modify, a two-voucher redeem and its replay,
+//! cancel), posts a discount, checks every row it expects, and drops the database. Without the variable it returns at once. The
 //! connection string is never printed; the data is synthetic.
 
 use std::sync::Arc;
@@ -115,6 +115,21 @@ fn job(id: &str, action: &str) -> Job {
     }
 }
 
+/// A REDEEM job with two stacked vouchers, listed out of `sequence` order.
+fn redeem_job(id: &str) -> Job {
+    Job {
+        job_id: id.into(),
+        action: "RedeemVoucher".into(),
+        booking_id: Some(BOOKING.parse().unwrap()),
+        payload_json: format!(
+            r#"{{"bookingId":"{BOOKING}","confirmationCode":"AZ-LIVE-1",
+                "Vouchers":[{{"Code":"VCH-B","Type":"PercentOff","Value":0.15,"Sequence":2,"AppliedAmount":450000}},
+                {{"Code":"VCH-A","Type":"AmountOff","Value":100000,"Sequence":1,"AppliedAmount":100000}}]}}"#
+        ),
+        attempts: 1,
+    }
+}
+
 fn ack(o: Outcome) -> Ack {
     match o {
         Outcome::Ack(a) => a,
@@ -216,6 +231,37 @@ fn every_smile_write_runs_against_sql_server() {
         count(
             &db,
             "SELECT COUNT(*) FROM FolioTransaction WHERE FolioNum = '7001' AND RefNumber = 'VCH-LIVE-1'"
+        ),
+        1
+    );
+
+    // Stacked REDEEM (`vouchers` array): one line per voucher on the first live folio, for
+    // the hub's appliedAmount in sequence order; a replay posts nothing more.
+    let r = Dispatcher::new(
+        writer.clone(),
+        None,
+        DispatchSettings {
+            origin_code: "AZ".into(),
+            member_discount_code: "DS".into(),
+            extra_bed_mode: MODE_FOLD_LEGACY.into(),
+        },
+    );
+    let two = redeem_job("r1");
+    assert!(ack(r.process(&two)).success);
+    assert!(ack(r.process(&two)).success);
+    let lines = "SELECT COUNT(*) FROM FolioTransaction WHERE FolioNum = '7001' AND PostingClerkID = 'MEM' AND RefNumber IN ('VCH-A', 'VCH-B')";
+    assert_eq!(count(&db, lines), 2);
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM FolioTransaction WHERE FolioNum = '7001' AND RefNumber = 'VCH-A' AND TransactionAmount = -100000 AND TransactionCode = 'DS'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM FolioTransaction WHERE FolioNum = '7001' AND RefNumber = 'VCH-B' AND TransactionAmount = -450000"
         ),
         1
     );

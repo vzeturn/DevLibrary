@@ -26,6 +26,10 @@ Status: **DONE_WITH_CONCERNS**. The core write path is ported and tested, includ
 **Job pipeline**
 - `JobDispatcher` → `jobs/dispatch.rs`. Actions:
   - Create, Modify, Cancel, LinkFolio, RedeemVoucher, GrantReward;
+  - RedeemVoucher with the `vouchers` array (MM-MEMBERSHIP 58a4524, `HandleStackedRedeemAsync`, RT-0260):
+    `jobs/redeem.rs`; one discount line per voucher in `sequence` order for the hub's `appliedAmount`,
+    idempotent per code, the whole job to the desk when any voucher lacks a positive amount; golden
+    `tests/fixtures/golden/sql/redeem_two_vouchers.json`, live in `tests/sql_live_writes.rs`;
   - Availability is a no-op ack;
   - EarnPoints → `report_earn`, which is not ported.
 - `RoomDiff`, `JobPayload` parsing.
