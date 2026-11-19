@@ -2,14 +2,17 @@
 pub mod additional_name;
 pub mod applock;
 pub mod folio;
+pub mod link;
 pub mod lookup;
 pub mod post;
+pub mod profile;
 #[cfg(test)]
 pub mod recorder;
 pub mod schema;
 pub mod session;
 pub mod smile_writer;
 pub mod tcvn3;
+pub mod travel_agent;
 
 /// `SmileClerk.App`: the clerk id stamped on folios and rates the agent writes.
 pub const CLERK_APP: &str = "APP";

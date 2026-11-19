@@ -7,6 +7,8 @@ use dl_decimal::Decimal;
 use dl_uuid::Uuid;
 
 use super::folio::FolioWriter;
+use super::profile::ProfileWriter;
+use super::travel_agent;
 use crate::jobs::payload::LinkFolioPayload;
 use crate::jobs::plan::{BookingPlan, PmsWriter, ProfileRequest, WriteError, Written};
 use crate::jobs::room_diff::ExistingFolio;
@@ -19,12 +21,17 @@ use crate::smile::hotel_now;
 pub struct SmileWriter {
     smile: Arc<TdsSmile>,
     folio: FolioWriter,
+    profile: ProfileWriter,
 }
 
 impl SmileWriter {
     /// A writer on `smile` with the folio options.
     pub fn new(smile: Arc<TdsSmile>, folio: FolioWriter) -> SmileWriter {
-        SmileWriter { smile, folio }
+        SmileWriter {
+            smile,
+            folio,
+            profile: ProfileWriter::default(),
+        }
     }
 }
 
@@ -67,16 +74,18 @@ impl PmsWriter for SmileWriter {
         })
     }
 
-    fn link_folios(&self, _link: &LinkFolioPayload) -> Result<(), WriteError> {
-        Err(WriteError::NotPorted("link_folio"))
+    fn link_folios(&self, link: &LinkFolioPayload) -> Result<(), WriteError> {
+        self.smile
+            .session(None, |c| self.folio.link_folios(c, link))
     }
 
-    fn ensure_profile(&self, _req: &ProfileRequest) -> Result<Decimal, WriteError> {
-        Err(WriteError::NotPorted("ensure_profile"))
+    fn ensure_profile(&self, req: &ProfileRequest) -> Result<Decimal, WriteError> {
+        self.smile
+            .session(None, |c| self.profile.ensure_profile(c, req))
     }
 
-    fn find_travel_agent(&self, _code: i64) -> Result<Option<TravelAgent>, WriteError> {
-        Err(WriteError::NotPorted("travel_agent"))
+    fn find_travel_agent(&self, code: i64) -> Result<Option<TravelAgent>, WriteError> {
+        self.smile.session(None, |c| travel_agent::find(c, code))
     }
 
     fn report_earn(&self, _booking_id: Uuid, _ext: &str) -> Result<(), WriteError> {
