@@ -4,8 +4,6 @@
 //! and the SMILE connection string come from the environment or stdin, never from argv,
 //! and are never printed.
 
-pub mod tool;
-
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +30,11 @@ macro_rules! say {
         }
     }};
 }
+
+pub mod legacy;
+pub mod service;
+pub mod switch;
+pub mod tool;
 
 /// The environment variable with the one-time enrollment code.
 pub const TOKEN_ENV: &str = "DL_AGENT_MEMBERSHIP_TOKEN";
@@ -221,6 +224,29 @@ pub fn run_enroll(
         .filter(|s| !s.is_empty())
         .or_else(|| previous.as_ref().map(|p| p.smile_connection_string.clone()))
         .unwrap_or_default();
+    enroll_and_save(&args.hub_url, &store, code, smile, out, env)?;
+    Ok(())
+}
+
+/// What [`enroll_and_save`] wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Enrolled {
+    /// The hotel the hub enrolled.
+    pub hotel_id: dl_uuid::Uuid,
+    /// The copy of the file it replaced.
+    pub backup: Option<PathBuf>,
+}
+
+/// Spends `code` at the hub and writes `config.dpapi` with `smile` (the SMILE connection
+/// string the caller chose). Shared by the plain enrolment and `--switch`.
+pub(crate) fn enroll_and_save(
+    hub_url: &str,
+    store: &ConfigStore,
+    code: String,
+    smile: String,
+    out: &mut dyn Write,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Enrolled, String> {
     let target = TdsSmile::new(&smile).ok().map(|s| s.target());
     match &target {
         Some(t) => say!(out, "SMILE: {} / {}\n", t.data_source, t.database),
@@ -236,9 +262,8 @@ pub fn run_enroll(
         smile_data_source: target.as_ref().map(|t| t.data_source.clone()),
         smile_database: target.as_ref().map(|t| t.database.clone()),
     };
-    let resp = post_enroll(&args.hub_url, &req)?;
-    check_hub_url(&args.hub_url, &resp.hub_base_url)
-        .map_err(|e| format!("enrollment not saved: {e}"))?;
+    let resp = post_enroll(hub_url, &req)?;
+    check_hub_url(hub_url, &resp.hub_base_url).map_err(|e| format!("enrollment not saved: {e}"))?;
     let cfg = AgentConfig {
         hub_base_url: resp.hub_base_url.clone(),
         agent_token: resp.agent_token.clone(),
@@ -249,7 +274,7 @@ pub fn run_enroll(
     let backup = store
         .save(&cfg)
         .map_err(|e| format!("{}: {e}", store.path().display()))?;
-    if let Some(b) = backup {
+    if let Some(b) = &backup {
         say!(out, "previous {FILE_NAME} kept as {}\n", b.display());
     }
     match resp.enrollment_id {
@@ -269,7 +294,10 @@ pub fn run_enroll(
                 .unwrap_or("another machine")
         );
     }
-    Ok(())
+    Ok(Enrolled {
+        hotel_id: resp.hotel_id,
+        backup,
+    })
 }
 
 #[cfg(test)]

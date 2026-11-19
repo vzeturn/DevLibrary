@@ -69,8 +69,50 @@ on the origin that was called, and writes `config.dpapi` the way the .NET instal
 the previous file is kept beside it. Without `DL_AGENT_MEMBERSHIP_SMILE` a forced re-enroll
 keeps the SMILE connection string of the previous config.
 
-A site already enrolled by the .NET installer needs nothing: the module reads the same
-`config.dpapi`.
+A site already enrolled by the .NET installer needs no new code: the module reads the same
+`config.dpapi`. Use `--switch` to take it over.
+
+## Switching from the .NET agent
+
+```
+dl-agent membership-enroll --switch --hub-url https://hub.example
+```
+
+`--switch` (safe on every installer run):
+
+1. finds the .NET configuration: `%ProgramData%\MM.Membership.Agent\config.dpapi`, else the
+   seed the .NET agent would seal on its first start (`appsettings.json`,
+   `appsettings.{DOTNET_ENVIRONMENT}.json`, `appsettings.hotel.json` beside its exe, `Agent__*`
+   variables; off Windows also the portable `{"Agent":{...}}` file at `Agent__SecretStorePath`
+   or `/var/lib/mm-membership-agent/config.json`) and seals that into `config.dpapi`;
+2. checks the token with one `GET api/agent/sync-config`. Only `AGENT_TOKEN_REJECTED`, an
+   unreadable `config.dpapi` or no configuration at all spends a code
+   (`DL_AGENT_MEMBERSHIP_TOKEN` or stdin); that enrolment keeps the old SMILE connection
+   string and backs the old file up as `config.dpapi.bak-*`. An unreachable hub keeps the file;
+3. stops the `MM.Membership.Agent` Windows service and sets it to disabled (a failure is an
+   error: stop it by hand before turning writes on);
+4. records what it did, without secrets, in `<data>\modules\membership\enrolled.json`. Later
+   runs keep what is there and only make sure the .NET service stays stopped.
+
+Then turn the module on (`enabled: true`; `read_only: false` with `pull_jobs: true` for writes).
+
+### Rollback
+
+```
+dl-agent membership-enroll --rollback
+```
+
+1. puts the recorded start type of `MM.Membership.Agent` back and starts it (by hand:
+   `sc config MM.Membership.Agent start= auto` then `sc start MM.Membership.Agent`);
+2. restores the `config.dpapi.bak-*` copy if the switch replaced the file. When the switch
+   enrolled again the hub replaced the token, so the backup's token no longer works: the
+   current file (same format) is kept for the .NET agent unless `--force`;
+3. marks the record rolled back: later `--switch` runs do nothing until `--force`;
+4. turn the module off in the remote config: `{"modules":{"membership":{"read_only":true}}}`
+   (or `"enabled": false`), so only the .NET agent writes.
+
+Real DPAPI and the service control only run on Windows; tests use a plain sealer and a fake
+service.
 
 ## Behaviour
 
