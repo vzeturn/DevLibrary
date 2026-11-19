@@ -47,10 +47,10 @@ shared by every module on the site.
 | Heartbeat with module health + metrics | PDA, Membership | PROTOCOL §3 |
 | Remote config + last-known-good | HL policy cache, PDA runtime-config | `config.rs` (PROTOCOL §8) |
 | Remote commands (restart, diagnostics, log level) | PDA `diag`, Membership `X-MM-Run-Diagnostics` | PROTOCOL §4 |
-| Diagnostic bundle upload | PDA `diag`, Membership `diag-upload` | `collect_diagnostics` |
-| JSON logs, rotation, secret scrubbing | PDA Serilog, site-agent | `log` (10 MB × 5) |
-| Proxy (env + Windows Internet Options), TLS 1.2+, TLS 1.0 fallback for SQL 2008 | EINVOICE ladder | `dl-http`, `dl-tds` |
-| HTTP hub fallback host (DNS/TLS outage) | HL `smile-hl-hub.fly.dev` | hub URL list |
+| Diagnostic bundle upload | PDA `diag`, Membership `diag-upload` | `collect_diagnostics` → scrubbed zip in R2 `diag/` (30 days), admin list/download |
+| JSON logs, rotation, secret scrubbing | PDA Serilog, site-agent | `log` (10 MB × 5), `dl-log::scrub` |
+| Proxy (env + Windows Internet Options), TLS 1.2+, TLS 1.0 fallback for SQL 2008 | EINVOICE ladder | `dl-http` `ProxyRules` (env, WinHTTP, Internet Options), `dl-tds` ladder with the rung saved by `sql-setup` |
+| HTTP hub fallback host (DNS/TLS outage) | HL `smile-hl-hub.fly.dev` | `hub_urls` (`HUB_URLS`, allowlisted hosts, failover) |
 | Installer: `irm … | iex`, SHA-256, idempotent re-run = upgrade/repair, uninstall/purge, Defender exclusion guidance | Membership install.ps1, Arrival Install.ps1 | one `install.ps1` served by the hub |
 
 ## 3. Module requirements (port list)
@@ -81,8 +81,9 @@ shared by every module on the site.
 
 ## 4. Known risks to carry into the migration
 
-- No agent's update/service path is verified on real Windows by automated tests; Membership pilots are the
-  only field evidence. Every module switch needs a Windows smoke run on the demo tenant first.
+- No agent's update/service path is verified on real Windows by automated tests; the fault build
+  (`--fault probation`, PROTOCOL §6.6) is run on the SR bench instead. Every module switch needs a Windows
+  smoke run on the demo tenant first.
 - SRBackup hands every agent the same master key (cross-tenant exposure) — fix in the hub before porting.
 - SMILE-HL and SRBackup allow downgrades; EINVOICE has no hash check at install; speaker token in plaintext.
 - No code signing anywhere except Membership's self-signed Authenticode; antivirus (Kaspersky/Defender)

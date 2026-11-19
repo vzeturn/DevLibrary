@@ -8,6 +8,25 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent: `sql-setup` picks a Windows or SQL login, tests it on every SMILE database before saving
+  and seals the password with DPAPI; the installer offers the same choice (password from env
+  `DL_AGENT_SQL_PASSWORD` or a hidden prompt only). The working TLS rung is saved; no silent fall back to
+  an unencrypted SQL login to another host (`--allow-unencrypted` is explicit).
+- dl-agent: `collect_diagnostics` uploads a scrubbed zip to the hub (R2 `diag/`, 30-day lifecycle, admin
+  list and download, migration `0007`), only for an open command of that agent, once, 4 per hour.
+- agent-hub: admin audit trail with the actor from a verified Cloudflare Access JWT
+  (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`); a change that cannot be recorded is refused with 503, except the
+  kill switch (release pause, tenant hold), which runs and logs the audit failure.
+- agent-hub, dl-agent: ordered `hub_urls` from `HUB_URLS` with failover, hosts limited to a built-in
+  allowlist.
+- dl-agent: proxy from env, WinHTTP or Internet Options, with Basic credentials; selftest rows
+  `core/hub_urls`, `core/proxy`, `core/update_state`.
+- dl-agent: modules drain before the binary swap; fault build `--fault probation` for rollback tests.
+- dl-agent: module cloud links (`ModuleContext::set_cloud_link`), restarted by the watchdog when one goes
+  silent (only 2xx/3xx count as alive); `add_diagnostic_file` for modules.
+- dl-log: `scrub` (incl. `*_key` names, ADO.NET quoting); dl-http: `ProxyRules`; dl-tds: `fake-server`
+  feature; dl-winsvc: `process::list`, `process::named`.
+- agent-hub: installer hook `Get-ArrivalLegacySql`; `arrival-enroll` gets the SQL login by env.
 - dl-agent-einvoice: per-tenant collect profile from the hub config (`collect_profile.pos_item_name`,
   default `till`); `iname1` takes POS line names from `ItemDef.IName1` (RT-0204 port, opt-in). Golden
   drift guard against MM-EINVOICE (`$MMEI_REPO`).
@@ -58,6 +77,8 @@ All notable changes are listed here. The format follows
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
 ### Fixed
+
+- dl-agent: SQL error 4063 counts as no access.
 - agent-hub bench: with a Check-In step and `sql_grant_service`, the service login also gets `db_owner` in SMILE_PICTURE, created first when missing; Check-In installs its picture tables from `master` and failed with SQL error 916 (RT-0164).
 - einvoice: the collector install now includes the write-back procedure `sp_ApplyInvoiceWriteback` (MM-EINVOICE `writeback.sql`, missing from the port); a site without it gets it on the first cycle or on SQL error 2812 at write-back, never under a DBA-owned name (RT-0164).
 - membership: connection string values in double quotes (`Server=".";Database="SMILE_FO"`, as the bench writes them) are unquoted like SqlClient does; the quoted host went to DNS (RT-0164).
