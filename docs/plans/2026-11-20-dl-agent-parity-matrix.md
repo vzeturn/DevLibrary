@@ -15,7 +15,7 @@ Membership 64, HotelLink 53, SRBackup 58).
 
 | # | Gap | Risk | Work | Depends on |
 |---|---|---|---|---|
-| 1 | Membership: REDEEM jobs ignore the `vouchers` array (.NET `58a4524`: one discount line per voucher, exactly the hub's `appliedAmount`); Rust prices one PercentOff voucher on the first night, several vouchers go to the desk | **cao (tiền)** | port the .NET change (in progress in this request, separate PR) — Victory / Mũi Né must stay `read_only: true` until it ships | — |
+| 1 | Membership: REDEEM jobs ignored the `vouchers` array (.NET `58a4524`: one discount line per voucher, exactly the hub's `appliedAmount`) | **cao (tiền)** | **fixed in PR #69** (golden + live SQL 2022 with replay). Victory / Mũi Né stay `read_only: true` until a release with it is on stable | — |
 | 2 | Membership: `SmileDiagnostics` (periodic, after failed jobs, on hub request) not ported | trung | port, 4–6 h | — |
 | 3 | Membership: heartbeat shares the job-pull loop (a failed pull skips it; a slow batch delays it → hub may mark the agent offline) | trung | own heartbeat thread, ~2 h | — |
 | 4 | Check-In: no `export-key` to print the tenant master key for offline storage (only cloud escrow + fingerprint) | trung | owner decision, then port | owner |
