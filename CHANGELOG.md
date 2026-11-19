@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `agent-hub`: bench bundles for a test PC (RT-0164). `POST/GET /admin/bench`, `DELETE /admin/bench/:id` mint a demo-tenant enrolment code and a one-line `irm https://<hub>/bench/<token> | iex` (256-bit token, SHA-256 stored, steps sealed with AES-256-GCM under `BENCH_KEY`, limited fetches and lifetime). The PowerShell 5.1 script lists the older per-product agents without touching them, prompts once for SQL Server, applies optional `sql_fixups` to the restored copy in a transaction, runs `install.ps1 -Channel canary` (no `-Replace`), `sql-add` per database, each `dl-agent <setup>` step with its env for that process only (`{{SQL:<Db>}}`, `{{BENCH_DIR}}`), then `dl-agent selftest`, and writes a masked log under `%ProgramData%\dl-agent`.
+- `agent-hub`: `POST /v1/agent/selftest` (signed, ≤ 256 KB, ≤ 500 checks, newest 20 runs per agent), `GET /admin/agents/:id/selftest`, and a "Tự kiểm tra" section on the `/admin` status page with pass/warn/fail/skip counts and the failed checks. Migration `0004_bench_selftest.sql`.
+
 - `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
