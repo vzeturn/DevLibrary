@@ -8,6 +8,7 @@ use std::path::Path;
 use dl_agent::tool::{Tool, ToolContext};
 use dl_cli::{Arg, Command, Matches};
 
+use super::goagent::GoSource;
 use super::{Outcome, enroll};
 
 /// The sub-command name.
@@ -49,9 +50,21 @@ fn run(ctx: &ToolContext<'_>, m: &Matches) -> Result<(), dl_agent::Error> {
         &|k| std::env::var(k).ok(),
         &mut input,
         &mut out,
-        &dl_agent::hub::hostname(),
+        &Machine {
+            name: &dl_agent::hub::hostname(),
+            go: &GoSource::current(),
+        },
     )
     .map_err(dl_agent::Error::from)
+}
+
+/// The machine being enrolled: its name for the hub and where a Go agent may have left its
+/// identity.
+pub struct Machine<'a> {
+    /// The machine name sent on self-registration.
+    pub name: &'a str,
+    /// Where to look for the Go agent's `agent.json`.
+    pub go: &'a GoSource,
 }
 
 /// The testable body of the tool.
@@ -62,7 +75,7 @@ pub fn run_args(
     env: &dyn Fn(&str) -> Option<String>,
     input: &mut dyn BufRead,
     out: &mut dyn Write,
-    machine_name: &str,
+    machine: &Machine<'_>,
 ) -> Result<(), crate::Error> {
     let key = match env(KEY_ENV).filter(|k| !k.trim().is_empty()) {
         Some(k) => k,
@@ -71,20 +84,33 @@ pub fn run_args(
     let say = |out: &mut dyn Write, text: String| {
         writeln!(out, "{text}").map_err(|e| crate::Error::io("write to stdout", &e))
     };
-    match enroll(module_dir, hub_url, &key, machine_name, force)? {
+    let replaced = |out: &mut dyn Write, why: Option<String>| match why {
+        Some(why) => say(
+            out,
+            format!("replaced an enrollment file that did not open: {why}"),
+        ),
+        None => Ok(()),
+    };
+    match enroll(module_dir, hub_url, &key, machine.name, force, machine.go)? {
         Outcome::AlreadyEnrolled { agent_id } => say(
             out,
             format!("already enrolled as agent {agent_id}; pass --force to enroll again"),
         ),
-        Outcome::Enrolled {
+        Outcome::Adopted {
             agent_id,
             replaced_unreadable,
         } => {
-            if let Some(why) = replaced_unreadable {
-                say(
-                    out,
-                    format!("replaced an enrollment file that did not open: {why}"),
-                )?;
+            replaced(out, replaced_unreadable)?;
+            say(out, format!("adopted agent {agent_id} from the Go agent"))
+        }
+        Outcome::Enrolled {
+            agent_id,
+            replaced_unreadable,
+            not_adopted,
+        } => {
+            replaced(out, replaced_unreadable)?;
+            if let Some(why) = not_adopted {
+                say(out, format!("not adopting the Go agent: {why}"))?;
             }
             say(out, format!("enrolled as agent {agent_id}"))
         }

@@ -155,6 +155,13 @@ impl HubClient {
         ConfigResponse::from_json(&v)
     }
 
+    /// `GET /api/agent/config` only to learn whether the hub accepts this client's token
+    /// (any 2xx); the body is not interpreted. 401/403 is [`Error::Auth`].
+    pub fn check_token(&self) -> Result<(), Error> {
+        self.call(Method::Get, "/config", &self.token, None)
+            .map(|_| ())
+    }
+
     /// `GET /api/agent/master-key`: the per-agent key the config's credentials are sealed under.
     pub fn master_key(&self) -> Result<String, Error> {
         let v = self.call(Method::Get, "/master-key", &self.token, None)?;

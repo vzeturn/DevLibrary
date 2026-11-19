@@ -39,7 +39,15 @@ fn enrolled_agent_polls_config_runs_the_job_and_reports_it() {
     let hub = FakeHub::start(default_config());
     let dir = temp_dir("sync-e2e");
     let module = dir.join("module");
-    enroll(&module, &hub.url(), "tenant-enroll-key", "SQL-HOST", false).unwrap();
+    enroll(
+        &module,
+        &hub.url(),
+        "tenant-enroll-key",
+        "SQL-HOST",
+        false,
+        &crate::enroll::goagent::GoSource::none(),
+    )
+    .unwrap();
     let e = Enrollment::load(&module).unwrap().unwrap();
     assert_eq!(
         hub.bearers("/self-register"),

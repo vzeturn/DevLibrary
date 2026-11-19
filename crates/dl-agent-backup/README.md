@@ -49,6 +49,31 @@ tool calls `POST /api/agent/self-register` and stores the agent id and token sea
 the same hub is kept and one for another hub is refused. A running module picks up a new
 enrollment within 30 s, without a restart.
 
+## Upgrading from the Go agent
+
+The hub ties a site's SQL servers, schedules and history to its agent id, so an upgrade must
+not register a new agent. The installer
+(`install.ps1 -Setup backup-enroll -Replace SRBackupAgent`) removes the Go service and runs
+`backup-enroll`, which first looks for the Go agent's `agent.json` in the Go agent's own order:
+`%PROGRAMDATA%\srbackup\agent.json` (or `C:\ProgramData\srbackup\agent.json` when the
+variable is unset), `%APPDATA%\srbackup\agent.json`, `%LOCALAPPDATA%\srbackup\agent.json`
+(Go also looks next to its own executable, which this binary cannot know). The first file that
+parses and has a `server_url` is used.
+
+Its `api_key` is opened the way the Go agent seals it (`enc:v1:` + AES-256-GCM under
+HKDF-SHA256 of the Windows `MachineGuid`, or of `host-<hash>` when the registry cannot be
+read); a plaintext key from an older agent is used as it is. When `server_url` is the same
+origin as `--hub-url` and the hub accepts the key on `GET /api/agent/config`, the agent id and
+key are stored in `enrollment.enc` and the tool prints `adopted agent <id> from the Go agent`;
+no self-registration happens. The Go agent's `master_key` is not imported: the module fetches
+the per-agent key from the hub as it does after a fresh enrollment.
+
+A rejected key (401/403), a config that does not open (another machine, altered) or another
+hub origin falls back to self-registration with the enroll key, and the tool says why in one
+line. A hub that cannot be reached or answers 5xx stops the tool with nothing changed, since a
+new registration would orphan the site. The Go `agent.json` is never written or deleted: it
+stays the rollback path (reinstall the Go service and it carries on as the same agent).
+
 ## How it runs
 
 - **Not enrolled**: `degraded` with `not enrolled`; it waits for an enrollment or stop.
@@ -132,8 +157,8 @@ Commands: `backup.status` (the metrics and the last outcomes) and
 - Time zones come from a small built-in table (zones without daylight saving such as
   `Asia/Ho_Chi_Minh`, fixed offsets like `+07:00` / `Etc/GMT-7`, and UTC) instead of the IANA
   database; another zone fails its schedule with `backup_schedule_invalid`.
-- No import of the Go agent's on-disk state: a site moving from the Go agent starts with an
-  empty queue and history (the hub keeps the backup history; restores of older backups use
+- Only the Go agent's identity (agent id, API key) is imported; its queue and history are
+  not: a site moving from the Go agent starts with an empty queue and history (the hub keeps the backup history; restores of older backups use
   their cloud copy).
 
 ## Tests
