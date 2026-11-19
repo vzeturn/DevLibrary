@@ -38,6 +38,7 @@ fn args(install: &Path) -> Args {
     Args {
         cloud_url: "https://arrival.example/".into(),
         install_dir: Some(install.to_path_buf()),
+        legacy_dir: None,
         force: false,
         no_probe: true,
     }
