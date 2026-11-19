@@ -252,6 +252,7 @@ describe('bench script (PowerShell)', () => {
       sql_names: ['SMILE_FO'],
       sql_parts: true,
       remove_legacy: true,
+      sql_grant_service: true,
     });
     const dir = mkdtempSync(join(tmpdir(), 'bench-ps-'));
     try {

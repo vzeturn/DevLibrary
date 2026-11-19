@@ -79,6 +79,12 @@ export const benchBody = z
      * field only list them.
      */
     remove_legacy: z.boolean().default(true),
+    /**
+     * With Windows authentication, give `NT AUTHORITY\\SYSTEM` (the agent service account) a login,
+     * a user and `db_owner` in each of `sql_databases`, so the service can open them. For test
+     * copies only; off by default.
+     */
+    sql_grant_service: z.boolean().default(false),
     /** Initial remote config of the enrolled agent, e.g. `{"modules":{"einvoice":{"enabled":true}}}`. */
     config: z.record(z.string(), z.unknown()).optional(),
   })
@@ -110,6 +116,8 @@ export interface BenchPayload {
   sql_fixups?: SqlFixup[];
   /** Absent in bundles sealed before it existed: those only list the older agents. */
   remove_legacy?: boolean;
+  /** Absent in bundles sealed before it existed: nothing is granted. */
+  sql_grant_service?: boolean;
 }
 
 /** Every database a bundle touches: registered, fixed up, or named by an env placeholder. */
