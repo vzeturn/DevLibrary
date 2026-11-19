@@ -71,6 +71,7 @@ dependencies = [
  "dl-agent-pda-sync",
  "dl-agent-pms",
  "dl-agent-pms-device",
+ "dl-agent-speaker",
 ]
 
 [[package]]
@@ -188,6 +189,21 @@ dependencies = [
  "dl-time",
  "dl-uuid",
  "dl-winos",
+]
+
+[[package]]
+name = "dl-agent-speaker"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-agent-pda-sync",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-signalr",
+ "dl-winos",
+ "dl-winsvc",
+ "dl-ws",
 ]
 
 [[package]]

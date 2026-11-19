@@ -10,7 +10,7 @@ Source of truth:
 
 Scope (SMILE rule):
 - **IN:** everything that reads or writes `SMILE_POS`, plus the site-ship needs (enrol, heartbeat, selftest, reports). This includes the print relay (see §4).
-- **OUT:** speaker, `legacy-archive`, Azure, systemd, the config UI, door-lock.
+- **OUT:** `legacy-archive`, Azure, systemd, the config UI, door-lock.
 
 ## 1. Done in phase A (branch `feat/smile100-pda`)
 
@@ -121,8 +121,8 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 31 | `legacy-upload` | out | Not SMILE_POS |
 | 32 | `status`, `status.json` | ✅ | Hub `status` command, module state |
 | 33 | Selftest and Windows bench | 🟡 | Selftest rows done; bench run is B6 |
-| 34–38 | speaker | out | Speaker is out of this programme |
-| 39 | Print relay duplication | 🟡 | Decision in §4; needs the speaker's guard when the speaker returns |
+| 34–38 | speaker | 🟡 IN (RT-0257) | `crates/dl-agent-speaker`, module `speaker`; tested against a fake hub; live needs the PDA cloud change (§4b) and a Windows site |
+| 39 | Print relay duplication | ✅ | The speaker module never relays (§4b); `pda-sync` is the only relay |
 
 **Coverage:** 17 ✅ + 10 🟡 = 22/31 = **71.0%** (strict ✅ only: 17/31 = 54.8%). The audit baseline was 15.4%.
 
@@ -171,7 +171,32 @@ The module runs the port's relay:
 
 It is wired through the host hooks. It is **not yet verified on a real printer** (slice B7).
 
-Where the speaker also relays (speaker is OUT of this programme), keep the one-relay-per-branch rule of ADR 0026. The speaker module must not relay while `pda-sync` does.
+Keep the one-relay-per-branch rule of ADR 0026: the speaker module (RT-0257, §4b) never relays, so `pda-sync` stays the only relay.
+
+## 4b. Speaker module (RT-0257)
+
+Rows 34–38 are now **IN** through the new crate `crates/dl-agent-speaker` (module `speaker`,
+opt-in with `modules.speaker.enabled` and `rvcList`), a port of the Go `speaker-agent` and its
+Rust port on the workspace crates (`dl-signalr`, `dl-http`, `dl-json`, `dl-winos` COM):
+
+- order hub link with `JoinRvc` per RVC (each join awaited, refusals reported), reconnect on the
+  web client's backoff;
+- embedded WAV tones and SAPI speech vi/en (Windows; other systems log);
+- per-RVC `guest.speakerSoundMode` with the Go rules (tone off keeps the voice, malformed is
+  the default, failed fetch keeps the last mode);
+- hub commands `status` and `test`.
+
+**Credential.** No 365-day speaker-device JWT file: the module uses the `pda-sync` enrolment on
+the same machine (`agent.json` + secret store, `/sync/v1/token` exchange, 15-minute tokens). The
+PDA cloud must accept that SyncAgent principal for `JoinRvc` (today `FORBIDDEN_RVC`) and for
+`GET /api/v1/speaker/sound-mode/{rvc}` (today `ClerkOrSpeakerDevice`); the exact change is in the
+crate README. Until then the module is degraded with that reason (report `SPEAKER_JOIN_REFUSED`).
+
+**Print relay.** The speaker module does not relay prints (ADR 0026: one relay per branch;
+`pda-sync` relays, ADR 0098). This closes row 39.
+
+**Still owed.** Real audio on a Windows site (SAPI voices installed, tone playback) and a live
+run once the cloud change ships.
 
 ## 5. Phase-B slices
 

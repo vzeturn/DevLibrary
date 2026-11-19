@@ -1,0 +1,25 @@
+[package]
+name = "dl-agent-speaker"
+description = "PDAOrder speaker module for dl-agent: joins the PDA cloud order hub per RVC with the enrolled pda-sync identity and plays the staff alert tone and the vi/en spoken announcement for guest orders and service calls (port of the Go speaker-agent, without its print relay)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+dl-agent.workspace = true
+dl-agent-pda-sync.workspace = true
+dl-json.workspace = true
+dl-http.workspace = true
+dl-signalr.workspace = true
+dl-ws.workspace = true
+dl-log.workspace = true
+dl-winsvc.workspace = true
+dl-winos.workspace = true
+
+[lints]
+workspace = true
