@@ -20,7 +20,10 @@ read-only and reports to the Membership hub:
 jobs against SMILE and acks them like the .NET agent: create / modify / cancel folios
 (applock, `GetFolioNumber` / `GetConfirmNum` / `GetCancelNum`, replay lookup, hand-entered
 duplicate guard), member profile (`GetProfileNumber`), link folio, voucher and reward
-discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity),
+discounts (`PostOneTransaction`; a REDEEM job with the `vouchers` array posts one line per
+voucher, in `sequence` order, for the hub's `appliedAmount`, idempotent per code; any voucher
+without a positive amount sends the whole job to the desk), travel agent read, behind the
+write gate (DB identity),
 and `EarnPoints` jobs (revenue read from SMILE, `POST /api/agent/earn`).
 Extra beds follow `extra_bed_write_mode`: `SMILE_SPECIAL` runs the .NET preflight (terms
 read from `GlobalParameter` / `SpecialService` / `TransactionCode`, the hub's verified

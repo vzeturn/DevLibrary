@@ -1,0 +1,266 @@
+[
+  {
+    "kind": "text",
+    "text": "SELECT CASE WHEN EXISTS (\n    SELECT 1\n    FROM FolioTransaction t\n    WHERE t.FolioNum IN (@Folios1,@Folios2)\n      AND t.RefNumber = @Ref\n      AND t.PostingClerkID = @Clerk\n) THEN 1 ELSE 0 END",
+    "params": [
+      {
+        "name": "Folios1",
+        "type": "AnsiString",
+        "value": "700"
+      },
+      {
+        "name": "Folios2",
+        "type": "AnsiString",
+        "value": "701"
+      },
+      {
+        "name": "Ref",
+        "type": "AnsiString",
+        "value": "AMT100"
+      },
+      {
+        "name": "Clerk",
+        "type": "AnsiString",
+        "value": "MEM"
+      }
+    ]
+  },
+  {
+    "kind": "proc",
+    "text": "PostOneTransaction",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "String",
+        "value": "700"
+      },
+      {
+        "name": "BillAmount",
+        "type": "Decimal",
+        "value": "-100000"
+      },
+      {
+        "name": "BillExRate",
+        "type": "Decimal",
+        "value": "1"
+      },
+      {
+        "name": "TransactionCode",
+        "type": "String",
+        "value": "MDISC"
+      },
+      {
+        "name": "TransactionSubCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "sTransactionDate",
+        "type": "String",
+        "value": "2026-12-01"
+      },
+      {
+        "name": "RoomCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "RefNumber",
+        "type": "String",
+        "value": "AMT100"
+      },
+      {
+        "name": "TransactionAmount",
+        "type": "Decimal",
+        "value": "-100000"
+      },
+      {
+        "name": "FolioBalanceCode",
+        "type": "String",
+        "value": "A"
+      },
+      {
+        "name": "MealPeriodNumber",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "Comment",
+        "type": "String",
+        "value": "Membership voucher discount"
+      },
+      {
+        "name": "sSystemTime",
+        "type": "String",
+        "value": "14:05:09"
+      },
+      {
+        "name": "OriginAmount",
+        "type": "Decimal",
+        "value": "-100000"
+      },
+      {
+        "name": "OriginCurrency",
+        "type": "String",
+        "value": "VND"
+      },
+      {
+        "name": "OriginFolioNumber",
+        "type": "String",
+        "value": "700"
+      },
+      {
+        "name": "PostingClerkID",
+        "type": "String",
+        "value": "MEM"
+      },
+      {
+        "name": "NumberCover",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "OriginRoom",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "Discount",
+        "type": "Decimal",
+        "value": "100000"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT CASE WHEN EXISTS (\n    SELECT 1\n    FROM FolioTransaction t\n    WHERE t.FolioNum IN (@Folios1,@Folios2)\n      AND t.RefNumber = @Ref\n      AND t.PostingClerkID = @Clerk\n) THEN 1 ELSE 0 END",
+    "params": [
+      {
+        "name": "Folios1",
+        "type": "AnsiString",
+        "value": "700"
+      },
+      {
+        "name": "Folios2",
+        "type": "AnsiString",
+        "value": "701"
+      },
+      {
+        "name": "Ref",
+        "type": "AnsiString",
+        "value": "PCT15"
+      },
+      {
+        "name": "Clerk",
+        "type": "AnsiString",
+        "value": "MEM"
+      }
+    ]
+  },
+  {
+    "kind": "proc",
+    "text": "PostOneTransaction",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "String",
+        "value": "700"
+      },
+      {
+        "name": "BillAmount",
+        "type": "Decimal",
+        "value": "-450000"
+      },
+      {
+        "name": "BillExRate",
+        "type": "Decimal",
+        "value": "1"
+      },
+      {
+        "name": "TransactionCode",
+        "type": "String",
+        "value": "MDISC"
+      },
+      {
+        "name": "TransactionSubCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "sTransactionDate",
+        "type": "String",
+        "value": "2026-12-01"
+      },
+      {
+        "name": "RoomCode",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "RefNumber",
+        "type": "String",
+        "value": "PCT15"
+      },
+      {
+        "name": "TransactionAmount",
+        "type": "Decimal",
+        "value": "-450000"
+      },
+      {
+        "name": "FolioBalanceCode",
+        "type": "String",
+        "value": "A"
+      },
+      {
+        "name": "MealPeriodNumber",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "Comment",
+        "type": "String",
+        "value": "Membership voucher discount"
+      },
+      {
+        "name": "sSystemTime",
+        "type": "String",
+        "value": "14:05:09"
+      },
+      {
+        "name": "OriginAmount",
+        "type": "Decimal",
+        "value": "-450000"
+      },
+      {
+        "name": "OriginCurrency",
+        "type": "String",
+        "value": "VND"
+      },
+      {
+        "name": "OriginFolioNumber",
+        "type": "String",
+        "value": "700"
+      },
+      {
+        "name": "PostingClerkID",
+        "type": "String",
+        "value": "MEM"
+      },
+      {
+        "name": "NumberCover",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "OriginRoom",
+        "type": "String",
+        "value": ""
+      },
+      {
+        "name": "Discount",
+        "type": "Decimal",
+        "value": "450000"
+      }
+    ]
+  }
+]

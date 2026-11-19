@@ -460,6 +460,11 @@ impl Dispatcher {
     }
 
     fn redeem(&self, job: &Job, p: &JobPayload) -> Result<Ack, WriteError> {
+        // The `vouchers` array (spec 2026-10-15 §3) carries the hub's amounts; a legacy
+        // payload with only `voucher` keeps the behaviour below unchanged.
+        if let Some(stacked) = p.stacked_vouchers.as_deref().filter(|v| !v.is_empty()) {
+            return self.redeem_stacked(job, p, stacked);
+        }
         let Some(voucher) = &p.voucher else {
             return Ok(Ack::manual(&job.job_id, "payload thiếu thông tin voucher."));
         };
@@ -486,22 +491,10 @@ impl Dispatcher {
                 ));
             }
         };
+        if let Some(refusal) = self.discount_code_refusal(&job.job_id) {
+            return Ok(refusal);
+        }
         let code = &self.settings.member_discount_code;
-        if code.is_empty() {
-            return Ok(Ack::manual(
-                &job.job_id,
-                "Earn:MemberDiscountCode để trống (tắt ghi giảm giá voucher lên folio) — áp voucher tay tại quầy.",
-            ));
-        }
-        if code.chars().count() > MAX_TRANSACTION_CODE_LENGTH {
-            return Ok(Ack::manual(
-                &job.job_id,
-                &format!(
-                    "Earn:MemberDiscountCode '{code}' dài {} ký tự, vượt giới hạn {MAX_TRANSACTION_CODE_LENGTH} của FolioTransaction.TransactionCode — SMILE sẽ cắt hoặc từ chối. Đặt mã ngắn hơn hoặc để trống để tắt ghi giảm giá voucher lên folio.",
-                    code.chars().count()
-                ),
-            ));
-        }
         let nums: Vec<Decimal> = live.iter().map(|f| f.folio_num).collect();
         if self.pms.has_posted_ref(&nums, &voucher.code)? {
             log::info(
@@ -681,6 +674,9 @@ impl Dispatcher {
         }
     }
 }
+
+#[path = "redeem.rs"]
+mod redeem;
 
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
