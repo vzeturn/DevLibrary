@@ -42,11 +42,16 @@ pub struct Beat {
     pub version: String,
     /// Process id, so a stuck process can be killed.
     pub pid: u32,
+    /// Channel the hub assigned in its last answer (empty: none yet).
+    pub channel: String,
+    /// Hub clock minus local clock at the last heartbeat, in seconds.
+    pub skew: i64,
 }
 
 impl Beat {
     fn to_json(&self) -> Value {
-        json!({"at": self.at, "hub_at": self.hub_at, "version": self.version, "pid": u64::from(self.pid)})
+        json!({"at": self.at, "hub_at": self.hub_at, "version": self.version, "pid": u64::from(self.pid),
+            "channel": self.channel, "skew": self.skew})
     }
 
     fn from_json(v: &Value) -> Option<Beat> {
@@ -59,6 +64,12 @@ impl Beat {
                 .unwrap_or("")
                 .into(),
             pid: u32::try_from(v.get("pid").and_then(Value::as_u64).unwrap_or(0)).unwrap_or(0),
+            channel: v
+                .get("channel")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            skew: v.get("skew").and_then(Value::as_i64).unwrap_or(0),
         })
     }
 }

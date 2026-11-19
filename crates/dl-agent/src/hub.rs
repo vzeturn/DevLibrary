@@ -10,6 +10,9 @@ use crate::identity::{Identity, public_key_b64};
 use crate::report::ProblemReport;
 use crate::{Error, now};
 
+/// Where a self-test run is uploaded (agent-hub `routes/agent.ts`).
+pub const SELFTEST_PATH: &str = "/v1/agent/selftest";
+
 /// Sends one HTTP request. The runtime uses [`HttpTransport`]; tests use a fake.
 pub trait Transport: Send + Sync {
     /// Sends `method url` with the headers and body; returns status and body. Errors are
@@ -33,9 +36,14 @@ pub struct HttpTransport {
 impl HttpTransport {
     /// A client with agent timeouts and a 200 MiB body limit (update artifacts).
     pub fn new() -> HttpTransport {
+        HttpTransport::with_timeout(std::time::Duration::from_secs(120))
+    }
+
+    /// The same client with a shorter request timeout (self-test probes).
+    pub fn with_timeout(timeout: std::time::Duration) -> HttpTransport {
         let options = dl_http::ClientOptions {
-            timeout: Some(std::time::Duration::from_secs(120)),
-            connect_timeout: Some(std::time::Duration::from_secs(10)),
+            timeout: Some(timeout),
+            connect_timeout: Some(timeout.min(std::time::Duration::from_secs(10))),
             max_body: 200 * 1024 * 1024,
             user_agent: Some(format!("dl-agent/{}", crate::agent_version())),
             max_redirects: 3,
@@ -295,6 +303,17 @@ impl HubClient {
             .collect();
         let v = self.post("/v1/reports", &json!({"reports": items}))?;
         Ok(v.get("accepted").and_then(Value::as_u64).unwrap_or(0))
+    }
+
+    /// Uploads one self-test run to [`SELFTEST_PATH`]. `Ok(false)` when the hub answers 404
+    /// (a hub older than the route): callers log it and go on.
+    pub fn selftest(&self, run: &Value) -> Result<bool, Error> {
+        let body = dl_json::to_string(run);
+        match self.call("POST", SELFTEST_PATH, body.as_bytes()) {
+            Ok(_) => Ok(true),
+            Err(Error::Status { code: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// `POST /v1/commands/{id}/result`.

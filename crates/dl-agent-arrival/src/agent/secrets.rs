@@ -230,20 +230,33 @@ impl TenantKeyStore {
             .map_err(|e| Error::Crypto(e.clone()))
     }
 
+    /// The configured key or the key file, without creating one: `None` when neither
+    /// exists yet (the self-test reads, it never writes a key).
+    ///
+    /// # Errors
+    /// [`Error::Config`] for a configured key that is not base64; [`Error::Io`] or
+    /// [`Error::Crypto`] for the file.
+    pub fn load_existing(&self) -> Result<Option<Vec<u8>>, Error> {
+        if !self.configured.trim().is_empty() {
+            return parse_base64(self.configured.trim())
+                .map(Some)
+                .ok_or_else(|| Error::Config("Agent:TenantKey is not base64".into()));
+        }
+        match std::fs::read(&self.file) {
+            Ok(blob) => unprotect(&blob, TENANT_KEY_ENTROPY).map(Some),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::io("tenant key", e)),
+        }
+    }
+
     /// `LoadOrCreate`.
     ///
     /// # Errors
     /// [`Error::Config`] for a configured key that is not base64; [`Error::Io`] or
     /// [`Error::Crypto`] for the file.
     pub fn load_or_create(&self) -> Result<Vec<u8>, Error> {
-        if !self.configured.trim().is_empty() {
-            return parse_base64(self.configured.trim())
-                .ok_or_else(|| Error::Config("Agent:TenantKey is not base64".into()));
-        }
-        match std::fs::read(&self.file) {
-            Ok(blob) => return unprotect(&blob, TENANT_KEY_ENTROPY),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(Error::io("tenant key", e)),
+        if let Some(key) = self.load_existing()? {
+            return Ok(key);
         }
         let key = TenantKeyVault::new_key()?;
         if let Some(dir) = self.file.parent() {

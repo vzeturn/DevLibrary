@@ -8,10 +8,21 @@ fn beat(at: u64, hub_at: u64) -> Beat {
         hub_at,
         version: "1.0.0".into(),
         pid: 4242,
+        channel: "canary".into(),
+        skew: -3,
     }
 }
 
 const T: u64 = 1_000_000;
+
+#[test]
+fn beat_written_by_an_older_agent_still_reads() {
+    let d = TestDir::new("wd-old-beat");
+    let old = dl_json::json!({"at": T, "hub_at": T - 5, "version": "1.0.0", "pid": 4242});
+    store::write_json(&d.0.join(BEAT_FILE), &old).unwrap();
+    let b = read_beat(&d.0).unwrap();
+    assert_eq!((b.channel.as_str(), b.skew, b.hub_at), ("", 0, T - 5));
+}
 
 #[test]
 fn beat_and_state_round_trip() {

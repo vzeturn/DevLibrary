@@ -9,6 +9,7 @@
 //! to end on its own.
 
 pub mod collector;
+pub mod selftest;
 pub mod settings;
 
 use std::path::{Path, PathBuf};

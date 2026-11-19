@@ -18,6 +18,7 @@
 //! `HotelUtcOffsetMinutes` of the .NET agent.
 
 pub mod reporter;
+pub mod selftest;
 
 use std::path::PathBuf;
 use std::sync::Arc;

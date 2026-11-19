@@ -67,6 +67,8 @@ pub struct Options {
     pub trusted: TrustedKeys,
     /// Probation after an update.
     pub probation_seconds: u64,
+    /// Answers the `selftest` command (set by the CLI; `None` answers "no self-test").
+    pub selftest: Option<crate::sys_module::SelfTestHook>,
 }
 
 impl Options {
@@ -79,6 +81,7 @@ impl Options {
             version: agent_version(),
             trusted: release_keys(),
             probation_seconds: PROBATION_SECONDS,
+            selftest: None,
         }
     }
 }
@@ -141,7 +144,7 @@ impl Agent {
         let spool = Spool::open(opts.data_dir.join("reports.json"));
         let outbox = Outbox::default();
         let mut supervisor = Supervisor::new(opts.data_dir.clone(), outbox.clone(), spool.clone());
-        supervisor.add(crate::sys_module::factory());
+        supervisor.add(crate::sys_module::factory_with(opts.selftest.clone()));
         let sql = Site::load(&opts.data_dir);
         supervisor.set_sql(sql.pools.clone());
         if !sql.pools.is_empty() {
@@ -304,6 +307,8 @@ impl Agent {
             hub_at: self.hub_ok_at,
             version: self.opts.version.to_string(),
             pid: std::process::id(),
+            channel: self.channel.clone(),
+            skew: self.hub.skew(),
         };
         if let Err(e) = watchdog::write_beat(&self.opts.data_dir, &beat) {
             dl_log::warn!("cannot write the heartbeat file"; error = %e);
@@ -502,6 +507,7 @@ impl Agent {
             return None;
         }
         if !cmd.is_built_in() {
+            let cmd = crate::sys_module::route(cmd);
             if cmd.module.is_none() {
                 self.answer(&cmd.id, false, format!("unknown command {}", cmd.kind));
             } else if let Err(c) = self.supervisor.deliver(cmd) {

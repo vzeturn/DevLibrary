@@ -33,4 +33,5 @@ pub mod wire;
 pub mod writer;
 
 pub use enroll::tool::membership_enroll_tool;
+pub use module::selftest::membership_selftest;
 pub use module::{MembershipModule, membership_module};

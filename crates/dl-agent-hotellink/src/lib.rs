@@ -20,4 +20,5 @@ pub mod run;
 mod testhub;
 
 pub use enroll::hl_enroll_tool;
+pub use module::selftest::hotellink_selftest;
 pub use module::{HotellinkModule, hotellink_module};

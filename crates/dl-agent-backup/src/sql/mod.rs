@@ -119,6 +119,12 @@ pub trait SqlConn: Send {
     fn list_databases(&mut self) -> Result<Vec<String>, Error>;
     /// Arms (or clears) the cancel token for the next statement.
     fn set_cancel(&mut self, token: Option<CancelToken>);
+    /// Whether this login may `BACKUP DATABASE` `database`; `None` when there is no such
+    /// database. Connections that do not model permissions answer `Some(true)`.
+    fn can_backup(&mut self, database: &str) -> Result<Option<bool>, Error> {
+        let _ = database;
+        Ok(Some(true))
+    }
 }
 
 /// Opens connections; the real one is [`Tds`].
@@ -276,6 +282,21 @@ impl SqlConn for TdsConn {
 
     fn set_cancel(&mut self, token: Option<CancelToken>) {
         self.client.set_cancel(token);
+    }
+
+    fn can_backup(&mut self, database: &str) -> Result<Option<bool>, Error> {
+        let r = self
+            .client
+            .query(
+                "SELECT HAS_PERMS_BY_NAME(@name, 'DATABASE', 'BACKUP DATABASE') AS can",
+                &[Param::new("name", database)],
+            )
+            .map_err(|e| sql_err("read the BACKUP permission", &e))?;
+        Ok(r.rows()
+            .first()
+            .and_then(|row| row.try_get::<Option<i32>>(0))
+            .flatten()
+            .map(|v| v == 1))
     }
 }
 

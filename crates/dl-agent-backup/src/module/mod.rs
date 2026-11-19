@@ -10,6 +10,7 @@
 //! Stop: workers take no new job; a running backup gets the stop grace to finish, then its
 //! statement is cancelled and the job stays queued for the next start.
 
+pub mod selftest;
 pub mod settings;
 
 use std::sync::Arc;

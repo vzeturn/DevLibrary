@@ -38,6 +38,8 @@ pub struct App {
     pub modules: Vec<Factory>,
     /// Sub-commands the modules add (setup steps such as `einvoice-enroll`).
     pub tools: Vec<Tool>,
+    /// The modules' self-tests (`selftest`).
+    pub selftests: Vec<crate::selftest::SelfTest>,
     /// Release line on the hub (default `dl-agent`).
     pub product: String,
     /// Version of this binary on that line (default: the `dl-agent` crate version).
@@ -52,6 +54,7 @@ impl App {
             display: display.into(),
             modules: Vec::new(),
             tools: Vec::new(),
+            selftests: Vec::new(),
             product: crate::agent::PRODUCT.into(),
             version: agent_version(),
         }
@@ -74,6 +77,12 @@ impl App {
     /// Adds a module sub-command. Its name must not clash with a built-in one.
     pub fn tool(mut self, tool: Tool) -> App {
         self.tools.push(tool);
+        self
+    }
+
+    /// Adds a module's self-test (run by `selftest` and the `selftest` command).
+    pub fn selftest(mut self, test: crate::selftest::SelfTest) -> App {
+        self.selftests.push(test);
         self
     }
 
@@ -166,7 +175,8 @@ pub fn command(app: &App) -> Command {
                 .about("Connects to every declared database (or one) and prints the result")
                 .arg(Arg::positional("name").help("Only this database"))
                 .arg(data()),
-        );
+        )
+        .subcommand(crate::selftest::cli::grammar(data()));
     app.tools.iter().fold(cmd, |cmd, t| {
         cmd.subcommand((t.grammar)(Command::new(t.name)).arg(data()))
     })
@@ -198,6 +208,7 @@ pub fn main(app: App) -> i32 {
         }
         "sql-add" => sql_add(&dir, sub),
         "sql-test" => return sql_test(&dir, sub.value("name")),
+        crate::selftest::COMMAND => return crate::selftest::cli::main(&app, &dir, sub),
         "status" => {
             println!(
                 "{}",
@@ -415,6 +426,7 @@ fn run_agent(app: &App, dir: &Path, stop: &StopSignal) -> i32 {
     let mut opts = Options::new(dir.to_path_buf(), exe);
     opts.product = app.product.clone();
     opts.version = app.version.clone();
+    opts.selftest = Some(crate::selftest::hook(app, dir));
     match Agent::new(
         opts,
         identity,

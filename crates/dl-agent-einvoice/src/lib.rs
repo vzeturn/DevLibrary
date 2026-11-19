@@ -32,6 +32,7 @@ pub mod stats;
 pub mod tcvn3;
 
 pub use enroll::einvoice_enroll_tool;
+pub use module::selftest::einvoice_selftest;
 pub use module::{EinvoiceModule, einvoice_module};
 
 use domain::{CollectedInvoice, PushItem};

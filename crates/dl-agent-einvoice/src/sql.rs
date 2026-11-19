@@ -495,6 +495,34 @@ impl Sql {
             .collect()
     }
 
+    /// The stored procedures among `names` that the database of `source` lacks (a
+    /// read-only `OBJECT_ID` lookup; the self-test's schema probe).
+    pub fn missing_procs(
+        &self,
+        source: &str,
+        names: &[&str],
+        timeout: Duration,
+    ) -> Result<Vec<String>, String> {
+        let mut missing = Vec::new();
+        for name in names.iter().filter(|n| !n.is_empty()) {
+            let rs = self
+                .conn(source)
+                .with(timeout, |c| {
+                    c.query(
+                        "SELECT CAST(CASE WHEN OBJECT_ID(@Name, 'P') IS NULL THEN 0 ELSE 1 END AS bit)",
+                        &[Param::new("Name", *name)],
+                    )
+                })
+                .map_err(|e| err(&format!("agent: look up {name} ({source})"), e))?;
+            let present = rs.rows().first().map(|r| r.get::<bool>(0)).transpose();
+            match present.map_err(|e| err("agent: scan procedure lookup", e))? {
+                Some(true) => {}
+                _ => missing.push((*name).to_owned()),
+            }
+        }
+        Ok(missing)
+    }
+
     /// `ProbeFOSchema`. An empty SP name gives `group1_count = -1`.
     pub fn probe_fo_schema(&self, timeout: Duration) -> Result<FoSchemaProbe, String> {
         let sp = &self.sp.probe_fo_schema;
