@@ -16,6 +16,7 @@ use dl_agent::supervisor::{Factory, Module, ModuleContext};
 use dl_json::{Map, Value};
 use dl_winsvc::StopSignal;
 
+use crate::checkout::CheckoutScanner;
 use crate::config::{AgentConfig, ConfigStore, Dpapi, Sealer};
 use crate::earn::pairs::{EarnSettings, PairSource};
 use crate::earn::{EarnEnv, ModuleEnv};
@@ -31,7 +32,7 @@ use crate::smile::{SmileError, SmileHealth, TdsSmile};
 use crate::sync::{SyncSettings, SyncWorker};
 use crate::writer::folio::{FolioWriter, WriteOptions};
 use crate::writer::smile_writer::{EarnPath, SmileWriter};
-use scan::{ScanDeps, ScanLoop};
+use scan::{CheckoutPass, ScanDeps, ScanLoop};
 use state::{RateLimit, Shared};
 
 /// The module name (the `modules.membership` section).
@@ -222,6 +223,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             ("pull_jobs", V::B(settings.pull_jobs)),
             ("read_only", V::B(settings.read_only)),
             ("folio_scan", V::B(settings.folio.enabled)),
+            ("checkout_scan", V::B(settings.checkout.enabled)),
         ],
     );
 
@@ -264,6 +266,9 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             shared: shared.clone(),
         };
         let mut scans = ScanLoop::new(deps, settings, &cfg.hotel_id.to_string(), agent_version());
+        if let Some(pass) = checkout_pass(settings, &cfg, &shared, &earn_hub, &env) {
+            scans = scans.with_checkout(pass);
+        }
         let s = stop.clone();
         match spawn("membership-scan", move || scans.run(&s)) {
             Ok(h) => workers.push(("scan", h)),
@@ -326,6 +331,33 @@ fn dispatcher(
             extra_bed_mode: w.extra_bed_mode.clone(),
         },
     )))
+}
+
+/// The checkout scan when `checkout_scan_enabled` (default: writes on), on a SMILE
+/// session of its own.
+fn checkout_pass(
+    settings: &Settings,
+    cfg: &AgentConfig,
+    shared: &Arc<Shared>,
+    hub: &Arc<dyn EarnHub>,
+    env: &Arc<dyn EarnEnv>,
+) -> Option<CheckoutPass> {
+    if !settings.checkout.enabled {
+        return None;
+    }
+    let smile = TdsSmile::new(&cfg.smile_connection_string).ok()?;
+    Some(CheckoutPass {
+        scanner: CheckoutScanner::new(
+            settings.checkout.clone(),
+            &settings.smile.guest_phone_column,
+            PairSource::new(earn_settings(settings)),
+            shared.walk_in.clone(),
+            agent_version(),
+        ),
+        db: Arc::new(smile),
+        hub: hub.clone(),
+        env: env.clone(),
+    })
 }
 
 /// `EarnOptions` plus the configured extra-bed code, for every earn path.

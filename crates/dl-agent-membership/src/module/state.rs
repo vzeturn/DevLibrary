@@ -129,6 +129,8 @@ pub struct Shared {
     pinned_identity: Mutex<Option<String>>,
     /// The folio scanner's cursor reading, for the heartbeat.
     pub folio: Arc<FolioScanState>,
+    /// The walk-in earn health (`WalkInEarnState`), for the heartbeat.
+    pub walk_in: Arc<crate::checkout::WalkInEarnState>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

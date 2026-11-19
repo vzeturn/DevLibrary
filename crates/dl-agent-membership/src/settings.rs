@@ -73,6 +73,8 @@ pub struct Settings {
     pub write: WriteSettings,
     /// `Smile` and `Earn` (read side only).
     pub smile: SmileSettings,
+    /// `CheckoutScan`.
+    pub checkout: crate::checkout::CheckoutSettings,
 }
 
 /// `FolioObservationScan`.
@@ -216,9 +218,11 @@ impl Settings {
             .map_or_else(|| config::default_dir(data_dir), PathBuf::from);
         let secs = |key, d| Duration::from_secs(uint(v, key, d));
         let (bed_mode, bed_problem) = extra_bed_mode(v);
+        let read_only = flag(v, "read_only", true);
         Settings {
             program_data_dir,
-            read_only: flag(v, "read_only", true),
+            read_only,
+            checkout: crate::checkout::CheckoutSettings::from_config(v, read_only),
             pull_jobs: flag(v, "pull_jobs", false),
             max_jobs_per_pull: u32::try_from(uint(v, "max_jobs_per_pull", 20)).unwrap_or(20),
             heartbeat: secs("heartbeat_seconds", 30),

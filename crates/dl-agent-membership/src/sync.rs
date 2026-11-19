@@ -355,7 +355,7 @@ impl SyncWorker {
             agent_version: self.agent_version.clone(),
             pending_jobs: 0,
             smile_ok,
-            walk_in_earn_ok: None,
+            walk_in_earn_ok: self.shared.walk_in.is_healthy(),
             folio_scan_watermark: scan.map(|s| s.watermark),
             folio_scan_lag_seconds: scan.map(|s| s.lag_seconds),
             folio_scan_at: scan.map(|s| s.scan_at),

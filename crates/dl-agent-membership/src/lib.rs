@@ -16,6 +16,7 @@
 //! entropy `MM.Membership.Agent.v1`), so an enrolled machine needs no new enrolment.
 
 pub mod availability;
+pub mod checkout;
 pub mod config;
 pub mod earn;
 pub mod enroll;
@@ -33,6 +34,7 @@ pub mod sync;
 pub mod wire;
 pub mod writer;
 
+pub use checkout::tool::membership_backfill_tool;
 pub use enroll::tool::membership_enroll_tool;
 pub use module::selftest::membership_selftest;
 pub use module::{MembershipModule, membership_module};

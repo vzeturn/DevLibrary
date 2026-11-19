@@ -49,7 +49,7 @@ pub struct Heartbeat {
     pub pending_jobs: i64,
     /// Whether a SMILE connection opened.
     pub smile_ok: bool,
-    /// Walk-in earn health; `None` while the walk-in path is not ported.
+    /// Walk-in earn health (`WalkInEarnState`); `None` until a walk-in scan ran.
     pub walk_in_earn_ok: Option<bool>,
     /// The folio-observation watermark (PMS local time).
     pub folio_scan_watermark: Option<DateTime>,

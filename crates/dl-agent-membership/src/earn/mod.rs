@@ -11,7 +11,7 @@ pub mod sql;
 pub mod wire;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// What the earn paths need from the running module besides SMILE and the hub.
 pub trait EarnEnv: Send + Sync {

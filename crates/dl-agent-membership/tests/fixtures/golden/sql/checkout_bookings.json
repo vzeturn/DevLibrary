@@ -1,0 +1,108 @@
+[
+  {
+    "kind": "text",
+    "text": "SELECT MAX(FolioNum)          AS FolioNum,\n       ExternalConfirmNumber  AS ConfirmationCode,\n       MAX(CASE WHEN UserInfo2 LIKE @Tag THEN UserInfo2 END) AS UserInfo2,\n       MAX(CheckOutTime)      AS CheckOutTime\nFROM Folio\nWHERE ISNULL(CancelNum, 0) = 0\n  AND ExternalConfirmNumber IN (@Codes0,@Codes1,@Codes2)\nGROUP BY ExternalConfirmNumber\nHAVING COUNT(*) = SUM(CASE WHEN FolioStatus = 3 THEN 1 ELSE 0 END)",
+    "params": [
+      {
+        "name": "Codes0",
+        "type": "String",
+        "value": "MM-A"
+      },
+      {
+        "name": "Codes1",
+        "type": "String",
+        "value": "MM-B"
+      },
+      {
+        "name": "Codes2",
+        "type": "String",
+        "value": "MM-C"
+      },
+      {
+        "name": "Tag",
+        "type": "String",
+        "value": "MEM:%;BKG:%"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT f.RmChgTrn\nFROM dbo.Folio f\nWHERE f.ExternalConfirmNumber IN (@Keys0,@Keys1)\n  AND ISNULL(f.RmChgTrn, 0) <> 0",
+    "params": [
+      {
+        "name": "Keys0",
+        "type": "String",
+        "value": "MM-A"
+      },
+      {
+        "name": "Keys1",
+        "type": "String",
+        "value": "MM-B"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT LTRIM(RTRIM(TransactionCode)) AS Code, LTRIM(RTRIM(TransactionSubCode)) AS Sub,\n       ISNULL(AutoPost, 0) AS AutoPost\nFROM dbo.TransactionCode;\n\nSELECT DISTINCT CONVERT(varchar(12), TrnCode) AS Code, CONVERT(varchar(12), ISNULL(TrnSubCode, 0)) AS Sub\nFROM dbo.RoomType\nWHERE ISNULL(TrnCode, 0) <> 0;\n\nSELECT DISTINCT LTRIM(RTRIM(TrnCode)) AS Code, LTRIM(RTRIM(TrnSubCode)) AS Sub\nFROM dbo.PackageCode\nWHERE NULLIF(LTRIM(RTRIM(TrnCode)), '') IS NOT NULL;\n\nSELECT LTRIM(RTRIM(ParaName)) AS Code, LTRIM(RTRIM(ParaString)) AS Sub\nFROM dbo.GlobalParameter\nWHERE ParaName IN ('EBedSurChgTrnCode', 'EBedSurChgTrnSub');\n\nSELECT LTRIM(RTRIM(TrnCode)) AS Code, LTRIM(RTRIM(TrnSubCode)) AS Sub\nFROM dbo.SpecialService\nWHERE SpecialServiceCode = @ExtraBedCode\n  AND ISNULL(IncludeInRoomCharge, 0) = 0\n  AND NULLIF(LTRIM(RTRIM(TrnCode)), '') IS NOT NULL;",
+    "params": [
+      {
+        "name": "ExtraBedCode",
+        "type": "AnsiString",
+        "value": "EB"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT t.TransactionCode,\n       ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') AS TransactionSubCode,\n       tc.Description, t.TransactionAmount AS Amount,\n       CASE WHEN ((t.TransactionCode = @EarnC0 AND ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') = @EarnS0)) THEN 1 ELSE 0 END AS Qualifies\nFROM Folio f\nJOIN FolioTransaction t ON t.FolioNum = CONVERT(varchar(20), f.FolioNum)\nLEFT JOIN TransactionCode tc ON tc.TransactionCode = t.TransactionCode\n    AND tc.TransactionSubCode = ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0')\nWHERE f.ExternalConfirmNumber = @Ext\n  AND ISNULL(f.CancelNum, 0) = 0\n  AND f.FolioStatus = 3\n  AND t.FolioBalanceCode = 'A'",
+    "params": [
+      {
+        "name": "Ext",
+        "type": "String",
+        "value": "MM-A"
+      },
+      {
+        "name": "EarnC0",
+        "type": "AnsiString",
+        "value": "110"
+      },
+      {
+        "name": "EarnS0",
+        "type": "AnsiString",
+        "value": "1"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT 'O' AS K, LTRIM(RTRIM(f.OriginCode)) AS V FROM Folio f\n  WHERE f.ExternalConfirmNumber = @Key AND ISNULL(f.CancelNum, 0) = 0\nUNION\nSELECT 'S', LTRIM(RTRIM(f.MarketSegmentCode)) FROM Folio f\n  WHERE f.ExternalConfirmNumber = @Key AND ISNULL(f.CancelNum, 0) = 0\nUNION\nSELECT 'R', LTRIM(RTRIM(f.RoomRateCode)) FROM Folio f\n  WHERE f.ExternalConfirmNumber = @Key AND ISNULL(f.CancelNum, 0) = 0",
+    "params": [
+      {
+        "name": "Key",
+        "type": "String",
+        "value": "MM-A"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT ExternalConfirmNumber\nFROM Folio\nWHERE ExternalConfirmNumber IN (@Codes0,@Codes1,@Codes2)\nGROUP BY ExternalConfirmNumber\nHAVING SUM(CASE WHEN ISNULL(CancelNum, 0) = 0 THEN 1 ELSE 0 END) = 0",
+    "params": [
+      {
+        "name": "Codes0",
+        "type": "String",
+        "value": "MM-A"
+      },
+      {
+        "name": "Codes1",
+        "type": "String",
+        "value": "MM-B"
+      },
+      {
+        "name": "Codes2",
+        "type": "String",
+        "value": "MM-C"
+      }
+    ]
+  }
+]

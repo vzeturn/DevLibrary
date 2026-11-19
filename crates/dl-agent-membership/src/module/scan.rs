@@ -1,5 +1,5 @@
-//! The scan thread: the availability probe, the physical rooms and the folio observations,
-//! each on its own interval, on a SMILE connection of their own. Nothing is scanned before
+//! The scan thread: the availability probe, the physical rooms, the folio observations and
+//! the checkout scan (earn), each on its own interval, on a SMILE connection of their own. Nothing is scanned before
 //! the first sync-config, nor while SMILE shows another database than the pinned one.
 
 use std::sync::Arc;
@@ -9,7 +9,10 @@ use dl_agent::report::Severity;
 use dl_winsvc::StopSignal;
 
 use crate::availability::{self, AvailabilityError, AvailabilityScanner, TickOutcome};
+use crate::checkout::{CheckoutDb, CheckoutError, CheckoutScanner};
+use crate::earn::EarnEnv;
 use crate::folio::scanner::{FolioError, FolioScanner};
+use crate::hub::earn::EarnHub;
 use crate::hub::{HubApi, HubError};
 use crate::identity::Tracker;
 use crate::log::{self, V};
@@ -42,12 +45,26 @@ pub struct ScanDeps {
     pub shared: Arc<Shared>,
 }
 
+/// The checkout scan with its own SMILE session, hub and identity.
+pub struct CheckoutPass {
+    /// The scanner.
+    pub scanner: CheckoutScanner,
+    /// SMILE.
+    pub db: Arc<dyn CheckoutDb>,
+    /// The hub's earn routes.
+    pub hub: Arc<dyn EarnHub>,
+    /// The identity fingerprint and the hub's extra-bed code.
+    pub env: Arc<dyn EarnEnv>,
+}
+
 /// The scanners and when each is due.
 pub struct ScanLoop {
     deps: ScanDeps,
     availability: AvailabilityScanner,
     rooms: RoomScanner,
     folio: Option<FolioScanner>,
+    checkout: Option<CheckoutPass>,
+    next_checkout: Option<Instant>,
     probe_every: Duration,
     rooms_every: Duration,
     folio_every: Duration,
@@ -90,6 +107,8 @@ impl ScanLoop {
             ),
             rooms: RoomScanner::new(settings.rooms.full_push_every),
             folio,
+            checkout: None,
+            next_checkout: None,
             probe_every: settings
                 .availability
                 .probe_interval
@@ -102,6 +121,12 @@ impl ScanLoop {
             paused_logged: false,
             deps,
         }
+    }
+
+    /// Adds the checkout scan (off unless given).
+    pub fn with_checkout(mut self, pass: CheckoutPass) -> ScanLoop {
+        self.checkout = Some(pass);
+        self
     }
 
     /// Runs until `stop` fires.
@@ -142,13 +167,26 @@ impl ScanLoop {
             let more = self.folio_pass(&sync);
             self.next_folio = Some(if more { now } else { now + self.folio_every });
         }
-        [self.next_availability, self.next_rooms, self.next_folio]
-            .into_iter()
-            .flatten()
-            .map(|t| t.saturating_duration_since(now))
-            .min()
-            .unwrap_or(IDLE)
-            .min(IDLE.max(self.probe_every))
+        if self.checkout.is_some() && due(self.next_checkout) {
+            self.checkout_pass();
+            let every = self
+                .checkout
+                .as_ref()
+                .map_or(IDLE, |c| c.scanner.settings().interval.max(IDLE));
+            self.next_checkout = Some(now + every);
+        }
+        [
+            self.next_availability,
+            self.next_rooms,
+            self.next_folio,
+            self.next_checkout,
+        ]
+        .into_iter()
+        .flatten()
+        .map(|t| t.saturating_duration_since(now))
+        .min()
+        .unwrap_or(IDLE)
+        .min(IDLE.max(self.probe_every))
     }
 
     fn availability_pass(&mut self, sync: &SyncConfig, now: Instant) -> Duration {
@@ -256,6 +294,32 @@ impl ScanLoop {
                 };
                 self.failed("folio", &msg, smile, hub);
                 false
+            }
+        }
+    }
+
+    /// `CheckoutScanner.ScanOnceAsync`; a failure waits for the next interval.
+    fn checkout_pass(&mut self) {
+        let Some(c) = self.checkout.as_mut() else {
+            return;
+        };
+        match c
+            .scanner
+            .scan_once(c.db.as_ref(), c.hub.as_ref(), c.env.as_ref())
+        {
+            Ok(o) => self.deps.shared.record_scan(
+                "checkout",
+                Ok((
+                    o.reported as u64,
+                    format!("{} pending bookings, {} reported", o.pending, o.reported),
+                )),
+            ),
+            Err(e) => {
+                let (smile, hub) = match &e {
+                    CheckoutError::Smile(s) => (Some(s), None),
+                    CheckoutError::Hub(h) => (None, Some(h)),
+                };
+                self.failed("checkout", &e.to_string(), smile, hub);
             }
         }
     }
