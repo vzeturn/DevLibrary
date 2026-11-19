@@ -104,6 +104,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 - dl-agent-arrival: the SCM "terminated unexpectedly" event logged with an update restart (exit 75, same instant) is information, no longer a problem that turns selftest `last_problem` to warn.
+- dl-agent-arrival: the self-test's `last_problem` warns only for a problem of the last 24 h; an older one is shown as history with `pass` (RT-0164).
 - dl-agent-backup selftest: the BACKUP permission check covers only databases a schedule backs up; the other databases the hub lists on the server (MM_*, test copies) no longer fail it (RT-0164).
 
 - dl-agent-arrival: the install report (`hello.installations`) uses the format the Check-In cloud parses (`processes=<n>`, both agents counted); 1.3.9 read as "unreadable report" in `agent_install_state`.

@@ -288,7 +288,12 @@ fn link_check(identity: &Path) -> Check {
     })
 }
 
-/// The newest warning or error of the problem journal.
+/// How long a recorded problem keeps the check at `warn`; older ones are shown as history.
+const PROBLEM_WARN_HOURS: i64 = 24;
+
+/// The newest warning or error of the problem journal: `warn` while it is recent, `pass`
+/// (still naming it) once it is older than [`PROBLEM_WARN_HOURS`], so a problem that is over
+/// does not keep the self-test yellow for good.
 fn last_problem(identity: &Path) -> Check {
     let title = "Last recorded problem";
     let journal = ProblemJournal::next_to(identity);
@@ -297,9 +302,10 @@ fn last_problem(identity: &Path) -> Check {
             Outcome::pass("none recorded")
         }),
         Ok(Some(p)) => {
+            let at = p.last_at.as_deref().unwrap_or(&p.at);
             let detail = format!(
                 "{} {} [{}] {}{}",
-                p.last_at.as_deref().unwrap_or(&p.at),
+                at,
                 p.level,
                 p.source,
                 p.message,
@@ -309,12 +315,32 @@ fn last_problem(identity: &Path) -> Check {
                     String::new()
                 }
             );
+            let recent = is_recent(at, &problem_cutoff());
             Check::timed(NAME, "last_problem", title, || {
-                Outcome::warn(detail).remedy("the hub's diagnostics carry the full journal")
+                if recent {
+                    Outcome::warn(detail).remedy("the hub's diagnostics carry the full journal")
+                } else {
+                    Outcome::pass(format!(
+                        "none in the last {PROBLEM_WARN_HOURS} h; last: {detail}"
+                    ))
+                }
             })
         }
         Err(e) => Check::timed(NAME, "last_problem", title, || Outcome::warn(e)),
     }
+}
+
+/// Round-trip UTC text of the moment [`PROBLEM_WARN_HOURS`] ago.
+fn problem_cutoff() -> String {
+    stj::num::format_utc_o(
+        &(dl_time::OffsetDateTime::now_utc() - dl_time::Duration::from_hours(PROBLEM_WARN_HOURS)),
+    )
+}
+
+/// Whether a journal time (round-trip UTC text, which sorts as time) is at or after `cutoff`.
+/// A time that is not in that form counts as recent: better yellow than a hidden problem.
+fn is_recent(at: &str, cutoff: &str) -> bool {
+    !(at.len() >= 20 && at.ends_with('Z') && at.as_bytes()[10] == b'T') || at >= cutoff
 }
 
 /// The bundle marker in the PMS against this build's.
@@ -395,6 +421,16 @@ fn reachable(base: &str) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_problem_older_than_the_window_is_history_not_a_warning() {
+        let cutoff = "2026-11-19T16:00:00.0000000Z";
+        assert!(!super::is_recent("2026-11-19T14:38:27.8649581Z", cutoff));
+        assert!(super::is_recent("2026-11-19T16:00:00.0000000Z", cutoff));
+        assert!(super::is_recent("2026-11-20T01:02:03.0000000Z", cutoff));
+        assert!(super::is_recent("not a time", cutoff));
+        assert!(super::problem_cutoff().ends_with('Z'));
+    }
+
     use dl_agent::selftest::Status;
     use dl_json::json;
 
