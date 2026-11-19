@@ -35,9 +35,12 @@ pub use ping::{Ping, PingError, ping_dsn, ping_negotiated};
 pub use prompt::HideInput;
 pub use tool::einvoice_enroll_tool;
 
-use prompt::{Prompter, prompt_sql};
+use prompt::{Prompter, prompt_sql, split_server_address};
 
 const DEFAULT_SQL_HOST: &str = ".";
+/// Where `einvoice-enroll` reads the one-time token when `--token` is not given, so it
+/// stays off the command line (the bench script and other installers set it).
+pub const TOKEN_ENV: &str = "DL_AGENT_EINVOICE_TOKEN";
 const DEFAULT_SQL_USER: &str = "smile";
 const FO_DATABASE: &str = "SMILE_FO";
 const POS_DATABASE: &str = "SMILE_POS";
@@ -89,6 +92,9 @@ pub struct EnrollOptions<'a> {
     pub sql_user: String,
     /// `--sql-password` (empty = `MMEI_SQL_PASSWORD`, then [`default_sql_password`]).
     pub sql_password: String,
+    /// `--sql-auth`: `sql` (a SQL login) or `windows` (integrated authentication as the
+    /// service account, no user or password); empty = `MMEI_SQL_AUTH`, then `sql`.
+    pub sql_auth: String,
     /// `--collect-from` (None = the tenant's Hub value, then today).
     pub collect_from: Option<OffsetDateTime>,
     /// `--sql-prompt`: ask for the connection and test it before spending the token.
@@ -122,6 +128,7 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
         sql_host,
         sql_user,
         sql_password,
+        sql_auth,
         collect_from: collect_from_flag,
         prompt_sql: prompted,
         input,
@@ -132,7 +139,9 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
         env,
     } = opts;
     if platform_url.is_empty() || enroll_token.is_empty() {
-        return Err("enroll requires --platform-url and --token".into());
+        return Err(format!(
+            "enroll requires --platform-url and --token (or {TOKEN_ENV})"
+        ));
     }
     let mock = env("MMEI_AGENT_MOCK").as_deref() == Some("1");
     let default_ping = |d: &Dsn| ping_dsn(d, mock);
@@ -145,15 +154,44 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| def.to_owned())
     };
-    let host = pick(&sql_host, "MMEI_SQL_HOST", DEFAULT_SQL_HOST);
-    let user = pick(&sql_user, "MMEI_SQL_USER", DEFAULT_SQL_USER);
-    let password = pick(&sql_password, "MMEI_SQL_PASSWORD", default_sql_password());
-    let base = |database: &str| Dsn {
-        host: host.clone(),
-        database: database.to_owned(),
-        user: user.clone(),
-        password: password.clone(),
-        ..Dsn::default()
+    let windows_auth = match pick(&sql_auth, "MMEI_SQL_AUTH", "sql")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "sql" => false,
+        "windows" => true,
+        other => {
+            return Err(format!(
+                "enroll: --sql-auth {other:?}: expected sql or windows"
+            ));
+        }
+    };
+    // SSMS forms (`host\instance`, `host,port`) work here as at the prompt.
+    let (host, port_or_inst) =
+        split_server_address(&pick(&sql_host, "MMEI_SQL_HOST", DEFAULT_SQL_HOST));
+    // Windows authentication: a DSN without a user name logs in through SSPI.
+    let (user, password) = if windows_auth {
+        (String::new(), String::new())
+    } else {
+        (
+            pick(&sql_user, "MMEI_SQL_USER", DEFAULT_SQL_USER),
+            pick(&sql_password, "MMEI_SQL_PASSWORD", default_sql_password()),
+        )
+    };
+    let base = |database: &str| {
+        let mut d = Dsn {
+            host: host.clone(),
+            database: database.to_owned(),
+            user: user.clone(),
+            password: password.clone(),
+            ..Dsn::default()
+        };
+        if port_or_inst.chars().all(|c| c.is_ascii_digit()) {
+            d.port = port_or_inst.clone();
+        } else {
+            d.instance = port_or_inst.clone();
+        }
+        d
     };
     let (mut fo, mut pos) = (base(FO_DATABASE), base(POS_DATABASE));
     if prompted {
@@ -166,7 +204,7 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
             hide: hide_input,
         };
         (fo, pos) = prompt_sql(&mut p, fo, pos, ping)?;
-    } else if password.is_empty() {
+    } else if password.is_empty() && !windows_auth {
         return Err(
             "enroll needs the SQL password: --sql-password, MMEI_SQL_PASSWORD or --sql-prompt (this build has no default password)"
                 .into(),
@@ -185,11 +223,15 @@ pub fn enroll(opts: EnrollOptions<'_>) -> Result<(), String> {
     )?;
     say!(out, "Enrolled tenant {tenant}.\n\n");
 
+    let login = if fo.user.is_empty() {
+        "Windows authentication".to_owned()
+    } else {
+        format!("user {}", go_quote(&fo.user))
+    };
     say!(
         out,
-        "Using SQL Server {} (user {}), databases {} + {}\n",
+        "Using SQL Server {} ({login}), databases {} + {}\n",
         go_quote(&fo.host),
-        go_quote(&fo.user),
         fo.database,
         pos.database
     );
