@@ -14,10 +14,17 @@ read-only and reports to the Membership hub:
 - **folio observations** (`POST /api/agent/folio-observations`) from a cursor that moves
   only after the hub answered 2xx;
 - **job pull plumbing** (`POST /api/agent/jobs/pull`, or `GET /api/agent/jobs` on an older
-  hub): jobs are counted, never executed and never acked in this release.
+  hub): with `read_only: true` (the default) jobs are counted, never executed, never acked.
 
-The writers (job execution: create / modify / cancel folios, check-in, link, ack) are the
-next slice (M2). Until then the module refuses `read_only: false`.
+**Writes (M2).** With `read_only: false` and `pull_jobs: true` the module runs the hub's
+jobs against SMILE and acks them like the .NET agent: create / modify / cancel folios
+(applock, `GetFolioNumber` / `GetConfirmNum` / `GetCancelNum`, replay lookup, hand-entered
+duplicate guard), member profile (`GetProfileNumber`), link folio, voucher and reward
+discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity).
+Not ported yet: earn reporting (`EarnPoints` jobs are left un-acked), SMILE_SPECIAL
+extra-bed rows (a booking that needs them is left un-acked), the checkout / walk-in
+scanners and the extra-bed terms sync. Only one writer may run per hotel: stop the .NET
+`MM.Membership.Agent` service before turning writes on.
 
 ## Turning it on
 
@@ -32,7 +39,7 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | Key | Default | Meaning |
 |---|---|---|
 | `program_data_dir` | `%ProgramData%\MM.Membership.Agent` (the module data dir off Windows) | where `config.dpapi` and the folio cursor live |
-| `read_only` | `true` | `false` is refused (`degraded`) until the writers exist |
+| `read_only` | `true` | `false` runs and acks hub jobs against SMILE (needs `pull_jobs: true`) |
 | `pull_jobs` | `false` | pull jobs to count them; off by default because an un-acked lease goes back to the queue and four such deliveries turn a job MANUAL |
 | `max_jobs_per_pull` | `20` | |
 | `heartbeat_seconds` | `30` | |
@@ -41,6 +48,7 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | `availability_probe_seconds`, `availability_heartbeat_minutes`, `availability_horizon_days`, `availability_full_push_every`, `availability_max_folios` | `5`, `5`, `365`, `24`, `20000` | `AvailabilityScan` |
 | `rooms_interval_seconds`, `rooms_full_push_every` | `300`, `12` | room inventory |
 | `extra_bed_special_code`, `guest_phone_column`, `earn_charge_codes`, `member_discount_code` | `EB`, `MobileNum`, SMILE's catalog, none | `Smile` / `Earn` |
+| `write_lock_timeout_ms`, `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode` | `10000`, `1`, `BFF`, `SMILE_SPECIAL` | `SmileWriteOptions`; an empty code is not written; an unknown mode falls back to `FOLD_LEGACY` with a warning |
 | `capabilities` | the .NET `FullCapabilities` | sent in the heartbeat |
 
 No secret is in the remote config: the hotel token and the SMILE connection string stay in

@@ -8,6 +8,16 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-membership` (M2, write side): with `read_only: false` and `pull_jobs: true` the
+  module executes and acks hub jobs against SMILE with the .NET agent's SQL: create / modify /
+  cancel folios under the folio and cancel applocks (replay lookup, hand-entered duplicate
+  guard, TCVN3 names, AdditionalName placeholders), member profiles under the profile applock,
+  link folio (`LINK_TARGET_CHANGED`), voucher and reward discounts via `PostOneTransaction`,
+  travel agent reads, all behind the DB-identity write gate. New keys `write_lock_timeout_ms`,
+  `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode`. `read_only` still
+  defaults to `true`. Not yet ported: earn reporting, SMILE_SPECIAL extra-bed rows, the
+  checkout / walk-in scanners and the extra-bed terms sync (those jobs are left un-acked).
+
 - `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
 - `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
