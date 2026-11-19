@@ -25,8 +25,45 @@ fn refuses_contract_drift() {
 
 #[test]
 fn errors_never_echo_values() {
-    let err = decode_json(br#"{"type":"op","id":"6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f","op":"x","contract_ver":"SECRET-VALUE","args":{},"request_key":null,"deadline_ms":1}"#).unwrap_err();
+    let err = decode_json(br#"{"type":"op","id":"6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f","op":"x","contract_ver":"SECRET-VALUE","target_db":"SMILE_FO","args":{},"request_key":null,"deadline_ms":1}"#).unwrap_err();
     assert_eq!(err.to_string(), "bad op frame at contract_ver");
+}
+
+#[test]
+fn migrate_frames_are_retired_and_op_frames_name_a_smile_database() {
+    for t in RETIRED_FRAMES {
+        let js = format!(r#"{{"type":"{t}","id":"{ID}"}}"#);
+        assert_eq!(
+            decode_json(js.as_bytes()),
+            Err(WireError::Retired(t)),
+            "{t}"
+        );
+    }
+    let op = |db: &str, extra: &str| {
+        format!(
+            r#"{{"type":"op","id":"{ID}","op":"fo.hotelDate.get","contract_ver":1,"target_db":"{db}","args":{{}},"request_key":null,"deadline_ms":1{extra}}}"#
+        )
+    };
+    for db in ["SMILE_FO", "SMILE_POS", "SMILE_BO"] {
+        let Frame::Op(o) = decode_json(op(db, "").as_bytes()).unwrap() else {
+            panic!("not an op");
+        };
+        assert_eq!(o.target_db, db);
+        assert!(!o.is_replay());
+    }
+    for db in ["MM_PMS", "smile_fo", ""] {
+        assert!(decode_json(op(db, "").as_bytes()).is_err(), "{db}");
+    }
+    let Frame::Op(o) = decode_json(op("SMILE_FO", r#","replay":true"#).as_bytes()).unwrap() else {
+        panic!("not an op");
+    };
+    assert!(o.is_replay());
+    let back = to_json(&Frame::Op(o));
+    assert!(
+        back.contains(r#""target_db":"SMILE_FO""#) && back.contains(r#""replay":true"#),
+        "{back}"
+    );
+    assert!(decode_json(op("SMILE_FO", r#","replay":"yes""#).as_bytes()).is_err());
 }
 
 #[test]

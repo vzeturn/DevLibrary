@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use dl_json::{Map, Value};
 
 use crate::exec;
-use crate::wire::{self, MigrateResult, Op, OpResult};
+use crate::wire::{self, Op, OpResult};
 
 /// The stream kept failing for longer than one back-off cycle, or the cloud stopped it.
 pub const CODE_STREAM_FAILED: &str = "pms_stream_failed";
@@ -22,8 +22,8 @@ pub const CODE_STREAM_FAILED: &str = "pms_stream_failed";
 pub const CODE_AUTH_FAILED: &str = "pms_auth_failed";
 /// An op failed in the site database.
 pub const CODE_SQL_FAILED: &str = "pms_sql_failed";
-/// A cloud-requested migration failed or was refused.
-pub const CODE_MIGRATION_FAILED: &str = "pms_migration_failed";
+/// The op journal could not record or answer a keyed write, or is at its cap.
+pub const CODE_JOURNAL_FAILED: &str = "pms_journal_failed";
 /// The agent rejected an op (unknown op, contract or argument mismatch).
 pub const CODE_OP_REJECTED: &str = "pms_op_rejected";
 /// The PMS config file cannot be read or is invalid.
@@ -74,7 +74,6 @@ pub struct Telemetry {
     failed: AtomicU64,
     last_op_unix: AtomicI64,
     reconnects: AtomicU64,
-    migrations_applied: AtomicU64,
     connected: AtomicBool,
     ever_connected: AtomicBool,
     down: Mutex<Down>,
@@ -107,8 +106,6 @@ pub struct Snapshot {
     pub last_op_unix: i64,
     /// Times the stream came back up after it had been up.
     pub reconnects: u64,
-    /// Migration files applied by cloud-requested runs.
-    pub migrations_applied: u64,
     /// The stream is up.
     pub connected: bool,
 }
@@ -124,7 +121,6 @@ impl Snapshot {
         m.insert("ops_failed", self.failed);
         m.insert("last_op_unix", self.last_op_unix);
         m.insert("reconnects", self.reconnects);
-        m.insert("migrations_applied", self.migrations_applied);
         m
     }
 }
@@ -175,7 +171,6 @@ impl Telemetry {
             failed: AtomicU64::new(0),
             last_op_unix: AtomicI64::new(0),
             reconnects: AtomicU64::new(0),
-            migrations_applied: AtomicU64::new(0),
             connected: AtomicBool::new(false),
             ever_connected: AtomicBool::new(false),
             down: Mutex::new(Down::default()),
@@ -194,7 +189,6 @@ impl Telemetry {
             failed: self.failed.load(Ordering::SeqCst),
             last_op_unix: self.last_op_unix.load(Ordering::SeqCst),
             reconnects: self.reconnects.load(Ordering::SeqCst),
-            migrations_applied: self.migrations_applied.load(Ordering::SeqCst),
             connected: self.connected.load(Ordering::SeqCst),
         }
     }
@@ -264,27 +258,6 @@ impl Telemetry {
                 }
             }
         }
-    }
-
-    /// Counts a finished migration run and reports a failure or a refusal.
-    pub fn migration_done(&self, res: &MigrateResult) {
-        if res.status == wire::MIGRATE_APPLIED {
-            let n = u64::try_from(res.applied).unwrap_or(0);
-            self.migrations_applied.fetch_add(n, Ordering::SeqCst);
-            return;
-        }
-        if res.status != wire::MIGRATE_FAILED && res.status != wire::MIGRATE_REFUSED {
-            return;
-        }
-        let code = res.error.as_ref().map_or("", |e| e.code.as_str());
-        let mut ctx = Map::new();
-        ctx.insert("run_id", res.id.as_str());
-        ctx.insert("bundle_id", res.bundle_id.as_str());
-        ctx.insert("status", res.status.as_str());
-        ctx.insert("error_code", code);
-        ctx.insert("head", res.head);
-        let msg = format!("migration {} {}: {code}", res.bundle_id, res.status);
-        self.report(Level::Error, CODE_MIGRATION_FAILED, &msg, ctx);
     }
 
     /// The cloud answered the hello; counts a reconnect when it was up before.

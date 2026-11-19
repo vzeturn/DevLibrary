@@ -108,13 +108,16 @@ pub struct Token {
     pub expires_at: OffsetDateTime,
 }
 
+/// Caps an enroll or token answer (small JSON documents).
+const MAX_HTTP_BODY: usize = 1 << 20;
+
 /// The shared HTTP client: HTTP/1.1, OS TLS, `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`,
-/// 30 s per request, bodies up to the bundle cap.
+/// 30 s per request, bodies up to [`MAX_HTTP_BODY`].
 pub fn new_http_client() -> Arc<dl_http::Client> {
     Arc::new(dl_http::Client::with_options(dl_http::ClientOptions {
         timeout: Some(Duration::from_secs(30)),
         connect_timeout: Some(Duration::from_secs(10)),
-        max_body: wire::MAX_BUNDLE_BYTES + 1,
+        max_body: MAX_HTTP_BODY,
         user_agent: Some(format!("dl-agent/{}", dl_agent::agent_version())),
         ..dl_http::ClientOptions::default()
     }))

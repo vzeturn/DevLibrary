@@ -3,10 +3,12 @@
 //! results written in order of completion), exponential reconnect with jitter capped at
 //! 30 s. A supersede (4409), a revoked agent or an unsupported contract stops the loop
 //! instead of reconnecting. Args and results are never logged. `update` hints are ignored:
-//! dl-agent updates itself.
+//! dl-agent updates itself. The hello names the ops this build executes (`ops`,
+//! `contract_max`) and `schema_version` 0: the site has no MM_PMS schema. The retired
+//! migrate frames are logged and skipped.
 //!
 //! The session thread owns the socket: it reads with a short timeout and, between reads,
-//! sends the frames that op and migration workers queue through a [`Writer`].
+//! sends the frames that op workers queue through a [`Writer`].
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -20,12 +22,10 @@ use dl_ws::{CloseFrame, ConnectOptions, Message, WebSocket};
 use crate::attrs;
 use crate::ctx::Ctx;
 use crate::enroll::{EnrollError, TokenProvider};
-use crate::exec::{self, Executor, SchemaVersion};
+use crate::exec::{self, Executor};
 use crate::log::Logger;
 use crate::telemetry::{DownKind, Telemetry};
-use crate::wire::{
-    self, Frame, Migrate, MigrateError, MigrateProgress, MigrateResult, Op, OpResult,
-};
+use crate::wire::{self, Frame, Op, OpResult, WireError};
 
 /// Why the stream loop ended for good.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,17 +73,6 @@ fn other(m: impl Into<String>) -> ConnError {
     ConnError::Other(m.into())
 }
 
-/// Runs a cloud-requested migration; blocks until the run ends and returns its result.
-/// `progress` sends a frame on the live stream (best effort). Enforces its own single
-/// flight.
-pub trait MigrationHandler: Send + Sync {
-    /// Runs one request.
-    fn handle(&self, ctx: &Ctx, req: &Migrate, progress: ProgressSink) -> MigrateResult;
-}
-
-/// Where a migration's progress frames go.
-pub type ProgressSink = Arc<dyn Fn(MigrateProgress) + Send + Sync>;
-
 /// Stream settings.
 pub struct Options {
     /// Tenant base URL (`https://…`).
@@ -94,14 +83,12 @@ pub struct Options {
     pub tokens: Arc<dyn TokenProvider>,
     /// The op executor.
     pub exec: Arc<dyn Executor>,
-    /// The schema version for hello and pong.
-    pub schema: Arc<dyn SchemaVersion>,
+    /// `name@contract_ver` of every op the executor runs: the hello's `ops`.
+    pub ops: Vec<String>,
     /// Logger.
     pub log: Logger,
     /// Build version.
     pub agent_version: String,
-    /// Runs migrate frames; `None` answers each refused/MIGRATE_UNSUPPORTED.
-    pub migrator: Option<Arc<dyn MigrationHandler>>,
     /// In-flight cap.
     pub inflight_cap: usize,
     /// No frame from the cloud this long: reconnect.
@@ -129,10 +116,9 @@ impl Options {
             http,
             tokens,
             exec,
-            schema: Arc::new(exec::UnknownSchema),
+            ops: Vec::new(),
             log: Logger::discard(),
             agent_version: String::new(),
-            migrator: None,
             inflight_cap: wire::INFLIGHT_CAP,
             idle_timeout: wire::HEARTBEAT * wire::MISSED_PONGS_LIMIT + Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
@@ -155,7 +141,6 @@ pub fn backoff(attempt: u32) -> Duration {
     Duration::from_nanos(half + dl_rand::range(0..=half))
 }
 
-const SCHEMA_REFRESH: Duration = Duration::from_secs(300);
 /// How long one socket read waits before queued frames get their turn: the latency a
 /// worker's result can see on an otherwise idle stream.
 const READ_SLICE: Duration = Duration::from_millis(25);
@@ -164,7 +149,6 @@ const READ_SLICE: Duration = Duration::from_millis(25);
 pub struct Client {
     o: Options,
     started: Instant,
-    schema: Mutex<(i64, Option<Instant>)>,
 }
 
 type Ws = WebSocket<Upgraded>;
@@ -252,39 +236,14 @@ impl Client {
         Client {
             o,
             started: Instant::now(),
-            schema: Mutex::new((0, None)),
         }
     }
 
-    /// The schema for a pong: cached, re-read at most every 5 minutes; a failed read keeps
-    /// the last known value.
-    fn schema_version(&self, life: &Ctx) -> i64 {
-        let mut s = self.schema.lock().unwrap_or_else(PoisonError::into_inner);
-        if s.1.is_some_and(|at| at.elapsed() < SCHEMA_REFRESH) {
-            return s.0;
-        }
-        s.1 = Some(Instant::now());
-        let q = life.with_timeout(Duration::from_secs(2));
-        match self.o.schema.schema_version(&q) {
-            Ok(v) if v >= 0 => {
-                s.0 = v;
-                v
-            }
-            r => {
-                let reason = r.err().unwrap_or_default();
-                self.o
-                    .log
-                    .warn("agent.schema_version.unknown", attrs!["reason" => reason]);
-                s.0
-            }
-        }
-    }
-
-    fn pong(&self, life: &Ctx, ts: i64) -> Frame {
+    fn pong(&self, ts: i64) -> Frame {
         Frame::Pong(wire::Pong {
             ts,
             agent_version: self.o.agent_version.clone(),
-            schema_version: self.schema_version(life),
+            schema_version: wire::SCHEMA_VERSION_UNKNOWN,
             uptime_s: i64::try_from(self.started.elapsed().as_secs()).unwrap_or(i64::MAX),
         })
     }
@@ -386,21 +345,12 @@ impl Client {
         };
         let _ = ws.set_read_timeout(Some(READ_SLICE));
         let _ = ws.set_write_timeout(Some(self.o.write_timeout));
-        let schema = match self.o.schema.schema_version(ctx) {
-            Ok(v) if v >= 0 => v,
-            r => {
-                let reason = r.err().unwrap_or_default();
-                self.o
-                    .log
-                    .warn("agent.schema_version.unknown", attrs!["reason" => reason]);
-                wire::SCHEMA_VERSION_UNKNOWN
-            }
-        };
         let hello = Frame::Hello(wire::Hello {
             protocol: wire::PROTOCOL_VERSION,
             agent_version: self.o.agent_version.clone(),
-            schema_version: schema,
+            schema_version: wire::SCHEMA_VERSION_UNKNOWN,
             contract_max: self.o.exec.contract_max(),
+            ops: Some(self.o.ops.clone()),
         });
         if let Err(e) = send_ws(&mut ws, &hello) {
             return (false, Err(other(e)));
@@ -479,6 +429,11 @@ impl Client {
             last = Instant::now();
             let frame = match wire::decode_cloud_frame(&data, binary) {
                 Ok(f) => f,
+                Err(WireError::Retired(t)) => {
+                    // A cloud on the old contract: nothing on the site runs migrations.
+                    self.o.log.warn("agent.frame.retired", attrs!["type" => t]);
+                    continue;
+                }
                 Err(e) => {
                     self.o
                         .log
@@ -493,7 +448,7 @@ impl Client {
             }
             match frame {
                 Frame::Ping(p) => {
-                    let pong = self.pong(ctx, p.ts);
+                    let pong = self.pong(p.ts);
                     if let Err(e) = send_ws(ws, &pong) {
                         return Some(other(e));
                     }
@@ -503,7 +458,6 @@ impl Client {
                     attrs!["inflight_cap" => c.inflight_cap, "heartbeat_ms" => c.heartbeat_ms],
                 ),
                 Frame::Op(op) => self.dispatch(ws, shared, op),
-                Frame::Migrate(m) => self.migrate(ctx, ws, shared, m),
                 Frame::Update(u) => self.o.log.info(
                     "agent.update.ignored",
                     attrs!["version" => u.version, "reason" => "dl-agent updates itself"],
@@ -557,58 +511,6 @@ impl Client {
         self.o.telemetry.op_done(&op, &res);
         let r = send_ws(ws, &Frame::Result(res.clone()));
         log_sent(&self.o.log, &op, &res, Duration::ZERO, r);
-    }
-
-    fn migrate(&self, life: &Ctx, ws: &mut Ws, shared: &Arc<Shared>, req: Migrate) {
-        self.o.log.info(
-            "agent.migrate.requested",
-            attrs!["run_id" => &req.id, "bundle_id" => &req.bundle_id, "dry_run" => req.dry_run],
-        );
-        let Some(h) = self.o.migrator.clone() else {
-            let res = MigrateResult {
-                id: req.id.clone(),
-                status: wire::MIGRATE_REFUSED.into(),
-                bundle_id: req.bundle_id.clone(),
-                error: Some(MigrateError {
-                    code: wire::MIGRATE_UNSUPPORTED.into(),
-                    ..MigrateError::default()
-                }),
-                ..MigrateResult::default()
-            };
-            self.o.telemetry.migration_done(&res);
-            if let Err(e) = send_ws(ws, &Frame::MigrateResult(res.clone())) {
-                self.o.log.warn(
-                    "agent.migrate.result_unsent",
-                    attrs!["run_id" => &res.id, "status" => &res.status, "reason" => e],
-                );
-            }
-            return;
-        };
-        let writer = shared.writer.clone();
-        let log = self.o.log.clone();
-        let tel = self.o.telemetry.clone();
-        let life = life.clone();
-        std::thread::spawn(move || {
-            let w = writer.clone();
-            let l = log.clone();
-            let id = req.id.clone();
-            let progress: ProgressSink = Arc::new(move |p: MigrateProgress| {
-                if let Err(e) = w.write(Frame::MigrateProgress(p)) {
-                    l.warn(
-                        "agent.migrate.progress_unsent",
-                        attrs!["run_id" => &id, "reason" => e],
-                    );
-                }
-            });
-            let res = h.handle(&life, &req, progress);
-            tel.migration_done(&res);
-            if let Err(e) = writer.write(Frame::MigrateResult(res.clone())) {
-                log.warn(
-                    "agent.migrate.result_unsent",
-                    attrs!["run_id" => &res.id, "status" => &res.status, "reason" => e],
-                );
-            }
-        });
     }
 
     /// Stops new ops and gives in-flight ones the grace period to finish and report,

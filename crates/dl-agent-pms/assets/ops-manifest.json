@@ -1,10 +1,8 @@
 {
-  "manifest_version": 1,
-  "allowlist_hash": "b5054f62876640c76d6ead10fb3a1d6b1c58f89c3a73aa4c4407a75e510f152b",
+  "manifest_version": 2,
+  "allowlist_hash": "4a5c05628d7f11bdb0212890d8a636b46f5fca117a2004f99260008df0cdd523",
   "procs": [
-    "MM_Pos_GetBillDetail",
-    "MM_Pos_GetCheckOpenHistory",
-    "MM_Pos_GetTenderVersion"
+    "GetHotelDate1"
   ],
   "excluded_proc_patterns": [
     "^SMLExecRsSql$",
@@ -19,6 +17,7 @@
       "contract_ver": 1,
       "kind": "read",
       "target": "FO",
+      "target_db": "SMILE_FO",
       "timeout_ms": 30000,
       "idempotent": true,
       "calls": []
@@ -28,6 +27,7 @@
       "contract_ver": 1,
       "kind": "write",
       "target": "FO",
+      "target_db": "SMILE_FO",
       "timeout_ms": 30000,
       "idempotent": true,
       "calls": []
@@ -37,64 +37,35 @@
       "contract_ver": 1,
       "kind": "write",
       "target": "FO",
+      "target_db": "SMILE_FO",
       "timeout_ms": 30000,
       "idempotent": true,
       "calls": []
+    },
+    {
+      "name": "fo.hotelDate.get",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 10000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "GetHotelDate1",
+          "params": []
+        }
+      ]
     },
     {
       "name": "pos.checkVersion.get",
       "contract_ver": 1,
       "kind": "read",
       "target": "PMS",
+      "target_db": null,
       "timeout_ms": 15000,
       "idempotent": true,
-      "calls": [
-        {
-          "proc": "MM_Pos_GetBillDetail",
-          "params": [
-            {
-              "name": "CheckNo",
-              "type": "bigint",
-              "arg": "checkNo"
-            },
-            {
-              "name": "RVCNo",
-              "type": "int",
-              "arg": "rvcNo"
-            }
-          ]
-        },
-        {
-          "proc": "MM_Pos_GetCheckOpenHistory",
-          "params": [
-            {
-              "name": "CheckNo",
-              "type": "bigint",
-              "arg": "checkNo"
-            },
-            {
-              "name": "MaxRows",
-              "type": "int",
-              "value": 500
-            }
-          ]
-        },
-        {
-          "proc": "MM_Pos_GetTenderVersion",
-          "params": [
-            {
-              "name": "RVCNo",
-              "type": "int",
-              "arg": "rvcNo"
-            },
-            {
-              "name": "CheckNo",
-              "type": "bigint",
-              "arg": "checkNo"
-            }
-          ]
-        }
-      ]
+      "calls": []
     }
   ]
 }

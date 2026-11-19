@@ -65,7 +65,16 @@ pub(super) fn validate(frame: &Frame) -> Result<(), String> {
             positive("protocol", f.protocol)?;
             str_len("agent_version", &f.agent_version, 1, 32)?;
             non_negative("schema_version", f.schema_version)?;
-            positive("contract_max", f.contract_max)
+            positive("contract_max", f.contract_max)?;
+            if let Some(ops) = &f.ops {
+                if ops.len() > MAX_HELLO_OPS {
+                    return Err(format!("ops: at most {MAX_HELLO_OPS} entries"));
+                }
+                if !ops.iter().all(|o| pat::is_op_cap(o)) {
+                    return Err("ops: every entry must be name@contract_ver".into());
+                }
+            }
+            Ok(())
         }
         Frame::Op(f) => {
             if !pat::is_uuid(&f.id) {
@@ -73,6 +82,9 @@ pub(super) fn validate(frame: &Frame) -> Result<(), String> {
             }
             str_len("op", &f.op, 1, 100)?;
             positive("contract_ver", f.contract_ver)?;
+            if !crate::ops::TARGET_DBS.contains(&f.target_db.as_str()) {
+                return Err("target_db: must be SMILE_FO, SMILE_POS or SMILE_BO".into());
+            }
             if !f.args.is_object() {
                 return Err("args: must be an object".into());
             }
@@ -144,86 +156,5 @@ pub(super) fn validate(frame: &Frame) -> Result<(), String> {
             }
             Ok(())
         }
-        Frame::Migrate(f) => {
-            if !pat::is_uuid(&f.id) {
-                return Err("id: must be a UUID".into());
-            }
-            if !pat::is_bundle_id(&f.bundle_id) {
-                return Err("bundle_id: bad shape".into());
-            }
-            positive("target_version", f.target_version)?;
-            non_negative("rerun_partial", f.rerun_partial)
-        }
-        Frame::MigrateProgress(f) => {
-            if !pat::is_uuid(&f.id) {
-                return Err("id: must be a UUID".into());
-            }
-            if !["verified", "adopt", "backup", "start", "applied", "failed"]
-                .contains(&f.phase.as_str())
-            {
-                return Err("phase: unknown".into());
-            }
-            if let Some(n) = &f.name
-                && pat::migration_file(n).is_none()
-            {
-                return Err("name: must be a migration file name".into());
-            }
-            non_negative("seq", f.seq)?;
-            non_negative("duration_ms", f.duration_ms)
-        }
-        Frame::MigrateResult(f) => validate_migrate_result(f),
     }
-}
-
-pub(super) fn validate_migrate_result(f: &MigrateResult) -> Result<(), String> {
-    if !pat::is_uuid(&f.id) {
-        return Err("id: must be a UUID".into());
-    }
-    if ![
-        MIGRATE_APPLIED,
-        MIGRATE_DRY_RUN,
-        MIGRATE_REFUSED,
-        MIGRATE_FAILED,
-    ]
-    .contains(&f.status.as_str())
-    {
-        return Err("status: unknown".into());
-    }
-    if !pat::is_bundle_id(&f.bundle_id) {
-        return Err("bundle_id: bad shape".into());
-    }
-    for (name, v) in [
-        ("head", f.head),
-        ("applied", f.applied),
-        ("adopted", f.adopted),
-        ("pending", f.pending),
-        ("duration_ms", f.duration_ms),
-    ] {
-        non_negative(name, v)?;
-    }
-    if f.drift.len() > 500 {
-        return Err("drift: at most 500 findings".into());
-    }
-    for d in &f.drift {
-        if !["ledger", "proc", "table"].contains(&d.kind.as_str()) || !pat::is_migrate_code(&d.code)
-        {
-            return Err("drift: bad finding".into());
-        }
-        str_len("drift.object", &d.object, 1, 128)?;
-    }
-    let ok = f.status == MIGRATE_APPLIED || f.status == MIGRATE_DRY_RUN;
-    match (&f.error, ok) {
-        (Some(_), true) => return Err(format!("error: {} carries no error", f.status)),
-        (None, false) => return Err(format!("error: {} needs an error", f.status)),
-        _ => {}
-    }
-    if let Some(e) = &f.error {
-        if !pat::is_migrate_code(&e.code) {
-            return Err("error.code: bad shape".into());
-        }
-        if e.seq.is_some_and(|s| s < 0) {
-            return Err("error.seq: must be a non-negative integer".into());
-        }
-    }
-    Ok(())
 }

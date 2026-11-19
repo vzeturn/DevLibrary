@@ -78,19 +78,29 @@ pub(super) fn ints_json(v: &[i64]) -> String {
 pub fn to_json(frame: &Frame) -> String {
     let o = Obj::new().str("type", frame.frame_type());
     match frame {
-        Frame::Hello(f) => o
-            .int("protocol", f.protocol)
-            .str("agent_version", &f.agent_version)
-            .int("schema_version", f.schema_version)
-            .int("contract_max", f.contract_max)
-            .finish(),
+        Frame::Hello(f) => {
+            let mut o = o
+                .int("protocol", f.protocol)
+                .str("agent_version", &f.agent_version)
+                .int("schema_version", f.schema_version)
+                .int("contract_max", f.contract_max);
+            if let Some(ops) = &f.ops {
+                let items: Vec<String> = ops.iter().map(|x| json::quote(x)).collect();
+                o = o.raw("ops", &format!("[{}]", items.join(",")));
+            }
+            o.finish()
+        }
         Frame::Op(f) => {
             let mut o = o
                 .str("id", &f.id)
                 .str("op", &f.op)
                 .int("contract_ver", f.contract_ver)
+                .str("target_db", &f.target_db)
                 .value("args", &f.args)
                 .opt_str("request_key", f.request_key.as_deref());
+            if let Some(r) = f.replay {
+                o = o.bool("replay", r);
+            }
             if let Some(s) = &f.expected_stamp {
                 o = o.str("expected_stamp", s);
             }
@@ -151,60 +161,5 @@ pub fn to_json(frame: &Frame) -> String {
             .str("sha256", &f.sha256)
             .str("sig", &f.sig)
             .finish(),
-        Frame::Migrate(f) => {
-            let mut o = o
-                .str("id", &f.id)
-                .str("bundle_id", &f.bundle_id)
-                .int("target_version", f.target_version)
-                .bool("dry_run", f.dry_run);
-            if f.rerun_partial != 0 {
-                o = o.int("rerun_partial", f.rerun_partial);
-            }
-            if f.check_drift {
-                o = o.bool("check_drift", true);
-            }
-            o.finish()
-        }
-        Frame::MigrateProgress(f) => o
-            .str("id", &f.id)
-            .str("phase", &f.phase)
-            .int("seq", f.seq)
-            .opt_str("name", f.name.as_deref())
-            .int("duration_ms", f.duration_ms)
-            .finish(),
-        Frame::MigrateResult(f) => {
-            let mut o = o
-                .str("id", &f.id)
-                .str("status", &f.status)
-                .str("bundle_id", &f.bundle_id)
-                .int("head", f.head)
-                .int("applied", f.applied)
-                .int("adopted", f.adopted)
-                .int("pending", f.pending)
-                .int("duration_ms", f.duration_ms);
-            if !f.drift.is_empty() {
-                let items: Vec<String> = f
-                    .drift
-                    .iter()
-                    .map(|d| {
-                        Obj::new()
-                            .str("kind", &d.kind)
-                            .str("object", &d.object)
-                            .str("code", &d.code)
-                            .finish()
-                    })
-                    .collect();
-                o = o.raw("drift", &format!("[{}]", items.join(",")));
-            }
-            let err = f.error.as_ref().map_or("null".into(), |e| {
-                Obj::new()
-                    .str("code", &e.code)
-                    .opt_int("seq", e.seq)
-                    .opt_int("sql_number", e.sql_number.map(i64::from))
-                    .opt_int("line", e.line.map(i64::from))
-                    .finish()
-            });
-            o.raw("error", &err).finish()
-        }
     }
 }

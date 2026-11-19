@@ -5,6 +5,10 @@
 //! Decoding is as strict as the Go agent: every top-level key must be known, required
 //! keys present, `null` only where the contract allows it, integers only from integer
 //! literals, then the frame's own rules. Error messages name fields, never values.
+//!
+//! The SMILE-only contract (SMILE-PMS decision 2026-11-19) retired the `migrate`,
+//! `migrate_progress` and `migrate_result` frames: no DDL is ever sent to a site. A cloud
+//! that still sends `migrate` gets [`WireError::Retired`], which the session logs and skips.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -23,11 +27,6 @@ pub const STREAM_PATH: &str = "/agent/v1/stream";
 pub const ENROLL_PATH: &str = "/agent/v1/enroll";
 /// Exchanges a signed request for a short-lived JWT.
 pub const TOKEN_PATH: &str = "/agent/v1/token";
-/// Where the agent downloads a bundle: `GET AGENT_BUNDLE_PATH/<id>`.
-pub const AGENT_BUNDLE_PATH: &str = "/agent/v1/bundles";
-
-/// Caps a downloaded bundle's JSON (base64 adds a third to the SQL).
-pub const MAX_BUNDLE_BYTES: usize = 128 << 20;
 
 /// Caps every frame, compressed or not, and after decompression.
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -56,9 +55,11 @@ pub const ERR_CONTRACT_UNSUPPORTED: &str = "CONTRACT_UNSUPPORTED";
 pub const ERR_LEASE_EXPIRED: &str = "LEASE_EXPIRED";
 /// At the in-flight cap or shutting down: the op never started.
 pub const ERR_AGENT_BUSY: &str = "AGENT_BUSY";
+/// A `replay: true` op whose request key is not in the agent's journal: nothing ran.
+pub const ERR_REQUEST_KEY_UNKNOWN: &str = "REQUEST_KEY_UNKNOWN";
 
 /// The codes above in the order of `AGENT_ERROR_CODES` (constants.ts).
-pub const ERROR_CODES: [&str; 7] = [
+pub const ERROR_CODES: [&str; 8] = [
     ERR_SITE_OFFLINE,
     ERR_AGENT_SUPERSEDED,
     ERR_OP_TIMEOUT,
@@ -66,10 +67,15 @@ pub const ERROR_CODES: [&str; 7] = [
     ERR_CONTRACT_UNSUPPORTED,
     ERR_LEASE_EXPIRED,
     ERR_AGENT_BUSY,
+    ERR_REQUEST_KEY_UNKNOWN,
 ];
 
-/// `hello.schema_version` when the MM_SchemaVersion ledger cannot be read.
+/// `hello.schema_version`: kept on the wire for compatibility, always 0 since the
+/// SMILE-only contract (there is no site schema any more; the cloud ignores it).
 pub const SCHEMA_VERSION_UNKNOWN: i64 = 0;
+
+/// The most entries of `hello.ops`.
+pub const MAX_HELLO_OPS: usize = 500;
 
 /// WebSocket close codes the cloud uses; the reason string is the error code.
 pub const CLOSE_BAD_FRAME: u16 = 4400;
@@ -91,24 +97,6 @@ pub const STATUS_REJECTED: &str = "rejected";
 /// See [`STATUS_APPLIED`].
 pub const STATUS_FAILED: &str = "failed";
 
-/// Codes the agent answers a migrate frame with before (or instead of) running.
-pub const MIGRATE_BUSY: &str = "MIGRATE_BUSY";
-/// See [`MIGRATE_BUSY`].
-pub const MIGRATE_UNSUPPORTED: &str = "MIGRATE_UNSUPPORTED";
-/// See [`MIGRATE_BUSY`].
-pub const BUNDLE_FETCH: &str = "BUNDLE_FETCH";
-/// See [`MIGRATE_BUSY`].
-pub const TARGET_MISMATCH: &str = "TARGET_MISMATCH";
-
-/// Migrate result statuses.
-pub const MIGRATE_APPLIED: &str = "applied";
-/// See [`MIGRATE_APPLIED`].
-pub const MIGRATE_DRY_RUN: &str = "dry_run";
-/// See [`MIGRATE_APPLIED`].
-pub const MIGRATE_REFUSED: &str = "refused";
-/// See [`MIGRATE_APPLIED`].
-pub const MIGRATE_FAILED: &str = "failed";
-
 /// `hello`, agent -> cloud, the first frame of every session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hello {
@@ -116,10 +104,12 @@ pub struct Hello {
     pub protocol: i64,
     /// Agent build.
     pub agent_version: String,
-    /// Applied MM_PMS schema (0 = unknown).
+    /// Always [`SCHEMA_VERSION_UNKNOWN`] from this agent (no site schema).
     pub schema_version: i64,
     /// Highest op contract version the agent executes.
     pub contract_max: i64,
+    /// `name@contract_ver` of every op the agent executes (`None` omits the key).
+    pub ops: Option<Vec<String>>,
 }
 
 /// `op`, cloud -> agent: run one operation. Args are opaque here and never logged.
@@ -131,6 +121,8 @@ pub struct Op {
     pub op: String,
     /// Contract version.
     pub contract_ver: i64,
+    /// The SMILE database the op runs on: SMILE_FO, SMILE_POS or SMILE_BO.
+    pub target_db: String,
     /// The arguments (an object once validated).
     pub args: Value,
     /// Idempotency key (`null` allowed).
@@ -139,6 +131,15 @@ pub struct Op {
     pub expected_stamp: Option<String>,
     /// Deadline in milliseconds.
     pub deadline_ms: i64,
+    /// Answer only from the agent's journal (`None` omits the key).
+    pub replay: Option<bool>,
+}
+
+impl Op {
+    /// Whether the cloud asked for a journal-only answer.
+    pub fn is_replay(&self) -> bool {
+        self.replay == Some(true)
+    }
 }
 
 /// Why a result was rejected or failed.
@@ -170,7 +171,7 @@ pub struct OpResult {
     pub outputs: BTreeMap<String, Value>,
     /// The error (required unless applied).
     pub error: Option<OpError>,
-    /// Set when the result was replayed from the request-key log.
+    /// `Some(true)` when the result was answered from the agent's journal.
     pub replayed: Option<bool>,
 }
 
@@ -188,7 +189,7 @@ pub struct Pong {
     pub ts: i64,
     /// Agent build ("" omits it).
     pub agent_version: String,
-    /// Applied schema (0 omits it).
+    /// Site schema (0 omits it; this agent always sends 0).
     pub schema_version: i64,
     /// Process uptime in seconds (0 omits it).
     pub uptime_s: i64,
@@ -226,87 +227,6 @@ pub struct Update {
     pub sig: String,
 }
 
-/// `migrate`, cloud -> agent: verify and apply (or dry-run) one signed bundle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Migrate {
-    /// Run id (UUID).
-    pub id: String,
-    /// Bundle id.
-    pub bundle_id: String,
-    /// The version the bundle must end at.
-    pub target_version: i64,
-    /// Plan only.
-    pub dry_run: bool,
-    /// Operator approval to re-run a half-applied version (0: none).
-    pub rerun_partial: i64,
-    /// Report drift too.
-    pub check_drift: bool,
-}
-
-/// `migrate_progress`, agent -> cloud: one runner step.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MigrateProgress {
-    /// Run id.
-    pub id: String,
-    /// verified, adopt, backup, start, applied or failed.
-    pub phase: String,
-    /// Migration version.
-    pub seq: i64,
-    /// Migration file name.
-    pub name: Option<String>,
-    /// Step duration.
-    pub duration_ms: i64,
-}
-
-/// Why a run was refused or failed (codes and numbers only).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MigrateError {
-    /// Error code.
-    pub code: String,
-    /// Failed version.
-    pub seq: Option<i64>,
-    /// SQL Server error number.
-    pub sql_number: Option<i32>,
-    /// Line of the failing statement.
-    pub line: Option<i32>,
-}
-
-/// One difference between the database and the bundle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DriftFinding {
-    /// ledger, proc or table.
-    pub kind: String,
-    /// The object.
-    pub object: String,
-    /// What differs.
-    pub code: String,
-}
-
-/// `migrate_result`, agent -> cloud: the outcome of one run.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MigrateResult {
-    /// Run id.
-    pub id: String,
-    /// applied, dry_run, refused or failed.
-    pub status: String,
-    /// Bundle id.
-    pub bundle_id: String,
-    /// Ledger head.
-    pub head: i64,
-    /// Files applied.
-    pub applied: i64,
-    /// Files adopted.
-    pub adopted: i64,
-    /// Files still pending.
-    pub pending: i64,
-    /// Run duration.
-    pub duration_ms: i64,
-    /// Drift findings (omitted when empty).
-    pub drift: Vec<DriftFinding>,
-    /// The error (required unless applied or dry_run).
-    pub error: Option<MigrateError>,
-}
-
 /// One decoded, validated frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
@@ -324,12 +244,6 @@ pub enum Frame {
     Cfg(Cfg),
     /// `update`.
     Update(Update),
-    /// `migrate`.
-    Migrate(Migrate),
-    /// `migrate_progress`.
-    MigrateProgress(MigrateProgress),
-    /// `migrate_result`.
-    MigrateResult(MigrateResult),
 }
 
 impl Frame {
@@ -343,16 +257,13 @@ impl Frame {
             Frame::Pong(_) => "pong",
             Frame::Cfg(_) => "cfg",
             Frame::Update(_) => "update",
-            Frame::Migrate(_) => "migrate",
-            Frame::MigrateProgress(_) => "migrate_progress",
-            Frame::MigrateResult(_) => "migrate_result",
         }
     }
 
     fn sent_by_cloud(&self) -> bool {
         matches!(
             self,
-            Frame::Op(_) | Frame::Ping(_) | Frame::Cfg(_) | Frame::Update(_) | Frame::Migrate(_)
+            Frame::Op(_) | Frame::Ping(_) | Frame::Cfg(_) | Frame::Update(_)
         )
     }
 }
@@ -364,13 +275,19 @@ pub enum WireError {
     TooLarge,
     /// Malformed or off-contract; the message names fields, never values.
     Frame(String),
+    /// A frame type the SMILE-only contract retired (the `migrate` family).
+    Retired(&'static str),
 }
+
+/// Frame types retired by the SMILE-only contract: refused, never decoded.
+pub const RETIRED_FRAMES: [&str; 3] = ["migrate", "migrate_progress", "migrate_result"];
 
 impl fmt::Display for WireError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WireError::TooLarge => f.write_str("frame over the size limit"),
             WireError::Frame(m) => f.write_str(m),
+            WireError::Retired(t) => write!(f, "{t}: frame retired by the SMILE-only contract"),
         }
     }
 }

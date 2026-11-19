@@ -1,12 +1,15 @@
-//! Against a real SQL Server: set `PMS_AGENT_TEST_SQL` to a connection URL with rights to
-//! create a database, e.g. `sqlserver://sa:<pw>@127.0.0.1:14333?encrypt=disable`. Without
-//! it every test returns early.
+//! Against a real SQL Server (2017 and 2022 are the supported floor and ceiling): set
+//! `PMS_AGENT_TEST_SQL` to a connection URL with rights to create a database, e.g.
+//! `sqlserver://sa:<pw>@127.0.0.1:14333?encrypt=disable`. Without it every test returns
+//! early. The test databases are `pms_agent_it_*`, never a real SMILE_* name.
 //!
-//! - the golden op/result pairs of packages/shared/src/ops/fixtures, served by procedures
-//!   generated from each fixture's `db.calls` (binds are checked inside the procedure);
-//! - request-key replay, SQL errors, timeouts and the result caps through MM_Op_GetLog /
-//!   MM_Op_CreateLog of packages/db/sql/pms/530 and 531;
-//! - the golden migration bundle through the runner (dry run, apply, re-apply, drift).
+//! - the golden op/result pairs of testdata/ops, served by procedures generated from each
+//!   fixture's `db.calls` (binds are checked inside the procedure);
+//! - `fo.hotelDate.get` against a SMILE_FO fixture whose `HotelParameter` table and
+//!   `GetHotelDate1` procedure are the vendor's (`Select HotelDate From HotelParameter`);
+//! - the op journal in front of the SQL executor: a keyed write runs once, its replay is
+//!   answered from the journal, an unknown key is refused; SQL errors, timeouts, the
+//!   result caps and output parameters.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -14,14 +17,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 use dl_agent_pms::ctx::Ctx;
 use dl_agent_pms::db::{self, Pool};
 use dl_agent_pms::exec::{self, Executor, Limits, SqlExecutor};
+use dl_agent_pms::journal::exec::Journaled;
+use dl_agent_pms::journal::{self, Journal};
+use dl_agent_pms::json;
 use dl_agent_pms::log::Logger;
-use dl_agent_pms::migrate::{self, backup};
 use dl_agent_pms::ops::Manifest;
 use dl_agent_pms::wire::{self, Frame, Op};
-use dl_agent_pms::{bundle, config, json};
 use dl_json::Value;
 
-const DB: &str = "pms_agent_it";
+/// The SMILE_FO stand-in.
+const DB_FO: &str = "pms_agent_it_fo";
+/// The SMILE_POS stand-in (empty: only routing is checked against it).
+const DB_POS: &str = "pms_agent_it_pos";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata")
@@ -35,31 +42,35 @@ fn server() -> Option<dl_tds::Config> {
     )
 }
 
-/// Creates the test database once and installs the op-log migrations.
-fn pool() -> Option<Arc<Pool>> {
-    static POOL: OnceLock<Option<Arc<Pool>>> = OnceLock::new();
-    POOL.get_or_init(|| {
-        let cfg = server()?;
-        let mut master = dl_tds::Client::connect(&cfg).expect("connect master");
-        master
-            .batch(&format!(
-                "IF DB_ID('{DB}') IS NOT NULL BEGIN ALTER DATABASE {DB} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {DB}; END; CREATE DATABASE {DB};"
-            ))
-            .expect("create database");
-        master.close();
-        let p = Arc::new(Pool::new(db::DB_PMS, cfg.with_database(DB), 4));
-        let ctx = Ctx::background();
-        let mut c = p.get(&ctx).unwrap();
-        for f in ["530_ops_op-log.sql", "531_ops_op-log-retention.sql"] {
-            let sql = std::fs::read_to_string(root().join("sql").join(f)).unwrap();
-            for b in migrate::split_batches(&sql) {
-                c.batch(&ctx, &b.text).unwrap_or_else(|e| panic!("{f}: {e}"));
+/// The SMILE_FO and SMILE_POS stand-ins, created once (empty).
+fn pools() -> Option<db::Pools> {
+    static POOLS: OnceLock<Option<db::Pools>> = OnceLock::new();
+    POOLS
+        .get_or_init(|| {
+            let cfg = server()?;
+            let mut master = dl_tds::Client::connect(&cfg).expect("connect master");
+            for name in [DB_FO, DB_POS] {
+                master
+                    .batch(&format!(
+                        "IF DB_ID('{name}') IS NOT NULL BEGIN ALTER DATABASE {name} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {name}; END; CREATE DATABASE {name};"
+                    ))
+                    .expect("create database");
             }
-        }
-        drop(c);
-        Some(p)
-    })
-    .clone()
+            master.close();
+            let mut dbs = db::Pools::new();
+            for (key, name) in [(db::DB_FO, DB_FO), (db::DB_POS, DB_POS)] {
+                dbs.insert(
+                    key.to_owned(),
+                    Arc::new(Pool::new(key, cfg.clone().with_database(name), 4)),
+                );
+            }
+            Some(dbs)
+        })
+        .clone()
+}
+
+fn fo(dbs: &db::Pools) -> Arc<Pool> {
+    dbs[db::DB_FO].clone()
 }
 
 /// The fixtures share procedure names: one test at a time redefines them.
@@ -143,7 +154,8 @@ fn cell_sql(typ: &str, v: &Value) -> String {
 }
 
 /// `CREATE OR ALTER PROCEDURE` serving one fixture call, checking its binds.
-fn proc_sql(manifest: &Manifest, op: &str, call: &Value) -> String {
+/// The batches that make a fixture call happen on the server: setup, then the proc.
+fn proc_sql(manifest: &Manifest, op: &str, call: &Value) -> Vec<String> {
     let name = call["proc"].as_str().unwrap();
     let spec = manifest
         .lookup(op)
@@ -157,8 +169,9 @@ fn proc_sql(manifest: &Manifest, op: &str, call: &Value) -> String {
         .iter()
         .map(|p| format!("@{} {}", p.name, p.typ))
         .collect();
+    let mut batches = Vec::new();
     let mut body = String::from("SET NOCOUNT ON;\n");
-    if let Some(Value::Object(binds)) = call.get("binds") {
+    if let Some(Value::Object(binds)) = call.get("binds").filter(|b| !is_empty_object(b)) {
         let conds: Vec<String> = binds
             .iter()
             .map(|(k, v)| match v {
@@ -173,11 +186,9 @@ fn proc_sql(manifest: &Manifest, op: &str, call: &Value) -> String {
         ));
     }
     if let Some(e) = call.get("error").filter(|e| !e.is_null()) {
-        body.push_str(&format!(
-            "THROW {}, {}, 1;\n",
-            e["number"].as_i64().unwrap(),
-            lit(e["message"].as_str().unwrap())
-        ));
+        let (setup, raise) = raise_sql(e);
+        batches.extend(setup);
+        body.push_str(&raise);
     }
     for set in call
         .get("sets")
@@ -217,10 +228,38 @@ fn proc_sql(manifest: &Manifest, op: &str, call: &Value) -> String {
         .and_then(Value::as_i64)
         .unwrap_or(0);
     body.push_str(&format!("RETURN {rs};\n"));
-    format!(
+    batches.push(format!(
         "CREATE OR ALTER PROCEDURE dbo.{name} {}\nAS\nBEGIN\n{body}END",
         params.join(", ")
-    )
+    ));
+    batches
+}
+
+fn is_empty_object(v: &Value) -> bool {
+    matches!(v, Value::Object(m) if m.is_empty())
+}
+
+/// The statement that raises a fixture's SQL error. THROW only takes numbers
+/// from 50000 up, so a system error is raised by doing what causes it.
+fn raise_sql(e: &Value) -> (Option<String>, String) {
+    let number = e["number"].as_i64().unwrap();
+    let message = e["message"].as_str().unwrap();
+    if number >= 50000 {
+        return (None, format!("THROW {number}, {}, 1;\n", lit(message)));
+    }
+    match number {
+        208 => {
+            let name = message
+                .strip_prefix("Invalid object name '")
+                .and_then(|m| m.strip_suffix("'."))
+                .unwrap_or_else(|| panic!("error 208 message not understood: {message}"));
+            (
+                Some(format!("DROP TABLE IF EXISTS dbo.[{name}];")),
+                format!("SELECT * FROM [{name}];\n"),
+            )
+        }
+        other => panic!("fixture SQL error {other}: add the statement that raises it"),
+    }
 }
 
 /// Object keys sorted recursively, numbers by value: JSON equality like Go's DeepEqual.
@@ -249,28 +288,31 @@ fn op_of(v: &Value) -> Op {
     }
 }
 
-fn executor(p: &Arc<Pool>, manifest: Manifest, limits: Limits) -> SqlExecutor {
-    let mut dbs = db::Pools::new();
-    dbs.insert(db::DB_PMS.to_owned(), p.clone());
+fn executor(dbs: &db::Pools, manifest: Manifest, limits: Limits) -> SqlExecutor {
     SqlExecutor {
         manifest: Arc::new(manifest),
-        dbs,
+        dbs: dbs.clone(),
         limits,
         log: Logger::discard(),
     }
 }
 
+/// Runs `op` and checks its result frame validates.
+fn run(e: &dyn Executor, op: &Op) -> wire::OpResult {
+    let res = e.execute(&Ctx::background(), op);
+    wire::encode(&Frame::Result(res.clone()))
+        .unwrap_or_else(|err| panic!("{}: frame does not validate: {err}", op.op));
+    res
+}
+
 #[test]
-fn golden_op_fixtures_match_the_go_agent() {
-    let Some(p) = pool() else { return };
+fn golden_op_fixtures_match_the_cloud_contract() {
+    let Some(dbs) = pools() else { return };
     let _g = serial();
+    let p = fo(&dbs);
     let manifest = Manifest::load().unwrap();
     let dir = root().join("ops");
-    for name in [
-        "pos-check-version-get.json",
-        "pos-check-version-get-shape.json",
-        "pos-check-version-get-sql-error.json",
-    ] {
+    for name in ["fo-hotel-date-get.json", "fo-hotel-date-get-sql-error.json"] {
         let fx = json::parse(&std::fs::read(dir.join(name)).unwrap()).unwrap();
         let op = op_of(&fx["op"]);
         let calls = fx["db"]["calls"].as_array().unwrap();
@@ -278,25 +320,14 @@ fn golden_op_fixtures_match_the_go_agent() {
         for c in &spec.calls {
             let call = calls
                 .iter()
-                .find(|x| x["proc"].as_str() == Some(c.proc_name.as_str()));
-            let sql = match call {
-                Some(call) => proc_sql(&manifest, &op.op, call),
-                None => format!(
-                    "CREATE OR ALTER PROCEDURE dbo.{} {} AS THROW 50998, 'must not be called', 1;",
-                    c.proc_name,
-                    c.params
-                        .iter()
-                        .map(|p| format!("@{} {}", p.name, p.typ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            };
-            exec_sql(&p, &sql);
+                .find(|x| x["proc"].as_str() == Some(c.proc_name.as_str()))
+                .unwrap_or_else(|| panic!("{name}: no fixture call for {}", c.proc_name));
+            for sql in proc_sql(&manifest, &op.op, call) {
+                exec_sql(&p, &sql);
+            }
         }
-        let e = executor(&p, manifest.clone(), Limits::default());
-        let res = e.execute(&Ctx::background(), &op);
-        let frame = Frame::Result(res);
-        wire::encode(&frame).unwrap_or_else(|e| panic!("{name}: frame does not validate: {e}"));
+        let e = executor(&dbs, manifest.clone(), Limits::default());
+        let frame = Frame::Result(run(&e, &op));
         let got = json::parse(wire::to_json(&frame).as_bytes()).unwrap();
         assert_eq!(
             semantic(&got),
@@ -307,10 +338,106 @@ fn golden_op_fixtures_match_the_go_agent() {
     }
 }
 
+/// The vendor's objects on SMILE_FO, as SMILE_FO.exe installs them.
+const VENDOR_HOTEL_PARAMETER: &str = "IF OBJECT_ID('dbo.HotelParameter') IS NOT NULL DROP TABLE dbo.HotelParameter; CREATE TABLE dbo.HotelParameter (HotelID varchar(30) NULL, HotelDate datetime NULL, AuditorDate datetime NULL, ReportDate datetime NULL, TodayPassword varchar(10) NULL);";
+const VENDOR_GET_HOTEL_DATE1: &str =
+    "CREATE OR ALTER PROCEDURE dbo.GetHotelDate1 AS Select HotelDate From HotelParameter";
+
+fn hotel_date_op(target_db: &str) -> Op {
+    let v = json::parse(
+        format!(
+            r#"{{"type":"op","id":"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a62","op":"fo.hotelDate.get","contract_ver":1,"target_db":"{target_db}","args":{{}},"request_key":null,"deadline_ms":10000}}"#
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    op_of(&v)
+}
+
+/// What the cloud makes of the result: the date part of the first row's HotelDate.
+fn hotel_date(r: &wire::OpResult) -> Option<String> {
+    let v = r.sets.first()?.first()?.get("HotelDate")?.as_str()?;
+    Some(v.get(..10)?.to_owned())
+}
+
+#[test]
+fn hotel_date_comes_from_the_vendor_proc_without_a_timezone_shift() {
+    let Some(dbs) = pools() else { return };
+    let _g = serial();
+    let p = fo(&dbs);
+    exec_sql(&p, VENDOR_HOTEL_PARAMETER);
+    exec_sql(&p, VENDOR_GET_HOTEL_DATE1);
+    let e = executor(&dbs, Manifest::load().unwrap(), Limits::default());
+    let op = hotel_date_op(db::DB_FO);
+
+    // No row and a NULL HotelDate are failures, never a null date.
+    for setup in [
+        "DELETE dbo.HotelParameter",
+        "DELETE dbo.HotelParameter; INSERT dbo.HotelParameter (HotelID, HotelDate) VALUES ('H1', NULL)",
+    ] {
+        exec_sql(&p, setup);
+        let r = run(&e, &op);
+        let err = r.error.as_ref().expect("an error");
+        assert_eq!(
+            (r.status.as_str(), err.code.as_str(), err.message.as_str()),
+            (
+                "failed",
+                exec::CODE_NO_DATA,
+                "GetHotelDate1 returned no HotelDate"
+            ),
+            "{setup}"
+        );
+    }
+
+    for (stored, wire_value, date) in [
+        (
+            "2026-11-19T00:00:00",
+            "2026-11-19T00:00:00.000Z",
+            "2026-11-19",
+        ),
+        // Late evening stays on its own day: the stored wall clock is taken as it is.
+        (
+            "2026-11-19T23:30:00",
+            "2026-11-19T23:30:00.000Z",
+            "2026-11-19",
+        ),
+        (
+            "2024-02-29T07:15:00",
+            "2024-02-29T07:15:00.000Z",
+            "2024-02-29",
+        ),
+    ] {
+        exec_sql(
+            &p,
+            &format!(
+                "DELETE dbo.HotelParameter; INSERT dbo.HotelParameter (HotelID, HotelDate, AuditorDate) VALUES ('H1', '{stored}', '2000-01-01')"
+            ),
+        );
+        let r = run(&e, &op);
+        assert_eq!(r.status, wire::STATUS_APPLIED, "{r:?}");
+        assert_eq!(r.sets.len(), 1);
+        assert_eq!(r.sets[0][0]["HotelDate"].as_str(), Some(wire_value));
+        assert_eq!(r.sets[0][0].len(), 1, "only the vendor's one column");
+        assert_eq!(hotel_date(&r).as_deref(), Some(date));
+        assert_eq!(r.outputs["ReturnValue"].as_i64(), Some(0));
+    }
+
+    // The op names SMILE_FO; any other target is refused before a connection is used.
+    for wrong in [db::DB_POS, db::DB_BO] {
+        let r = run(&e, &hotel_date_op(wrong));
+        let err = r.error.expect("an error");
+        assert_eq!(
+            (r.status.as_str(), err.message.as_str()),
+            ("rejected", "target_db_mismatch"),
+            "{wrong}"
+        );
+    }
+}
+
 fn it_manifest() -> Manifest {
     let op = |name: &str, kind: &str, proc_name: &str, params: &str, timeout: i64| {
         format!(
-            r#"{{"name":"{name}","contract_ver":1,"kind":"{kind}","target":"PMS","timeout_ms":{timeout},"idempotent":false,"calls":[{{"proc":"{proc_name}","params":{params}}}]}}"#
+            r#"{{"name":"{name}","contract_ver":1,"kind":"{kind}","target":"FO","target_db":"SMILE_FO","timeout_ms":{timeout},"idempotent":false,"calls":[{{"proc":"{proc_name}","params":{params}}}]}}"#
         )
     };
     let v = r#"[{"name":"V","type":"int","arg":"v"}]"#;
@@ -330,7 +457,7 @@ fn it_manifest() -> Manifest {
     ];
     Manifest::parse(
         format!(
-            r#"{{"manifest_version":1,"allowlist_hash":"","procs":["MM_It_Add","MM_It_Fail","MM_It_Slow","MM_It_List","MM_It_Out"],"excluded_proc_patterns":[],"ops":[{}]}}"#,
+            r#"{{"manifest_version":2,"allowlist_hash":"","procs":["MM_It_Add","MM_It_Fail","MM_It_Slow","MM_It_List","MM_It_Out"],"excluded_proc_patterns":[],"ops":[{}]}}"#,
             ops.join(",")
         )
         .as_bytes(),
@@ -338,11 +465,11 @@ fn it_manifest() -> Manifest {
     .unwrap()
 }
 
-fn it_op(name: &str, args: &str, key: Option<&str>) -> Op {
+fn it_op(name: &str, args: &str, key: Option<&str>, replay: bool) -> Op {
     let key = key.map_or("null".to_owned(), json::quote);
     let v = json::parse(
         format!(
-            r#"{{"type":"op","id":"6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f","op":"{name}","contract_ver":1,"args":{args},"request_key":{key},"deadline_ms":15000}}"#
+            r#"{{"type":"op","id":"6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f","op":"{name}","contract_ver":1,"target_db":"SMILE_FO","args":{args},"request_key":{key},"replay":{replay},"deadline_ms":15000}}"#
         )
         .as_bytes(),
     )
@@ -350,10 +477,19 @@ fn it_op(name: &str, args: &str, key: Option<&str>) -> Op {
     op_of(&v)
 }
 
+/// A fresh journal directory under the system temp dir.
+fn journal_dir() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::env::temp_dir().join(format!("pms-it-journal-{}-{nanos}", std::process::id()))
+}
+
 #[test]
-fn writes_replay_by_request_key_and_errors_are_classified() {
-    let Some(p) = pool() else { return };
+fn keyed_writes_run_once_and_errors_are_classified() {
+    let Some(dbs) = pools() else { return };
     let _g = serial();
+    let p = fo(&dbs);
     exec_sql(
         &p,
         "IF OBJECT_ID('dbo.MM_ItCounter') IS NULL CREATE TABLE dbo.MM_ItCounter (Id int IDENTITY PRIMARY KEY, V int NOT NULL)",
@@ -378,37 +514,51 @@ fn writes_replay_by_request_key_and_errors_are_classified() {
         &p,
         "CREATE OR ALTER PROCEDURE dbo.MM_It_Out @A int, @B bigint OUTPUT, @C nvarchar(50) OUTPUT, @D datetime2 OUTPUT AS BEGIN SET @B = @A * 2; SET @C = N'đã xong'; SET @D = '2026-11-15T10:00:00.5'; RETURN 0; END",
     );
-    exec_sql(&p, "DELETE dbo.MM_ItCounter; DELETE dbo.MM_OpLog;");
-    let e = executor(&p, it_manifest(), Limits::default());
-    let ctx = Ctx::background();
+    exec_sql(&p, "DELETE dbo.MM_ItCounter;");
+    let dir = journal_dir();
+    let j = Arc::new(Journal::open_dir(&dir, journal::Limits::default()).unwrap());
+    let sql = Arc::new(executor(&dbs, it_manifest(), Limits::default()));
+    let e = Journaled::new(sql, Some(j.clone()), Logger::discard(), None);
     let count = || scalar(&p, "SELECT CAST(COUNT(*) AS bigint) FROM dbo.MM_ItCounter");
 
-    let first = e.execute(&ctx, &it_op("it.counter.add", r#"{"v":5}"#, Some("req-1")));
+    let first = run(
+        &e,
+        &it_op("it.counter.add", r#"{"v":5}"#, Some("req-1"), false),
+    );
     assert_eq!(first.status, wire::STATUS_APPLIED, "{first:?}");
-    assert_eq!(first.replayed, Some(false));
+    assert_eq!(first.replayed, None);
     assert_eq!(first.outputs["ReturnValue"].as_i64(), Some(7));
     assert_eq!(first.sets[0][0]["Html"].as_str(), Some("<b>&"));
     assert_eq!(count(), 1);
-    let again = e.execute(&ctx, &it_op("it.counter.add", r#"{"v":5}"#, Some("req-1")));
-    assert_eq!(again.replayed, Some(true));
-    assert_eq!(
-        (again.sets.clone(), again.outputs.clone()),
-        (first.sets.clone(), first.outputs.clone())
-    );
+    assert_eq!(j.health().entries, 1);
+    for replay in [true, false] {
+        let again = run(
+            &e,
+            &it_op("it.counter.add", r#"{"v":5}"#, Some("req-1"), replay),
+        );
+        assert_eq!(again.replayed, Some(true));
+        assert_eq!(
+            (again.sets.clone(), again.outputs.clone()),
+            (first.sets.clone(), first.outputs.clone())
+        );
+    }
     assert_eq!(count(), 1, "a replay never runs the write again");
-    let other = e.execute(
-        &ctx,
-        &it_op("it.counter.addAgain", r#"{"v":5}"#, Some("req-1")),
+    let miss = run(
+        &e,
+        &it_op("it.counter.add", r#"{"v":5}"#, Some("req-2"), true),
+    );
+    assert_eq!(miss.error.unwrap().code, wire::ERR_REQUEST_KEY_UNKNOWN);
+    assert_eq!(count(), 1, "an unknown replay runs nothing");
+    let other = run(
+        &e,
+        &it_op("it.counter.addAgain", r#"{"v":5}"#, Some("req-1"), false),
     );
     assert_eq!(other.error.unwrap().message, "request_key_conflict");
-    // The stored row is what the Go agent writes: the envelope and its sha256.
-    let stored = scalar(
-        &p,
-        "SELECT CAST(CASE WHEN ResultJson LIKE N'{\"v\":\"agent/1\",\"sets\":%' AND LEN(ResultHash) = 64 THEN 1 ELSE 0 END AS bigint) FROM dbo.MM_OpLog WHERE RequestKey = 'req-1'",
-    );
-    assert_eq!(stored, 1);
 
-    let failed = e.execute(&ctx, &it_op("it.counter.fail", r#"{"v":9}"#, None));
+    let failed = run(
+        &e,
+        &it_op("it.counter.fail", r#"{"v":9}"#, Some("req-3"), false),
+    );
     let err = failed.error.unwrap();
     assert_eq!(
         (failed.status.as_str(), err.code.as_str(), err.sql_number),
@@ -416,152 +566,29 @@ fn writes_replay_by_request_key_and_errors_are_classified() {
     );
     assert_eq!(err.message, "refused by the fixture");
     assert_eq!(count(), 1, "a refused write is rolled back");
+    assert_eq!(j.health().entries, 1, "only applied writes are journaled");
 
-    let slow = e.execute(&ctx, &it_op("it.counter.slow", "{}", None));
+    let slow = run(&e, &it_op("it.counter.slow", "{}", None, false));
     assert_eq!(slow.error.unwrap().code, wire::ERR_OP_TIMEOUT);
     // The connection survives the cancelled statement.
-    let list = e.execute(&ctx, &it_op("it.counter.list", "{}", None));
+    let list = run(&e, &it_op("it.counter.list", "{}", None, false));
     assert_eq!(list.rowcounts, vec![2]);
 
     let capped = executor(
-        &p,
+        &dbs,
         it_manifest(),
         Limits {
             max_rows_per_set: 1,
             ..Limits::default()
         },
     );
-    let big = capped.execute(&ctx, &it_op("it.counter.list", "{}", None));
+    let big = run(&capped, &it_op("it.counter.list", "{}", None, false));
     assert_eq!(big.error.unwrap().code, exec::CODE_RESULT_TOO_LARGE);
 
-    let out = e.execute(&ctx, &it_op("it.counter.out", r#"{"a":42}"#, None));
+    let out = run(&e, &it_op("it.counter.out", r#"{"a":42}"#, None, false));
     assert_eq!(out.status, wire::STATUS_APPLIED, "{out:?}");
     assert_eq!(out.outputs["B"].as_str(), Some("84"));
     assert_eq!(out.outputs["C"].as_str(), Some("đã xong"));
     assert_eq!(out.outputs["D"].as_str(), Some("2026-11-15T10:00:00.500Z"));
-}
-
-#[test]
-fn golden_bundle_migrates_and_reports_drift() {
-    golden_bundle(true);
-}
-
-/// A site migrate.mjs never touched has no MM_MigrationHistory: the runner's history
-/// statement must then do nothing (it once failed with error 208, invalid object name).
-#[test]
-fn golden_bundle_migrates_without_migration_history() {
-    golden_bundle(false);
-}
-
-fn golden_bundle(with_history: bool) {
-    let Some(p) = pool() else { return };
-    let _g = serial();
-    exec_sql(
-        &p,
-        "IF OBJECT_ID('dbo.MM_SchemaVersion') IS NOT NULL DROP TABLE dbo.MM_SchemaVersion; IF OBJECT_ID('dbo.MM_BundleFixture') IS NOT NULL DROP TABLE dbo.MM_BundleFixture; IF OBJECT_ID('dbo.MM_MigrationHistory') IS NOT NULL DROP TABLE dbo.MM_MigrationHistory;",
-    );
-    if with_history {
-        // migrate.mjs's history table, which an MM_PMS it migrated has (001_migration_history.sql).
-        exec_sql(
-            &p,
-            "CREATE TABLE dbo.MM_MigrationHistory (FileName varchar(200) NOT NULL PRIMARY KEY, Checksum char(64) NOT NULL, DurationMs int NULL, AppliedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME());",
-        );
-    }
-    let td = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/bundle");
-    let keys = bundle::parse_keyring(
-        &json::parse(&std::fs::read(td.join("dev-keyring.json")).unwrap()).unwrap(),
-    )
-    .unwrap();
-    let b = bundle::open(&td.join("golden"), &keys).unwrap();
-    let state = std::env::temp_dir().join(format!("pms-it-state-{}", std::process::id()));
-    std::fs::create_dir_all(&state).unwrap();
-    let now = dl_time::OffsetDateTime::now_utc();
-    std::fs::write(
-        state.join(backup::ATTEST_FILE),
-        format!(
-            r#"{{"attested_at":"{}","by":"it"}}"#,
-            backup::rfc3339_nano(now)
-        ),
-    )
-    .unwrap();
-    let events: Arc<Mutex<Vec<String>>> = Arc::default();
-    let runner = |rerun: i64| {
-        let ev = events.clone();
-        let gate = backup::new_backup_gate(
-            &config::MigrationBackup {
-                mode: "attested".into(),
-                ..Default::default()
-            },
-            &state,
-        )
-        .unwrap();
-        let mut o = migrate::Options::new(p.clone(), "0.1.0");
-        o.backup = gate;
-        o.rerun_partial = rerun;
-        o.progress = Box::new(move |e| ev.lock().unwrap().push(format!("{}:{}", e.phase, e.seq)));
-        migrate::Runner::new(o)
-    };
-    let ctx = Ctx::background();
-    let r = runner(0);
-    let (plan, res) = r.dry_run(&ctx, &b);
-    res.unwrap_or_else(|e| panic!("{e:?}\n{plan:?}"));
-    assert_eq!(plan.pending.len(), 5);
-    assert!(!plan.ledger_exists);
-    assert!(
-        plan.backup_refusal.is_empty() && plan.missing_permissions.is_empty(),
-        "{plan:?}"
-    );
-    assert!(
-        !plan.pending[2].in_tx,
-        "an online index runs outside a transaction"
-    );
-
-    let (rep, res) = r.apply(&ctx, &b);
-    res.unwrap();
-    assert_eq!((rep.head, rep.applied.len()), (5, 5));
-    assert_eq!(rep.backup.as_ref().unwrap().mode, "attested");
-    assert!(events.lock().unwrap().contains(&"backup:5".to_owned()));
-    let lv = migrate::ledger::LedgerVersion {
-        pool: Some(p.clone()),
-    };
-    assert_eq!(
-        dl_agent_pms::exec::SchemaVersion::schema_version(&lv, &ctx),
-        Ok(5)
-    );
-    assert_eq!(
-        scalar(
-            &p,
-            "SELECT CAST(COUNT(*) AS bigint) FROM sys.indexes WHERE name = 'IX_MM_BundleFixture_Name'"
-        ),
-        1
-    );
-
-    let (rep, res) = r.apply(&ctx, &b);
-    res.unwrap();
-    assert_eq!((rep.head, rep.applied.len()), (5, 0));
-    let history = if with_history {
-        "SELECT CAST(COUNT(*) AS bigint) FROM dbo.MM_MigrationHistory"
-    } else {
-        "SELECT CAST(CASE WHEN OBJECT_ID(N'dbo.MM_MigrationHistory', N'U') IS NULL THEN 0 ELSE -1 END AS bigint)"
-    };
-    assert_eq!(
-        scalar(&p, history),
-        if with_history { 5 } else { 0 },
-        "MM_MigrationHistory kept in step, never created"
-    );
-    assert!(r.check_drift(&ctx, &b).unwrap().is_empty());
-
-    exec_sql(
-        &p,
-        "UPDATE dbo.MM_SchemaVersion SET Sha256 = REPLICATE('0', 64) WHERE Version = 2",
-    );
-    let drift = r.check_drift(&ctx, &b).unwrap();
-    let codes: Vec<&str> = drift.iter().map(|d| d.code.as_str()).collect();
-    assert_eq!(
-        codes,
-        [migrate::CODE_LEDGER_CORRUPT, migrate::DRIFT_CHECKSUM]
-    );
-    let (_, res) = r.dry_run(&ctx, &b);
-    assert_eq!(res.unwrap_err().code, migrate::CODE_LEDGER_CORRUPT);
-    let _ = std::fs::remove_dir_all(&state);
+    std::fs::remove_dir_all(&dir).unwrap();
 }

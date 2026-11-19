@@ -8,7 +8,8 @@
     "OP_REJECTED",
     "CONTRACT_UNSUPPORTED",
     "LEASE_EXPIRED",
-    "AGENT_BUSY"
+    "AGENT_BUSY",
+    "REQUEST_KEY_UNKNOWN"
   ],
   "schema_version_unknown": 0,
   "fixtures": [
@@ -23,12 +24,22 @@
       "valid": true
     },
     {
+      "file": "hello-ops.json",
+      "direction": "agent_to_cloud",
+      "valid": true
+    },
+    {
       "file": "op.json",
       "direction": "cloud_to_agent",
       "valid": true
     },
     {
       "file": "op-read.json",
+      "direction": "cloud_to_agent",
+      "valid": true
+    },
+    {
+      "file": "op-replay.json",
       "direction": "cloud_to_agent",
       "valid": true
     },
@@ -113,7 +124,22 @@
       "valid": false
     },
     {
+      "file": "invalid/hello-ops-bad-entry.json",
+      "direction": "agent_to_cloud",
+      "valid": false
+    },
+    {
       "file": "invalid/op-missing-deadline.json",
+      "direction": "cloud_to_agent",
+      "valid": false
+    },
+    {
+      "file": "invalid/op-missing-target-db.json",
+      "direction": "cloud_to_agent",
+      "valid": false
+    },
+    {
+      "file": "invalid/op-target-db-mm-pms.json",
       "direction": "cloud_to_agent",
       "valid": false
     },

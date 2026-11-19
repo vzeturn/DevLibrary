@@ -42,12 +42,22 @@ fn parse(data: &[u8]) -> Value {
 fn fixtures_round_trip() {
     let manifest = parse(&read("manifest.json"));
     assert_eq!(manifest["protocol"].as_i64(), Some(wire::PROTOCOL_VERSION));
-    let (mut valid, mut invalid) = (0, 0);
+    let (mut valid, mut retired, mut invalid) = (0, 0, 0);
     for fx in manifest["fixtures"].as_array().unwrap() {
         let file = fx["file"].as_str().unwrap();
         let cloud_sent = fx["direction"].as_str() == Some("cloud_to_agent");
         let raw = read(file);
         let decoded = wire::decode_json(&raw);
+        let typ = parse(&raw)["type"].as_str().unwrap_or_default().to_owned();
+        if wire::RETIRED_FRAMES.contains(&typ.as_str()) {
+            // The SMILE-only contract retired the migrate family: refused, never run.
+            retired += 1;
+            assert!(
+                matches!(decoded, Err(wire::WireError::Retired(_))),
+                "{file}: a retired frame must be refused as retired, got {decoded:?}"
+            );
+            continue;
+        }
         if fx["valid"].as_bool() != Some(true) {
             invalid += 1;
             assert!(decoded.is_err(), "{file}: invalid fixture decoded");
@@ -72,7 +82,7 @@ fn fixtures_round_trip() {
             assert!(!msg.binary, "{file}");
         }
     }
-    assert_eq!((valid, invalid), (19, 8));
+    assert_eq!((valid, retired, invalid), (16, 8, 8));
 }
 
 #[test]
@@ -104,5 +114,49 @@ fn manifest_codes_match_the_agent() {
     match wire::decode_json(&read("hello-schema-unknown.json")).unwrap() {
         Frame::Hello(h) => assert_eq!(h.schema_version, wire::SCHEMA_VERSION_UNKNOWN),
         other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn hello_ops_and_replay_fixtures() {
+    match wire::decode_json(&read("hello-ops.json")).unwrap() {
+        Frame::Hello(h) => {
+            let m = dl_agent_pms::ops::Manifest::load().unwrap();
+            assert_eq!(
+                h.ops,
+                Some(m.implemented_ops()),
+                "this build advertises the fixture's ops"
+            );
+            assert_eq!(h.contract_max, m.contract_max());
+            assert_eq!(h.schema_version, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    match wire::decode_json(&read("op-replay.json")).unwrap() {
+        Frame::Op(op) => {
+            assert!(op.is_replay());
+            assert_eq!(op.target_db, "SMILE_FO");
+        }
+        other => panic!("{other:?}"),
+    }
+    match wire::decode_json(&read("op-read.json")).unwrap() {
+        Frame::Op(op) => {
+            assert!(!op.is_replay());
+            assert_eq!(op.request_key, None, "reads carry no request key");
+        }
+        other => panic!("{other:?}"),
+    }
+    for file in [
+        "invalid/op-missing-target-db.json",
+        "invalid/op-target-db-mm-pms.json",
+        "invalid/hello-ops-bad-entry.json",
+    ] {
+        assert!(
+            matches!(
+                wire::decode_json(&read(file)),
+                Err(wire::WireError::Frame(_))
+            ),
+            "{file}"
+        );
     }
 }

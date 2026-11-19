@@ -1,6 +1,7 @@
-//! The embedded ops manifest must match SMILE-PMS's
-//! (`apps/site-agent/internal/ops/ops-manifest.json`). Set `PMS_OPS_MANIFEST` to that file
-//! to check; the test is skipped when the variable is unset (no SMILE-PMS checkout).
+//! The embedded ops manifest must be a byte copy of SMILE-PMS's manifest v2
+//! (`packages/shared/src/ops/ops-manifest.json`). Set `PMS_OPS_MANIFEST` to that file, e.g.
+//! `git -C $SMILE_PMS_REPO show origin/master:packages/shared/src/ops/ops-manifest.json`
+//! saved to a file; the test is skipped when the variable is unset (no SMILE-PMS checkout).
 
 use dl_agent_pms::ops::EMBEDDED;
 
