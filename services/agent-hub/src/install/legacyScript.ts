@@ -398,7 +398,7 @@ try {
     # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser and the password reach arrival-enroll through env
     #    only, never argv; the setup's secret env (token, PMS connection, tenant key, password) is
     #    removed right after it ran.
-    $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')
+    $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD', 'DL_AGENT_EINVOICE_TOKEN')
     if ($Setup -eq 'arrival-enroll') {
       if ($SqlAuth) { $env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth }
       if ($SqlUser) { $env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { benchStep } from '../src/domain/bench';
-import { installScript } from '../src/install/script';
+import { installScript, legacyScript } from '../src/install/script';
 import {
   EINVOICE_CHECK_COMMANDS,
   EINVOICE_GO_SERVICES,
@@ -52,13 +52,12 @@ describe('einvoice switch helpers', () => {
     expect(step.env.MMEI_SQL_AUTH).toBe('{{SQL_AUTH}}');
   });
 
-  it('has install.ps1 remove the token after the setup ran', () => {
-    const text = installScript('https://agent.example.test');
-    const add = text.indexOf("$SetupSecrets += 'DL_AGENT_EINVOICE_TOKEN'");
-    const run = text.indexOf("try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {");
-    expect(add).toBeGreaterThan(text.indexOf('# -- end arrival sign-in'));
-    expect(run).toBeGreaterThan(add);
-    expect(text.slice(run, text.indexOf('Remove-Replaced', run))).toContain('foreach ($n in $SetupSecrets)');
+  it('has install.ps1 (thin and legacy) remove the token after the setup ran', () => {
+    for (const text of [installScript('https://agent.example.test'), legacyScript('https://agent.example.test')]) {
+      const list = text.match(/\$SetupSecrets = @\(([^)]*)\)/);
+      expect(list?.[1]).toContain("'DL_AGENT_EINVOICE_TOKEN'");
+      expect(text).toMatch(/foreach \(\$n in \(?(\$HandoffSecrets \+ )?\$SetupSecrets\)?\) \{ Remove-Item \('Env:' \+ \$n\)/);
+    }
   });
 
   it('lists only read-only check commands', () => {

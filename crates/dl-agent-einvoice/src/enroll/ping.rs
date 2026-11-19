@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::dsn::{Dsn, Transport};
+use crate::dsn::{Dsn, ENCRYPT_DISABLE, Transport};
 
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -46,7 +46,10 @@ pub fn ping_dsn(dsn: &Dsn, mock: bool) -> Result<(), PingError> {
 
 /// `pingNegotiated`: pings `dsn` and, when the driver-default transport fails in the TLS
 /// handshake, walks the legacy ladder (TLS 1.0, then no encryption) until one gets past
-/// it. Returns the DSN to seal: the first whose ping succeeded or failed for a non-TLS
+/// it. The unencrypted step is tried only where dl-agent's core allows clear text
+/// ([`dl_agent::sql::transport::clear_allowed`]: Windows login or a server on this
+/// computer), so a man in the middle cannot push a SQL login to another host into clear
+/// text; such a site pins `encrypt=disable` by hand (or carries it over from the Go agent). Returns the DSN to seal: the first whose ping succeeded or failed for a non-TLS
 /// reason (the handshake worked; that error, login or database, is the one worth
 /// showing). When every step fails in TLS the original DSN and error come back. A DSN
 /// that already carries an explicit transport is pinged as is.
@@ -56,7 +59,11 @@ pub fn ping_negotiated(dsn: &Dsn, ping: Ping<'_>) -> (Dsn, Result<(), PingError>
     if !tls_failure || !dsn.transport().is_default() {
         return (dsn.clone(), first);
     }
+    let clear_ok = clear_allowed(dsn);
     for t in Transport::legacy_ladder() {
+        if t.encrypt == ENCRYPT_DISABLE && !clear_ok {
+            continue;
+        }
         let alt = dsn.clone().with_transport(&t);
         let r = ping(&alt);
         if !matches!(&r, Err(e) if e.tls) {
@@ -64,4 +71,12 @@ pub fn ping_negotiated(dsn: &Dsn, ping: Ping<'_>) -> (Dsn, Result<(), PingError>
         }
     }
     (dsn.clone(), first)
+}
+
+/// The core rule for an unencrypted fallback, applied to `dsn` (unparsable → not allowed).
+fn clear_allowed(dsn: &Dsn) -> bool {
+    let here = std::env::var("COMPUTERNAME").ok();
+    dsn.to_string()
+        .parse::<dl_tds::Config>()
+        .is_ok_and(|cfg| dl_agent::sql::transport::clear_allowed(&cfg, here.as_deref()))
 }

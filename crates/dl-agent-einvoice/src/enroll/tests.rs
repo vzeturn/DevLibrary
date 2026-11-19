@@ -281,6 +281,30 @@ fn no_encryption_only_when_tls10_also_fails() {
 }
 
 #[test]
+fn no_clear_text_fallback_for_a_sql_login_to_another_host() {
+    let tried_clear = AtomicUsize::new(0);
+    let ping = |d: &Dsn| {
+        if d.encrypt == "disable" {
+            tried_clear.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        } else {
+            tls_fail("TLS handshake failed: handshake failure")
+        }
+    };
+    let d = Dsn {
+        host: "10.0.0.5".into(),
+        database: "SMILE_FO".into(),
+        user: "smile".into(),
+        password: "p".into(),
+        ..Dsn::default()
+    };
+    let (got, r) = ping_negotiated(&d, &ping);
+    assert_eq!(got, d);
+    assert!(r.is_err_and(|e| e.tls));
+    assert_eq!(tried_clear.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn default_kept_for_non_tls_failure() {
     let calls = AtomicUsize::new(0);
     let ping = |_: &Dsn| {
