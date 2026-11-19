@@ -215,6 +215,7 @@ describe('bench script (PowerShell)', () => {
       expect(n).toMatch(legacy);
     }
     for (const n of ['dl-agent', 'Spooler', 'MSSQLSERVER', 'W32Time']) expect(n).not.toMatch(legacy);
+    expect('SmilePmsDeviceAgent').toMatch(legacy);
   });
 
   it('doubles every quote character PowerShell honours', () => {
@@ -249,6 +250,8 @@ describe('bench script (PowerShell)', () => {
         { database: 'SMILE_HL', sql_url: 'https://x.test/fix.sql', sha256: 'a'.repeat(64) },
       ],
       sql_names: ['SMILE_FO'],
+      sql_parts: true,
+      remove_legacy: true,
     });
     const dir = mkdtempSync(join(tmpdir(), 'bench-ps-'));
     try {

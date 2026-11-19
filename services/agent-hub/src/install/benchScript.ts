@@ -1,7 +1,8 @@
 /**
  * The bench script served at `/bench/<token>` (RT-0164 BENCH): one `irm … | iex` on a test PC
- * lists the older per-product agents (never touching them), applies the SQL fixups to the restored
- * copy, installs dl-agent on canary for a demo tenant (no `-Replace`), registers the SQL databases,
+ * removes the older per-product agents (`remove_legacy`, see `benchLegacy.ts`; older bundles only
+ * list them), applies the SQL fixups to the restored copy, installs dl-agent on canary for a demo
+ * tenant (no `-Replace`), registers the SQL databases,
  * runs each product's setup step and the self test. Windows PowerShell 5.1 (parses on 2.0: no JSON cmdlets, no
  * `::new()`, no `[ordered]`). Like `script.ts`, the body is free of backticks and dollar-brace so it
  * lives in a raw template literal; the generated data block replaces `__DATA__`.
@@ -12,18 +13,14 @@
  */
 import type { BenchStep, SqlFixup } from '../domain/bench';
 import { toBase64 } from '../lib/crypto';
+import { LEGACY_BODY, LEGACY_SERVICE_PATTERN, SQL_BINARY_PATTERN, SQL_SERVICE_PATTERN } from './benchLegacy';
 
-/**
- * Windows services of the per-product agents dl-agent takes over (E-Invoice, SmilePmsAgent,
- * SmileHLAgent, MM.Arrival.Agent, MM.Membership.Agent, SRBackup, PdaSyncAgent), matched
- * case-insensitively against name, display name and path. The bench only lists them.
- */
-export const LEGACY_SERVICE_PATTERN =
-  'mmei|e-?invoice|smile ?pms|smile ?hl|mm\\.arrival|mm\\.membership|arrival\\.agent|membership\\.agent|srbackup|pda ?sync';
+export { LEGACY_SERVICE_PATTERN, SQL_BINARY_PATTERN, SQL_SERVICE_PATTERN } from './benchLegacy';
 
-const BODY = String.raw`# DevLibrary bench bundle: lists the older per-product agents (they keep running: nothing here stops,
-# removes or replaces them), applies the SQL fixups, installs dl-agent (canary), registers the SQL
-# databases, runs each product setup step, then the self test. Run in Windows PowerShell as Administrator:
+const BODY = String.raw`# DevLibrary bench bundle: removes the older per-product agents first when the bundle says so (their
+# services and scheduled tasks are deleted, their folders renamed to <dir>.bench-old-<time>, never
+# deleted; otherwise it only lists them), applies the SQL fixups, installs dl-agent (canary), registers
+# the SQL databases, runs each product setup step, then the self test. Run in Windows PowerShell as Administrator:
 #   irm <link> | iex
 # To pass a SQL Server connection instead of answering the prompt (it then sits in the console history):
 #   & ([scriptblock]::Create((irm <link>))) -SqlConnection 'Server=.;User Id=sa;Password=...'
@@ -40,7 +37,7 @@ $Exe = Join-Path $pf ('DevLibrary\' + $Product + '\' + $Product + '.exe')
 $Data = Join-Path $env:ProgramData $Product
 # Steps point their own install/config/state directories here, away from the older agents' ones.
 $BenchDir = Join-Path $Data 'bench'
-$St = @{ Log = ''; Sql = ''; Exit = 0; Legacy = @{}; Secrets = (New-Object Collections.ArrayList); Results = (New-Object Collections.ArrayList) }
+$St = @{ Log = ''; Sql = ''; Exit = 0; Legacy = @{}; Parts = @{}; Secrets = (New-Object Collections.ArrayList); Results = (New-Object Collections.ArrayList) }
 [void]$St.Secrets.Add($Code)
 
 function Hide([string]$m) {
@@ -81,12 +78,13 @@ function Invoke-Agent([string[]]$argv) {
 }
 
 # Sets $vars for the agent process only (it inherits them), then restores what was there before.
-function Invoke-WithEnv([hashtable]$vars, [string[]]$argv) {
+# Every value is masked in the output unless its name is in $plain (e.g. the SQL_AUTH word).
+function Invoke-WithEnv([hashtable]$vars, [string[]]$argv, [string[]]$plain = @()) {
   $saved = @{}
   try {
     foreach ($k in @($vars.Keys)) {
       $saved[$k] = [Environment]::GetEnvironmentVariable($k)
-      Add-Secret $vars[$k]
+      if ($plain -notcontains $k) { Add-Secret $vars[$k] }
       Set-Item -Path ('Env:' + $k) -Value $vars[$k]
     }
     return (Invoke-Agent $argv)
@@ -132,6 +130,9 @@ function Use-Sql([string]$base) {
     if ($b.IntegratedSecurity) {
       Warn 'Windows authentication: the agent service runs as LocalSystem, so NT AUTHORITY\SYSTEM needs a login on this SQL Server (or use a SQL login).'
     }
+    # The same connection, field by field, for tools that take them separately ({{SQL_SERVER}} ...).
+    if ($b.IntegratedSecurity) { $St.Parts = @{ SQL_SERVER = $b.DataSource; SQL_USER = ''; SQL_PASSWORD = ''; SQL_AUTH = 'windows' } }
+    else { $St.Parts = @{ SQL_SERVER = $b.DataSource; SQL_USER = $b.UserID; SQL_PASSWORD = $b.Password; SQL_AUTH = 'sql' } }
     $St.Sql = $base
     return $true
   } catch {
@@ -161,36 +162,7 @@ function Read-Sql {
   }
 }
 
-# Read only: the older per-product agents are listed before anything changes and checked again at the end.
-function Get-Legacy {
-  if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) { $all = Get-CimInstance -ClassName Win32_Service -ErrorAction Stop }
-  else { $all = Get-WmiObject -Class Win32_Service -ErrorAction Stop }
-  @($all | Where-Object { $_.Name -ne $Product -and (($_.Name + ' ' + $_.DisplayName + ' ' + $_.PathName) -match $LegacyPattern) } | Sort-Object Name)
-}
-function Show-Legacy {
-  try { $found = @(Get-Legacy) }
-  catch { Warn ('Could not list the Windows services: ' + $_.Exception.Message); Add-Result 'older agents' 'warn' 'could not list services'; return }
-  if ($found.Count -eq 0) { Say 'No older per-product agent service on this PC.'; Add-Result 'older agents' 'ok' 'none found'; return }
-  Say ('Older per-product agents on this PC (' + $found.Count + '); the bench leaves them as they are:')
-  foreach ($svc in $found) {
-    $St.Legacy[[string]$svc.Name] = [string]$svc.State
-    Out-Line ('    ' + $svc.Name + ' [' + $svc.State + '] ' + $svc.DisplayName + ' -> ' + $svc.PathName) ''
-  }
-  Add-Result 'older agents' 'ok' ([string]$found.Count + ' found, left untouched')
-}
-function Test-Legacy {
-  if ($St.Legacy.Count -eq 0) { return }
-  try { $after = @(Get-Legacy) } catch { Warn ('Could not list the Windows services again: ' + $_.Exception.Message); return }
-  $changed = @()
-  foreach ($k in @($St.Legacy.Keys)) {
-    $state = 'missing'
-    foreach ($svc in $after) { if ([string]$svc.Name -eq $k) { $state = [string]$svc.State } }
-    if ($state -ne $St.Legacy[$k]) { $changed += ($k + ': ' + $St.Legacy[$k] + ' -> ' + $state) }
-  }
-  if ($changed.Count -gt 0) { Warn ('Older agents changed state during the bench: ' + ($changed -join '; ')); Add-Result 'older agents after' 'warn' ($changed -join '; ') }
-  else { Say 'Older agents are in the same state as before the bench.'; Add-Result 'older agents after' 'ok' 'unchanged' }
-}
-
+__LEGACY__
 # GO lines (sqlcmd style) split a script into batches; SqlCommand runs one batch at a time.
 function Split-Batches([string]$sql) {
   @([regex]::Split($sql, '(?im)^[ \t]*GO[ \t]*;?[ \t]*\r?$') | Where-Object { $_.Trim() })
@@ -246,6 +218,13 @@ function Invoke-Fixup($f) {
 }
 
 function Resolve-Sql([string]$v) {
+  foreach ($p in @('SQL_SERVER', 'SQL_USER', 'SQL_PASSWORD', 'SQL_AUTH')) {
+    $ph = '{{' + $p + '}}'
+    if ($v.Contains($ph)) {
+      if (-not $St.Sql) { throw ('it needs SQL Server for ' + $ph + ' and none is connected') }
+      $v = $v.Replace($ph, [string]$St.Parts[$p])
+    }
+  }
   foreach ($n in $SqlNames) {
     $ph = '{{SQL:' + $n + '}}'
     if ($v.Contains($ph)) {
@@ -272,8 +251,13 @@ function Invoke-Step($s) {
   Say ('Step: dl-agent ' + $name + ' ' + ($argv -join ' '))
   try {
     $vars = @{}
-    foreach ($k in @($s.Env.Keys)) { $vars[$k] = Resolve-Sql (([string]$s.Env[$k]).Replace('{{BENCH_DIR}}', $BenchDir)) }
-    if (Invoke-WithEnv $vars (@($name) + $argv + @('--data', $Data))) { Add-Result $name 'ok' '' }
+    $plain = @()
+    foreach ($k in @($s.Env.Keys)) {
+      $raw = [string]$s.Env[$k]
+      if ($raw -eq '{{SQL_AUTH}}') { $plain += $k }
+      $vars[$k] = Resolve-Sql ($raw.Replace('{{BENCH_DIR}}', $BenchDir))
+    }
+    if (Invoke-WithEnv $vars (@($name) + $argv + @('--data', $Data)) $plain) { Add-Result $name 'ok' '' }
     else { Fail ('Step ' + $name + ' failed (exit code ' + $St.Exit + '); going on with the next one.'); Add-Result $name 'FAILED' ('exit code ' + $St.Exit) }
   } catch {
     Fail ('Step ' + $name + ' failed: ' + $_.Exception.Message)
@@ -319,22 +303,9 @@ function Skip-Rest([string]$why) {
   Add-Result 'selftest' 'skipped' $why
 }
 
-$me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  Write-Host '[bench] Run Windows PowerShell as Administrator (right-click > Run as administrator), then paste the line again.' -ForegroundColor Red
-  return
-}
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 }
-catch { Write-Host '[bench] TLS 1.2 is not available: install .NET Framework 4.5 or newer if a download fails.' -ForegroundColor Yellow }
-
-New-Item -ItemType Directory -Force -Path $Data | Out-Null
-$St.Log = Join-Path $Data ('bench-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-Say ('Bench ' + $Label + ': tenant ' + $Tenant + ', site ' + $Site + ', hub ' + $Hub + ', channel canary; link valid until ' + $Expires + '.')
-Say ('PowerShell ' + $PSVersionTable.PSVersion + '; log ' + $St.Log + ' (secrets are never written to it).')
-
-try {
-  Show-Legacy
-  if ($SqlNames.Count -gt 0) {
+# SQL Server, fixups, install, databases, steps, restart and self test.
+function Invoke-Bench {
+  if ($SqlNames.Count -gt 0 -or $SqlParts) {
     if ($SqlConnection) {
       if (-not (Use-Sql $SqlConnection)) { Warn 'The -SqlConnection given did not connect; asking instead.'; Read-Sql }
     } else {
@@ -350,7 +321,8 @@ try {
     Add-Result 'install' 'skipped' 'a SQL fixup failed'
     Skip-Rest 'a SQL fixup failed'
   } else {
-    # install.ps1 runs without its Replace option: the older agents stay installed and running next to dl-agent.
+    # install.ps1 runs without its Replace option: the older agents were removed above, or (remove_legacy
+    # off) stay installed and running next to dl-agent.
     Say 'Running the hub installer (install.ps1 -Channel canary)...'
     $wc = New-Object Net.WebClient
     $wc.Headers.Add('Cache-Control', 'no-cache')
@@ -371,7 +343,35 @@ try {
       Skip-Rest 'not installed'
     }
   }
-  Test-Legacy
+}
+
+$me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Write-Host '[bench] Run Windows PowerShell as Administrator (right-click > Run as administrator), then paste the line again.' -ForegroundColor Red
+  return
+}
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 }
+catch { Write-Host '[bench] TLS 1.2 is not available: install .NET Framework 4.5 or newer if a download fails.' -ForegroundColor Yellow }
+
+New-Item -ItemType Directory -Force -Path $Data | Out-Null
+$St.Log = Join-Path $Data ('bench-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+Say ('Bench ' + $Label + ': tenant ' + $Tenant + ', site ' + $Site + ', hub ' + $Hub + ', channel canary; link valid until ' + $Expires + '.')
+Say ('PowerShell ' + $PSVersionTable.PSVersion + '; log ' + $St.Log + ' (secrets are never written to it).')
+
+try {
+  $go = $true
+  if ($RemoveLegacy) {
+    if (-not (Remove-Legacy)) {
+      Fail 'An older agent could not be removed: dl-agent is not installed and the enrolment code is not spent. Fix the cause shown above and run the link again.'
+      Add-Result 'install' 'skipped' 'an older agent could not be removed'
+      Skip-Rest 'an older agent could not be removed'
+      $go = $false
+    }
+  } else {
+    Show-Legacy
+  }
+  if ($go) { Invoke-Bench }
+  if (-not $RemoveLegacy) { Test-Legacy }
 } catch {
   Fail ('Bench stopped: ' + $_.Exception.Message)
   Add-Result 'bench' 'FAILED' $_.Exception.Message
@@ -421,6 +421,10 @@ export interface BenchScriptInput {
   sql_fixups: SqlFixup[];
   /** Registered and fixed-up databases plus those named by `{{SQL:…}}` placeholders. */
   sql_names: string[];
+  /** A step uses `{{SQL_SERVER}}`/`{{SQL_USER}}`/`{{SQL_PASSWORD}}`/`{{SQL_AUTH}}`: SQL Server is asked for. */
+  sql_parts: boolean;
+  /** Remove the older per-product agents before anything is installed (otherwise only list them). */
+  remove_legacy: boolean;
 }
 
 export function benchScript(b: BenchScriptInput): string {
@@ -436,7 +440,11 @@ export function benchScript(b: BenchScriptInput): string {
     `$SqlNames = ${psArray(b.sql_names)}`,
     `$Steps = @(\n${b.steps.map(psStep).join(',\n')}\n)`,
     `$Fixups = @(\n${b.sql_fixups.map(psFixup).join(',\n')}\n)`,
+    `$SqlParts = ${b.sql_parts ? '$true' : '$false'}`,
+    `$RemoveLegacy = ${b.remove_legacy ? '$true' : '$false'}`,
     `$LegacyPattern = ${psQuote(LEGACY_SERVICE_PATTERN)}`,
+    `$SqlServicePattern = ${psQuote(SQL_SERVICE_PATTERN)}`,
+    `$SqlBinaryPattern = ${psQuote(SQL_BINARY_PATTERN)}`,
   ].join('\n');
-  return BODY.split('__DATA__').join(data);
+  return BODY.split('__LEGACY__').join(LEGACY_BODY).split('__DATA__').join(data);
 }

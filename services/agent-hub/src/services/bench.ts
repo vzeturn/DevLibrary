@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { sqlNamesOf, type BenchBody, type BenchPayload } from '../domain/bench';
+import { sqlNamesOf, usesSqlParts, type BenchBody, type BenchPayload } from '../domain/bench';
 import { benchScript } from '../install/benchScript';
 import { importAesKey, randomToken, seal, sha256Hex, unseal } from '../lib/crypto';
 import { HttpError, logError } from '../lib/http';
@@ -40,7 +40,13 @@ export async function createBench(env: Env, body: BenchBody, origin: string, now
   );
   const token = randomToken(32);
   const id = await sha256Hex(token);
-  const payload: BenchPayload = { code: code.code, steps: body.steps, sql_databases: body.sql_databases, sql_fixups: body.sql_fixups };
+  const payload: BenchPayload = {
+    code: code.code,
+    steps: body.steps,
+    sql_databases: body.sql_databases,
+    sql_fixups: body.sql_fixups,
+    remove_legacy: body.remove_legacy,
+  };
   const expires_at = now + ttl;
   try {
     await insertBench(env.DB, {
@@ -102,5 +108,7 @@ export async function fetchBenchScript(env: Env, token: string, origin: string, 
     sql_databases: payload.sql_databases,
     sql_fixups: payload.sql_fixups ?? [],
     sql_names: sqlNamesOf(payload),
+    sql_parts: usesSqlParts(payload.steps),
+    remove_legacy: payload.remove_legacy ?? false,
   });
 }

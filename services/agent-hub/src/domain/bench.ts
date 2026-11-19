@@ -10,7 +10,15 @@ export const sqlName = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'letters, digit
 const RESERVED = new Set(['enroll', 'install', 'uninstall', 'run', 'watchdog', 'sql-add']);
 
 export const SQL_PLACEHOLDER = /\{\{SQL:([^{}]*)\}\}/g;
-/** Any `{{…}}`: only `{{BENCH_DIR}}` (args and env) and `{{SQL:<DbName>}}` (env only) exist. */
+/**
+ * The prompted SQL Server connection field by field (env only), for tools that take them apart
+ * (E-Invoice: `MMEI_SQL_HOST`, `MMEI_SQL_USER`, `MMEI_SQL_PASSWORD`, `MMEI_SQL_AUTH`).
+ * `SQL_AUTH` is `sql` or `windows`; with `windows`, user and password are empty.
+ * `SQL_PASSWORD` is a secret: masked in the console and the log like every env value.
+ */
+export const SQL_PARTS = ['SQL_SERVER', 'SQL_USER', 'SQL_PASSWORD', 'SQL_AUTH'] as const;
+const SQL_PART = new Set<string>(SQL_PARTS);
+/** Any `{{…}}`: only `{{BENCH_DIR}}` (args and env), `{{SQL:<DbName>}}` and the `SQL_PARTS` (env only) exist. */
 const ANY_PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 export const BENCH_DIR = 'BENCH_DIR';
 
@@ -47,7 +55,7 @@ export const benchStep = z.object({
     .refine((s) => !RESERVED.has(s), 'reserved: the bench script runs it itself'),
   /** Plain arguments (visible in the process list): no secrets here, use `env`. May hold `{{BENCH_DIR}}`. */
   args: z.array(plain(500)).max(50).default([]),
-  /** Set for this step's process only; values may hold `{{SQL:<DbName>}}` and `{{BENCH_DIR}}`. */
+  /** Set for this step's process only; values may hold `{{SQL:<DbName>}}`, `{{SQL_SERVER}}` (etc.) and `{{BENCH_DIR}}`. */
   env: z
     .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, 'an environment variable name'), plain(8000))
     .default({})
@@ -65,6 +73,12 @@ export const benchBody = z
     sql_fixups: z.array(sqlFixup).max(20).default([]),
     expires_hours: z.number().int().min(1).max(72).default(24),
     max_fetches: z.number().int().min(1).max(100).default(10),
+    /**
+     * Remove the older per-product agents before installing: scheduled tasks unregistered, services
+     * stopped and deleted, folders renamed to `<dir>.bench-old-<time>`. Bundles made before this
+     * field only list them.
+     */
+    remove_legacy: z.boolean().default(true),
     /** Initial remote config of the enrolled agent, e.g. `{"modules":{"einvoice":{"enabled":true}}}`. */
     config: z.record(z.string(), z.unknown()).optional(),
   })
@@ -73,14 +87,14 @@ export const benchBody = z
       s.args.forEach((arg, j) => {
         for (const m of arg.matchAll(ANY_PLACEHOLDER)) {
           if (m[1] !== BENCH_DIR) {
-            ctx.addIssue({ code: 'custom', path: ['steps', i, 'args', j], message: `only {{BENCH_DIR}} in args (SQL connections go in env): ${m[0]}` });
+            ctx.addIssue({ code: 'custom', path: ['steps', i, 'args', j], message: `only {{BENCH_DIR}} in args (SQL connections and their parts go in env): ${m[0]}` });
           }
         }
       });
       for (const [name, value] of Object.entries(s.env)) {
         for (const m of value.matchAll(ANY_PLACEHOLDER)) {
           const inner = m[1] ?? '';
-          const ok = inner === BENCH_DIR || (inner.startsWith('SQL:') && sqlName.safeParse(inner.slice(4)).success);
+          const ok = inner === BENCH_DIR || SQL_PART.has(inner) || (inner.startsWith('SQL:') && sqlName.safeParse(inner.slice(4)).success);
           if (!ok) ctx.addIssue({ code: 'custom', path: ['steps', i, 'env', name], message: `unknown placeholder or bad database name: ${m[0]}` });
         }
       }
@@ -94,6 +108,8 @@ export interface BenchPayload {
   steps: BenchStep[];
   sql_databases: string[];
   sql_fixups?: SqlFixup[];
+  /** Absent in bundles sealed before it existed: those only list the older agents. */
+  remove_legacy?: boolean;
 }
 
 /** Every database a bundle touches: registered, fixed up, or named by an env placeholder. */
@@ -106,4 +122,9 @@ export function sqlNamesOf(p: Pick<BenchPayload, 'steps' | 'sql_databases' | 'sq
     }
   }
   return [...names];
+}
+
+/** True when a step takes the SQL connection field by field (`{{SQL_SERVER}}` …). */
+export function usesSqlParts(steps: readonly BenchStep[]): boolean {
+  return steps.some((s) => Object.values(s.env).some((v) => SQL_PARTS.some((p) => v.includes(`{{${p}}}`))));
 }
