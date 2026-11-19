@@ -158,6 +158,35 @@ fn i0_h2_claim_maps_204_to_none() {
 }
 
 #[test]
+fn with_proxy_sends_the_claim_through_the_proxy() {
+    // The fake API plays the proxy: the request reaches it in absolute form for the
+    // unreachable API host, so it went through the proxy and not straight to the API.
+    let f = Fixture::new();
+    f.api.then(204, None);
+    let options = AgentOptions {
+        api_base_url: "http://127.0.0.1:9/api".into(),
+        agent_id: "FD01".into(),
+        token_file: f.token_path.to_string_lossy().into_owned(),
+        ..AgentOptions::default()
+    };
+    let token = Arc::new(TokenFile::new(options.token_file.clone()));
+    let proxy = dl_http::Proxy::Http(dl_http::Url::parse(&f.api.base_url()).unwrap());
+    let queue = ApiCommandQueue::with_proxy(&options, token, f.clock.clone(), proxy);
+    assert_eq!(queue.claim().unwrap(), None);
+
+    let sent = f.api.requests();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].target,
+        "http://127.0.0.1:9/api/device-agent/commands/claim"
+    );
+    assert_eq!(
+        sent[0].header("Authorization"),
+        Some(format!("DeviceAgent {TOKEN}").as_str())
+    );
+}
+
+#[test]
 fn i0_h3_result_posts_the_contract_body() {
     let f = Fixture::new();
     f.api.then(200, Some("{}"));

@@ -102,6 +102,25 @@ impl std::fmt::Debug for CloudLink {
     }
 }
 
+/// The proxy the cloud is reached through: the dl-agent core's choice (environment, then
+/// WinHTTP, then the service account's Internet Options), as the .NET `HttpClient` used the
+/// machine's proxy settings rather than only the environment.
+pub fn proxy() -> Proxy {
+    dl_agent::proxy::current().proxy.clone()
+}
+
+/// The HTTP options of the link.
+fn client_options(user_agent: &str) -> ClientOptions {
+    ClientOptions {
+        timeout: Some(POLL_TIMEOUT),
+        connect_timeout: Some(CONNECT_TIMEOUT),
+        max_body: MAX_REPLY_BYTES,
+        proxy: proxy(),
+        user_agent: Some(user_agent.to_string()),
+        ..ClientOptions::default()
+    }
+}
+
 impl CloudLink {
     /// A link to `base_url` sealing with `cipher`.
     ///
@@ -114,14 +133,7 @@ impl CloudLink {
         user_agent: &str,
     ) -> Result<CloudLink, Error> {
         let base = check_base_url(base_url)?;
-        let http = Client::with_options(ClientOptions {
-            timeout: Some(POLL_TIMEOUT),
-            connect_timeout: Some(CONNECT_TIMEOUT),
-            max_body: MAX_REPLY_BYTES,
-            proxy: Proxy::FromEnv,
-            user_agent: Some(user_agent.to_string()),
-            ..ClientOptions::default()
-        });
+        let http = Client::with_options(client_options(user_agent));
         Ok(CloudLink {
             http,
             base,
@@ -215,6 +227,15 @@ impl CloudLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_link_uses_the_core_proxy_choice() {
+        let o = client_options("dl-agent/test");
+        assert_eq!(o.proxy, dl_agent::proxy::current().proxy);
+        assert_ne!(o.proxy, Proxy::FromEnv);
+        assert_eq!(o.user_agent.as_deref(), Some("dl-agent/test"));
+        assert_eq!(o.timeout, Some(POLL_TIMEOUT));
+    }
 
     #[test]
     fn base_url_needs_https_except_on_loopback() {

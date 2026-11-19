@@ -1,16 +1,18 @@
 //! `HubClient`: the `api/agent/*` routes the read side uses.
 //!
 //! Every request carries `Authorization: Bearer <token>` and `X-Hotel-Id: <uuid>`
-//! (`AgentAuthHandler`), and passes through the [`gate::TokenGate`]. Bodies are the
-//! [`crate::wire`] JSON, byte for byte what the .NET agent sends.
+//! (`AgentAuthHandler`), a fresh `X-Correlation-Id` (`AgentCorrelationHandler`: 32 lower-case
+//! hex digits, so the hub's request log and error `traceId` name the call), and passes through
+//! the [`gate::TokenGate`]. Requests go through the proxy the dl-agent core chose
+//! ([`proxy`]). Bodies are the [`crate::wire`] JSON, byte for byte what the .NET agent sends.
 //!
 //! Older-hub fallbacks kept from .NET: `POST jobs/pull` answered 404/405 falls back to
 //! `GET jobs`; a `null` sync-config means both syncs on; a 202 on folio-observations means
 //! "held" (the hub keeps the report because the source database is not confirmed yet), which
 //! counts as accepted and is never resent.
 //!
-//! `jobs/ack` is the M2 write side; the earn routes are in [`earn`]. Not ported yet:
-//! `pms/extra-bed-terms`, `pms/special-services`, `update/*`.
+//! `jobs/ack` is the M2 write side; the earn routes are in [`earn`]. `update/*` is not
+//! ported: dl-agent updates itself.
 
 pub mod earn;
 pub mod gate;
@@ -37,6 +39,13 @@ pub const AUTH_ERROR_HEADER: &str = "X-MM-Agent-Auth-Error";
 pub const TOKEN_REJECTED_CODE: &str = "AGENT_TOKEN_REJECTED";
 /// `X-MM-Run-Diagnostics` (heartbeat reply).
 pub const RUN_DIAGNOSTICS_HEADER: &str = "X-MM-Run-Diagnostics";
+/// `X-Correlation-Id` (`AgentCorrelation.HeaderName`): one fresh id per request.
+pub const CORRELATION_HEADER: &str = "X-Correlation-Id";
+
+/// A new correlation id, as `Guid.NewGuid().ToString("N")`: 32 lower-case hex digits.
+pub fn correlation_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
 
 /// Why a hub call failed. Messages never carry the token or a body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +175,23 @@ impl fmt::Debug for HubClient {
     }
 }
 
+/// The proxy the hub is reached through: the dl-agent core's choice (environment, then
+/// WinHTTP, then the service account's Internet Options), as the .NET `HttpClient` used the
+/// machine's proxy settings rather than only the environment.
+pub fn proxy() -> dl_http::Proxy {
+    dl_agent::proxy::current().proxy.clone()
+}
+
+/// The HTTP options of the hub client (`HttpClient.Timeout` 100 s, the .NET default).
+fn client_options(user_agent: &str) -> ClientOptions {
+    ClientOptions {
+        timeout: Some(Duration::from_secs(100)),
+        user_agent: Some(user_agent.to_owned()),
+        proxy: proxy(),
+        ..ClientOptions::default()
+    }
+}
+
 impl HubClient {
     /// A client for `hub_base_url` acting as `hotel_id` with `token`.
     pub fn new(
@@ -175,11 +201,7 @@ impl HubClient {
         user_agent: &str,
         gate: Arc<TokenGate>,
     ) -> Result<HubClient, HubError> {
-        let http = dl_http::Client::with_options(ClientOptions {
-            timeout: Some(Duration::from_secs(100)),
-            user_agent: Some(user_agent.to_owned()),
-            ..ClientOptions::default()
-        });
+        let http = dl_http::Client::with_options(client_options(user_agent));
         Ok(HubClient {
             base: base_address(hub_base_url)?,
             token: token.to_owned(),
@@ -219,6 +241,7 @@ impl HubClient {
         let req = req
             .and_then(|r| r.with_header("Authorization", &format!("Bearer {}", self.token)))
             .and_then(|r| r.with_header("X-Hotel-Id", &self.hotel_id))
+            .and_then(|r| r.with_header(CORRELATION_HEADER, &correlation_id()))
             .map_err(|_| HubError::Transport(format!("{route}: invalid request header")))?;
         let resp = self.http.request(&req).map_err(|e| match e {
             dl_http::Error::Timeout => HubError::Timeout(route),
@@ -422,6 +445,29 @@ mod tests {
             ),
         ] {
             assert_eq!(base_address(input).unwrap().to_string(), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn the_hub_client_uses_the_core_proxy_choice() {
+        let o = client_options("dl-agent/test");
+        assert_eq!(o.proxy, dl_agent::proxy::current().proxy);
+        assert_ne!(o.proxy, dl_http::Proxy::FromEnv);
+        assert_eq!(o.timeout, Some(Duration::from_secs(100)));
+    }
+
+    #[test]
+    fn correlation_ids_are_fresh_32_hex_digits() {
+        let a = correlation_id();
+        let b = correlation_id();
+        assert_ne!(a, b);
+        for id in [&a, &b] {
+            assert_eq!(id.len(), 32, "{id}");
+            assert!(
+                id.bytes()
+                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+                "{id}"
+            );
         }
     }
 

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use dl_agent::selftest::{Check, Outcome, PROBE_TIMEOUT, SelfTest};
 use dl_agent::supervisor::ModuleContext;
-use dl_http::{Client, ClientOptions, Proxy, Version};
+use dl_http::{Client, ClientOptions, Version};
 
 use super::{ModuleConfig, NAME, NOT_ENROLLED, commands, picture};
 use crate::agent::cloud::{self, POLL_PATH};
@@ -396,7 +396,7 @@ fn reachable(base: &str) -> Outcome {
     let client = Client::with_options(ClientOptions {
         timeout: Some(PROBE_TIMEOUT),
         connect_timeout: Some(PROBE_TIMEOUT.min(Duration::from_secs(10))),
-        proxy: Proxy::FromEnv,
+        proxy: crate::agent::cloud::proxy(),
         max_redirects: 0,
         ..ClientOptions::default()
     });
