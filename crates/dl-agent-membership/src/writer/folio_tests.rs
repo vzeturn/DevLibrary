@@ -12,10 +12,10 @@ use crate::writer::recorder::Recorder;
 use crate::writer::schema::OPTIONAL_COLUMNS;
 use crate::writer::session::{Called, Rec};
 
-const ROOM_ID: &str = "11111111-2222-3333-4444-555555555555";
+pub(crate) const ROOM_ID: &str = "11111111-2222-3333-4444-555555555555";
 const BOOKING_ID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
-fn room(extra: &str) -> Room {
+pub(crate) fn room(extra: &str) -> Room {
     let json = format!(
         r#"{{"rooms":[{{"Id":"{ROOM_ID}","RoomTypeCode":"DLX","Arrival":"2026-12-01",
         "Departure":"2026-12-03","NumAdult":2,"NumChild":0,"GuestFirstName":"An",
@@ -25,7 +25,7 @@ fn room(extra: &str) -> Room {
     parse_payload(&json).unwrap().rooms.remove(0)
 }
 
-fn ctx(force: bool, note: Option<&str>) -> WriteContext {
+pub(crate) fn ctx(force: bool, note: Option<&str>) -> WriteContext {
     WriteContext {
         confirmation_code: "MM-TEST-1".into(),
         booking_id: BOOKING_ID.parse().unwrap(),
@@ -37,7 +37,7 @@ fn ctx(force: bool, note: Option<&str>) -> WriteContext {
     }
 }
 
-fn plan(ctx: WriteContext) -> BookingPlan {
+pub(crate) fn plan(ctx: WriteContext) -> BookingPlan {
     BookingPlan {
         ctx,
         shared_confirm_num: None,
@@ -46,19 +46,20 @@ fn plan(ctx: WriteContext) -> BookingPlan {
         updates: Vec::new(),
         cancels: Vec::new(),
         note_folios: None,
+        extra_bed: None,
     }
 }
 
-fn dec(n: i64) -> Value {
+pub(crate) fn dec(n: i64) -> Value {
     Value::Decimal(Decimal::from(n))
 }
 
-fn s(v: &str) -> Value {
+pub(crate) fn s(v: &str) -> Value {
     Value::String(v.into())
 }
 
 /// A recorder whose schema probe sees every whitelisted column (plus `IsChild`).
-fn full_install() -> Recorder {
+pub(crate) fn full_install() -> Recorder {
     let mut r = Recorder::default();
     r.on("INFORMATION_SCHEMA.COLUMNS", |st| {
         let table = st.params[0].2.clone().unwrap_or_default();
@@ -96,7 +97,7 @@ fn full_install() -> Recorder {
     r
 }
 
-fn golden(name: &str, r: &Recorder) {
+pub(crate) fn golden(name: &str, r: &Recorder) {
     let path = format!(
         "{}/tests/fixtures/golden/sql/{name}.json",
         env!("CARGO_MANIFEST_DIR")
@@ -110,7 +111,7 @@ fn golden(name: &str, r: &Recorder) {
     assert_eq!(got.trim_end(), want.trim_end(), "golden SQL {name}");
 }
 
-fn position(r: &Recorder, needle: &str) -> usize {
+pub(crate) fn position(r: &Recorder, needle: &str) -> usize {
     r.texts()
         .iter()
         .position(|t| t.contains(needle))

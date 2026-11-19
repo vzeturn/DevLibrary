@@ -30,6 +30,7 @@ use crate::log::{self, V};
 use crate::settings::Settings;
 use crate::smile::{SmileError, SmileHealth, TdsSmile};
 use crate::sync::{SyncSettings, SyncWorker};
+use crate::terms::{TermsOptions, TermsSync};
 use crate::writer::folio::{FolioWriter, WriteOptions};
 use crate::writer::smile_writer::{EarnPath, SmileWriter};
 use scan::{CheckoutPass, ScanDeps, ScanLoop};
@@ -249,12 +250,27 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
     if let Some(d) = dispatcher(
         settings,
         &cfg,
-        write_smile,
+        write_smile.clone(),
         &hub,
         &tracker,
         (&earn_hub, &env),
+        &shared,
     ) {
         sync = sync.with_dispatcher(d);
+        // The terms report belongs to the agent of record: only with writes on.
+        if let Some(smile) = write_smile {
+            sync = sync.with_terms(TermsSync::new(
+                smile,
+                hub.clone(),
+                TermsOptions {
+                    mode: settings.write.extra_bed_mode.clone(),
+                    configured_code: settings.smile.extra_bed_special_code.clone(),
+                    hub_code: shared.hub_special_code.clone(),
+                    smile_hotel_id: settings.write.smile_hotel_id.clone(),
+                    earn_charge_codes: settings.smile.earn_charge_codes.clone(),
+                },
+            ));
+        }
     }
     let s = stop.clone();
     let mut workers = vec![("sync", spawn("membership-sync", move || sync.run(&s))?)];
@@ -294,6 +310,7 @@ fn dispatcher(
     hub: &Arc<dyn HubApi>,
     tracker: &Arc<Tracker>,
     (earn_hub, env): (&Arc<dyn EarnHub>, &Arc<dyn EarnEnv>),
+    shared: &Shared,
 ) -> Option<Arc<Dispatcher>> {
     if settings.read_only {
         return None;
@@ -312,6 +329,8 @@ fn dispatcher(
         default_breakfast_code: w.default_breakfast_code.clone(),
         extra_bed_mode: w.extra_bed_mode.clone(),
         extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+        hub_special_code: shared.hub_special_code.clone(),
+        smile_hotel_id: w.smile_hotel_id.clone(),
     });
     let gate = Arc::new(WriteGate::new(hub.clone(), tracker.clone()));
     log::warn(

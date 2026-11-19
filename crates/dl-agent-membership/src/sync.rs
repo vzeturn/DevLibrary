@@ -16,6 +16,7 @@ use crate::jobs::dispatch::{Dispatcher, Outcome};
 use crate::log::{self, V};
 use crate::module::state::{Shared, codes};
 use crate::smile::{SmileHealth, hotel_offset};
+use crate::terms::TermsSync;
 use crate::wire::Heartbeat;
 
 /// `IdlePollSeconds`: the pause after a quiet loop turn.
@@ -58,6 +59,7 @@ pub struct SyncWorker {
     failures: u32,
     diagnostics_logged: bool,
     dispatcher: Option<Arc<Dispatcher>>,
+    terms: Option<TermsSync>,
 }
 
 impl std::fmt::Debug for SyncWorker {
@@ -92,12 +94,20 @@ impl SyncWorker {
             failures: 0,
             diagnostics_logged: false,
             dispatcher: None,
+            terms: None,
         }
     }
 
     /// Executes pulled jobs through `dispatcher` instead of leaving them.
     pub fn with_dispatcher(mut self, dispatcher: Arc<Dispatcher>) -> SyncWorker {
         self.dispatcher = Some(dispatcher);
+        self
+    }
+
+    /// Reports SMILE's extra-bed terms and special-service catalogue (`ExtraBedTermsSync`,
+    /// every 300 s, after sync-config).
+    pub fn with_terms(mut self, terms: TermsSync) -> SyncWorker {
+        self.terms = Some(terms);
         self
     }
 
@@ -200,6 +210,11 @@ impl SyncWorker {
             let c = self.hub.sync_config()?;
             self.shared.set_sync_config(c);
             self.last_sync_config = Some(now);
+        }
+        if let Some(t) = self.terms.as_mut()
+            && !self.shared.scans_paused()
+        {
+            t.run_if_due(now);
         }
         Ok(())
     }

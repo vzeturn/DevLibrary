@@ -21,10 +21,15 @@ jobs against SMILE and acks them like the .NET agent: create / modify / cancel f
 (applock, `GetFolioNumber` / `GetConfirmNum` / `GetCancelNum`, replay lookup, hand-entered
 duplicate guard), member profile (`GetProfileNumber`), link folio, voucher and reward
 discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity),
-and `EarnPoints` jobs (revenue read from SMILE, `POST /api/agent/earn`). Not ported yet:
-SMILE_SPECIAL extra-bed rows (a booking that needs them is left un-acked) and the extra-bed
-terms sync. Only one writer may run per hotel: stop the .NET
-`MM.Membership.Agent` service before turning writes on.
+and `EarnPoints` jobs (revenue read from SMILE, `POST /api/agent/earn`).
+Extra beds follow `extra_bed_write_mode`: `SMILE_SPECIAL` runs the .NET preflight (terms
+read from `GlobalParameter` / `SpecialService` / `TransactionCode`, the hub's verified
+fingerprint, the special the hub picked in sync-config or in the job) and writes one
+agent-marked `Folio_Special` row per price band inside the folio transaction; any failed
+check folds the bed into the room rate with the .NET reason. With writes on, the module
+also reports the extra-bed terms and the `SpecialService` catalogue to the hub every
+300 s (`pms/extra-bed-terms`, `pms/special-services`). Only one writer may run per hotel:
+stop the .NET `MM.Membership.Agent` service before turning writes on.
 
 **Earn (checkout scan).** Every `checkout_interval_seconds` the scan thread asks the hub for
 the bookings still waiting to earn (`GET /api/agent/bookings/pending-checkout`), reports earn
@@ -62,6 +67,7 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | `checkout_scan_enabled` | `true` when `read_only` is `false`, else `false` | the checkout scan (earn); the .NET agent always runs it, so a read-only module beside the .NET service leaves it off |
 | `checkout_interval_seconds`, `checkout_max_per_scan`, `checkout_grace_days` | `60`, `100`, `1` | `CheckoutScan` |
 | `walk_in_earn_enabled`, `walk_in_lookback_days`, `walk_in_max_per_scan` | `true`, `3`, `100` | `CheckoutScan` walk-in earn (phone column: `guest_phone_column`) |
+| `smile_hotel_id` | none | `Smile:SmileHotelId`: the `GlobalParameter.HotelID` whose extra-bed terms are read; needed only when SMILE has several |
 | `capabilities` | the .NET `FullCapabilities` | sent in the heartbeat |
 
 No secret is in the remote config: the hotel token and the SMILE connection string stay in
@@ -119,8 +125,8 @@ command resumes. Re-running never double-earns (the hub dedups by `CONF:{Confirm
 
 ## Not ported yet
 
-The extra-bed terms and special-service sync, the TCVN3 decoding of
-legacy text, `SmileDiagnostics`, the travel-agent reader, the SMILE
+The TCVN3 decoding of
+legacy text, `SmileDiagnostics`, the SMILE
 schema probe, the folio revenue scan, the earn-pair drift check and the inventory fallback.
 Off Windows `config.dpapi` cannot be opened (no DPAPI); tests use a plain sealer.
 
@@ -136,7 +142,7 @@ against SQL Server:
 
 ```
 MEMBERSHIP_AGENT_TEST_SQL='Data Source=127.0.0.1,14333;User ID=sa;Password=…;Encrypt=disable' \
-  cargo test -p dl-agent-membership --test sql_live --test sql_live_writes --test sql_live_earn
+  cargo test -p dl-agent-membership --test sql_live --test sql_live_writes --test sql_live_earn --test sql_live_extra_bed
 ```
 
 `sql_live_earn` seeds folios and `FolioTransaction` rows and runs the `EarnPoints` job through

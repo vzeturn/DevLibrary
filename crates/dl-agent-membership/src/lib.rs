@@ -31,6 +31,7 @@ pub mod settings;
 pub mod smile;
 pub mod stj;
 pub mod sync;
+pub mod terms;
 pub mod wire;
 pub mod writer;
 

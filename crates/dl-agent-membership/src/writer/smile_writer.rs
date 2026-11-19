@@ -15,6 +15,7 @@ use crate::earn::{self, EarnEnv};
 use crate::hub::earn::EarnHub;
 use crate::jobs::payload::LinkFolioPayload;
 use crate::jobs::plan::{BookingPlan, PmsWriter, ProfileRequest, WriteError, Written};
+use crate::jobs::preflight::PreflightInputs;
 use crate::jobs::room_diff::ExistingFolio;
 use crate::jobs::travel_agent::TravelAgent;
 use crate::log::{self, V};
@@ -96,6 +97,17 @@ impl PmsWriter for SmileWriter {
     fn lookup_by_folio_nums(&self, nums: &[Decimal]) -> Result<Vec<ExistingFolio>, WriteError> {
         self.smile
             .session(None, |c| self.folio.lookup_by_folio_nums(c, nums))
+    }
+
+    fn read_extra_bed_inputs(
+        &self,
+        verified_fingerprint: Option<&str>,
+        special_code: Option<&str>,
+    ) -> Result<Option<PreflightInputs>, WriteError> {
+        self.smile.session(None, |c| {
+            self.folio
+                .read_extra_bed_inputs(c, verified_fingerprint, special_code)
+        })
     }
 
     fn write_booking(&self, plan: &BookingPlan) -> Result<Written, WriteError> {

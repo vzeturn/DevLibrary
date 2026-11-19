@@ -1,6 +1,7 @@
 //! The SMILE writers behind [`crate::jobs::dispatch::PmsWriter`].
 pub mod additional_name;
 pub mod applock;
+pub mod bed_terms_reader;
 pub mod folio;
 pub mod link;
 pub mod lookup;
@@ -11,6 +12,7 @@ pub mod recorder;
 pub mod schema;
 pub mod session;
 pub mod smile_writer;
+pub mod special_rows;
 pub mod tcvn3;
 pub mod travel_agent;
 

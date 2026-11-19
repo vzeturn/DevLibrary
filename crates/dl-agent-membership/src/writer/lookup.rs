@@ -297,7 +297,7 @@ WHERE s.FolioNum IN {list} {cancel}",
             num("ToDay"),
         );
         let rows = s.rows(&sql, &params)?;
-        let code = self.opts.extra_bed_special_code.as_str();
+        let code = self.effective_special_code();
         for r in &rows {
             let folio = r.dec("FolioNum")?;
             let Some((_, room)) = folios.iter().find(|(f, _)| *f == folio) else {
@@ -320,7 +320,7 @@ WHERE s.FolioNum IN {list} {cancel}",
                 });
             } else if r
                 .opt_str("SpecialCode")?
-                .is_some_and(|c| c.eq_ignore_ascii_case(code))
+                .is_some_and(|c| c.eq_ignore_ascii_case(&code))
             {
                 entry.1 += qty.max(0);
             }

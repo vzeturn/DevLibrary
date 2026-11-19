@@ -7,6 +7,7 @@ use dl_decimal::Decimal;
 use dl_uuid::Uuid;
 
 use super::payload::{Contact, LinkFolioPayload, Room};
+use super::preflight::PreflightInputs;
 use super::result::{
     ErrorClass, NETWORK, PROFILE_UNAVAILABLE, UNKNOWN, class_of_code, classify_sql,
 };
@@ -105,6 +106,8 @@ pub struct BookingPlan {
     pub cancels: Vec<Decimal>,
     /// `NoteFolios`: folios whose note is rewritten (`None`: the note is not touched).
     pub note_folios: Option<Vec<Decimal>>,
+    /// `ExtraBed`: the `SMILE_SPECIAL` preflight inputs (`None`: every room folds).
+    pub extra_bed: Option<PreflightInputs>,
 }
 
 /// `BookingWriteResult`.
@@ -138,6 +141,15 @@ pub trait PmsWriter: Send + Sync {
     fn lookup_by_confirmation(&self, ext: &str) -> Result<Vec<ExistingFolio>, WriteError>;
     /// `LookupByFolioNumsAsync`.
     fn lookup_by_folio_nums(&self, nums: &[Decimal]) -> Result<Vec<ExistingFolio>, WriteError>;
+    /// `ReadExtraBedInputsAsync`: the `SMILE_SPECIAL` preflight inputs, read right before a
+    /// booking write; `None` in `FOLD_LEGACY` mode (and for writers without SMILE).
+    fn read_extra_bed_inputs(
+        &self,
+        _verified_fingerprint: Option<&str>,
+        _special_code: Option<&str>,
+    ) -> Result<Option<PreflightInputs>, WriteError> {
+        Ok(None)
+    }
     /// `WriteBookingAsync`.
     fn write_booking(&self, plan: &BookingPlan) -> Result<Written, WriteError>;
     /// `CancelFolioAsync`.
