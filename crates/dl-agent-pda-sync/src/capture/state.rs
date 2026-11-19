@@ -148,6 +148,21 @@ pub trait CaptureState: Send + Sync {
     /// Distinct buckets that currently have shadow entries (ordinal order).
     fn get_buckets(&self, table: &str, ctx: &Ctx) -> Result<Vec<String>>;
 
+    /// Number of shadow entries of a table (`CountShadowAsync`, ADR 0126).
+    fn count_shadow(&self, table: &str, ctx: &Ctx) -> Result<usize> {
+        Ok(self.get_shadow(table, None, ctx)?.len())
+    }
+
+    /// Hands every (key, hash) of a table's shadow to `visit` (`ScanShadowAsync`, store-cloud
+    /// reconciliation, ADR 0126). A store that can should read it in one statement without
+    /// loading the table into memory.
+    fn scan_shadow(&self, table: &str, visit: &mut dyn FnMut(&str, &str), ctx: &Ctx) -> Result<()> {
+        for (k, h) in self.get_shadow(table, None, ctx)?.iter() {
+            visit(k, h);
+        }
+        Ok(())
+    }
+
     /// Applies a commit atomically.
     fn commit(&self, commit: &StateCommit, ctx: &Ctx) -> Result<()>;
 

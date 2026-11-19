@@ -520,10 +520,12 @@ fn the_file_has_the_csharp_schema() {
     assert_eq!(
         tables,
         [
+            "key_repair",
             "meta",
             "outbox",
             "stream_resnapshot",
             "stream_state",
+            "ux_key_repair",
             "ux_outbox_stream_seq"
         ]
     );

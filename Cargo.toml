@@ -51,6 +51,7 @@ dl-agent-backup = { path = "crates/dl-agent-backup" }
 dl-agent-hotellink = { path = "crates/dl-agent-hotellink" }
 dl-agent-arrival = { path = "crates/dl-agent-arrival" }
 dl-agent-pda-sync = { path = "crates/dl-agent-pda-sync" }
+dl-agent-speaker = { path = "crates/dl-agent-speaker" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

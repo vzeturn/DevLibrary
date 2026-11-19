@@ -128,6 +128,28 @@ pub mod row_key {
         out
     }
 
+    /// The key columns of a canonical row key (`RowKey.TryParse`, ADR 0128): the inverse
+    /// of [`of`]. `None` when the text is not the canonical form of any key (empty, a
+    /// column twice, an empty name or columns out of order), so `of(key) == row_key` on
+    /// success.
+    pub fn try_parse(row_key: &str) -> Option<StrMap> {
+        if row_key.is_empty() {
+            return None;
+        }
+        let mut parts = StrMap::new();
+        for part in row_key.split(SEPARATOR) {
+            let (name, value) = match part.find('=') {
+                Some(eq) => (&part[..eq], Some(part[eq + 1..].to_owned())),
+                None => (part, None),
+            };
+            if name.is_empty() || parts.contains_key(name) {
+                return None;
+            }
+            parts.insert(name, value);
+        }
+        (of(&parts) == row_key).then_some(parts)
+    }
+
     /// The first byte of SHA-256 over the key, modulo `buckets` (default 256).
     pub fn bucket(row_key: &str, buckets: u32) -> u32 {
         let first = Sha256::digest(row_key.as_bytes()).as_ref()[0];

@@ -37,6 +37,9 @@ pub mod site_command_types {
     pub const RESERVATION_CANCEL: &str = "reservation.cancel";
     /// Resend every row of the named sync streams (ADR 0102).
     pub const SYNC_RESNAPSHOT: &str = "sync.resnapshot";
+    /// Store-cloud reconciliation (ADR 0126): compare the agent's shadow with the cloud
+    /// manifest per bucket.
+    pub const SYNC_VERIFY: &str = "sync.verify";
 }
 
 /// Values of [`KdsLineStatePayload::action`].
@@ -99,6 +102,7 @@ pub mod site_command_contract {
         spec(site_command_types::RESERVATION_SAVE, Durable, 8),
         spec(site_command_types::RESERVATION_CANCEL, Durable, 8),
         spec(site_command_types::SYNC_RESNAPSHOT, Durable, 8),
+        spec(site_command_types::SYNC_VERIFY, Durable, 3),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),
         spec(o::SEND, Interactive, 3),

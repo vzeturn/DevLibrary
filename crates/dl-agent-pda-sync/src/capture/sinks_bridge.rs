@@ -53,6 +53,11 @@ pub trait BatchStore: Send + Sync {
     fn stream_resnapshot_captured(&self) -> Result<()> {
         Ok(())
     }
+    /// Rows `sync.verify` queued for a resend by key (ADR 0128); `None` when the store
+    /// keeps none.
+    fn key_repairs(&self) -> Option<Arc<dyn super::key_repair::KeyRepairList>> {
+        None
+    }
 }
 
 /// Durable sink for blob column values (ADR 0030), `IBlobStore`. `CapReached` means "not
@@ -147,6 +152,12 @@ impl BatchStore for OutboxBatchStore {
         self.outbox
             .stream_resnapshot_captured()
             .map_err(outbox_error)
+    }
+
+    fn key_repairs(&self) -> Option<Arc<dyn super::key_repair::KeyRepairList>> {
+        Some(Arc::new(crate::outbox::OutboxKeyRepairList::new(
+            self.outbox.clone(),
+        )))
     }
 }
 

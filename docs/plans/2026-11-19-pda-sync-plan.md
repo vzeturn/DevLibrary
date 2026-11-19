@@ -10,7 +10,7 @@ Source of truth:
 
 Scope (SMILE rule):
 - **IN:** everything that reads or writes `SMILE_POS`, plus the site-ship needs (enrol, heartbeat, selftest, reports). This includes the print relay (see §4).
-- **OUT:** speaker, `legacy-archive`, Azure, systemd, the config UI, door-lock.
+- **OUT:** `legacy-archive`, Azure, systemd, the config UI, door-lock.
 
 ## 1. Done in phase A (branch `feat/smile100-pda`)
 
@@ -72,6 +72,15 @@ Dropped from the port:
 | SQL Server 2022 RTM-CU27 (16.0.4295.3) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 | SQL Server 2017 RTM-CU31-GDR (14.0.3570.2) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 
+Slice B1 (2026-11-19) adds `verify_live` to the script: 1/1 on SQL Server 2022 (16) and 2017 (14), with the other live tests still green on both.
+
+**B9 live results (2026-11-19, RT-0257).** With the order fixture, all 18 tests pass on both servers, run on Linux against throwaway containers (`TZ=Asia/Ho_Chi_Minh`):
+
+| Server | earlier 10 | `live_orders` | `live_orders_combo` | `live_orders_tables` |
+|---|---|---|---|---|
+| SQL Server 2022 RTM-CU28 (16.0.4325.4) | 10/10 | 3/3 | 2/2 | 3/3 |
+| SQL Server 2017 RTM-CU31-GDR (14.0.3570.2) | 10/10 | 3/3 | 2/2 | 3/3 |
+
 The tests run in a Linux container of the repo's build image (`scripts/xbuild/Dockerfile`), not on the macOS host. The agent connects with `Encrypt=Required`, and `dl-tls` has no macOS backend, so on macOS every agent-login connection fails with "error 0". Tests that only use the `encrypt=disable` admin URL pass on macOS too. Windows uses SChannel; it is covered only by the cross-target clippy (B6).
 
 `bootstrap_sql_live` used to assert `major >= 16`. It now asserts the preflight minimum (`MIN_MAJOR`, 11), so that it runs on the 2017 container as well.
@@ -90,7 +99,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 |---|---|---|---|
 | 1 | Service host, SCM recovery | ✅ | dl-agent core; the port's service code is dropped |
 | 2 | Self-update | ✅ | dl-agent core; `AutoUpdate` forced off in the module |
-| 3 | Problem reports, site events | 🟡 | State changes report through `ctx.report`; per-code mapping of site events is B5 |
+| 3 | Problem reports, site events | ✅ | State changes report through `ctx.report`; every Error site event goes on as a problem report with its own code, at most once per code per 15 min (`reporting/module_reports.rs`, B5); the PDA cloud link is declared to the watchdog from the first accepted heartbeat (`reporting/cloud_link.rs`) |
 | 4 | Diagnostic bundle | 🟡 | Core bundle with `status.json` and `runtime-config.json`; the log file is B5 |
 | 5 | Installer takeover | ❌ | Replaced by uninstall + fresh enrol (owner rule); the hub step is B3 |
 | 6 | Hub product gate | ❌ | B3 |
@@ -104,15 +113,15 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 14 | TCVN3 text normalisation | ✅ | Port unit and golden tests |
 | 15 | Contracts byte-identical to C# | ✅ | Port golden tests (`contracts/tests/dotnet.rs`) |
 | 16 | Capture engine | ✅ | Live capture as `pda_sync` on 2017 and 2022 |
-| 17 | Snapshot, resnapshot, 424 parent wait | 🟡 | Snapshot live; key repair belongs to B1 |
+| 17 | Snapshot, resnapshot, 424 parent wait | ✅ | Snapshot live; key repair live (B1, `verify_live`) |
 | 18 | Outbox, uploader | ✅ | Port tests; live capture fills a SQLite outbox |
 | 19 | Blob queue | ✅ | Port tests (`outbox_uploaders`) |
 | 20 | Heartbeat, runtime config | ✅ | Port tests |
 | 21 | Command channel | ✅ | Port tests (`commands_channel`) |
 | 22 | Exactly-once `kds.line_state`, reservations | ✅ | Live redelivery test on 2017 and 2022 |
-| 23 | Order verbs `open/post/send/void` | 🟡 | SQL text pinned byte for byte to C#; not yet executed live (B9) |
-| 24 | Combo, table change/transfer/merge | 🟡 | Same as 23 (B9) |
-| 25 | `sync.verify` and key repair | ❌ | B1 |
+| 23 | Order verbs `open/post/send/void` | ✅ | Live as `pda_sync` on 2017 and 2022 (`live_orders`): each delivered twice, one write, one journal row; refused after a POS WIN close, removal or edit; a lost grant rolls the write back with its journal row (B9) |
+| 24 | Combo, table change/transfer/merge | ✅ | Live on 2017 and 2022 (`live_orders_combo`, `live_orders_tables`): combo, covers, table change/transfer, check merge, line move, exactly once; paid, discounted or changed checks refused without a write (B9) |
+| 25 | `sync.verify` and key repair | ✅ | B1: `commands/verify*.rs`, `capture/{shadow_manifest,key_repair}.rs`, `outbox/key_repairs.rs`; C# tests ported (`verify_handler`, `verify_contract`, `verify_repair`); wire JSON checked against .NET 10; `verify_live` on 2017 and 2022 |
 | 26 | Staff sync from `CashierDef` | ✅ | Live `staff_sql` on 2017 and 2022 |
 | 27 | Print relay engine | 🟡 | Wired and unit-tested; no real printer yet (B7) |
 | 28 | Print queue discovery | 🟡 | Windows-only; bench (B6, B7) |
@@ -121,10 +130,16 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 31 | `legacy-upload` | out | Not SMILE_POS |
 | 32 | `status`, `status.json` | ✅ | Hub `status` command, module state |
 | 33 | Selftest and Windows bench | 🟡 | Selftest rows done; bench run is B6 |
-| 34–38 | speaker | out | Speaker is out of this programme |
-| 39 | Print relay duplication | 🟡 | Decision in §4; needs the speaker's guard when the speaker returns |
+| 34–38 | speaker | 🟡 IN (RT-0257) | `crates/dl-agent-speaker`, module `speaker`; tested against a fake hub; live needs the PDA cloud change (§4b) and a Windows site |
+| 39 | Print relay duplication | ✅ | The speaker module never relays (§4b); `pda-sync` is the only relay |
 
 **Coverage:** 17 ✅ + 10 🟡 = 22/31 = **71.0%** (strict ✅ only: 17/31 = 54.8%). The audit baseline was 15.4%.
+
+After slice B1 (rows 17 and 25 ✅): 19 ✅ + 9 🟡 = 23.5/31 = **75.8%** (strict 19/31 = 61.3%).
+
+After B5 (rows 3) and B9 (rows 23, 24), 2026-11-19: 20 ✅ + 7 🟡 = 23.5/31 = **75.8%** (strict 20/31 = 64.5%), not counting the other phase-B slices.
+
+After B1, B5 and B9 together (rows 3, 17, 23, 24, 25 ✅): 22 ✅ + 6 🟡 = 25/31 = **80.6%** (strict 22/31 = 71.0%).
 
 ## 2. Fresh-enrol analysis
 
@@ -136,7 +151,7 @@ The owner asked whether a fresh enrol of a live site is safe, and what it costs.
 | Duplicate rows in the cloud | `sync.row_state` upserts per tenant by natural key, guarded by `src_ver`. A resnapshot rewrites the same keys with the same content. | **Yes** |
 | Cursors | Upload cursors and stream sequences are per `agent_id`. A new agent starts with no cursors and an empty `capture.db`, so it sends a **full snapshot of every stream**, including the closed-ledger history window (`historyMonths`, 24 by default). | Costly |
 | Cost | The catalog's sample site has about 1.05M rows in captured tables: about 0.97M closed ledger (`Trn` 172k, `CheckActivities` 140k, `KitchenOrderDetail` 135k, ...), 48k masters and 30k open-check rows. The upload rate is 8 batches per cycle. Expect hours of upload, during which the PDA reads lag. `capture_dry_run` gives the exact count per site before the cutover. | Plan it |
-| Deletions while no agent runs | The new `capture.db` has no shadow hashes. A row deleted or closed in SMILE_POS between the old agent's last cycle and the new agent's snapshot gets **no tombstone**. For example, a check closed in the gap would still look open in the cloud. The C# fix for this is `sync.verify` per bucket plus repair by key (ADR 0126/0128). The Rust port does **not** have it yet (phase B, slice B1). | Gap |
+| Deletions while no agent runs | The new `capture.db` has no shadow hashes. A row deleted or closed in SMILE_POS between the old agent's last cycle and the new agent's snapshot gets **no tombstone** from the snapshot. Since slice B1, one `sync.verify` heals it: the manifest mismatch is narrowed to keys and the capture's key-repair job tombstones them (`verify_repair`, `verify_live`). Two C# limits remain: open-check tables are never compared, so the open-check row of a check closed in the gap stays in the cloud's open set; and tables that tolerate duplicate rows (`CashierRVC`) are dropped by the key repair, so their deleted rows stay and are queued again by every verify. | Healed by B1, except open checks and `CashierRVC` |
 | Two agents at once | Both would capture, relay prints and lease commands. The journal keeps commands exactly-once, but prints could double. | Uninstall first |
 
 **Verdict.** A fresh enrol is safe for money and orders. It costs one full resnapshot, and it has a stale-row gap for anything deleted between the uninstall and the new snapshot.
@@ -146,7 +161,7 @@ Minimum procedure that makes it safe without carrying any state:
 2. Run `capture_dry_run` first, to size the upload.
 3. Uninstall the old agent, then run `dl-agent pda-enroll` in the same session, so the gap is minutes with no POS writes.
 4. Revoke the old agent in the PDA cloud.
-5. Before a wide rollout, port `sync.verify` (B1), so that any stale row heals by itself.
+5. Send `sync.verify` once after the first snapshot (cloud request 5); stale ledger and master rows heal by themselves. Doing the cutover with all checks closed (step 1) keeps the open-check limit out of the way.
 
 The alternative, only if the owner wants no resnapshot, is to carry over `capture.db` alone (shadow hashes and cursors, slice B8). It is the minimum state. It is not built, because cloud cursors are per `agent_id` and reusing them under a new agent needs a PDA cloud change. Do not build it without an owner decision.
 
@@ -171,7 +186,32 @@ The module runs the port's relay:
 
 It is wired through the host hooks. It is **not yet verified on a real printer** (slice B7).
 
-Where the speaker also relays (speaker is OUT of this programme), keep the one-relay-per-branch rule of ADR 0026. The speaker module must not relay while `pda-sync` does.
+Keep the one-relay-per-branch rule of ADR 0026: the speaker module (RT-0257, §4b) never relays, so `pda-sync` stays the only relay.
+
+## 4b. Speaker module (RT-0257)
+
+Rows 34–38 are now **IN** through the new crate `crates/dl-agent-speaker` (module `speaker`,
+opt-in with `modules.speaker.enabled` and `rvcList`), a port of the Go `speaker-agent` and its
+Rust port on the workspace crates (`dl-signalr`, `dl-http`, `dl-json`, `dl-winos` COM):
+
+- order hub link with `JoinRvc` per RVC (each join awaited, refusals reported), reconnect on the
+  web client's backoff;
+- embedded WAV tones and SAPI speech vi/en (Windows; other systems log);
+- per-RVC `guest.speakerSoundMode` with the Go rules (tone off keeps the voice, malformed is
+  the default, failed fetch keeps the last mode);
+- hub commands `status` and `test`.
+
+**Credential.** No 365-day speaker-device JWT file: the module uses the `pda-sync` enrolment on
+the same machine (`agent.json` + secret store, `/sync/v1/token` exchange, 15-minute tokens). The
+PDA cloud must accept that SyncAgent principal for `JoinRvc` (today `FORBIDDEN_RVC`) and for
+`GET /api/v1/speaker/sound-mode/{rvc}` (today `ClerkOrSpeakerDevice`); the exact change is in the
+crate README. Until then the module is degraded with that reason (report `SPEAKER_JOIN_REFUSED`).
+
+**Print relay.** The speaker module does not relay prints (ADR 0026: one relay per branch;
+`pda-sync` relays, ADR 0098). This closes row 39.
+
+**Still owed.** Real audio on a Windows site (SAPI voices installed, tone playback) and a live
+run once the cloud change ships.
 
 ## 5. Phase-B slices
 
@@ -179,15 +219,15 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 
 | Slice | Work | Owned files | Size |
 |---|---|---|---|
-| B1 `sync.verify` + key repair | Port C# `VerifyCommandHandler` (bucket manifests vs shadow) and `SqliteOutbox.KeyRepairs` (ADR 0126/0128), with tests from the C# suite. This closes the fresh-enrol deletion gap. | `src/commands/verify*.rs`, `src/outbox/key_repairs*.rs`, `tests/verify_*.rs` | M |
+| B1 `sync.verify` + key repair (**done**, RT-0257) | Port C# `VerifyCommandHandler` (bucket manifests vs shadow) and `SqliteOutbox.KeyRepairs` (ADR 0126/0128), with tests from the C# suite. This closes the fresh-enrol deletion gap, except the two C# limits in §2. | `src/commands/verify*.rs`, `src/outbox/key_repairs*.rs`, `src/capture/{shadow_manifest,key_repair}.rs`, `tests/verify_*.rs` | M |
 | B2 file splits | 15 files are over 800 lines: `util/stj.rs` 1517, `commands/batches.rs` 1168, `hosting/host.rs` 1066, `contracts/time.rs` 1027, `reporting/format.rs` 976, `commands/executor.rs` 898, `config/providers.rs` 863, `capture/runner.rs` 839, `contracts/legacy/sql_store.rs` 823, plus the tests `commands_executor.rs` 1516, `outbox_uploaders.rs` 1117, `capture/strategy_tests.rs` 1040, `site_events.rs` 996, `contracts/tests/dotnet.rs` 810, `commands/tests/sql.rs` 806. Split them by responsibility and keep the public paths. Run the split after B1 for `commands/`. | the files listed | M |
 | B3 hub: uninstall the old agent + product gate | `install/pdaLegacy.ts`: stop and delete the `PdaSyncAgent` service and any `PdaSyncAgent*` scheduled task. Rename `%ProgramData%\MM\SyncAgent` to `SyncAgent.retired-<date>` for rollback; never delete it. Then run `dl-agent pda-enroll`. Also a `pda-sync` product requirement: SMILE_POS tables, the `pda_sync` login, `Pda_Sync*` tables, order grants. | `services/agent-hub/src/install/pda*.ts`, its tests | M |
 | B4 `pda-legacy-export --from-sql` | Port `legacy/export` as a Tool. It is IN only for the `--from-sql` path, which reads `dbo.Pda_*` in SMILE_POS (ADR 0094). | `src/legacy/export/**`, `src/module/tool.rs` (one tool), one `dl-agent-bin` line | M |
-| B5 reports, logs, diagnostics, cloud link | Map the port's site events and error codes onto `ctx.report`. Add the current log file to the bundle (`status.json` and `runtime-config.json` are already named). Call `ctx.set_cloud_link(cloud_url, ok_at)` from the heartbeat's last success, so the core watchdog sees the PDA link; a wrong `ok_at` restarts the service, so it needs a test. | `src/reporting/**`, `src/module/mod.rs` | S |
+| B5 reports, logs, diagnostics, cloud link | Map the port's site events and error codes onto `ctx.report`. Add the current log file to the bundle (`status.json` and `runtime-config.json` are already named). Call `ctx.set_cloud_link(cloud_url, ok_at)` from the heartbeat's last success, so the core watchdog sees the PDA link; a wrong `ok_at` restarts the service, so it needs a test. **Done (RT-0257) except the log file:** `AgentHealth::last_heartbeat_ok` (unix seconds of the last 2xx heartbeat, never backwards) feeds `CloudLinkPublisher`, which declares nothing before the first accepted heartbeat and withdraws the link on `reenroll_required`; tests hold it against `dl_agent::watchdog::decide`. Error site events reach the hub through the `ModuleReports` log sink. The rolling log folder still needs core hook H2. | `src/reporting/**`, `src/module/mod.rs` | S |
 | B6 bench run | Windows bench with SMILE_POS and a PDA demo tenant: uninstall the old agent, `pda-enroll`, then: capture to the cloud; a KDS done from the PDA UI; one order post; one reservation; staff sync of `CashierDef`; `selftest`; `capture_dry_run`. | none (report only) | M |
 | B7 print relay on hardware | One ticket to a 9100 printer and one to a spooler queue, then an unknown outcome with no reprint, then a cloud redeploy with a quiet reconnect. | `src/printrelay/**` (fixes only) | S |
 | B8 `capture.db` carry-over (only on an owner decision) | `pda-import-state --from %ProgramData%\MM\SyncAgent`: copy `capture.db` only. Needs PDA cloud support for adopting cursors. | `src/module/import_state.rs` | S |
-| B9 live order verbs | Extend the fixture with the C# `OrderVerbsSchema.cs` and `ComboStoreSchema.cs` shapes, kept faithful to SMILE_POS. Then run `open/post/send/void`, covers, combo post, table change/transfer, check merge and move lines live, each one exactly-once and refused after a POS WIN change. Add them to `scripts/live-sql.sh`. | `testdata/sql/**`, `tests/live_orders*.rs`, `tests/live_support/**` | M |
+| B9 live order verbs | Extend the fixture with the C# `OrderVerbsSchema.cs` and `ComboStoreSchema.cs` shapes, kept faithful to SMILE_POS. Then run `open/post/send/void`, covers, combo post, table change/transfer, check merge and move lines live, each one exactly-once and refused after a POS WIN change. Add them to `scripts/live-sql.sh`. **Done (RT-0257):** `testdata/sql/smile_pos_orders{,_post}.sql`, `tests/live_support/orders.rs`, `tests/live_orders{,_combo,_tables}.rs` (8 tests, KDS and reservations included), `tests/commands_redelivery.rs` (fake); no executor bug found. | `testdata/sql/**`, `tests/live_orders*.rs`, `tests/live_support/**` | M |
 
 ## 6. Core hooks needed (for the core slice)
 
@@ -201,5 +241,5 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 - A Windows compile is covered by clippy with `--target x86_64-pc-windows-gnu`. A Windows run is not: no service run, DPAPI secret store, spooler or SSPI admin yet (B6).
 - SQL Server 2008 R2 and 2012 with the TLS 1.0 ladder are untested; docker images exist only from 2017 on.
 - The port's side-by-side "0 differences" against C# was not re-run here.
-- The order verbs, combo and table commands write to SMILE_POS but have no live test yet (B9).
+- The order verbs, combo and table commands run live on the fixture's stand-in vendor routines (`GetRVCSeqNumber`, `PostITrn`, `UpdateTmpInvoice`, `Unicode2TCVN`); the real SMILE_POS procedure bodies are only exercised on the B6 bench.
 - The live tests need Linux (or Windows); on macOS the `Encrypt=Required` connections fail because `dl-tls` has no macOS backend.

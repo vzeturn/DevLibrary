@@ -13,6 +13,12 @@ and diagnostics; this crate brings everything that reads or writes `SMILE_POS`.
 - **Commands** (`commands`): the cloud's site commands (KDS, reservations, order verbs,
   covers, combo, table moves) in one SQL transaction each, journalled in
   `Pda_SyncCommandLog` so a redelivered command is never applied twice (ADR 0029/0100).
+- **Verify** (`commands::verify`, `capture::{shadow_manifest, key_repair}`): the cloud's
+  `sync.verify` compares the shadow with `GET /sync/v1/manifest` per bucket, narrows a
+  mismatch to row keys (`/sync/v1/manifest/keys`) queued in `outbox.db`'s `key_repair`, and
+  the capture's `key-repair` job resends or tombstones them (ADR 0126/0128). This heals
+  rows deleted while no agent ran (fresh enrol). Open-check tables and tables that tolerate
+  duplicate rows (`CashierRVC`) are not repaired by key, as in C#.
 - **Bootstrap** (`bootstrap`): the `pda_sync` login, the `Pda_Sync*` tables and the
   grants `010`–`090`, run by `dl-agent pda-enroll` under the operator's Windows login or a
   SQL admin (`PDA_SQL_ADMIN_PASSWORD`).
@@ -31,3 +37,10 @@ dl-agent pda-enroll --code <code> --url <https cloud url> [--dry-run]
 
 Live SQL tests run when `PDA_SYNC_TEST_SQL` holds a dl-tds URL of a login that may
 create databases; each test creates and drops its own `pda_sync_test_*` database.
+`tests/live_orders*.rs` run every order, combo, covers, table, KDS and reservation command
+as `pda_sync` against the SMILE_POS fixture (`testdata/sql/smile_pos_*.sql`), each one
+delivered twice; `scripts/live-sql.sh` runs all live tests on SQL Server 2022 and 2017.
+
+The module declares the PDA cloud to the dl-agent watchdog from the first heartbeat the
+cloud accepted (`reporting/cloud_link.rs`), and every Error site event also goes to the
+hub as a problem report with its code (`reporting/module_reports.rs`).

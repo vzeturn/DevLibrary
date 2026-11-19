@@ -1,5 +1,5 @@
 //! The command loops of the running agent (`AgentHost.AddAgentRuntime` registrations of
-//! `SqlSiteCommandStore`, `ResnapshotCommandHandler`, `BootstrapGrantsRepair`,
+//! `SqlSiteCommandStore`, `ResnapshotCommandHandler`, `VerifyCommandHandler`, `BootstrapGrantsRepair`,
 //! `OrderGrantsMonitor`, `TableSchemaGuard`, `SiteCommandExecutor`, `CommandChannel`, and
 //! the hosted `CommandService` and `OrderGrantsService`).
 
@@ -11,6 +11,8 @@ use super::grants::{BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, Ord
 use super::resnapshot::ResnapshotCommandHandler;
 use super::schema_guard::{LogOnlyEvents, TableSchemaGuard};
 use super::sql_store::{ConfigSource, SqlSiteCommandStore};
+use super::verify::{VerifyCommandHandler, VerifyParts};
+use super::verify_manifest::HttpCloudManifestSource;
 use crate::bootstrap::{SqlAdminCredential, SqlOrderGrantsProbe};
 use crate::contracts::SyncCatalog;
 use crate::hosting::cli::Unhandled;
@@ -80,6 +82,29 @@ pub fn build(
         log,
         catalog,
     ));
+    // sync.verify (ADR 0126) compares the shadow with the cloud manifest; it reads no store
+    // table. Its own capture state connection (WAL) reads beside the capture session's and
+    // is dropped after each run.
+    let state_path = s.paths.capture_state_db();
+    let verify = Arc::new(VerifyCommandHandler::new(
+        VerifyParts {
+            outbox: s.outbox.clone(),
+            open_state: Arc::new(move || {
+                Ok(
+                    Arc::new(crate::capture::SqliteCaptureState::open(&state_path)?)
+                        as Arc<dyn crate::capture::CaptureState>,
+                )
+            }),
+            cloud: Arc::new(HttpCloudManifestSource::new(
+                s.http.clone(),
+                s.tokens.clone(),
+            )),
+            clock: s.clock.clone(),
+            catalog: Arc::new(catalog.clone()),
+            config: Some(s.runtime_config.clone()),
+        },
+        log,
+    ));
     let repair: Option<Arc<dyn GrantsRepair>> = match crate::hosting::enroll::real_bootstrapper(
         s.secrets.clone(),
         SqlAdminCredential::windows(),
@@ -104,6 +129,7 @@ pub fn build(
     let schema = Arc::new(TableSchemaGuard::new(events, log));
     let mut executor = SiteCommandExecutor::new(store, s.clock.clone(), log)
         .with_resnapshot(resnapshot)
+        .with_verify(verify)
         .with_grants(grants.clone())
         .with_schema(schema);
     if let Some(n) = &extras.nudge {

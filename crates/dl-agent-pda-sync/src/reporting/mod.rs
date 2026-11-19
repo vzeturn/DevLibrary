@@ -10,9 +10,11 @@
 //! ([`site_event_service`]) and `ToolRun.cs` ([`tool_run`]).
 
 pub mod agent_logging;
+pub mod cloud_link;
 pub mod file_sink;
 pub mod format;
 pub mod log;
+pub mod module_reports;
 pub mod run_stages;
 pub mod scrubber;
 pub mod site_event_bridge;
@@ -25,7 +27,9 @@ pub mod template;
 pub mod tool_run;
 
 pub use agent_logging::ToolLogTarget;
+pub use cloud_link::{CloudLinkPublisher, LinkUpdate};
 pub use log::{Event, Exception, Level, Logger, LoggerConfig, MemorySink, Property, Sink, Value};
+pub use module_reports::{ModuleReports, ReportFn, TeeSink};
 pub use run_stages::{NullRunStages, RunStages};
 pub use scrubber::{MASK, register as register_secret, scrub};
 pub use site_event_bridge::SiteEventLogBridge;

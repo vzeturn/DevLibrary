@@ -117,6 +117,11 @@ impl CaptureScheduler {
                 o.ledger_rescan_interval,
                 CaptureEngine::run_ledger_load_resume,
             ),
+            job(
+                "key-repair",
+                o.master_interval,
+                CaptureEngine::run_key_repairs,
+            ),
         ];
         let wake = self.wake.clone();
         ctx.on_cancel(move || wake.notify());

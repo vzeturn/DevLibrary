@@ -100,7 +100,14 @@ impl SqliteOutbox {
     /// Opens (creating when absent, with its directory) the outbox at `path`; `cap_bytes`
     /// bounds the queued payload bytes.
     pub fn open(path: impl AsRef<Path>, cap_bytes: i64, log: &Logger) -> Result<SqliteOutbox> {
-        let db = sql::open_store(path.as_ref(), &[SCHEMA, super::resnapshots::SCHEMA])?;
+        let db = sql::open_store(
+            path.as_ref(),
+            &[
+                SCHEMA,
+                super::resnapshots::SCHEMA,
+                super::key_repairs::SCHEMA,
+            ],
+        )?;
         Ok(SqliteOutbox {
             db: Mutex::new(db),
             cap_bytes,

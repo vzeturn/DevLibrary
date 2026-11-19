@@ -7,7 +7,8 @@
 //!   `dl_tds` with the command log `dbo.Pda_SyncCommandLog`.
 //! - [`TableSchemaGuard`]: the column probe of the table verbs.
 //! - [`SiteCommandExecutor`]: runs each command once in the store's transaction;
-//!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`.
+//!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
+//!   `sync.verify` (ADR 0126/0128).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`service::services`]: the host's loop factory.
 
@@ -25,6 +26,8 @@ mod sql_store;
 mod sql_table;
 pub mod sql_text;
 mod units;
+pub mod verify;
+pub mod verify_manifest;
 
 pub use channel::{ChannelError, CommandChannel, CommandChannelParts, next_failure_count};
 pub use error::{CommandError, PERMISSION_DENIED, Result};
@@ -40,6 +43,10 @@ pub use sql_store::{ConfigSource, SqlSiteCommandStore, SqlSiteCommandUnit};
 pub use units::{
     CheckMoneyFacts, CommandWork, OrderCommandUnit, OrderLineFacts, OrderPostOutcome,
     SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
+};
+pub use verify::{VerifyCommandHandler, VerifyParts};
+pub use verify_manifest::{
+    CloudManifest, CloudManifestKeys, CloudManifestSource, HttpCloudManifestSource,
 };
 
 /// The parameter lists the SQL units bind (`SqlOrderCommandUnit.*Parameters`,

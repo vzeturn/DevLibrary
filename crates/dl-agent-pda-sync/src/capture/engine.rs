@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::context::CaptureContext;
 use super::error::Result;
 use super::governor::CycleDeadline;
+use super::key_repair::{KeyRepairCapture, KeyRepairList};
 use super::ledger::{LedgerCapture, reopen_exclude};
 use super::master::MasterScanCapture;
 use super::open_check::{self, OpenCheckCapture};
@@ -31,6 +32,7 @@ pub struct CaptureEngine {
     cx: CaptureContext,
     plan: CapturePlan,
     reopen_exclude: Vec<String>,
+    repairs: Option<Arc<dyn KeyRepairList>>,
 }
 
 impl std::fmt::Debug for CaptureEngine {
@@ -73,7 +75,15 @@ impl CaptureEngine {
             cx,
             plan,
             reopen_exclude,
+            repairs: None,
         })
+    }
+
+    /// The queue of rows `sync.verify` asks to send again by key (ADR 0128); `None`, the
+    /// default, keeps [`Self::run_key_repairs`] a no-op.
+    pub fn with_key_repairs(mut self, repairs: Option<Arc<dyn KeyRepairList>>) -> CaptureEngine {
+        self.repairs = repairs;
+        self
     }
 
     /// The capture plan.
@@ -111,6 +121,15 @@ impl CaptureEngine {
     /// The master scan.
     pub fn run_masters(&self, ctx: &Ctx) -> Result<CaptureReport> {
         MasterScanCapture::new(&self.cx).run(&self.plan.masters, ctx)
+    }
+
+    /// Sends again, or tombstones, the rows `sync.verify` queued by key (ADR 0128); nothing
+    /// without a queue.
+    pub fn run_key_repairs(&self, ctx: &Ctx) -> Result<CaptureReport> {
+        match &self.repairs {
+            None => Ok(CaptureReport::new()),
+            Some(q) => KeyRepairCapture::new(&self.cx, &**q).run(&self.plan, &self.deadline(), ctx),
+        }
     }
 
     /// Finishes the initial load of ledger tables that were skipped after a schema error (AD1).
