@@ -8,7 +8,11 @@ const GOLDEN: &str = include_str!("testdata/go_golden.tsv");
 fn golden(name: &str) -> &'static str {
     GOLDEN
         .lines()
-        .find_map(|l| l.split_once('\t').filter(|(k, _)| *k == name).map(|(_, v)| v))
+        .find_map(|l| {
+            l.split_once('\t')
+                .filter(|(k, _)| *k == name)
+                .map(|(_, v)| v)
+        })
         .unwrap_or_else(|| panic!("golden {name} missing"))
 }
 
@@ -249,8 +253,11 @@ fn content_hash_ignores_hl_fields() {
 #[test]
 fn content_hash_sensitive_to_business_fields() {
     let base = sample_job().content_hash();
-    let muts: Vec<(&str, fn(&mut Job))> = vec![
-        ("ItemID", |j| j.rooms.as_mut().unwrap()[0].item_id = "X".into()),
+    type Mutation = (&'static str, fn(&mut Job));
+    let muts: Vec<Mutation> = vec![
+        ("ItemID", |j| {
+            j.rooms.as_mut().unwrap()[0].item_id = "X".into()
+        }),
         ("RoomTypeCode", |j| {
             j.rooms.as_mut().unwrap()[0].room_type_code = "X".into()
         }),
@@ -302,7 +309,10 @@ fn pms_result_omits_empty_reason_and_manual() {
         ..Default::default()
     };
     let s = r.to_json();
-    assert!(!s.contains("\"reason\"") && !s.contains("\"needsManual\""), "{s}");
+    assert!(
+        !s.contains("\"reason\"") && !s.contains("\"needsManual\""),
+        "{s}"
+    );
     for tag in [
         r#""action":"save""#,
         r#""folioNum":100001"#,

@@ -23,7 +23,7 @@ use crate::pms::{
 
 /// `insertedFolio`.
 #[derive(Debug, Clone)]
-pub(super) struct Inserted {
+pub(crate) struct Inserted {
     pub f: Folio,
     pub rates: Vec<FolioRate>,
     pub an: AdditionalName,
@@ -31,7 +31,7 @@ pub(super) struct Inserted {
 
 /// `fakeRepo`'s fields. Maps keyed by a folio number use `n as i64`.
 #[derive(Default)]
-pub(super) struct State {
+pub(crate) struct State {
     /// What `GetFolios` returns when `folios_by_ext` is `None`.
     pub folios: Vec<Folio>,
     pub folios_by_ext: Option<HashMap<String, Vec<Folio>>>,
@@ -56,10 +56,24 @@ pub(super) struct State {
     pub folios_after_insert: Option<Vec<Folio>>,
     /// `HasUserCancelledFolio` is true for these keys (Booker or BookingID).
     pub cancelled_booking: HashMap<String, bool>,
+    /// What `GetHotelDate` returns; `None` is an error (fail-open).
+    pub hotel_date: Option<DateTime>,
+    /// `fullFakeRepo` (run tests): `GetRoomTypeMapped`, `GetAvailability` and the mapping
+    /// writes, which all fail with `mapping_write_err` when set.
+    pub mapping: Vec<crate::jobmodel::MappingRow>,
+    pub avail: Vec<crate::jobmodel::AvailRow>,
+    pub mapping_inserted: Vec<crate::jobmodel::MappingRow>,
+    pub mapping_updated: Vec<(crate::jobmodel::MappingRow, crate::jobmodel::MappingRow)>,
+    pub mapping_deleted: Vec<crate::jobmodel::MappingRow>,
+    pub mapping_write_err: Option<Error>,
+    /// `TestConnection` fails while this is above zero (counts down per call).
+    pub sql_down_calls: usize,
+    /// How long `InsertFolioWithRates` takes (module tests: a job in flight at stop).
+    pub insert_delay: std::time::Duration,
 }
 
 /// `fakeRepo`.
-pub(super) struct FakeRepo(Mutex<State>);
+pub(crate) struct FakeRepo(Mutex<State>);
 
 impl FakeRepo {
     pub fn new() -> Arc<FakeRepo> {
@@ -112,6 +126,10 @@ impl PmsRepo for FakeRepo {
         rates: &[FolioRate],
         an: &AdditionalName,
     ) -> Result<()> {
+        let delay = self.st().insert_delay;
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
         let mut s = self.st();
         if let Some(e) = &s.insert_err {
             return Err(Error::other(e.clone()));
@@ -134,11 +152,7 @@ impl PmsRepo for FakeRepo {
         s.cancelled.push(folios.to_vec());
         Ok(())
     }
-    fn update_folio_fields(
-        &self,
-        folio_num: f64,
-        set: &BTreeMap<&'static str, Val>,
-    ) -> Result<()> {
+    fn update_folio_fields(&self, folio_num: f64, set: &BTreeMap<&'static str, Val>) -> Result<()> {
         if !set.is_empty() {
             self.st().updates.push((folio_num, set.clone()));
         }
@@ -197,16 +211,18 @@ impl PmsRepo for FakeRepo {
         Ok(self.st().client_sts.get(&(code as i64)).cloned())
     }
     fn get_hotel_date(&self) -> Result<DateTime> {
-        Err(Error::other("fakeRepo: HotelDate không cấu hình"))
+        self.st()
+            .hotel_date
+            .ok_or_else(|| Error::other("fakeRepo: HotelDate không cấu hình"))
     }
 }
 
 /// A date at midnight.
-pub(super) fn day(y: i32, m: u8, d: u8) -> DateTime {
+pub(crate) fn day(y: i32, m: u8, d: u8) -> DateTime {
     Date::new(y, m, d).expect("valid date").midnight()
 }
 
-pub(super) fn rn(date: &str, rate: f64) -> RateNight {
+pub(crate) fn rn(date: &str, rate: f64) -> RateNight {
     RateNight {
         date: date.into(),
         rate,
@@ -215,7 +231,7 @@ pub(super) fn rn(date: &str, rate: f64) -> RateNight {
 }
 
 /// `saveJob`.
-pub(super) fn save_job() -> Job {
+pub(crate) fn save_job() -> Job {
     Job {
         job_id: "0000000000001000-123456".into(),
         hotel_id: "h1".into(),
@@ -237,7 +253,10 @@ pub(super) fn save_job() -> Job {
             children: 1,
             include_bf: true,
             breakfast_code: "ABU".into(),
-            rates: Some(vec![rn("2026-06-12", 1500000.0), rn("2026-06-13", 1600000.0)]),
+            rates: Some(vec![
+                rn("2026-06-12", 1500000.0),
+                rn("2026-06-13", 1600000.0),
+            ]),
             ..Room::default()
         }]),
         ..Job::default()
@@ -245,38 +264,38 @@ pub(super) fn save_job() -> Job {
 }
 
 /// `jobWithItem` (same as `saveJob`).
-pub(super) fn job_with_item() -> Job {
+pub(crate) fn job_with_item() -> Job {
     save_job()
 }
 
 /// The first room of a job, mutably.
-pub(super) fn room0(job: &mut Job) -> &mut Room {
+pub(crate) fn room0(job: &mut Job) -> &mut Room {
     &mut job.rooms.as_mut().expect("rooms")[0]
 }
 
 /// The first room's rates, mutably.
-pub(super) fn rates0(job: &mut Job) -> &mut Vec<RateNight> {
+pub(crate) fn rates0(job: &mut Job) -> &mut Vec<RateNight> {
     room0(job).rates.as_mut().expect("rates")
 }
 
 /// `ratesAsJob`.
-pub(super) fn rates_as_job() -> Vec<RateNight> {
+pub(crate) fn rates_as_job() -> Vec<RateNight> {
     vec![rn("2026-06-12", 1500000.0), rn("2026-06-13", 1600000.0)]
 }
 
 /// The fixed clock: 2026-06-10 08:00 UTC.
-pub(super) fn fixed_now() -> OffsetDateTime {
+pub(crate) fn fixed_now() -> OffsetDateTime {
     let t = dl_time::Time::from_hms(8, 0, 0).expect("valid");
     Date::new(2026, 6, 10).expect("valid").at(t).assume_utc()
 }
 
 /// `newReconciler`.
-pub(super) fn new_reconciler(repo: &Arc<FakeRepo>) -> Reconciler {
+pub(crate) fn new_reconciler(repo: &Arc<FakeRepo>) -> Reconciler {
     Reconciler::with_clock(repo.clone(), Arc::new(fixed_now))
 }
 
 /// `existingFolio`: matches `saveJob()` (item DLX01, one room), room 101 assigned.
-pub(super) fn existing_folio() -> Folio {
+pub(crate) fn existing_folio() -> Folio {
     Folio {
         id: 5,
         folio_num: 100000.0,
@@ -303,7 +322,7 @@ pub(super) fn existing_folio() -> Folio {
 }
 
 /// `ratesFor`.
-pub(super) fn rates_for(folio_num: f64, check_in: DateTime) -> Vec<FolioRate> {
+pub(crate) fn rates_for(folio_num: f64, check_in: DateTime) -> Vec<FolioRate> {
     let d1 = check_in.date().add_days(1).midnight();
     vec![
         FolioRate {
@@ -326,7 +345,7 @@ pub(super) fn rates_for(folio_num: f64, check_in: DateTime) -> Vec<FolioRate> {
 }
 
 /// A repo holding `folios` with `rates_for` each one.
-pub(super) fn repo_with(folios: Vec<Folio>) -> Arc<FakeRepo> {
+pub(crate) fn repo_with(folios: Vec<Folio>) -> Arc<FakeRepo> {
     let repo = FakeRepo::new();
     {
         let mut s = repo.st();
@@ -340,7 +359,7 @@ pub(super) fn repo_with(folios: Vec<Folio>) -> Arc<FakeRepo> {
 }
 
 /// `(updates, inserted, cancelled, replacedRates)` counts.
-pub(super) fn counts(repo: &FakeRepo) -> (usize, usize, usize, usize) {
+pub(crate) fn counts(repo: &FakeRepo) -> (usize, usize, usize, usize) {
     let s = repo.st();
     (
         s.updates.len(),

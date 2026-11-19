@@ -1,0 +1,289 @@
+-- Subset schema SMILE cho integration test / dev local (KHÔNG phải schema production —
+-- agent chạy với DB SMILE hiện hữu). Bảng + proc đúng tên/cột mà agent đụng tới.
+IF DB_ID('SMILE_FO') IS NULL CREATE DATABASE SMILE_FO;
+GO
+USE SMILE_FO;
+GO
+
+IF OBJECT_ID('Folio') IS NULL
+CREATE TABLE Folio (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    FolioNum DECIMAL(18,2) NOT NULL,
+    ArrivalDate DATETIME NOT NULL,
+    DepartureDate DATETIME NOT NULL,
+    NumRoom INT NOT NULL DEFAULT 1,
+    RoomTypeCode NVARCHAR(50) NOT NULL DEFAULT '',
+    RoomCode NVARCHAR(50) NOT NULL DEFAULT '',
+    FolioSubNum DECIMAL(18,2) NOT NULL DEFAULT 0,
+    GroupCode NVARCHAR(50) NOT NULL DEFAULT '',
+    CompanyName NVARCHAR(255) NOT NULL DEFAULT '',
+    NumAdult INT NOT NULL DEFAULT 0,
+    NumChild INT NOT NULL DEFAULT 0,
+    RateReasonCode NVARCHAR(50) NOT NULL DEFAULT '',
+    TravelAgent1Code DECIMAL(18,2) NOT NULL DEFAULT 0,
+    TravelAgent2Code BIGINT NOT NULL DEFAULT 0,
+    ArrivalAirCode NVARCHAR(50) NOT NULL DEFAULT '',
+    ArrivalFlight NVARCHAR(50) NOT NULL DEFAULT '',
+    DepartureAirCode NVARCHAR(50) NOT NULL DEFAULT '',
+    DepartureFlight NVARCHAR(50) NOT NULL DEFAULT '',
+    Geographic1Code NVARCHAR(50) NOT NULL DEFAULT '',
+    Geographic2Code NVARCHAR(50) NOT NULL DEFAULT '',
+    OriginCode NVARCHAR(50) NOT NULL DEFAULT '',
+    MarketSegmentCode NVARCHAR(50) NOT NULL DEFAULT '',
+    MarketBusinessCode NVARCHAR(50) NOT NULL DEFAULT '',
+    MarketChannelCode NVARCHAR(50) NOT NULL DEFAULT '',
+    BuildingCode NVARCHAR(50) NOT NULL DEFAULT '',
+    WingCode NVARCHAR(50) NOT NULL DEFAULT '',
+    LowFloor INT NOT NULL DEFAULT 0,
+    HighFloor INT NOT NULL DEFAULT 0,
+    RoomExposureCode NVARCHAR(50) NOT NULL DEFAULT '',
+    RoomAttributeCode NVARCHAR(50) NOT NULL DEFAULT '',
+    Notice NVARCHAR(MAX) NOT NULL DEFAULT '',
+    ConfirmNum DECIMAL(18,2) NOT NULL DEFAULT 0,
+    ExternalConfirmNumber NVARCHAR(100) NULL,
+    ConfirmPrintFlag BIT NOT NULL DEFAULT 1,
+    FolioStatus INT NOT NULL DEFAULT 1,
+    NoShowFlag BIT NOT NULL DEFAULT 0,
+    WalkInFlag BIT NOT NULL DEFAULT 0,
+    ReservationTime DATETIME NOT NULL,
+    ReservationClerkID NVARCHAR(50) NOT NULL DEFAULT '',
+    CancelNum DECIMAL(18,2) NOT NULL DEFAULT 0,
+    LastChangeClerkID NVARCHAR(50) NOT NULL DEFAULT '',
+    LastChangeTime DATETIME NOT NULL,
+    UserDefineCode1 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode2 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode3 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode4 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode5 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode6 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode7 NVARCHAR(50) NOT NULL DEFAULT '',
+    UserDefineCode8 NVARCHAR(50) NOT NULL DEFAULT '',
+    RoomRateCode NVARCHAR(50) NOT NULL DEFAULT '',
+    PaymentCode NVARCHAR(50) NOT NULL DEFAULT '7',
+    PartyCode NVARCHAR(50) NOT NULL DEFAULT '',
+    CreditCardExpireTime NVARCHAR(50) NOT NULL DEFAULT '',
+    PackageCode NVARCHAR(50) NOT NULL DEFAULT '',
+    TransferHoldFlag BIT NOT NULL DEFAULT 0,
+    RateAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    RateOverideFlag BIT NOT NULL DEFAULT 1,
+    ConfidentialFlag BIT NOT NULL DEFAULT 0,
+    NoPostFlag BIT NOT NULL DEFAULT 0,
+    HouseUseFlag BIT NOT NULL DEFAULT 0,
+    CompFlag BIT NOT NULL DEFAULT 0,
+    CreditCardTypeCode NVARCHAR(50) NOT NULL DEFAULT '',
+    Booker NVARCHAR(100) NOT NULL DEFAULT '',
+    ARAccountNumber DECIMAL(18,2) NULL,
+    BookStatus INT NOT NULL DEFAULT 1,
+    Allotment BIT NOT NULL DEFAULT 0,
+    AllotmentTA BIGINT NOT NULL DEFAULT 0,
+    AllotmentContract NVARCHAR(100) NOT NULL DEFAULT '',
+    NetRate BIT NOT NULL DEFAULT 1,
+    SubGroupCode NVARCHAR(50) NOT NULL DEFAULT '',
+    IncludeBF BIT NOT NULL DEFAULT 1,
+    BreakfastCode NVARCHAR(50) NOT NULL DEFAULT 'ABU',
+    FolioCurrencyCode NVARCHAR(10) NOT NULL DEFAULT 'VND',
+    ExtraBed INT NOT NULL DEFAULT 0,
+    RoomChargeToMasterFlag BIT NOT NULL DEFAULT 0,
+    FolioExRate DECIMAL(18,6) NOT NULL DEFAULT 1,
+    NumGuestBF INT NOT NULL DEFAULT 0,
+    LastName NVARCHAR(255) NOT NULL DEFAULT '',
+    FirstName NVARCHAR(255) NOT NULL DEFAULT '',
+    TitleCodeM NVARCHAR(50) NOT NULL DEFAULT '',
+    TelNumM NVARCHAR(50) NOT NULL DEFAULT '',
+    FaxNumM NVARCHAR(50) NOT NULL DEFAULT '',
+    MailM NVARCHAR(255) NOT NULL DEFAULT '',
+    ProfileNumber DECIMAL(18,2) NOT NULL DEFAULT 0,
+    CreditLimit DECIMAL(18,2) NULL,
+    BlockFlag BIT NOT NULL DEFAULT 0,
+    BlockClerkID NVARCHAR(50) NOT NULL DEFAULT '',
+    RoomTypeBooked NVARCHAR(50) NOT NULL DEFAULT '',
+    CreditCardHolder NVARCHAR(255) NOT NULL DEFAULT '',
+    MemberID NVARCHAR(50) NOT NULL DEFAULT '',
+    CreditCardBlockAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    UserInfo1 NVARCHAR(255) NOT NULL DEFAULT '',
+    UserInfo2 NVARCHAR(255) NOT NULL DEFAULT '',
+    UserInfo3 NVARCHAR(255) NOT NULL DEFAULT '',
+    UserInfo4 NVARCHAR(255) NOT NULL DEFAULT '',
+    DscPcnt DECIMAL(18,4) NOT NULL DEFAULT 0,
+    DscAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    UpdateExRateAtCI BIT NOT NULL DEFAULT 1,
+    NumChildBF INT NOT NULL DEFAULT 0,
+    PrvOwnerID NVARCHAR(50) NOT NULL DEFAULT '',
+    MonthlyRate INT NOT NULL DEFAULT 0,
+    TraceNote NVARCHAR(MAX) NOT NULL DEFAULT '',
+    CntRoom INT NOT NULL DEFAULT 0,
+    RmChgtrn INT NOT NULL DEFAULT 0,
+    ChargeNights INT NOT NULL DEFAULT 0,
+    CommRate DECIMAL(18,4) NOT NULL DEFAULT 0,
+    CommAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    ShareNum DECIMAL(18,2) NOT NULL DEFAULT 0
+);
+GO
+
+IF OBJECT_ID('FolioRate') IS NULL
+CREATE TABLE FolioRate (
+    FolioNum DECIMAL(18,2) NOT NULL,
+    hDate DATETIME NOT NULL,
+    RateAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    ToDate DATETIME NOT NULL,
+    isCancel BIT NOT NULL DEFAULT 0,
+    RateOverride INT NOT NULL DEFAULT 0
+);
+GO
+
+IF OBJECT_ID('AdditionalName') IS NULL
+CREATE TABLE AdditionalName (
+    FolioNum DECIMAL(18,2) NOT NULL,
+    LastName NVARCHAR(255) NOT NULL DEFAULT '',
+    CompanyName NVARCHAR(255) NOT NULL DEFAULT '',
+    Address1 NVARCHAR(255) NOT NULL DEFAULT '',
+    Address2 NVARCHAR(255) NOT NULL DEFAULT '',
+    Address3 NVARCHAR(255) NOT NULL DEFAULT '',
+    Address4 NVARCHAR(255) NOT NULL DEFAULT '',
+    PostalCode NVARCHAR(50) NOT NULL DEFAULT '',
+    Country NVARCHAR(100) NOT NULL DEFAULT '',
+    TeleNum NVARCHAR(50) NOT NULL DEFAULT '',
+    FaxNum NVARCHAR(50) NOT NULL DEFAULT '',
+    LanguageCode NVARCHAR(20) NOT NULL DEFAULT '',
+    PassportNum NVARCHAR(50) NOT NULL DEFAULT '',
+    VisaNum NVARCHAR(50) NOT NULL DEFAULT '',
+    VIPLevel INT NOT NULL DEFAULT 0,
+    NationalityCode NVARCHAR(20) NOT NULL DEFAULT '',
+    ArrivalTime DATETIME NOT NULL,
+    DepartureTime DATETIME NOT NULL,
+    ConfirmNum DECIMAL(18,2) NOT NULL DEFAULT 0,
+    FirstName NVARCHAR(255) NOT NULL DEFAULT '',
+    Gender BIT NOT NULL DEFAULT 0,
+    Title NVARCHAR(50) NOT NULL DEFAULT '',
+    Geographic1Code NVARCHAR(50) NOT NULL DEFAULT '',
+    Geographic2Code NVARCHAR(50) NOT NULL DEFAULT '',
+    Occupation NVARCHAR(100) NOT NULL DEFAULT '',
+    ResidenceCard NVARCHAR(50) NOT NULL DEFAULT '',
+    Purpose NVARCHAR(100) NOT NULL DEFAULT '',
+    AOriginCode NVARCHAR(50) NOT NULL DEFAULT '',
+    EntryFrom NVARCHAR(100) NOT NULL DEFAULT '',
+    EntryPort NVARCHAR(100) NOT NULL DEFAULT '',
+    IsSuedBy NVARCHAR(100) NOT NULL DEFAULT '',
+    AdtStatus INT NOT NULL DEFAULT 1,
+    AProfileNum DECIMAL(18,2) NOT NULL DEFAULT 0,
+    Email NVARCHAR(255) NOT NULL DEFAULT '',
+    IsChild BIT NOT NULL DEFAULT 0,
+    MobileNum NVARCHAR(50) NOT NULL DEFAULT '',
+    WebSite NVARCHAR(255) NOT NULL DEFAULT '',
+    Remark NVARCHAR(MAX) NOT NULL DEFAULT '',
+    DocType NVARCHAR(50) NOT NULL DEFAULT '',
+    PassportType NVARCHAR(50) NOT NULL DEFAULT '',
+    ACancelNum DECIMAL(18,2) NOT NULL DEFAULT 0
+);
+GO
+
+IF OBJECT_ID('CLIENT') IS NULL
+CREATE TABLE CLIENT (
+    ClientFolioNum DECIMAL(18,2) NOT NULL PRIMARY KEY,
+    ClientName NVARCHAR(255) NOT NULL
+);
+GO
+IF OBJECT_ID('ClientContacts') IS NULL
+CREATE TABLE ClientContacts (
+    ClientFolioNum DECIMAL(18,2) NOT NULL,
+    ContactName NVARCHAR(255) NOT NULL
+);
+GO
+IF OBJECT_ID('ClientSts') IS NULL
+CREATE TABLE ClientSts (
+    ClientCode DECIMAL(18,2) NOT NULL,
+    Origin NVARCHAR(50) NOT NULL DEFAULT '',
+    MSegment NVARCHAR(50) NOT NULL DEFAULT '',
+    UDef1 NVARCHAR(50) NOT NULL DEFAULT '', UDef2 NVARCHAR(50) NOT NULL DEFAULT '',
+    UDef3 NVARCHAR(50) NOT NULL DEFAULT '', UDef4 NVARCHAR(50) NOT NULL DEFAULT '',
+    UDef5 NVARCHAR(50) NOT NULL DEFAULT '', UDef6 NVARCHAR(50) NOT NULL DEFAULT '',
+    UDef7 NVARCHAR(50) NOT NULL DEFAULT '', UDef8 NVARCHAR(50) NOT NULL DEFAULT ''
+);
+GO
+IF OBJECT_ID('RoomTypeMapped') IS NULL
+CREATE TABLE RoomTypeMapped (
+    RoomId NVARCHAR(50) NULL,
+    RoomTypeCode NVARCHAR(50) NOT NULL,
+    SplitPart INT NULL,
+    TotalPart INT NULL,
+    IsBooking BIT NOT NULL DEFAULT 0
+);
+GO
+IF OBJECT_ID('GlobalParameter') IS NULL
+CREATE TABLE GlobalParameter (
+    ParaName NVARCHAR(100) NOT NULL PRIMARY KEY,
+    ParaString NVARCHAR(255) NULL
+);
+GO
+-- Bảng seed cho proc AvailabilityTable bản test
+IF OBJECT_ID('AvailabilitySeed') IS NULL
+CREATE TABLE AvailabilitySeed (
+    RoomTypeCode NVARCHAR(50) NOT NULL,
+    sDate DATETIME NOT NULL,
+    Definite INT NOT NULL DEFAULT 0,
+    Tentative INT NOT NULL DEFAULT 0,
+    SeriBooking INT NOT NULL DEFAULT 0,
+    Waiting INT NOT NULL DEFAULT 0,
+    Allotment INT NOT NULL DEFAULT 0,
+    OOO INT NOT NULL DEFAULT 0,
+    OOI INT NOT NULL DEFAULT 0,
+    HU INT NOT NULL DEFAULT 0,
+    PHU INT NOT NULL DEFAULT 0,
+    NumRoom INT NOT NULL DEFAULT 0
+);
+GO
+
+-- Counter dùng chung cho 3 proc cấp số (bản test: MAX+1 là đủ, không lo race)
+IF OBJECT_ID('GetFolioNum') IS NOT NULL DROP PROCEDURE GetFolioNum;
+GO
+CREATE PROCEDURE GetFolioNum AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT CAST(ISNULL(MAX(FolioNum), 100000) + 1 AS DECIMAL(18,2)) AS FolioNum FROM Folio;
+END
+GO
+IF OBJECT_ID('GetConfirmNum') IS NOT NULL DROP PROCEDURE GetConfirmNum;
+GO
+CREATE PROCEDURE GetConfirmNum AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT CAST(ISNULL(MAX(ConfirmNum), 500000) + 1 AS DECIMAL(18,2)) FROM Folio;
+END
+GO
+IF OBJECT_ID('GetCancelNum') IS NOT NULL DROP PROCEDURE GetCancelNum;
+GO
+CREATE PROCEDURE GetCancelNum AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT CAST(ISNULL(MAX(CancelNum), 900000) + 1 AS DECIMAL(18,2)) FROM Folio;
+END
+GO
+IF OBJECT_ID('AvailabilityTable') IS NOT NULL DROP PROCEDURE AvailabilityTable;
+GO
+CREATE PROCEDURE AvailabilityTable @sFromDate VARCHAR(10), @sDays INT AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @from DATETIME = CONVERT(DATETIME, @sFromDate, 101);
+    SELECT RoomTypeCode, sDate, Definite, Tentative, SeriBooking, Waiting,
+           Allotment, OOO, OOI, HU, PHU, NumRoom
+    FROM AvailabilitySeed
+    WHERE sDate >= @from AND sDate < DATEADD(DAY, @sDays, @from)
+    ORDER BY RoomTypeCode, sDate;
+END
+GO
+-- Stub AvailabilityChart dùng cho test; bản thật có thêm trường CruiseCode, Description.
+IF OBJECT_ID('AvailabilityChart') IS NOT NULL DROP PROCEDURE AvailabilityChart;
+GO
+CREATE PROCEDURE AvailabilityChart @RoomType VARCHAR(50), @sDate VARCHAR(10), @NumDate INT AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @from DATETIME = CONVERT(DATETIME, @sDate, 101);
+    SELECT RoomTypeCode, sDate, Definite, Tentative, SeriBooking, Waiting,
+           Allotment, OOO, OOI, HU, PHU, NumRoom,
+           CAST(NULL AS NVARCHAR(255)) AS Description,
+           CAST(NULL AS NVARCHAR(50))  AS CruiseCode
+    FROM AvailabilitySeed
+    WHERE sDate >= @from AND sDate < DATEADD(DAY, @NumDate, @from)
+    ORDER BY RoomTypeCode, sDate;
+END
+GO

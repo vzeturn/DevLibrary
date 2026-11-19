@@ -33,14 +33,18 @@ fn split_item_repo(n: usize) -> Arc<FakeRepo> {
 #[test]
 fn split_items_create_one_folio_per_item() {
     let repo = FakeRepo::new();
-    new_reconciler(&repo).apply(&split_items_job(4)).expect("apply");
+    new_reconciler(&repo)
+        .apply(&split_items_job(4))
+        .expect("apply");
     assert_eq!(repo.st().inserted.len(), 4);
 }
 
 #[test]
 fn split_items_folios_get_distinct_seq_keys() {
     let repo = FakeRepo::new();
-    new_reconciler(&repo).apply(&split_items_job(4)).expect("apply");
+    new_reconciler(&repo)
+        .apply(&split_items_job(4))
+        .expect("apply");
     let mut keys: Vec<String> = repo
         .st()
         .inserted
@@ -48,7 +52,10 @@ fn split_items_folios_get_distinct_seq_keys() {
         .map(|i| i.f.user_info1.clone())
         .collect();
     keys.sort();
-    assert_eq!(keys, ["rt:DLX01#0", "rt:DLX01#1", "rt:DLX01#2", "rt:DLX01#3"]);
+    assert_eq!(
+        keys,
+        ["rt:DLX01#0", "rt:DLX01#1", "rt:DLX01#2", "rt:DLX01#3"]
+    );
 }
 
 #[test]
@@ -93,7 +100,9 @@ fn merge_rooms_conflicts_silent_when_identical() {
 #[test]
 fn split_items_modify_no_change_does_not_cancel() {
     let repo = split_item_repo(4);
-    new_reconciler(&repo).apply(&split_items_job(4)).expect("apply");
+    new_reconciler(&repo)
+        .apply(&split_items_job(4))
+        .expect("apply");
     let s = repo.st();
     assert!(s.cancelled.is_empty() && s.inserted.is_empty());
 }
@@ -101,7 +110,9 @@ fn split_items_modify_no_change_does_not_cancel() {
 #[test]
 fn split_items_modify_increase_creates_only_missing() {
     let repo = split_item_repo(2);
-    new_reconciler(&repo).apply(&split_items_job(4)).expect("apply");
+    new_reconciler(&repo)
+        .apply(&split_items_job(4))
+        .expect("apply");
     let s = repo.st();
     assert_eq!(s.inserted.len(), 2);
     assert!(s.cancelled.is_empty());
@@ -110,7 +121,9 @@ fn split_items_modify_increase_creates_only_missing() {
 #[test]
 fn split_items_modify_decrease_cancels_surplus_once() {
     let repo = split_item_repo(4);
-    new_reconciler(&repo).apply(&split_items_job(2)).expect("apply");
+    new_reconciler(&repo)
+        .apply(&split_items_job(2))
+        .expect("apply");
     let s = repo.st();
     let total: usize = s.cancelled.iter().map(Vec::len).sum();
     assert_eq!(total, 2);

@@ -68,7 +68,10 @@ fn dual_lookup_finds_old_booking_id_stamped_folio() {
         .apply(&one_night_job("HL-999", "OTA-123", "OLD GUEST"))
         .expect("apply");
     let s = repo.st();
-    assert!(s.inserted.is_empty(), "matched the old BookingID stamp → modify");
+    assert!(
+        s.inserted.is_empty(),
+        "matched the old BookingID stamp → modify"
+    );
     assert!(s.cancelled.is_empty(), "room type unchanged → no cancel");
 }
 
@@ -79,7 +82,10 @@ fn lookup_by_booker_when_no_fallback_needed() {
         .apply(&one_night_job("WALK-1", "WALK-1", "G"))
         .expect("apply");
     let s = repo.st();
-    assert!(s.inserted.is_empty() && s.cancelled.is_empty(), "no-op modify");
+    assert!(
+        s.inserted.is_empty() && s.cancelled.is_empty(),
+        "no-op modify"
+    );
 }
 
 #[test]
@@ -126,7 +132,10 @@ fn travel_agent_via_contact_fallback() {
     new_reconciler(&repo).apply(&job).expect("apply");
     let s = repo.st();
     let f = &s.inserted[0].f;
-    assert_eq!((f.travel_agent1_code, f.origin_code.as_str()), (88.0, "AGD"));
+    assert_eq!(
+        (f.travel_agent1_code, f.origin_code.as_str()),
+        (88.0, "AGD")
+    );
 }
 
 #[test]

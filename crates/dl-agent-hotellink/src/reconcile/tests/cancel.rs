@@ -40,34 +40,56 @@ fn at_030405() -> OffsetDateTime {
 
 #[test]
 fn conflict_flags() {
-    let cases: [(&str, Folio, &[(&str, i64)], bool); 5] = [
+    type Case = (&'static str, Folio, &'static [(&'static str, i64)], bool);
+    let cases: [Case; 5] = [
         (
             "FolioStatus>1 always conflicts",
-            Folio { folio_status: 2, ..Folio::default() },
+            Folio {
+                folio_status: 2,
+                ..Folio::default()
+            },
             &[],
             true,
         ),
         (
             "BookStatus!=1 + CancelByStatus=1",
-            Folio { book_status: 0, folio_status: 1, ..Folio::default() },
+            Folio {
+                book_status: 0,
+                folio_status: 1,
+                ..Folio::default()
+            },
             &[("CancelByStatus", 1)],
             true,
         ),
         (
             "BookStatus!=1 + CancelByStatus=0",
-            Folio { book_status: 0, folio_status: 1, ..Folio::default() },
+            Folio {
+                book_status: 0,
+                folio_status: 1,
+                ..Folio::default()
+            },
             &[],
             false,
         ),
         (
             "RoomCode set + CancelByRoom=1",
-            Folio { book_status: 1, folio_status: 1, room_code: "101".into(), ..Folio::default() },
+            Folio {
+                book_status: 1,
+                folio_status: 1,
+                room_code: "101".into(),
+                ..Folio::default()
+            },
             &[("CancelByRoom", 1)],
             true,
         ),
         (
             "RoomCode set + CancelByRoom=0",
-            Folio { book_status: 1, folio_status: 1, room_code: "101".into(), ..Folio::default() },
+            Folio {
+                book_status: 1,
+                folio_status: 1,
+                room_code: "101".into(),
+                ..Folio::default()
+            },
             &[],
             false,
         ),
@@ -94,8 +116,13 @@ fn cancel_no_folios_is_ok() {
 #[test]
 fn cancel_with_conflict_needs_manual() {
     let repo = FakeRepo::new();
-    repo.st().folios = vec![Folio { folio_status: 2, ..Folio::default() }];
-    let res = new_reconciler(&repo).apply(&cancel_job()).expect("not an error");
+    repo.st().folios = vec![Folio {
+        folio_status: 2,
+        ..Folio::default()
+    }];
+    let res = new_reconciler(&repo)
+        .apply(&cancel_job())
+        .expect("not an error");
     assert!(res.needs_manual && !res.completed, "{res:?}");
     assert!(!res.reason.is_empty(), "reason for the dashboard");
     assert!(repo.st().cancelled.is_empty());
@@ -117,7 +144,9 @@ fn diff_disappeared_conflict_needs_manual() {
             ..Folio::default()
         }];
     }
-    let res = new_reconciler(&repo).apply(&save_job()).expect("not an error");
+    let res = new_reconciler(&repo)
+        .apply(&save_job())
+        .expect("not an error");
     assert!(res.needs_manual && !res.completed, "{res:?}");
     assert!(repo.st().cancelled.is_empty());
 }
@@ -255,7 +284,10 @@ fn apply_cancel_returns_cancel_result() {
         ..Job::default()
     };
     let res = r.apply(&job).expect("apply");
-    assert!(res.action == "cancel" && res.completed && res.folios.len() == 1, "{res:?}");
+    assert!(
+        res.action == "cancel" && res.completed && res.folios.len() == 1,
+        "{res:?}"
+    );
     assert!(res.folios[0].cancel_num != 0.0, "CancelNum stamped");
 }
 
@@ -276,7 +308,10 @@ fn apply_cancel_refused_needs_manual() {
         ..Job::default()
     };
     let res = r.apply(&job).expect("not an error");
-    assert!(res.action == "cancel" && !res.completed && res.needs_manual, "{res:?}");
+    assert!(
+        res.action == "cancel" && !res.completed && res.needs_manual,
+        "{res:?}"
+    );
     assert!(!res.reason.is_empty());
 }
 

@@ -20,9 +20,15 @@ fn unassigned() -> Folio {
 #[test]
 fn modify_no_change_is_noop() {
     let repo = repo_with(vec![existing_folio()]);
-    new_reconciler(&repo).apply(&job_with_item()).expect("apply");
+    new_reconciler(&repo)
+        .apply(&job_with_item())
+        .expect("apply");
     assert_eq!(counts(&repo), (0, 0, 0, 0), "no change must be a no-op");
-    assert_eq!(repo.st().confirm_num_calls, 0, "modify takes no new ConfirmNum");
+    assert_eq!(
+        repo.st().confirm_num_calls,
+        0,
+        "modify takes no new ConfirmNum"
+    );
 }
 
 #[test]
@@ -51,9 +57,14 @@ fn booker_fallback_prevents_double_when_ext_conf_mismatch() {
         s.folio_rates
             .insert(100000, rates_for(100000.0, f.arrival_date));
     }
-    let res = new_reconciler(&repo).apply(&job_with_item()).expect("apply");
+    let res = new_reconciler(&repo)
+        .apply(&job_with_item())
+        .expect("apply");
     assert_eq!(repo.st().inserted.len(), 0, "no double folio");
-    assert!(res.completed && !res.needs_manual, "lock-by-room skip: {res:?}");
+    assert!(
+        res.completed && !res.needs_manual,
+        "lock-by-room skip: {res:?}"
+    );
 }
 
 #[test]
@@ -97,7 +108,10 @@ fn modify_price_only_updates_rate_not_room() {
     rates0(&mut job)[0].rate = 1700000.0;
     new_reconciler(&repo).apply(&job).expect("apply");
     let s = repo.st();
-    assert!(s.inserted.is_empty() && s.cancelled.is_empty(), "no create/cancel");
+    assert!(
+        s.inserted.is_empty() && s.cancelled.is_empty(),
+        "no create/cancel"
+    );
     assert_eq!(s.updates.len(), 1);
     assert_eq!(s.updates[0].0, 100000.0);
     assert_eq!(s.updates[0].1.get("RateAmount"), Some(&Val::F64(1700000.0)));
@@ -141,7 +155,9 @@ fn modify_quantity_decrease_cancels_unassigned_first() {
         base(5, 100000.0, "101", "rt:DLX01#0"),
         base(6, 100001.0, "", "rt:DLX01#1"),
     ]);
-    new_reconciler(&repo).apply(&job_with_item()).expect("apply");
+    new_reconciler(&repo)
+        .apply(&job_with_item())
+        .expect("apply");
     let s = repo.st();
     assert_eq!(s.cancelled.len(), 1);
     assert_eq!(s.cancelled[0].len(), 1);
@@ -155,7 +171,10 @@ fn modify_quantity_decrease_updates_survivor_not_cancelled() {
         base(5, 100000.0, "", "rt:DLX01#0"),
     ]);
     let mut job = job_with_item();
-    room0(&mut job).rates = Some(vec![rn("2026-06-12", 1750000.0), rn("2026-06-13", 1750000.0)]);
+    room0(&mut job).rates = Some(vec![
+        rn("2026-06-12", 1750000.0),
+        rn("2026-06-13", 1750000.0),
+    ]);
     new_reconciler(&repo).apply(&job).expect("apply");
     let s = repo.st();
     assert_eq!(s.cancelled.len(), 1);
@@ -165,7 +184,10 @@ fn modify_quantity_decrease_updates_survivor_not_cancelled() {
         s.updates.iter().all(|u| u.0 != 100001.0),
         "never update the folio being cancelled"
     );
-    assert!(s.updates.iter().any(|u| u.0 == 100000.0), "survivor updated");
+    assert!(
+        s.updates.iter().any(|u| u.0 == 100000.0),
+        "survivor updated"
+    );
 }
 
 #[test]
@@ -175,7 +197,11 @@ fn modify_room_type_change_unassigns_room() {
     room0(&mut job).room_type_code = "SUITE".into();
     new_reconciler(&repo).apply(&job).expect("apply");
     let s = repo.st();
-    assert_eq!((s.cancelled.len(), s.inserted.len()), (1, 1), "cancel-recreate");
+    assert_eq!(
+        (s.cancelled.len(), s.inserted.len()),
+        (1, 1),
+        "cancel-recreate"
+    );
     assert_eq!(s.inserted[0].f.room_type_code, "SUITE");
 }
 
@@ -186,7 +212,10 @@ fn modify_room_type_change_atomic_on_create_failure() {
     let mut job = job_with_item();
     room0(&mut job).room_type_code = "SUITE".into();
     assert!(new_reconciler(&repo).apply(&job).is_err());
-    assert!(repo.st().cancelled.is_empty(), "no cancel when create fails");
+    assert!(
+        repo.st().cancelled.is_empty(),
+        "no cancel when create fails"
+    );
 }
 
 fn suite_folio(folio_status: i32) -> Folio {
@@ -219,7 +248,9 @@ fn repo_a_plus(b: Folio) -> Arc<FakeRepo> {
 #[test]
 fn modify_item_removed_cancels() {
     let repo = repo_a_plus(suite_folio(1));
-    new_reconciler(&repo).apply(&job_with_item()).expect("apply");
+    new_reconciler(&repo)
+        .apply(&job_with_item())
+        .expect("apply");
     let s = repo.st();
     assert_eq!(s.cancelled.len(), 1);
     assert_eq!(s.cancelled[0][0].id, 9);
@@ -229,7 +260,9 @@ fn modify_item_removed_cancels() {
 #[test]
 fn modify_item_removed_protected_folio_not_cancelled() {
     let repo = repo_a_plus(suite_folio(2));
-    let res = new_reconciler(&repo).apply(&job_with_item()).expect("green");
+    let res = new_reconciler(&repo)
+        .apply(&job_with_item())
+        .expect("green");
     assert!(res.completed && !res.needs_manual, "{res:?}");
     assert!(res.reason.contains("bỏ qua"), "reason: {}", res.reason);
     let s = repo.st();
@@ -263,7 +296,11 @@ fn modify_no_change_is_noop_empty_item_id() {
     reset_to_inserted(&repo, 1);
     r.apply(&job).expect("re-apply");
     let user_info1 = repo.st().folios[0].user_info1.clone();
-    assert_eq!(counts(&repo), (0, 0, 0, 0), "no-op (UserInfo1 {user_info1:?})");
+    assert_eq!(
+        counts(&repo),
+        (0, 0, 0, 0),
+        "no-op (UserInfo1 {user_info1:?})"
+    );
 }
 
 #[test]
@@ -287,7 +324,10 @@ fn modify_rate_plan_distinguishes_items() {
     reset_to_inserted(&repo, 2);
     r.apply(&job).expect("re-apply");
     let s = repo.st();
-    assert!(s.inserted.is_empty() && s.cancelled.is_empty(), "two rate plans → no-op");
+    assert!(
+        s.inserted.is_empty() && s.cancelled.is_empty(),
+        "two rate plans → no-op"
+    );
 }
 
 /// Makes the inserted folios the live ones and clears the recorded writes.
@@ -311,7 +351,10 @@ fn modify_legacy_empty_prefix_folio_matches() {
     let repo = repo_with(vec![base(5, 100000.0, "", "#0")]);
     new_reconciler(&repo).apply(&save_job()).expect("apply");
     let s = repo.st();
-    assert!(s.inserted.is_empty() && s.cancelled.is_empty(), "legacy '#0' matches");
+    assert!(
+        s.inserted.is_empty() && s.cancelled.is_empty(),
+        "legacy '#0' matches"
+    );
 }
 
 #[test]
@@ -328,5 +371,8 @@ fn modify_empty_rates_returns_error() {
     }];
     let mut job = save_job();
     room0(&mut job).rates = None;
-    assert!(new_reconciler(&repo).apply(&job).is_err(), "empty rates → error");
+    assert!(
+        new_reconciler(&repo).apply(&job).is_err(),
+        "empty rates → error"
+    );
 }

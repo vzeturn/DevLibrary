@@ -32,7 +32,10 @@ fn reconciler_policy_snapshot_atomic() {
     assert!(r.policy_from_hub());
 
     r.set_policy(CancelPolicy::default(), true);
-    assert!(!r.policy_view().0.on_cancel.allow_when_room_assigned, "overwrite works");
+    assert!(
+        !r.policy_view().0.on_cancel.allow_when_room_assigned,
+        "overwrite works"
+    );
 }
 
 #[test]
@@ -80,7 +83,10 @@ fn has_conflicting_folios_checked_in_still_blocks_by_default() {
         },
         true,
     );
-    assert!(r.has_conflicting_folios(&folios, op).expect("ok"), "checked-in blocks");
+    assert!(
+        r.has_conflicting_folios(&folios, op).expect("ok"),
+        "checked-in blocks"
+    );
 
     let op2 = OpPolicy {
         allow_when_checked_in: true,

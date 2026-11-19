@@ -6,6 +6,8 @@ pub(crate) mod insert;
 mod mapping;
 mod repo;
 mod rows;
+#[cfg(test)]
+mod sql_tests;
 
 use std::collections::BTreeMap;
 
@@ -65,15 +67,13 @@ pub trait PmsRepo: Send + Sync {
     /// Cancels the folios in one transaction.
     fn cancel_folios(&self, folios: &[Folio]) -> Result<()>;
     /// Updates the given columns of a live folio.
-    fn update_folio_fields(&self, folio_num: f64, set: &BTreeMap<&'static str, Val>)
-    -> Result<()>;
+    fn update_folio_fields(&self, folio_num: f64, set: &BTreeMap<&'static str, Val>) -> Result<()>;
     /// The folio's nightly rates, by date.
     fn get_folio_rates(&self, folio_num: f64) -> Result<Vec<FolioRate>>;
     /// Replaces the folio's nightly rates in one transaction.
     fn replace_folio_rates(&self, folio_num: f64, rates: &[FolioRate]) -> Result<()>;
     /// Updates the guest name and e-mail of the folio's additional name.
-    fn update_additional_name(&self, folio_num: f64, last_name: &str, email: &str)
-    -> Result<()>;
+    fn update_additional_name(&self, folio_num: f64, last_name: &str, email: &str) -> Result<()>;
     /// `GlobalParameter.ParaString` as an integer (0 when absent).
     fn get_global_param_int(&self, name: &str) -> Result<i64>;
     /// Inserts the global parameter unless it exists.
@@ -137,7 +137,11 @@ mod tests {
             ("all zero", [10, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
             ("some booked", [10, 2, 1, 0, 0, 0, 1, 0, 0, 0], 6),
             ("fully booked", [5, 2, 1, 1, 1, 0, 0, 0, 0, 0], 0),
-            ("overbooking allowed negative", [3, 2, 1, 1, 0, 0, 0, 0, 0, 0], -1),
+            (
+                "overbooking allowed negative",
+                [3, 2, 1, 1, 0, 0, 0, 0, 0, 0],
+                -1,
+            ),
             ("all fields", [10, 1, 1, 1, 1, 1, 1, 1, 1, 1], 1),
         ];
         for (name, a, want) in cases {

@@ -44,6 +44,7 @@ dependencies = [
  "dl-agent",
  "dl-agent-backup",
  "dl-agent-einvoice",
+ "dl-agent-hotellink",
  "dl-agent-pms",
  "dl-agent-pms-device",
 ]

@@ -44,14 +44,6 @@ impl<'a> Obj<'a> {
         self
     }
 
-    /// An optional string pointer (`*string` with `omitempty`).
-    pub fn opt_str(&mut self, k: &str, v: Option<&str>) -> &mut Self {
-        if let Some(v) = v {
-            self.str(k, v);
-        }
-        self
-    }
-
     /// An integer field.
     pub fn int(&mut self, k: &str, v: i64) -> &mut Self {
         let out = self.key(k);

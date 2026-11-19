@@ -5,7 +5,7 @@
 mod build;
 mod diff;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::sync::{Arc, RwLock};
 
@@ -21,8 +21,8 @@ use crate::log::{self, V};
 use crate::pms::{ClientSts, Folio, PmsRepo, SmileClient};
 
 pub(crate) use build::{
-    build_folio, folio_to_pms, folios_to_pms, item_key, merge_rooms_by_item,
-    merge_rooms_conflicts, next_seq, parse_day, pick_to_cancel, room_item_key,
+    build_folio, folios_to_pms, item_key, merge_rooms_by_item, merge_rooms_conflicts, next_seq,
+    parse_day, pick_to_cancel, room_item_key,
 };
 
 /// A clock returning the current instant.
@@ -81,6 +81,7 @@ fn manual_result(reason: String, synced_at: String) -> PmsResult {
 
 impl Reconciler {
     /// A reconciler over `repo` using the system clock.
+    #[cfg(test)]
     pub fn new(repo: Arc<dyn PmsRepo>) -> Reconciler {
         Reconciler::with_clock(repo, system_clock())
     }
@@ -104,7 +105,10 @@ impl Reconciler {
     fn policy_view(&self) -> (CancelPolicy, bool) {
         match self.policy.read() {
             Ok(g) => g.map(|s| (s.p, s.from_hub)).unwrap_or_default(),
-            Err(p) => p.into_inner().map(|s| (s.p, s.from_hub)).unwrap_or_default(),
+            Err(p) => p
+                .into_inner()
+                .map(|s| (s.p, s.from_hub))
+                .unwrap_or_default(),
         }
     }
 
@@ -352,7 +356,10 @@ impl Reconciler {
             log::warn(
                 "HL gửi nhiều room-item cùng loại nhưng khác thông tin (số khách/giá) — \
                  các folio trong nhóm sẽ dùng thông tin của item đầu, cần kiểm tra tay",
-                &[("bookingId", V::S(&job.booking_id)), ("itemKey", V::S(&key))],
+                &[
+                    ("bookingId", V::S(&job.booking_id)),
+                    ("itemKey", V::S(&key)),
+                ],
             );
         }
     }
@@ -422,7 +429,9 @@ impl Reconciler {
         let Some(contact) = self.repo.get_client_contact_by_name(source_name)? else {
             return Ok((None, None));
         };
-        let ta = self.repo.get_client_by_folio_num(contact.client_folio_num)?;
+        let ta = self
+            .repo
+            .get_client_by_folio_num(contact.client_folio_num)?;
         let sts = self.repo.get_client_sts(contact.client_folio_num)?;
         Ok((ta, sts))
     }

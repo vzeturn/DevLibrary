@@ -30,12 +30,7 @@ pub fn sql_time(t: DateTime) -> String {
 
 /// `time.Format("2006-01-02")`.
 pub fn ymd(t: DateTime) -> String {
-    format!(
-        "{:04}-{:02}-{:02}",
-        t.year(),
-        t.month().number(),
-        t.day()
-    )
+    format!("{:04}-{:02}-{:02}", t.year(), t.month().number(), t.day())
 }
 
 /// A column value (Go's `any` in `buildInsert` and `UpdateFolioFields`).
@@ -446,31 +441,58 @@ impl Folio {
             ("TravelAgent2Code", Val::I64(self.travel_agent2_code)),
             ("ArrivalAirCode", Val::Str(self.arrival_air_code.clone())),
             ("ArrivalFlight", Val::Str(self.arrival_flight.clone())),
-            ("DepartureAirCode", Val::Str(self.departure_air_code.clone())),
+            (
+                "DepartureAirCode",
+                Val::Str(self.departure_air_code.clone()),
+            ),
             ("DepartureFlight", Val::Str(self.departure_flight.clone())),
             ("Geographic1Code", Val::Str(self.geographic1_code.clone())),
             ("Geographic2Code", Val::Str(self.geographic2_code.clone())),
             ("OriginCode", Val::Str(self.origin_code.clone())),
-            ("MarketSegmentCode", Val::Str(self.market_segment_code.clone())),
-            ("MarketBusinessCode", Val::Str(self.market_business_code.clone())),
-            ("MarketChannelCode", Val::Str(self.market_channel_code.clone())),
+            (
+                "MarketSegmentCode",
+                Val::Str(self.market_segment_code.clone()),
+            ),
+            (
+                "MarketBusinessCode",
+                Val::Str(self.market_business_code.clone()),
+            ),
+            (
+                "MarketChannelCode",
+                Val::Str(self.market_channel_code.clone()),
+            ),
             ("BuildingCode", Val::Str(self.building_code.clone())),
             ("WingCode", Val::Str(self.wing_code.clone())),
             ("LowFloor", Val::I32(self.low_floor)),
             ("HighFloor", Val::I32(self.high_floor)),
-            ("RoomExposureCode", Val::Str(self.room_exposure_code.clone())),
-            ("RoomAttributeCode", Val::Str(self.room_attribute_code.clone())),
+            (
+                "RoomExposureCode",
+                Val::Str(self.room_exposure_code.clone()),
+            ),
+            (
+                "RoomAttributeCode",
+                Val::Str(self.room_attribute_code.clone()),
+            ),
             ("Notice", Val::Str(self.notice.clone())),
             ("ConfirmNum", Val::F64(self.confirm_num)),
-            ("ExternalConfirmNumber", Val::OptStr(self.external_confirm_number.clone())),
+            (
+                "ExternalConfirmNumber",
+                Val::OptStr(self.external_confirm_number.clone()),
+            ),
             ("ConfirmPrintFlag", Val::Bool(self.confirm_print_flag)),
             ("FolioStatus", Val::I32(self.folio_status)),
             ("NoShowFlag", Val::Bool(self.no_show_flag)),
             ("WalkInFlag", Val::Bool(self.walk_in_flag)),
             ("ReservationTime", Val::Time(self.reservation_time)),
-            ("ReservationClerkID", Val::Str(self.reservation_clerk_id.clone())),
+            (
+                "ReservationClerkID",
+                Val::Str(self.reservation_clerk_id.clone()),
+            ),
             ("CancelNum", Val::F64(self.cancel_num)),
-            ("LastChangeClerkID", Val::Str(self.last_change_clerk_id.clone())),
+            (
+                "LastChangeClerkID",
+                Val::Str(self.last_change_clerk_id.clone()),
+            ),
             ("LastChangeTime", Val::Time(self.last_change_time)),
             ("UserDefineCode1", Val::Str(self.user_define_code1.clone())),
             ("UserDefineCode2", Val::Str(self.user_define_code2.clone())),
@@ -483,7 +505,10 @@ impl Folio {
             ("RoomRateCode", Val::Str(self.room_rate_code.clone())),
             ("PaymentCode", Val::Str(self.payment_code.clone())),
             ("PartyCode", Val::Str(self.party_code.clone())),
-            ("CreditCardExpireTime", Val::Str(self.credit_card_expire_time.clone())),
+            (
+                "CreditCardExpireTime",
+                Val::Str(self.credit_card_expire_time.clone()),
+            ),
             ("PackageCode", Val::Str(self.package_code.clone())),
             ("TransferHoldFlag", Val::Bool(self.transfer_hold_flag)),
             ("RateAmount", Val::F64(self.rate_amount)),
@@ -492,20 +517,32 @@ impl Folio {
             ("NoPostFlag", Val::Bool(self.no_post_flag)),
             ("HouseUseFlag", Val::Bool(self.house_use_flag)),
             ("CompFlag", Val::Bool(self.comp_flag)),
-            ("CreditCardTypeCode", Val::Str(self.credit_card_type_code.clone())),
+            (
+                "CreditCardTypeCode",
+                Val::Str(self.credit_card_type_code.clone()),
+            ),
             ("Booker", Val::Str(self.booker.clone())),
             ("ARAccountNumber", Val::OptF64(self.ar_account_number)),
             ("BookStatus", Val::I32(self.book_status)),
             ("Allotment", Val::Bool(self.allotment)),
             ("AllotmentTA", Val::I64(self.allotment_ta)),
-            ("AllotmentContract", Val::Str(self.allotment_contract.clone())),
+            (
+                "AllotmentContract",
+                Val::Str(self.allotment_contract.clone()),
+            ),
             ("NetRate", Val::Bool(self.net_rate)),
             ("SubGroupCode", Val::Str(self.sub_group_code.clone())),
             ("IncludeBF", Val::Bool(self.include_bf)),
             ("BreakfastCode", Val::Str(self.breakfast_code.clone())),
-            ("FolioCurrencyCode", Val::Str(self.folio_currency_code.clone())),
+            (
+                "FolioCurrencyCode",
+                Val::Str(self.folio_currency_code.clone()),
+            ),
             ("ExtraBed", Val::I32(self.extra_bed)),
-            ("RoomChargeToMasterFlag", Val::Bool(self.room_charge_to_master_flag)),
+            (
+                "RoomChargeToMasterFlag",
+                Val::Bool(self.room_charge_to_master_flag),
+            ),
             ("FolioExRate", Val::F64(self.folio_ex_rate)),
             ("NumGuestBF", Val::I32(self.num_guest_bf)),
             ("LastName", Val::Str(self.last_name.clone())),
@@ -519,9 +556,15 @@ impl Folio {
             ("BlockFlag", Val::Bool(self.block_flag)),
             ("BlockClerkID", Val::Str(self.block_clerk_id.clone())),
             ("RoomTypeBooked", Val::Str(self.room_type_booked.clone())),
-            ("CreditCardHolder", Val::Str(self.credit_card_holder.clone())),
+            (
+                "CreditCardHolder",
+                Val::Str(self.credit_card_holder.clone()),
+            ),
             ("MemberID", Val::Str(self.member_id.clone())),
-            ("CreditCardBlockAmount", Val::F64(self.credit_card_block_amount)),
+            (
+                "CreditCardBlockAmount",
+                Val::F64(self.credit_card_block_amount),
+            ),
             ("UserInfo1", Val::Str(self.user_info1.clone())),
             ("UserInfo2", Val::Str(self.user_info2.clone())),
             ("UserInfo3", Val::Str(self.user_info3.clone())),
@@ -566,4 +609,3 @@ impl Folio {
         }
     }
 }
-

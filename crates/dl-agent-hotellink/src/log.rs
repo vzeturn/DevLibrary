@@ -36,8 +36,6 @@ pub enum V<'a> {
     S(&'a str),
     /// Integer.
     I(i64),
-    /// Flag.
-    B(bool),
 }
 
 impl V<'_> {
@@ -45,7 +43,6 @@ impl V<'_> {
         match self {
             V::S(s) => dl_log::Value::from(*s),
             V::I(i) => dl_log::Value::from(*i),
-            V::B(b) => dl_log::Value::from(*b),
         }
     }
 }

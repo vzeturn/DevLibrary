@@ -115,8 +115,7 @@ pub(crate) fn pick_to_cancel(folios: &[Folio], n: usize) -> Vec<Folio> {
 /// `ratesEqual`.
 pub(crate) fn rates_equal(a: &[FolioRate], b: &[FolioRate]) -> bool {
     a.len() == b.len()
-        && a
-            .iter()
+        && a.iter()
             .zip(b)
             .all(|(x, y)| x.h_date == y.h_date && x.rate_amount == y.rate_amount)
 }

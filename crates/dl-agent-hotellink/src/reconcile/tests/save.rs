@@ -89,7 +89,10 @@ fn quantity_two_creates_two_folios() {
     new_reconciler(&repo).apply(&job).expect("apply");
     let s = repo.st();
     assert_eq!(s.inserted.len(), 2);
-    assert_eq!(s.confirm_num_calls, 1, "one ConfirmNum for the whole booking");
+    assert_eq!(
+        s.confirm_num_calls, 1,
+        "one ConfirmNum for the whole booking"
+    );
     assert_eq!(s.inserted[0].f.confirm_num, s.inserted[1].f.confirm_num);
     assert_ne!(s.inserted[0].f.folio_num, s.inserted[1].f.folio_num);
 }

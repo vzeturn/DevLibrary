@@ -30,7 +30,7 @@ pub(super) fn exec(c: &mut Client, sql: &str, params: &[Param]) -> Result<u64> {
 }
 
 /// The rows of the first result set.
-fn rows(c: &mut Client, sql: &str, params: &[Param]) -> Result<Vec<Row>> {
+pub(super) fn rows(c: &mut Client, sql: &str, params: &[Param]) -> Result<Vec<Row>> {
     let res = c.query(sql, params)?;
     Ok(res.rows().to_vec())
 }
@@ -74,10 +74,7 @@ impl SqlRepo {
             }
             Err(e) => {
                 if let Err(rb) = exec(&mut c, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION", &[]) {
-                    log::warn(
-                        "rollback lỗi",
-                        &[("error", log::V::S(rb.message()))],
-                    );
+                    log::warn("rollback lỗi", &[("error", log::V::S(rb.message()))]);
                 }
                 Err(e)
             }
@@ -124,12 +121,15 @@ WHERE {key_col} = @p1
     }
 
     fn scalar_proc(c: &mut Client, proc: &str) -> Result<f64> {
-        let r = rows(c, &format!("EXEC {proc}"), &[]).map_err(|e| e.context(format!("proc {proc}: ")))?;
+        let r = rows(c, &format!("EXEC {proc}"), &[])
+            .map_err(|e| e.context(format!("proc {proc}: ")))?;
         match r.first() {
             Some(row) => row
                 .get::<f64>(0)
                 .map_err(|e| Error::from(e).context(format!("proc {proc}: "))),
-            None => Err(Error::other(format!("proc {proc}: sql: no rows in result set"))),
+            None => Err(Error::other(format!(
+                "proc {proc}: sql: no rows in result set"
+            ))),
         }
     }
 
@@ -166,7 +166,10 @@ WHERE TABLE_NAME = @p1 AND CHARACTER_MAXIMUM_LENGTH IS NOT NULL",
             Err(e) => {
                 log::warn(
                     "không đọc được độ dài cột để chẩn đoán truncation",
-                    &[("table", log::V::S(table)), ("error", log::V::S(e.message()))],
+                    &[
+                        ("table", log::V::S(table)),
+                        ("error", log::V::S(e.message())),
+                    ],
                 );
                 None
             }
@@ -333,11 +336,7 @@ WHERE (Booker IN ({ph})
         })
     }
 
-    fn update_folio_fields(
-        &self,
-        folio_num: f64,
-        set: &BTreeMap<&'static str, Val>,
-    ) -> Result<()> {
+    fn update_folio_fields(&self, folio_num: f64, set: &BTreeMap<&'static str, Val>) -> Result<()> {
         if set.is_empty() {
             return Ok(());
         }
@@ -357,7 +356,9 @@ WHERE (Booker IN ({ph})
             params.push(v.param(&format!("p{}", i + 1)));
         }
         let n = set.len() + 1;
-        sql.push_str(&format!(" WHERE FolioNum = @p{n} AND ISNULL(CancelNum, 0) = 0"));
+        sql.push_str(&format!(
+            " WHERE FolioNum = @p{n} AND ISNULL(CancelNum, 0) = 0"
+        ));
         params.push(Param::new(&format!("p{n}"), folio_num));
         self.with_conn(|c| exec(c, &sql, &params))
             .map(|_| ())
@@ -443,7 +444,12 @@ WHERE (Booker IN ({ph})
             )
         })
         .map(|_| ())
-        .map_err(|e| e.context(format!("seed GlobalParameter {}: ", crate::gofmt::quote(name))))
+        .map_err(|e| {
+            e.context(format!(
+                "seed GlobalParameter {}: ",
+                crate::gofmt::quote(name)
+            ))
+        })
     }
 
     fn get_client_by_name(&self, name: &str) -> Result<Option<SmileClient>> {

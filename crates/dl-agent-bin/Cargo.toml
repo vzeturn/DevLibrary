@@ -19,6 +19,7 @@ dl-agent-backup.workspace = true
 dl-agent-einvoice.workspace = true
 dl-agent-pms.workspace = true
 dl-agent-pms-device.workspace = true
+dl-agent-hotellink.workspace = true
 
 [lints]
 workspace = true

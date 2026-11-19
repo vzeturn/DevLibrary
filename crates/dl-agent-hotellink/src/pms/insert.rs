@@ -53,10 +53,7 @@ pub fn overflow_note(fields: &[(&'static str, Val)], limits: &HashMap<String, i6
     hits.sort_by(|a, b| a.0.cmp(b.0));
     hits.iter()
         .map(|(col, got, max, sample)| {
-            format!(
-                "{col} vượt {got}>{max} ký tự (giá trị={})",
-                quote(sample)
-            )
+            format!("{col} vượt {got}>{max} ký tự (giá trị={})", quote(sample))
         })
         .collect::<Vec<_>>()
         .join("; ")
@@ -190,7 +187,10 @@ mod tests {
             ..Folio::default()
         };
         let note = overflow_note(&f.fields(), &limits(&[("externalconfirmnumber", 5)]));
-        assert!(note.contains("ExternalConfirmNumber") && note.contains("8>5"), "{note}");
+        assert!(
+            note.contains("ExternalConfirmNumber") && note.contains("8>5"),
+            "{note}"
+        );
     }
 
     #[test]

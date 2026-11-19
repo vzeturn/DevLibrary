@@ -5,7 +5,7 @@
 //! HTML-safe escaping); [`Job::content_hash`] matches Go's `ContentHash` exactly.
 
 mod decode;
-mod encode;
+pub(crate) mod encode;
 #[cfg(test)]
 mod tests;
 
@@ -22,7 +22,10 @@ pub const ACTION_IGNORE: &str = "ignore";
 
 /// `Action.Valid`.
 pub fn action_valid(a: &str) -> bool {
-    matches!(a, ACTION_SAVE | ACTION_CANCEL | ACTION_MANUAL | ACTION_IGNORE)
+    matches!(
+        a,
+        ACTION_SAVE | ACTION_CANCEL | ACTION_MANUAL | ACTION_IGNORE
+    )
 }
 
 /// One booking job from the hub (`jobmodel.Job`).
