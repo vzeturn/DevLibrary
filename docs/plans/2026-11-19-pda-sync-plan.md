@@ -72,6 +72,13 @@ Dropped from the port:
 | SQL Server 2022 RTM-CU27 (16.0.4295.3) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 | SQL Server 2017 RTM-CU31-GDR (14.0.3570.2) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 
+**B9 live results (2026-11-19, RT-0257).** With the order fixture, all 18 tests pass on both servers, run on Linux against throwaway containers (`TZ=Asia/Ho_Chi_Minh`):
+
+| Server | earlier 10 | `live_orders` | `live_orders_combo` | `live_orders_tables` |
+|---|---|---|---|---|
+| SQL Server 2022 RTM-CU28 (16.0.4325.4) | 10/10 | 3/3 | 2/2 | 3/3 |
+| SQL Server 2017 RTM-CU31-GDR (14.0.3570.2) | 10/10 | 3/3 | 2/2 | 3/3 |
+
 The tests run in a Linux container of the repo's build image (`scripts/xbuild/Dockerfile`), not on the macOS host. The agent connects with `Encrypt=Required`, and `dl-tls` has no macOS backend, so on macOS every agent-login connection fails with "error 0". Tests that only use the `encrypt=disable` admin URL pass on macOS too. Windows uses SChannel; it is covered only by the cross-target clippy (B6).
 
 `bootstrap_sql_live` used to assert `major >= 16`. It now asserts the preflight minimum (`MIN_MAJOR`, 11), so that it runs on the 2017 container as well.
@@ -90,7 +97,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 |---|---|---|---|
 | 1 | Service host, SCM recovery | ✅ | dl-agent core; the port's service code is dropped |
 | 2 | Self-update | ✅ | dl-agent core; `AutoUpdate` forced off in the module |
-| 3 | Problem reports, site events | 🟡 | State changes report through `ctx.report`; per-code mapping of site events is B5 |
+| 3 | Problem reports, site events | ✅ | State changes report through `ctx.report`; every Error site event goes on as a problem report with its own code, at most once per code per 15 min (`reporting/module_reports.rs`, B5); the PDA cloud link is declared to the watchdog from the first accepted heartbeat (`reporting/cloud_link.rs`) |
 | 4 | Diagnostic bundle | 🟡 | Core bundle with `status.json` and `runtime-config.json`; the log file is B5 |
 | 5 | Installer takeover | ❌ | Replaced by uninstall + fresh enrol (owner rule); the hub step is B3 |
 | 6 | Hub product gate | ❌ | B3 |
@@ -110,8 +117,8 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 20 | Heartbeat, runtime config | ✅ | Port tests |
 | 21 | Command channel | ✅ | Port tests (`commands_channel`) |
 | 22 | Exactly-once `kds.line_state`, reservations | ✅ | Live redelivery test on 2017 and 2022 |
-| 23 | Order verbs `open/post/send/void` | 🟡 | SQL text pinned byte for byte to C#; not yet executed live (B9) |
-| 24 | Combo, table change/transfer/merge | 🟡 | Same as 23 (B9) |
+| 23 | Order verbs `open/post/send/void` | ✅ | Live as `pda_sync` on 2017 and 2022 (`live_orders`): each delivered twice, one write, one journal row; refused after a POS WIN close, removal or edit; a lost grant rolls the write back with its journal row (B9) |
+| 24 | Combo, table change/transfer/merge | ✅ | Live on 2017 and 2022 (`live_orders_combo`, `live_orders_tables`): combo, covers, table change/transfer, check merge, line move, exactly once; paid, discounted or changed checks refused without a write (B9) |
 | 25 | `sync.verify` and key repair | ❌ | B1 |
 | 26 | Staff sync from `CashierDef` | ✅ | Live `staff_sql` on 2017 and 2022 |
 | 27 | Print relay engine | 🟡 | Wired and unit-tested; no real printer yet (B7) |
@@ -125,6 +132,8 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 39 | Print relay duplication | 🟡 | Decision in §4; needs the speaker's guard when the speaker returns |
 
 **Coverage:** 17 ✅ + 10 🟡 = 22/31 = **71.0%** (strict ✅ only: 17/31 = 54.8%). The audit baseline was 15.4%.
+
+After B5 (rows 3) and B9 (rows 23, 24), 2026-11-19: 20 ✅ + 7 🟡 = 23.5/31 = **75.8%** (strict 20/31 = 64.5%), not counting the other phase-B slices.
 
 ## 2. Fresh-enrol analysis
 
@@ -183,11 +192,11 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 | B2 file splits | 15 files are over 800 lines: `util/stj.rs` 1517, `commands/batches.rs` 1168, `hosting/host.rs` 1066, `contracts/time.rs` 1027, `reporting/format.rs` 976, `commands/executor.rs` 898, `config/providers.rs` 863, `capture/runner.rs` 839, `contracts/legacy/sql_store.rs` 823, plus the tests `commands_executor.rs` 1516, `outbox_uploaders.rs` 1117, `capture/strategy_tests.rs` 1040, `site_events.rs` 996, `contracts/tests/dotnet.rs` 810, `commands/tests/sql.rs` 806. Split them by responsibility and keep the public paths. Run the split after B1 for `commands/`. | the files listed | M |
 | B3 hub: uninstall the old agent + product gate | `install/pdaLegacy.ts`: stop and delete the `PdaSyncAgent` service and any `PdaSyncAgent*` scheduled task. Rename `%ProgramData%\MM\SyncAgent` to `SyncAgent.retired-<date>` for rollback; never delete it. Then run `dl-agent pda-enroll`. Also a `pda-sync` product requirement: SMILE_POS tables, the `pda_sync` login, `Pda_Sync*` tables, order grants. | `services/agent-hub/src/install/pda*.ts`, its tests | M |
 | B4 `pda-legacy-export --from-sql` | Port `legacy/export` as a Tool. It is IN only for the `--from-sql` path, which reads `dbo.Pda_*` in SMILE_POS (ADR 0094). | `src/legacy/export/**`, `src/module/tool.rs` (one tool), one `dl-agent-bin` line | M |
-| B5 reports, logs, diagnostics, cloud link | Map the port's site events and error codes onto `ctx.report`. Add the current log file to the bundle (`status.json` and `runtime-config.json` are already named). Call `ctx.set_cloud_link(cloud_url, ok_at)` from the heartbeat's last success, so the core watchdog sees the PDA link; a wrong `ok_at` restarts the service, so it needs a test. | `src/reporting/**`, `src/module/mod.rs` | S |
+| B5 reports, logs, diagnostics, cloud link | Map the port's site events and error codes onto `ctx.report`. Add the current log file to the bundle (`status.json` and `runtime-config.json` are already named). Call `ctx.set_cloud_link(cloud_url, ok_at)` from the heartbeat's last success, so the core watchdog sees the PDA link; a wrong `ok_at` restarts the service, so it needs a test. **Done (RT-0257) except the log file:** `AgentHealth::last_heartbeat_ok` (unix seconds of the last 2xx heartbeat, never backwards) feeds `CloudLinkPublisher`, which declares nothing before the first accepted heartbeat and withdraws the link on `reenroll_required`; tests hold it against `dl_agent::watchdog::decide`. Error site events reach the hub through the `ModuleReports` log sink. The rolling log folder still needs core hook H2. | `src/reporting/**`, `src/module/mod.rs` | S |
 | B6 bench run | Windows bench with SMILE_POS and a PDA demo tenant: uninstall the old agent, `pda-enroll`, then: capture to the cloud; a KDS done from the PDA UI; one order post; one reservation; staff sync of `CashierDef`; `selftest`; `capture_dry_run`. | none (report only) | M |
 | B7 print relay on hardware | One ticket to a 9100 printer and one to a spooler queue, then an unknown outcome with no reprint, then a cloud redeploy with a quiet reconnect. | `src/printrelay/**` (fixes only) | S |
 | B8 `capture.db` carry-over (only on an owner decision) | `pda-import-state --from %ProgramData%\MM\SyncAgent`: copy `capture.db` only. Needs PDA cloud support for adopting cursors. | `src/module/import_state.rs` | S |
-| B9 live order verbs | Extend the fixture with the C# `OrderVerbsSchema.cs` and `ComboStoreSchema.cs` shapes, kept faithful to SMILE_POS. Then run `open/post/send/void`, covers, combo post, table change/transfer, check merge and move lines live, each one exactly-once and refused after a POS WIN change. Add them to `scripts/live-sql.sh`. | `testdata/sql/**`, `tests/live_orders*.rs`, `tests/live_support/**` | M |
+| B9 live order verbs | Extend the fixture with the C# `OrderVerbsSchema.cs` and `ComboStoreSchema.cs` shapes, kept faithful to SMILE_POS. Then run `open/post/send/void`, covers, combo post, table change/transfer, check merge and move lines live, each one exactly-once and refused after a POS WIN change. Add them to `scripts/live-sql.sh`. **Done (RT-0257):** `testdata/sql/smile_pos_orders{,_post}.sql`, `tests/live_support/orders.rs`, `tests/live_orders{,_combo,_tables}.rs` (8 tests, KDS and reservations included), `tests/commands_redelivery.rs` (fake); no executor bug found. | `testdata/sql/**`, `tests/live_orders*.rs`, `tests/live_support/**` | M |
 
 ## 6. Core hooks needed (for the core slice)
 
@@ -201,5 +210,5 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 - A Windows compile is covered by clippy with `--target x86_64-pc-windows-gnu`. A Windows run is not: no service run, DPAPI secret store, spooler or SSPI admin yet (B6).
 - SQL Server 2008 R2 and 2012 with the TLS 1.0 ladder are untested; docker images exist only from 2017 on.
 - The port's side-by-side "0 differences" against C# was not re-run here.
-- The order verbs, combo and table commands write to SMILE_POS but have no live test yet (B9).
+- The order verbs, combo and table commands run live on the fixture's stand-in vendor routines (`GetRVCSeqNumber`, `PostITrn`, `UpdateTmpInvoice`, `Unicode2TCVN`); the real SMILE_POS procedure bodies are only exercised on the B6 bench.
 - The live tests need Linux (or Windows); on macOS the `Encrypt=Required` connections fail because `dl-tls` has no macOS backend.

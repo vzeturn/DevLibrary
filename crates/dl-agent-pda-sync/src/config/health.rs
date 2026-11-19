@@ -9,6 +9,8 @@ use super::status::{AgentStatus, ReadError};
 use super::time::{SharedClock, Timestamp};
 use crate::reporting::log::{Exception, Logger};
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// `healthy`.
 pub const HEALTHY: &str = "healthy";
@@ -26,6 +28,9 @@ pub struct AgentHealth {
     paths: AgentPaths,
     clock: SharedClock,
     log: Logger,
+    /// Unix seconds of the last heartbeat the cloud accepted (0: none in this run);
+    /// shared by clones (B5: the dl-agent watchdog's cloud link).
+    heartbeat_ok: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for AgentHealth {
@@ -78,7 +83,14 @@ impl AgentHealth {
             paths,
             clock,
             log: log.for_category(CATEGORY),
+            heartbeat_ok: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Unix seconds (system clock) of the last heartbeat the cloud accepted with a 2xx in
+    /// this run; 0 before the first one. It never moves backwards.
+    pub fn last_heartbeat_ok(&self) -> u64 {
+        self.heartbeat_ok.load(Ordering::SeqCst)
     }
 
     /// `healthy` only when the cloud took the heartbeat (2xx) and capture reaches
@@ -139,6 +151,10 @@ impl AgentHealth {
         sql_reachable: bool,
         capture_error: Option<&str>,
     ) {
+        if heartbeat_failure.is_none() && heartbeat_http.is_some_and(|h| (200..=299).contains(&h)) {
+            let at = u64::try_from(self.clock.now().unix_seconds()).unwrap_or(0);
+            self.heartbeat_ok.fetch_max(at, Ordering::SeqCst);
+        }
         self.record_status(AgentHealth::evaluate(
             heartbeat_http,
             heartbeat_failure,
@@ -299,6 +315,33 @@ mod tests {
             AgentStatus::try_read(&env.paths).unwrap(),
             Some(AgentStatus::new(HEALTHY, None, None, env.clock.now()))
         );
+    }
+
+    #[test]
+    fn the_last_accepted_heartbeat_is_unix_seconds_and_only_moves_forward() {
+        let env = Env::new();
+        let health = env.health();
+        assert_eq!(health.last_heartbeat_ok(), 0, "none before the first 2xx");
+        health.record(None, Some(codes::CLOUD_UNREACHABLE), true, None);
+        health.record(Some(500), None, true, None);
+        assert_eq!(health.last_heartbeat_ok(), 0, "failures do not count");
+
+        // 2026-10-24T08:00:00Z, in seconds (not milliseconds, not local time).
+        health.record(Some(204), None, false, Some("SQL_LOGIN_FAILED"));
+        assert_eq!(health.last_heartbeat_ok(), 1_792_828_800);
+        assert_eq!(
+            env.health().last_heartbeat_ok(),
+            0,
+            "a new writer starts over"
+        );
+        let shared = health.clone();
+        env.clock.advance(std::time::Duration::from_secs(15));
+        shared.record(Some(200), None, true, None);
+        assert_eq!(health.last_heartbeat_ok(), 1_792_828_815, "clones share it");
+        env.clock
+            .set(Timestamp::parse_iso("2026-10-24T07:00:00Z").unwrap());
+        health.record(Some(200), None, true, None);
+        assert_eq!(health.last_heartbeat_ok(), 1_792_828_815, "never backwards");
     }
 
     #[test]

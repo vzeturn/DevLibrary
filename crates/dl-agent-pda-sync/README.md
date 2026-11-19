@@ -31,3 +31,10 @@ dl-agent pda-enroll --code <code> --url <https cloud url> [--dry-run]
 
 Live SQL tests run when `PDA_SYNC_TEST_SQL` holds a dl-tds URL of a login that may
 create databases; each test creates and drops its own `pda_sync_test_*` database.
+`tests/live_orders*.rs` run every order, combo, covers, table, KDS and reservation command
+as `pda_sync` against the SMILE_POS fixture (`testdata/sql/smile_pos_*.sql`), each one
+delivered twice; `scripts/live-sql.sh` runs all live tests on SQL Server 2022 and 2017.
+
+The module declares the PDA cloud to the dl-agent watchdog from the first heartbeat the
+cloud accepted (`reporting/cloud_link.rs`), and every Error site event also goes to the
+hub as a problem report with its code (`reporting/module_reports.rs`).
