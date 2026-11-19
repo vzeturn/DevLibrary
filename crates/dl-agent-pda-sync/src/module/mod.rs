@@ -63,6 +63,10 @@ impl Module for PdaSyncModule {
 
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
         let host = settings::host_context(ctx.config(), ctx.data_dir()).map_err(Error::Config)?;
+        // The health record and the cloud's runtime settings carry no secret; the rolling
+        // logs, `secrets/` and the SQLite queues stay out of the bundle (phase B5).
+        ctx.add_diagnostic_file(host.paths.status_file());
+        ctx.add_diagnostic_file(host.paths.runtime_config_file());
         let Some(identity) = wait_for_identity(ctx, &host)? else {
             return Ok(());
         };

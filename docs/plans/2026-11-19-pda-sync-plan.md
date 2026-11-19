@@ -91,7 +91,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 1 | Service host, SCM recovery | ✅ | dl-agent core; the port's service code is dropped |
 | 2 | Self-update | ✅ | dl-agent core; `AutoUpdate` forced off in the module |
 | 3 | Problem reports, site events | 🟡 | State changes report through `ctx.report`; per-code mapping of site events is B5 |
-| 4 | Diagnostic bundle | 🟡 | Core bundle; the module's include list needs H2 (B5) |
+| 4 | Diagnostic bundle | 🟡 | Core bundle with `status.json` and `runtime-config.json`; the log file is B5 |
 | 5 | Installer takeover | ❌ | Replaced by uninstall + fresh enrol (owner rule); the hub step is B3 |
 | 6 | Hub product gate | ❌ | B3 |
 | 7 | Module skeleton, config, opt-in | ✅ | `src/module/{mod,settings}.rs`, unit tests |
@@ -183,7 +183,7 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 | B2 file splits | 15 files are over 800 lines: `util/stj.rs` 1517, `commands/batches.rs` 1168, `hosting/host.rs` 1066, `contracts/time.rs` 1027, `reporting/format.rs` 976, `commands/executor.rs` 898, `config/providers.rs` 863, `capture/runner.rs` 839, `contracts/legacy/sql_store.rs` 823, plus the tests `commands_executor.rs` 1516, `outbox_uploaders.rs` 1117, `capture/strategy_tests.rs` 1040, `site_events.rs` 996, `contracts/tests/dotnet.rs` 810, `commands/tests/sql.rs` 806. Split them by responsibility and keep the public paths. Run the split after B1 for `commands/`. | the files listed | M |
 | B3 hub: uninstall the old agent + product gate | `install/pdaLegacy.ts`: stop and delete the `PdaSyncAgent` service and any `PdaSyncAgent*` scheduled task. Rename `%ProgramData%\MM\SyncAgent` to `SyncAgent.retired-<date>` for rollback; never delete it. Then run `dl-agent pda-enroll`. Also a `pda-sync` product requirement: SMILE_POS tables, the `pda_sync` login, `Pda_Sync*` tables, order grants. | `services/agent-hub/src/install/pda*.ts`, its tests | M |
 | B4 `pda-legacy-export --from-sql` | Port `legacy/export` as a Tool. It is IN only for the `--from-sql` path, which reads `dbo.Pda_*` in SMILE_POS (ADR 0094). | `src/legacy/export/**`, `src/module/tool.rs` (one tool), one `dl-agent-bin` line | M |
-| B5 reports, logs, diagnostics | Map the port's site events and error codes onto `ctx.report`. Include `modules/pda-sync/logs` and `status.json` in the core diagnostics bundle, excluding `secrets/` and `*.db`. This needs core hook H2. | `src/reporting/**`, `src/module/mod.rs` | S |
+| B5 reports, logs, diagnostics, cloud link | Map the port's site events and error codes onto `ctx.report`. Add the current log file to the bundle (`status.json` and `runtime-config.json` are already named). Call `ctx.set_cloud_link(cloud_url, ok_at)` from the heartbeat's last success, so the core watchdog sees the PDA link; a wrong `ok_at` restarts the service, so it needs a test. | `src/reporting/**`, `src/module/mod.rs` | S |
 | B6 bench run | Windows bench with SMILE_POS and a PDA demo tenant: uninstall the old agent, `pda-enroll`, then: capture to the cloud; a KDS done from the PDA UI; one order post; one reservation; staff sync of `CashierDef`; `selftest`; `capture_dry_run`. | none (report only) | M |
 | B7 print relay on hardware | One ticket to a 9100 printer and one to a spooler queue, then an unknown outcome with no reprint, then a cloud redeploy with a quiet reconnect. | `src/printrelay/**` (fixes only) | S |
 | B8 `capture.db` carry-over (only on an owner decision) | `pda-import-state --from %ProgramData%\MM\SyncAgent`: copy `capture.db` only. Needs PDA cloud support for adopting cursors. | `src/module/import_state.rs` | S |
@@ -192,7 +192,7 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 ## 6. Core hooks needed (for the core slice)
 
 - **H1. Long-running module commands.** `capture_dry_run` can take minutes on a large site. It needs a way to keep the command leased or to report progress (`ctx.progress(id, …)`), or an assurance that a late `complete` is accepted.
-- **H2. Diagnostics include list per module.** Files under `data_dir()` that go into the bundle, with excludes.
+- **H2. Diagnostics include list per module.** Done on main as `ModuleContext::add_diagnostic_file`; the module names `status.json` and `runtime-config.json`. Still missing: a way to name a rolling log folder (the core takes single files), for B5.
 - **H3. Module-owned SQL login.** `pda-sync` uses its own least-privilege `pda_sync` login with the bootstrap grants, not the core `sql.json` pools. The core SQL selftest and the survey should be able to skip `SMILE_POS` for this module, or take a per-module credential. The new core `sql/setup.rs` could later host the server-level login scripts (010/020).
 - **H4. Installer step** (hub install script, core-owned). Call the B3 uninstall before the service install, on sites where `PdaSyncAgent` exists.
 
