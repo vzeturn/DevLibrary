@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 /// What the operator does when the agent must be enrolled again.
-pub const REENROLL_HINT: &str = "Create a new enrollment code in the web console and run: PdaSyncAgent enroll --code <code> --url <url> (the stored key is reused).";
+pub const REENROLL_HINT: &str = "Create a new enrollment code in the web console and run: dl-agent pda-enroll --code <code> --url <url> (the stored key is reused).";
 /// The route of the token exchange.
 pub const TOKEN_PATH: &str = "/sync/v1/token";
 /// The logger category (`ILogger<TokenProvider>`).

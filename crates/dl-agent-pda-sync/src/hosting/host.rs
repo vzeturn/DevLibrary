@@ -55,7 +55,7 @@ pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The hint written when the machine is not enrolled.
 pub const NOT_ENROLLED_HINT: &str =
-    "This machine is not enrolled. Run: PdaSyncAgent enroll --code <code> --url <url>";
+    "This machine is not enrolled. Run: dl-agent pda-enroll --code <code> --url <url>";
 
 /// `ILogger<SiteEventFlusher>`.
 pub const FLUSHER_CATEGORY: &str = "MM.PdaOrder.SyncAgent.Reporting.SiteEventFlusher";

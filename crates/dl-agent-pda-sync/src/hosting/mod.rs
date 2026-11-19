@@ -2,7 +2,7 @@
 //!
 //! - [`cli`]: verbs, options, usage and exit codes (`Cli.cs`); [`run`] is `Main`.
 //! - [`verbs`]: the table the verbs of other modules plug into.
-//! - [`status`]: `status [--wait]` (`StatusCommand.cs`); [`diag`]: `diag` (`Cli.Diag`).
+//! - [`status`]: `status [--wait]` (`StatusCommand.cs`); the diagnostics bundle is dl-agent's.
 //! - [`secret_prompt`]: passwords from the environment or a no-echo prompt.
 //! - [`enroll`]: `enroll` (`EnrollCommand.cs`); [`grants`]: `grants` (`GrantsCommand.cs`).
 //! - [`host`]: composition root, service host and Windows service (`AgentHost.cs`,
@@ -26,11 +26,9 @@ pub use verbs::{HostContext, VerbContext, VerbFn, VerbTable};
 /// The Windows service name the installer registers (`WindowsServiceRecovery.ServiceName`).
 pub const SERVICE_NAME: &str = "PdaSyncAgent";
 
-/// `HeartbeatSender.AgentVersion` (`AgentBuild.VersionText`): the stamped `version+commit`
-/// (`PDA_AGENT_BUILD_VERSION` at build time) when set, else the package version.
+/// `HeartbeatSender.AgentVersion`: what the agent calls itself to the PDA cloud
+/// (heartbeat, enroll, site events): `dl-agent/<version>`, the released dl-agent build
+/// (`DL_AGENT_VERSION` at build), not this crate's own version.
 pub fn agent_version() -> String {
-    match option_env!("PDA_AGENT_BUILD_VERSION") {
-        Some(v) if !v.is_empty() => v.to_owned(),
-        _ => env!("CARGO_PKG_VERSION").to_owned(),
-    }
+    format!("dl-agent/{}", dl_agent::agent_version())
 }

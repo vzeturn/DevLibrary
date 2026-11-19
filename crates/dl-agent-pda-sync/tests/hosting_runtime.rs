@@ -84,7 +84,6 @@ fn the_full_runtime_starts_in_registration_order_and_stops_cleanly() {
             "Capture",
             "PrintRelay",
             "StaffSync",
-            "SelfUpdate",
         ]
     );
     assert!(env.paths.events_db().is_file());
@@ -111,7 +110,6 @@ fn the_full_runtime_starts_in_registration_order_and_stops_cleanly() {
     assert_eq!(
         outcome.stopped,
         [
-            "SelfUpdate",
             "StaffSync",
             "PrintRelay",
             "Capture",

@@ -4,7 +4,7 @@
 
 use crate::capture::{BatchStore, RuntimeConfigSource, SqlCaptureRunner};
 use crate::outbox::{BatchUploader, BlobUploader, HeartbeatSender, UploadCycleResult};
-use crate::reporting::{Exception, Logger, SiteEventService, Value, site_event_service};
+use crate::reporting::{Exception, Logger, SiteEventService, Value};
 use crate::transport::RetryPolicy;
 use crate::util::ctx::Ctx;
 use std::sync::Arc;
@@ -252,22 +252,17 @@ impl LoopService for CaptureService {
     }
 }
 
-/// `SiteEventService` as a loop: started first and stopped last by the host. At start,
-/// when running as the Windows service, the service recovery policy is applied in the
-/// background (`WindowsServiceRecovery.TryConfigure`); at stop, `AGENT_STOPPING` and a
-/// last bounded flush.
+/// `SiteEventService` as a loop: started first and stopped last by the host; at stop,
+/// `AGENT_STOPPING` and a last bounded flush. The C# loop also set the Windows service
+/// recovery policy of `PdaSyncAgent`; under dl-agent the installer owns the service.
 pub struct SiteEventsLoop {
     service: SiteEventService,
-    log: Logger,
 }
 
 impl SiteEventsLoop {
-    /// The loop of `service`; `log` is the service logger.
-    pub fn new(service: SiteEventService, log: &Logger) -> SiteEventsLoop {
-        SiteEventsLoop {
-            service,
-            log: log.for_category(site_event_service::SERVICE_CATEGORY),
-        }
+    /// The loop of `service` (`_log`, the service logger, is kept for the C# signature).
+    pub fn new(service: SiteEventService, _log: &Logger) -> SiteEventsLoop {
+        SiteEventsLoop { service }
     }
 }
 
@@ -277,12 +272,6 @@ impl LoopService for SiteEventsLoop {
     }
 
     fn run_loop(&mut self, ctx: &Ctx) -> Result<(), ServiceError> {
-        if dl_winsvc::is_service_process().unwrap_or(false) {
-            let log = self.log.clone();
-            let _ = std::thread::Builder::new()
-                .name("ServiceRecovery".to_owned())
-                .spawn(move || crate::bootstrap::workflow::try_configure_service_recovery(&log));
-        }
         self.service.run(ctx);
         // The host's stop: the stop flush is bounded by the service itself.
         self.service.stop(&Ctx::background());

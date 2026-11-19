@@ -201,7 +201,7 @@ fn run_on_a_machine_that_is_not_enrolled_writes_the_status_and_exits_1() {
         run_service(&host, &*err, &RuntimeHooks::default()),
         EXIT_FAILED
     );
-    assert!(err.text().starts_with("[NOT_ENROLLED] This machine is not enrolled. Run: PdaSyncAgent enroll --code <code> --url <url>"));
+    assert!(err.text().starts_with("[NOT_ENROLLED] This machine is not enrolled. Run: dl-agent pda-enroll --code <code> --url <url>"));
     let st = AgentStatus::try_read(&host.paths).unwrap().unwrap();
     assert_eq!(st.state, "not_enrolled");
     assert_eq!(st.error_code.as_deref(), Some(codes::NOT_ENROLLED));

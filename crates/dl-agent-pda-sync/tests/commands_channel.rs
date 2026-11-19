@@ -395,8 +395,11 @@ fn missing_grants_send_one_event_with_the_instruction_per_episode() {
         (level.as_str(), code.as_str()),
         (site_event_levels::ERROR, codes::SQL_GRANTS_MISSING)
     );
-    assert!(message.contains("irm https://cloud.test/agent | iex"));
-    assert!(message.contains("PdaSyncAgent grants"));
+    assert!(message.contains("dl-agent pda-grants"));
+    assert!(
+        !message.contains("irm "),
+        "never the old agent's installer: {message}"
+    );
     assert!(message.contains("EXECUTE dbo.PostITrn"));
     assert_eq!(
         g.probe.calls.load(Ordering::SeqCst),

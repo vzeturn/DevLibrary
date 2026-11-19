@@ -142,7 +142,7 @@ fn apply(
         .ok_or_else(|| {
             AgentError::new(
                 codes::NOT_ENROLLED,
-                "This machine is not enrolled, so there is nothing to repair. Run: PdaSyncAgent enroll --code <code> --url <url>",
+                "This machine is not enrolled, so there is nothing to repair. Run: dl-agent pda-enroll --code <code> --url <url>",
             )
         })?;
     let preflight = bootstrapper.preflight(

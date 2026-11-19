@@ -14,14 +14,13 @@ use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentIdentity, AgentPaths, AgentStatus, codes};
 use crate::contracts::time::TICKS_PER_SECOND;
 use crate::contracts::wire::site_event_levels::{INFO, WARN};
-use crate::reporting::log::{Exception, Logger, Value};
+use crate::reporting::log::{Exception, Logger};
 use crate::reporting::run_stages::RunStages;
 use crate::security::{AgentKey, KeyError, SharedSecretStore, names};
 use crate::transport::{EnrollmentClient, SyncHttpClient};
 use crate::util::ctx::Ctx;
 use dl_json::Map;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// `ILogger<EnrollWorkflow>`.
 pub const CATEGORY: &str = "MM.PdaOrder.SyncAgent.Bootstrap.EnrollWorkflow";
@@ -532,47 +531,6 @@ fn report(findings: &[PreflightFinding], stages: &dyn RunStages) {
     for f in findings {
         stages.line(&format!("  [{}] {}", f.code, f.message));
         stages.progress(&f.level, &f.code, &f.message, None);
-    }
-}
-
-/// The Windows service name (`WindowsServiceRecovery.ServiceName`).
-pub const SERVICE_NAME: &str = "PdaSyncAgent";
-
-/// `WindowsServiceRecovery.TryConfigure`: the Service Control Manager restarts the agent
-/// after a crash (5 s, 15 s, then 60 s; the count resets after a day). Idempotent and
-/// never fatal; nothing off Windows. The C# agent runs `sc.exe failure`; this sets the
-/// same policy through the SCM API, and logs a refusal with the Win32 error `sc.exe`
-/// would have exited with.
-pub fn try_configure_service_recovery(log: &Logger) {
-    if !cfg!(windows) {
-        return;
-    }
-    use dl_winsvc::scm::{Manager, RecoveryAction};
-    let applied = Manager::connect()
-        .and_then(|m| m.open(SERVICE_NAME))
-        .and_then(|s| {
-            s.set_recovery_actions(
-                &[
-                    RecoveryAction::Restart(Duration::from_secs(5)),
-                    RecoveryAction::Restart(Duration::from_secs(15)),
-                    RecoveryAction::Restart(Duration::from_secs(60)),
-                ],
-                Duration::from_secs(86_400),
-            )
-        });
-    match applied {
-        Ok(()) => {}
-        Err(e) => match e.code() {
-            Some(code) => log.warn(
-                "Service recovery policy not applied (sc.exe exit {ExitCode}); the service may not be installed yet",
-                &[Value::from(i64::from(code))],
-            ),
-            None => log.warn_ex(
-                Exception::new("System.ComponentModel.Win32Exception", e.to_string()),
-                "Could not configure the service recovery policy",
-                &[],
-            ),
-        },
     }
 }
 

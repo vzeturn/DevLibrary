@@ -14,9 +14,7 @@ use crate::bootstrap::error::Error;
 use crate::bootstrap::fingerprint::{DEFAULT_MINIMUM_SCORE, SchemaFingerprint};
 use crate::bootstrap::models::StepOutcome;
 use crate::bootstrap::probes::SqlAgentLoginProbe;
-use crate::bootstrap::workflow::{
-    EnrollArgs, EnrollParts, EnrollWorkflow, HttpFactory, try_configure_service_recovery,
-};
+use crate::bootstrap::workflow::{EnrollArgs, EnrollParts, EnrollWorkflow, HttpFactory};
 use crate::config::time::SystemClock;
 use crate::config::{AgentError, AgentPaths, AgentStatus, codes};
 use crate::contracts::catalog::SyncCatalog;
@@ -154,7 +152,9 @@ pub fn real_workflow(
         http,
         log: log.clone(),
         clock: SystemClock::shared(),
-        service_recovery: Arc::new(try_configure_service_recovery),
+        // The dl-agent installer owns the service and its recovery policy; the C# one set
+        // it on `PdaSyncAgent`, which must not be touched while the old agent is removed.
+        service_recovery: Arc::new(|_: &Logger| {}),
     }))
 }
 
@@ -183,7 +183,7 @@ pub fn run_workflow(
                     .map(crate::config::AgentIdentity::agent_id_text)
                     .unwrap_or_default();
                 stdout.write_line(&format!(
-                    "Enrolled as agent {id}. Start the PdaSyncAgent service."
+                    "Enrolled as agent {id}. dl-agent runs it once modules.pda-sync is on for this machine in the hub config."
                 ));
                 return Ok(EXIT_OK);
             }

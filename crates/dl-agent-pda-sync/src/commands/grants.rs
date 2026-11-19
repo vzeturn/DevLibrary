@@ -143,13 +143,11 @@ impl OrderGrantsMonitor {
         }
     }
 
-    /// What the operator runs: the install command again (it applies the grants), or the
-    /// verb alone.
+    /// What the operator runs: the grants verb of dl-agent as a SQL administrator. (The
+    /// C# hint re-ran the PDA cloud installer, which installs the old agent dl-agent
+    /// replaces.)
     pub fn instruction(&self) -> String {
-        format!(
-            "Re-run the install command as administrator on the store server: irm {}/agent | iex (it applies the grants; or run: PdaSyncAgent grants)",
-            self.identity.cloud_url.trim_end_matches('/')
-        )
+        "Run as administrator on the store server: dl-agent pda-grants (it applies the order grants of pda_sync)".to_owned()
     }
 
     fn probe(
