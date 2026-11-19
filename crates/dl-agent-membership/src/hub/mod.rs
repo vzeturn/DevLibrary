@@ -22,6 +22,7 @@ use std::time::Duration;
 use dl_http::{ClientOptions, Request, Response, Url};
 use dl_uuid::Uuid;
 
+use crate::jobs::result::Ack;
 use crate::wire::parse::{self, DecodeError, Job, ObservationResult, SyncConfig};
 use crate::wire::{
     AvailabilityRequest, FolioObservation, Heartbeat, RoomInventoryRequest, RoomTypeCatalogRequest,
@@ -125,6 +126,8 @@ pub trait HubApi: Send + Sync {
         agent_version: &str,
         db_identity_fingerprint: Option<&str>,
     ) -> Result<ObservationResult, HubError>;
+    /// `POST jobs/ack` (`EnsureNoContent`).
+    fn ack_job(&self, ack: &Ack) -> Result<(), HubError>;
 }
 
 /// `HubBaseAddress.Create`: trims, drops a trailing `/` and a trailing `/api` (enrolment
@@ -262,6 +265,10 @@ fn ensure_success(resp: &Response, route: &'static str) -> Result<(), HubError> 
 }
 
 impl HubApi for HubClient {
+    fn ack_job(&self, ack: &Ack) -> Result<(), HubError> {
+        self.post_no_content("ack", "api/agent/jobs/ack", ack.to_j().to_json())
+    }
+
     fn heartbeat(&self, hb: &Heartbeat) -> Result<bool, HubError> {
         let resp = self.send(
             "heartbeat",
