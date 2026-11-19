@@ -231,6 +231,62 @@ describe('bench script (PowerShell)', () => {
     }
   })();
 
+  it.skipIf(!pwsh)('offers the SQL Server connection dl-agent already holds, server part only', () => {
+    const script = benchScript({
+      hub: BASE,
+      label: 'x',
+      tenant_id: 'bench-demo',
+      site_id: 'test-pc',
+      expires_at: T0,
+      code: 'ABCD-EFGH-JKLM-NPQR',
+      steps: [],
+      sql_databases: ['SMILE_FO'],
+      sql_fixups: [],
+      sql_names: ['SMILE_FO'],
+      sql_parts: false,
+      remove_legacy: false,
+      sql_grant_service: false,
+    });
+    expect(script).toContain('Keep it? (Y/n)');
+    expect(script).toContain('Password (Enter keeps the saved one)');
+    const lifted = /^# The server part of the connection[\s\S]*?(?=^# Asks for SQL Server)/m.exec(script)?.[0] ?? '';
+    expect(lifted).toContain('function Get-SavedSql');
+    const dir = mkdtempSync(join(tmpdir(), 'bench-sql-'));
+    try {
+      const probe = join(dir, 'probe.ps1');
+      writeFileSync(
+        probe,
+        [
+          '$St = @{ Secrets = (New-Object Collections.ArrayList) }',
+          'function Add-Secret([string]$s) { if ($s) { [void]$St.Secrets.Add($s) } }',
+          'function Warn([string]$m) { }',
+          '$Data = $args[0]',
+          lifted,
+          '$s = Get-SavedSql',
+          "@{ saved = $s; show = $(if ($s) { Show-Sql $s } else { '' }); secrets = $St.Secrets.Count } | ConvertTo-Json -Compress",
+        ].join('\n'),
+      );
+      const run = (json: string | null): Record<string, unknown> => {
+        const data = mkdtempSync(join(dir, 'data-'));
+        if (json !== null) writeFileSync(join(data, 'sql.json'), json);
+        return JSON.parse(execFileSync('pwsh', ['-NoProfile', '-File', probe, data]).toString()) as Record<string, unknown>;
+      };
+      const login = run(JSON.stringify({ databases: { SMILE_FO: { connection: 'Server="HOST\\SQL";User Id="sa";Password="p;w""x";Database="SMILE_FO";' } } }));
+      expect(login.show).toBe('HOST\\SQL, SQL login sa');
+      expect(login.saved).not.toMatch(/SMILE_FO|Catalog|Database/i);
+      expect(login.saved).toContain('p;w"x');
+      expect(login.secrets).toBe(1);
+      const win = run(JSON.stringify({ databases: { SMILE_FO: { connection: 'Server=.;Integrated Security=true;Database=SMILE_FO;' } } }));
+      expect(win.show).toBe('., Windows authentication');
+      expect(run(JSON.stringify({ databases: { X: { connection: 'sqlserver://sa:pw@host/X' } } })).saved).toBe('');
+      expect(run('{"databases":{}}').saved).toBe('');
+      expect(run('not json').saved).toBe('');
+      expect(run(null).saved).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(!pwsh)('parses clean in pwsh and its data block round-trips tricky values', () => {
     const tricky = `it's ‘quoted’ $(Get-Date) \`n "x" {{SQL:SMILE_FO}}`;
     const script = benchScript({

@@ -136,6 +136,19 @@ function Read-SqlDatabases {
   }
 }
 
+# A reinstall keeps the databases already declared in sql.json when they all still connect
+# (Enter at the question), so -SqlPrompt asks for them again only when something changed.
+function Test-SavedSql {
+  $f = Join-Path $Data 'sql.json'
+  if (-not (Test-Path $f)) { return $false }
+  try { $names = @((Get-Content -Raw -Path $f | ConvertFrom-Json).databases.PSObject.Properties | Where-Object { $_ } | ForEach-Object { $_.Name }) }
+  catch { Warn ('sql.json could not be read (' + $_.Exception.Message + '): asking for the databases.'); return $false }
+  if ($names.Count -eq 0) { return $false }
+  Say ('SQL databases already declared: ' + ($names -join ', ') + '.')
+  if (-not (Invoke-Agent @('sql-test', '--data', $Data))) { Warn 'A declared database did not connect (see above): enter it again.'; return $false }
+  return ((Read-Host 'Keep them? (Y/n)') -ne 'n')
+}
+
 function Remove-OldCopies {
   $svc = $null
   foreach ($s in @(Get-WmiObject Win32_Service | Where-Object { $_.PathName -like ('*\' + $Product + '.exe*') })) {
@@ -247,7 +260,7 @@ try {
   if ($SqlName -and $SqlConnection) {
     if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
   } elseif ($SqlPrompt) {
-    Read-SqlDatabases
+    if (Test-SavedSql) { Say 'Keeping the declared SQL databases.' } else { Read-SqlDatabases }
   }
 
   $enrolled = Test-Path (Join-Path $Data 'identity.json')

@@ -42,6 +42,9 @@ describe('install script', () => {
     expect(replace).toBeGreaterThan(setup);
     expect(install).toBeGreaterThan(replace);
     expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
+    // A reinstall with -SqlPrompt keeps the declared databases that still connect.
+    expect(text).toContain('if (Test-SavedSql) { Say');
+    expect(text).toContain("Invoke-Agent @('sql-test', '--data', $Data)");
   });
 
   it('keeps the verified download until Move-Item installs it (RT-0164 test PC)', async () => {

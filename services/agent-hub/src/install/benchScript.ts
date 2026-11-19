@@ -22,6 +22,7 @@ const BODY = String.raw`# DevLibrary bench bundle: removes the older per-product
 # deleted; otherwise it only lists them), applies the SQL fixups, installs dl-agent (canary), registers
 # the SQL databases, runs each product setup step, then the self test. Run in Windows PowerShell as Administrator:
 #   irm <link> | iex
+# Run again (or after a reinstall), it offers the SQL Server connection dl-agent already has: Enter keeps it.
 # To pass a SQL Server connection instead of answering the prompt (it then sits in the console history):
 #   & ([scriptblock]::Create((irm <link>))) -SqlConnection 'Server=.;User Id=sa;Password=...'
 # The link carries an enrolment code, works a limited number of times and expires: do not share it.
@@ -177,8 +178,39 @@ function Use-Sql([string]$base) {
   }
 }
 
-function Read-Sql {
-  $d = @{ server = '.'; auth = '1'; user = 'sa' }
+# The server part of the connection dl-agent already holds in sql.json (a rerun or a reinstall), or ''.
+function Get-SavedSql {
+  $f = Join-Path $Data 'sql.json'
+  if (-not (Test-Path $f)) { return '' }
+  try {
+    $dbs = (Get-Content -Raw -Path $f | ConvertFrom-Json).databases
+    foreach ($p in @($dbs.PSObject.Properties | Where-Object { $_ })) {
+      $conn = [string]$p.Value.connection
+      if (-not $conn -or $conn -match '^\s*sqlserver://') { continue }
+      $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $conn
+      Add-Secret $b.Password
+      [void]$b.Remove('Initial Catalog')
+      return ($b.ConnectionString + ';')
+    }
+  } catch { Warn ('sql.json could not be read (' + $_.Exception.Message + '): asking for SQL Server instead.') }
+  return ''
+}
+function Show-Sql([string]$base) {
+  $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $base
+  if ($b.IntegratedSecurity) { return $b.DataSource + ', Windows authentication' }
+  return $b.DataSource + ', SQL login ' + $b.UserID
+}
+
+# Asks for SQL Server; the answers start from $saved (the connection dl-agent already has), and an
+# empty password keeps the saved one while the server and the login stay the same.
+function Read-Sql([string]$saved) {
+  $d = @{ server = '.'; auth = '1'; user = 'sa'; pw = '' }
+  if ($saved) {
+    $sb = New-Object Data.SqlClient.SqlConnectionStringBuilder $saved
+    $d.server = $sb.DataSource
+    if ($sb.IntegratedSecurity) { $d.auth = '2' } else { $d.user = $sb.UserID; $d.pw = $sb.Password }
+  }
+  $first = @{ server = $d.server; user = $d.user }
   while ($true) {
     $d.server = Ask 'SQL Server (. = this PC, HOST\INSTANCE or HOST,PORT)' $d.server
     $d.auth = Ask 'Authentication: 1 = SQL login, 2 = Windows' $d.auth
@@ -187,13 +219,32 @@ function Read-Sql {
       $base += 'Integrated Security=true;'
     } else {
       $d.user = Ask 'SQL login' $d.user
-      $pw = Read-Secret 'Password'
+      $keep = $d.pw -and $d.server -eq $first.server -and $d.user -eq $first.user
+      $pw = Read-Secret $(if ($keep) { 'Password (Enter keeps the saved one)' } else { 'Password' })
+      if (-not $pw -and $keep) { $pw = $d.pw }
       Add-Secret $pw
       $base += 'User Id=' + (Quote $d.user) + ';Password=' + (Quote $pw) + ';'
     }
     if (Use-Sql $base) { return }
     if ((Read-Host 'Try again? (Y/n)') -eq 'n') { Warn 'Going on without SQL Server: steps that need it will fail.'; return }
   }
+}
+
+# -SqlConnection wins; else the connection dl-agent already has is kept (Enter) when it still
+# connects, so a rerun or a reinstall asks nothing new; else the prompt.
+function Select-Sql {
+  $saved = Get-SavedSql
+  if ($SqlConnection) {
+    if (Use-Sql $SqlConnection) { return }
+    Warn 'The -SqlConnection given did not connect; asking instead.'
+  } elseif ($saved) {
+    Say ('dl-agent already has a SQL Server connection: ' + (Show-Sql $saved) + '.')
+    if ((Read-Host 'Keep it? (Y/n)') -ne 'n') {
+      if (Use-Sql $saved) { Add-Result 'sql-server' 'ok' 'kept the saved connection'; return }
+      Warn 'The saved connection no longer connects; asking instead (Enter keeps each saved answer).'
+    }
+  }
+  Read-Sql $saved
 }
 
 __LEGACY__
@@ -349,11 +400,7 @@ function Get-EnrolledAgent {
 # SQL Server, fixups, install, databases, steps, restart and self test.
 function Invoke-Bench {
   if ($SqlNames.Count -gt 0 -or $SqlParts) {
-    if ($SqlConnection) {
-      if (-not (Use-Sql $SqlConnection)) { Warn 'The -SqlConnection given did not connect; asking instead.'; Read-Sql }
-    } else {
-      Read-Sql
-    }
+    Select-Sql
   }
 
   $fixed = $true
