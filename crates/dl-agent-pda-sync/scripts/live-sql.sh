@@ -57,7 +57,8 @@ for TAG in "${TAGS[@]}"; do
     -e "PDA_SYNC_TEST_SQL=sqlserver://sa:$ENC@$SQL:1433?encrypt=disable" \
     "$IMAGE" cargo test --offline -p dl-agent-pda-sync \
     --test live_smile_pos --test bootstrap_sql_live --test capture_runner_sql \
-    --test commands_sql --test staff_sql --no-fail-fast -- --test-threads=1 --nocapture \
+    --test commands_sql --test staff_sql \
+    --test live_orders --test live_orders_combo --test live_orders_tables --no-fail-fast -- --test-threads=1 --nocapture \
     >"$LOG" 2>&1
   RC=$?
   grep -E "^test result|panicked|skipped|SQL Server [0-9]+:" "$LOG"
