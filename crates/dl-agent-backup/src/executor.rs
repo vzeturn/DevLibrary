@@ -22,7 +22,7 @@ use dl_winsvc::StopSignal;
 use crate::Error;
 use crate::backup::{BackupResult, Params, Steps, pipeline};
 use crate::core::{Core, lock};
-use crate::hub::backup_report;
+use crate::hub::{backup_report, with_key_id};
 use crate::log;
 use crate::state::history::{BackupRecord, Outcome};
 use crate::state::now_ms;
@@ -138,9 +138,10 @@ fn run(core: &Core, gate: &Gate, stop: &StopSignal, params: &Params) -> RunResul
         return None;
     }
     let mut steps = Steps::new();
-    let res = pipeline::run(
+    let res = pipeline::run_with(
         core.sql.as_ref(),
         core.uploaders.as_ref(),
+        core,
         params,
         &core.cancel,
         &mut steps,
@@ -207,13 +208,16 @@ fn succeeded(core: &Core, p: &Params, steps: &Steps, res: &BackupResult) {
         }
         stats.last_success.insert(p.database_name.clone(), now);
     }
-    let body = backup_report(
-        &p.schedule_id,
-        &p.history_id,
-        true,
-        scrub_steps(steps.list()),
-        &res.checksum,
-        &res.cloud_file_path,
+    let body = with_key_id(
+        backup_report(
+            &p.schedule_id,
+            &p.history_id,
+            true,
+            scrub_steps(steps.list()),
+            &res.checksum,
+            &res.cloud_file_path,
+        ),
+        &res.key_id,
     );
     deliver(core, &format!("backup:{}", p.history_id), body);
     log::info(

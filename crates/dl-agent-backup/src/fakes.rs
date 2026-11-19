@@ -187,6 +187,8 @@ pub struct DestState {
     pub download_error: Option<Error>,
     pub delete_error: Option<Error>,
     pub uploaded: Vec<String>,
+    /// The bytes of the last uploaded file.
+    pub uploaded_content: Vec<u8>,
     pub downloaded: Vec<(String, String)>,
     pub deleted: Vec<String>,
     pub content: Vec<u8>,
@@ -237,6 +239,7 @@ impl Uploader for FakeUploader {
         progress(len, len);
         let name = file.file_name().unwrap().to_string_lossy().into_owned();
         s.uploaded.push(name.clone());
+        s.uploaded_content = std::fs::read(file).unwrap();
         Ok(format!("fake://{}/{name}", self.provider))
     }
 

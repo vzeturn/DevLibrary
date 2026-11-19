@@ -1,18 +1,22 @@
 //! The state the sync loop, the executor workers and the module share: the hub client, the
-//! durable stores, the master key, the problem reports and the counters.
+//! durable stores, the master key, the tenant backup keys, the problem reports and the
+//! counters.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dl_json::Value;
 use dl_tds::CancelToken;
 
 use crate::Error;
 use crate::crypto::decrypt_credential;
+use crate::crypto::envelope::{BackupKeys, DataKey};
 use crate::hub::HubClient;
 use crate::hub::types::ConfigResponse;
+use crate::log;
 use crate::report::{Reports, Sink, Stats};
 use crate::sql::Connector;
 use crate::state::history::History;
@@ -97,6 +101,19 @@ pub struct Core {
     /// Counts enqueued jobs, so an idle worker notices new work before its next poll.
     pub queued: AtomicU64,
     key: Mutex<Option<String>>,
+    backup_keys: Mutex<KeyCache>,
+}
+
+/// How long the tenant's current backup key (or the hub's "none") is trusted before it is
+/// asked for again, so a key the hub rotates is picked up without a restart.
+const CURRENT_KEY_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// Backup data keys the hub gave this agent: the current one, and every key by id (a key's
+/// bytes never change under its id). Memory only, like the master key.
+#[derive(Default)]
+struct KeyCache {
+    current: Option<(Instant, Option<DataKey>)>,
+    by_id: HashMap<String, DataKey>,
 }
 
 impl std::fmt::Debug for Core {
@@ -108,7 +125,56 @@ impl std::fmt::Debug for Core {
     }
 }
 
+impl BackupKeys for Core {
+    fn current(&self) -> Result<Option<DataKey>, Error> {
+        if let Some((at, k)) = &lock(&self.backup_keys).current
+            && at.elapsed() < CURRENT_KEY_TTL
+        {
+            return Ok(k.clone());
+        }
+        let fresh = match self.hub.backup_key() {
+            Ok(k) => k,
+            // The hub is unreachable: the last answer it gave (even past its TTL) keeps
+            // backups running, sealed as before, through an outage.
+            Err(e @ Error::Hub(_)) => match &lock(&self.backup_keys).current {
+                Some((_, k)) => return Ok(k.clone()),
+                None => return Err(e),
+            },
+            Err(e) => return Err(e),
+        };
+        let mut cache = lock(&self.backup_keys);
+        if let Some(k) = &fresh {
+            cache.by_id.insert(k.id.clone(), k.clone());
+        }
+        cache.current = Some((Instant::now(), fresh.clone()));
+        Ok(fresh)
+    }
+
+    fn by_id(&self, id: &str) -> Result<DataKey, Error> {
+        if let Some(k) = lock(&self.backup_keys).by_id.get(id) {
+            return Ok(k.clone());
+        }
+        let k = self.hub.backup_key_by_id(id)?;
+        lock(&self.backup_keys)
+            .by_id
+            .insert(k.id.clone(), k.clone());
+        Ok(k)
+    }
+}
+
 impl Core {
+    /// Asks the hub for the tenant's current backup key when the cached answer is stale, so
+    /// a backup that runs while the hub is down still has it. A failure is logged; the
+    /// backup itself fails later only if it still has no answer.
+    pub fn prefetch_backup_key(&self) {
+        if let Err(e) = BackupKeys::current(self) {
+            log::warn(
+                "could not fetch the tenant backup key",
+                &[("error", &e.to_string())],
+            );
+        }
+    }
+
     /// Opens the stores under `<module_data_dir>/backup/`.
     pub fn open(
         module_data_dir: &Path,
@@ -136,6 +202,7 @@ impl Core {
             cancel: CancelToken::new(),
             queued: AtomicU64::new(0),
             key: Mutex::new(None),
+            backup_keys: Mutex::new(KeyCache::default()),
         })
     }
 

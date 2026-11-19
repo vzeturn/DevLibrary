@@ -301,3 +301,35 @@ fn stop_wakes_sleepers() {
     assert!(h.join().expect("join"), "sleep returns true when stopped");
     assert!(!Stop::default().sleep(Duration::from_millis(1)));
 }
+
+/// Go cancels the runner's context on stop, which ends the long poll at once; here
+/// `Runner::stop` shuts the poll's socket down.
+#[test]
+fn stop_ends_a_held_long_poll_within_two_seconds() {
+    let (hub, polls, release) = super::holding_hub();
+    let repo = FakeRepo::new();
+    let parts = Parts {
+        hub: HubClient::new(&hub.url, "h1", "tok", "test", ""),
+        repo: repo.clone(),
+        queue: FileQueue::open(&temp_dir("run-longpoll").join("queue.jsonl")).expect("queue"),
+        state_dir: temp_dir("run-longpoll-state"),
+        legacy_policy_dir: None,
+    };
+    let t = Timings {
+        poll_wait_sec: 25,
+        ..super::fast()
+    };
+    let mut running = start(Arc::new(Runner::with(
+        parts,
+        t,
+        Arc::new(OffsetDateTime::now_utc),
+    )));
+    wait_until(|| polls.load(Ordering::SeqCst) == 1, "poll held open");
+    std::thread::sleep(Duration::from_millis(300));
+    let started = std::time::Instant::now();
+    running.r.stop();
+    let ended = running.finished_within(Duration::from_secs(2));
+    release.store(true, Ordering::SeqCst);
+    assert!(ended, "runner still running after {:?}", started.elapsed());
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+}

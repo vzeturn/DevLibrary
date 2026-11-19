@@ -27,6 +27,8 @@ pub mod upload;
 #[cfg(test)]
 mod fakes;
 #[cfg(test)]
+mod tenant_keys_tests;
+#[cfg(test)]
 mod testhub;
 #[cfg(test)]
 mod testutil;

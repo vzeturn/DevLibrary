@@ -9,6 +9,10 @@
 //! - A cloud copy is downloaded into a directory the SQL Server service can read: the
 //!   configured backup directory, else the instance's backup directory when the server is
 //!   on this machine, else the agent's temp directory (Go always used the temp directory).
+//! - A downloaded copy sealed under a tenant backup key ([`crate::crypto::envelope`]) is
+//!   opened with the key its header names (asked of the hub, which gives an agent only its
+//!   own tenant's keys) before `RESTORE`; a plaintext copy (every backup made before
+//!   encryption) is restored as it is.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -17,6 +21,7 @@ use dl_tds::CancelToken;
 
 use super::{Steps, file_safe};
 use crate::Error;
+use crate::crypto::envelope::{self, BackupKeys, NoKeys};
 use crate::sql::{Connector, SqlConn, Target, quote};
 use crate::upload::{Destination, Uploaders};
 
@@ -60,17 +65,45 @@ pub fn restore(
     finish(conn.as_mut(), p, steps, t0)
 }
 
-/// Go `RestoreFromRecord`: the local file when the agent can see it, else a download of the
-/// cloud copy. `backup_dir` is the configured server-side backup directory (may be empty).
+/// [`restore_from_record_with`] without backup keys (a sealed copy cannot be opened).
 pub fn restore_from_record(
     sql: &dyn Connector,
     uploaders: &dyn Uploaders,
     src: &Source,
-    mut p: RestoreParams,
+    p: RestoreParams,
     backup_dir: &str,
     cancel: &CancelToken,
     steps: &mut Steps,
 ) -> Result<(), Error> {
+    let io = RecordIo {
+        uploaders,
+        keys: &NoKeys,
+        backup_dir,
+    };
+    restore_from_record_with(sql, &io, src, p, cancel, steps)
+}
+
+/// Where a restore's file comes from.
+pub struct RecordIo<'a> {
+    /// The destinations.
+    pub uploaders: &'a dyn Uploaders,
+    /// The tenant's backup keys, for a sealed cloud copy.
+    pub keys: &'a dyn BackupKeys,
+    /// The configured server-side backup directory (may be empty).
+    pub backup_dir: &'a str,
+}
+
+/// Go `RestoreFromRecord`: the local file when the agent can see it, else a download of the
+/// cloud copy, opened with the tenant key it names when it is sealed.
+pub fn restore_from_record_with(
+    sql: &dyn Connector,
+    io: &RecordIo<'_>,
+    src: &Source,
+    mut p: RestoreParams,
+    cancel: &CancelToken,
+    steps: &mut Steps,
+) -> Result<(), Error> {
+    let (uploaders, backup_dir) = (io.uploaders, io.backup_dir);
     if !src.local_file_path.is_empty() && Path::new(&src.local_file_path).exists() {
         p.backup_file = src.local_file_path.clone();
         return restore(sql, &p, cancel, steps);
@@ -118,10 +151,68 @@ pub fn restore_from_record(
         format!("Downloaded to {}", file.display()),
         Some(t1),
     );
+    let file = match unseal(&file, io.keys, cancel, steps) {
+        Ok(f) => f,
+        Err(e) => {
+            remove_quietly(&file, steps);
+            return Err(e);
+        }
+    };
     p.backup_file = file.display().to_string();
     let res = validate(&p).and_then(|()| finish(conn.as_mut(), &p, steps, t0));
     remove_quietly(&file, steps);
     res
+}
+
+/// Opens a sealed download next to it (`…_plain.bak`) and removes the sealed file; a
+/// plaintext download is returned as it is.
+fn unseal(
+    file: &Path,
+    keys: &dyn BackupKeys,
+    cancel: &CancelToken,
+    steps: &mut Steps,
+) -> Result<PathBuf, Error> {
+    let t0 = Instant::now();
+    let key_id = match envelope::key_id_of(file) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            steps.set(
+                "decrypt",
+                "skipped",
+                "The backup is not encrypted (made before tenant keys)",
+                None,
+            );
+            return Ok(file.to_path_buf());
+        }
+        Err(e) => {
+            steps.set("decrypt", "error", e.to_string(), Some(t0));
+            return Err(e);
+        }
+    };
+    steps.set(
+        "decrypt",
+        "running",
+        format!("Decrypting with tenant backup key {key_id}"),
+        None,
+    );
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned());
+    let plain = file.with_file_name(format!("{}_plain.bak", stem.unwrap_or_default()));
+    match envelope::open_file(file, &plain, keys, cancel) {
+        Ok(id) => {
+            steps.set(
+                "decrypt",
+                "done",
+                format!("Decrypted with tenant backup key {id}"),
+                Some(t0),
+            );
+            remove_quietly(file, steps);
+            Ok(plain)
+        }
+        Err(e) => {
+            steps.set("decrypt", "error", e.to_string(), Some(t0));
+            Err(e)
+        }
+    }
 }
 
 fn validate(p: &RestoreParams) -> Result<(), Error> {

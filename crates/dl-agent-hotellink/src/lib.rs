@@ -2,6 +2,8 @@
 
 pub mod breaker;
 pub mod config;
+#[cfg(test)]
+mod e2e;
 pub mod enroll;
 pub mod error;
 mod gofmt;

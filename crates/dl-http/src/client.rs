@@ -1,6 +1,7 @@
 //! Blocking HTTP/1.1 client with keep-alive pooling, deadlines, proxies and TLS.
 
 use crate::body::ChunkedDecoder;
+use crate::cancel::Cancel;
 use crate::headers::validate_value;
 use crate::message::{
     BodyFraming, MAX_HEAD_SIZE, find_head_end, keep_alive, parse_response_head, response_framing,
@@ -531,6 +532,23 @@ impl Client {
     /// [`Error::BodyTooLarge`], [`Error::TooManyRedirects`], [`Error::ProxyConnect`], and
     /// [`Error::InvalidHeader`] for an invalid `user_agent` option.
     pub fn request(&self, request: &Request) -> Result<Response, Error> {
+        self.request_inner(request, None)
+    }
+
+    /// [`Client::request`] that another thread can end early with [`Cancel::cancel`]: the
+    /// socket of the exchange is shut down and the call returns [`Error::Cancelled`].
+    ///
+    /// # Errors
+    /// Those of [`Client::request`], and [`Error::Cancelled`].
+    pub fn request_with_cancel(
+        &self,
+        request: &Request,
+        cancel: &Cancel,
+    ) -> Result<Response, Error> {
+        self.request_inner(request, Some(cancel))
+    }
+
+    fn request_inner(&self, request: &Request, cancel: Option<&Cancel>) -> Result<Response, Error> {
         let timeout = request.timeout.or(self.options.timeout);
         let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
         let follow =
@@ -539,7 +557,7 @@ impl Client {
         let mut count = 0;
         loop {
             let current = redirected.as_ref().unwrap_or(request);
-            let response = self.send(current, deadline)?;
+            let response = self.send(current, deadline, cancel)?;
             if !follow || !is_followed_redirect(response.status.as_u16()) {
                 return Ok(response);
             }
@@ -593,7 +611,12 @@ impl Client {
     }
 
     /// One request/response exchange, with the stale keep-alive retry.
-    fn send(&self, request: &Request, deadline: Option<Instant>) -> Result<Response, Error> {
+    fn send(
+        &self,
+        request: &Request,
+        deadline: Option<Instant>,
+        cancel: Option<&Cancel>,
+    ) -> Result<Response, Error> {
         let user_agent = match &self.options.user_agent {
             Some(ua) => Some(validate_value(ua)?),
             None => None,
@@ -601,6 +624,9 @@ impl Client {
         let route = self.route(&request.url)?;
         let mut retried = false;
         loop {
+            if let Some(c) = cancel {
+                c.check()?;
+            }
             let pooled = if retried {
                 None
             } else {
@@ -611,21 +637,29 @@ impl Client {
                 Some(c) => c,
                 None => self.connect(&request.url, &route, user_agent, deadline)?,
             };
+            let watch = match cancel {
+                Some(c) => Some(c.watch(conn.io.tcp())?),
+                None => None,
+            };
             let mut progress = Progress::default();
-            match self.exchange(
+            let result = self.exchange(
                 &mut conn,
                 request,
                 &route,
                 user_agent,
                 deadline,
                 &mut progress,
-            ) {
+            );
+            drop(watch);
+            let cancelled = cancel.is_some_and(Cancel::is_cancelled);
+            match result {
                 Ok((response, reusable)) => {
-                    if reusable {
+                    if reusable && !cancelled {
                         self.checkin(route.key.clone(), conn);
                     }
                     return Ok(response);
                 }
+                Err(_) if cancelled => return Err(Error::Cancelled),
                 Err(e)
                     if reused
                         && !progress.response_started

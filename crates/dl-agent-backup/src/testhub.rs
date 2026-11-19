@@ -37,6 +37,11 @@ pub struct HubState {
     pub reports: Vec<Value>,
     /// Discover bodies.
     pub discovered: Vec<Value>,
+    /// The tenant the agent belongs to.
+    pub tenant: String,
+    /// Backup data keys as (tenant, key id, base64url key), oldest first; a tenant's last
+    /// key is its current one. None at all: an older hub, `/backup-key` is 404.
+    pub backup_keys: Vec<(String, String, String)>,
 }
 
 /// The fake hub.
@@ -54,6 +59,8 @@ impl FakeHub {
             status: 200,
             reports: Vec::new(),
             discovered: Vec::new(),
+            tenant: "tenant-a".into(),
+            backup_keys: Vec::new(),
         }));
         let st = state.clone();
         let server = Server::start(move |r| {
@@ -74,6 +81,21 @@ impl FakeHub {
                 "/report" => {
                     s.reports.push(r.json());
                     Reply::json(200, &json!({"ok": true}))
+                }
+                // Like the real hub must: only the agent's own tenant's keys, 404 otherwise.
+                "/backup-key" => {
+                    let want = r.query().strip_prefix("id=").map(str::to_owned);
+                    let mut own = s.backup_keys.iter().filter(|k| k.0 == s.tenant);
+                    let found = match &want {
+                        Some(id) => own.rfind(|k| &k.1 == id),
+                        None => own.next_back(),
+                    };
+                    match found {
+                        Some((_, id, key)) => {
+                            Reply::json(200, &json!({"keyId": id.as_str(), "key": key.as_str()}))
+                        }
+                        None => Reply::new(404, "no such key"),
+                    }
                 }
                 "/discover" => {
                     s.discovered.push(r.json());

@@ -3,6 +3,8 @@
 
 mod body;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod cancel;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod client;
 mod error;
 mod headers;
@@ -12,6 +14,8 @@ mod proxy_rules;
 mod url;
 
 pub use body::ChunkedDecoder;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use cancel::Cancel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub use client::{Client, ClientOptions, ShutdownHandle, Upgraded};
 pub use error::Error;

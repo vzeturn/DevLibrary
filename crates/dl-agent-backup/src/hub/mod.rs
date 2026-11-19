@@ -14,6 +14,7 @@ use dl_json::{Value, json};
 pub use types::*;
 
 use crate::Error;
+use crate::crypto::envelope::{DataKey, check_key_id};
 
 /// How long one hub call may take.
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -82,13 +83,13 @@ impl HubClient {
         &self.origin
     }
 
-    fn call(
+    fn send(
         &self,
         method: Method,
         path: &str,
         bearer: &str,
         body: Option<&Value>,
-    ) -> Result<Value, Error> {
+    ) -> Result<dl_http::Response, Error> {
         let url = format!("{}/api/agent{path}", self.origin);
         let parsed = Url::parse(&url).map_err(|e| Error::Hub(format!("{path}: {e}")))?;
         let mut req = Request::new(method, parsed)
@@ -101,25 +102,20 @@ impl HubClient {
                 .map_err(|e| Error::Hub(format!("{path}: {e}")))?
                 .with_body(dl_json::to_string(b).into_bytes());
         }
-        let resp = self
-            .http
+        self.http
             .request(&req)
-            .map_err(|e| Error::Hub(format!("{path}: {e}")))?;
-        let code = resp.status.as_u16();
-        if code == 401 || code == 403 {
-            return Err(Error::Auth(format!("{path}: hub answered HTTP {code}")));
-        }
-        if !resp.status.is_success() {
-            let text = String::from_utf8_lossy(&resp.body);
-            let snippet: String = text.chars().take(200).collect();
-            return Err(Error::Hub(format!(
-                "{path}: hub answered HTTP {code}: {snippet}"
-            )));
-        }
-        if resp.body.is_empty() {
-            return Ok(Value::Null);
-        }
-        dl_json::parse_slice(&resp.body).map_err(|e| Error::Hub(format!("{path}: bad JSON: {e}")))
+            .map_err(|e| Error::Hub(format!("{path}: {e}")))
+    }
+
+    fn call(
+        &self,
+        method: Method,
+        path: &str,
+        bearer: &str,
+        body: Option<&Value>,
+    ) -> Result<Value, Error> {
+        let resp = self.send(method, path, bearer, body)?;
+        decode(path, &resp)
     }
 
     /// `POST /api/agent/self-register` with the tenant enroll key.
@@ -171,6 +167,40 @@ impl HubClient {
         }
     }
 
+    /// `GET /api/agent/backup-key`: the tenant's current backup data key. `None` when the
+    /// hub answers 404 (a hub without per-tenant backup keys: backups go up unencrypted).
+    pub fn backup_key(&self) -> Result<Option<DataKey>, Error> {
+        let path = "/backup-key";
+        let resp = self.send(Method::Get, path, &self.token, None)?;
+        if resp.status.as_u16() == 404 {
+            return Ok(None);
+        }
+        data_key(path, &decode(path, &resp)?).map(Some)
+    }
+
+    /// `GET /api/agent/backup-key?id=<id>`: the key a sealed backup names. The hub answers
+    /// only for its own tenant's keys; 404 (or 403) for any other id is
+    /// [`Error::Credential`], not an agent rejection.
+    pub fn backup_key_by_id(&self, id: &str) -> Result<DataKey, Error> {
+        check_key_id(id)?;
+        let path = format!("/backup-key?id={id}");
+        let resp = self.send(Method::Get, &path, &self.token, None)?;
+        if matches!(resp.status.as_u16(), 403 | 404) {
+            return Err(Error::Credential(format!(
+                "the backup is encrypted under key {id}, which the hub does not give this agent \
+                 (a backup of another tenant, or a key the hub no longer has)"
+            )));
+        }
+        let key = data_key("/backup-key", &decode("/backup-key", &resp)?)?;
+        if key.id != id {
+            return Err(Error::Hub(format!(
+                "/backup-key: asked for key {id}, the hub sent {}",
+                key.id
+            )));
+        }
+        Ok(key)
+    }
+
     /// `POST /api/agent/report` with a backup, restore or command outcome.
     pub fn report(&self, body: &Value) -> Result<(), Error> {
         self.call(Method::Post, "/report", &self.token, Some(body))
@@ -196,6 +226,34 @@ impl HubClient {
     }
 }
 
+/// Turns a hub answer into its JSON body; 401/403 is [`Error::Auth`], other failures
+/// [`Error::Hub`].
+fn decode(path: &str, resp: &dl_http::Response) -> Result<Value, Error> {
+    let code = resp.status.as_u16();
+    if code == 401 || code == 403 {
+        return Err(Error::Auth(format!("{path}: hub answered HTTP {code}")));
+    }
+    if !resp.status.is_success() {
+        let text = String::from_utf8_lossy(&resp.body);
+        let snippet: String = text.chars().take(200).collect();
+        return Err(Error::Hub(format!(
+            "{path}: hub answered HTTP {code}: {snippet}"
+        )));
+    }
+    if resp.body.is_empty() {
+        return Ok(Value::Null);
+    }
+    dl_json::parse_slice(&resp.body).map_err(|e| Error::Hub(format!("{path}: bad JSON: {e}")))
+}
+
+fn data_key(path: &str, v: &Value) -> Result<DataKey, Error> {
+    let field = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default();
+    if field("keyId").is_empty() || field("key").is_empty() {
+        return Err(Error::Hub(format!("{path}: response has no keyId/key")));
+    }
+    DataKey::from_hub(field("keyId"), field("key"))
+}
+
 /// The report body for a finished backup, the Go `BackupReport` on the wire.
 pub fn backup_report(
     schedule_id: &str,
@@ -214,6 +272,17 @@ pub fn backup_report(
         "checksum": checksum,
         "cloudFilePath": cloud_file_path,
     })
+}
+
+/// Adds the tenant backup key id a successful backup's copy is sealed under
+/// (`encryptionKeyId`); an unencrypted copy leaves the body as it is.
+pub fn with_key_id(mut body: Value, key_id: &str) -> Value {
+    if !key_id.is_empty()
+        && let Some(m) = body.as_object_mut()
+    {
+        m.insert("encryptionKeyId".to_owned(), Value::from(key_id));
+    }
+    body
 }
 
 /// The report body for a restore request.

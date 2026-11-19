@@ -4,10 +4,11 @@
 //!
 //! The module is opt-in (`modules.hotellink.enabled = true`). Without a usable
 //! `config.json` (or without a token) it stays degraded ("not configured: …") and looks for
-//! the file again every 30 s. The hub long poll (25 s) and a SQL transaction cannot be
-//! interrupted, so the runner has its own thread: on stop the module waits up to 5 s for the
-//! job in flight and then returns, leaving that thread to end at its next check. A job it
-//! did not finish stays in the durable queue and is applied or re-acked on the next start.
+//! the file again every 30 s. The runner has its own thread. On stop the hub call in flight
+//! (the 25 s long poll included) is cut off at once (`dl_http::Cancel`); a SQL transaction
+//! in flight is not cut, so the module waits up to 5 s for it and then returns, leaving the
+//! thread to end after that call. A job it did not finish stays in the durable queue and is
+//! applied or re-acked on the next start.
 
 pub mod health;
 pub mod selftest;
@@ -47,7 +48,7 @@ pub const LEGACY_MARKER: &str = "legacy-queue-imported";
 const TICK: Duration = Duration::from_millis(500);
 /// How often a module without a usable config looks again.
 const RECHECK: Duration = Duration::from_secs(30);
-/// How long a stop waits for the job in flight.
+/// How long a stop waits for the SQL call in flight.
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// One report per code per window.
 const REPORT_WINDOW: Duration = Duration::from_secs(15 * 60);
@@ -92,7 +93,7 @@ pub(crate) struct Wiring {
 }
 
 /// Why the config cannot run, or the config and its SQL repository.
-fn usable(path: &Path) -> Result<(LocalConfig, Arc<dyn FullRepo>), String> {
+pub(crate) fn usable(path: &Path) -> Result<(LocalConfig, Arc<dyn FullRepo>), String> {
     let cfg = match config::load(path) {
         Ok(Some(c)) => c,
         Ok(None) => return Err(format!("not configured: no config at {}", path.display())),
@@ -293,7 +294,7 @@ fn supervise(
     }
 }
 
-/// Waits up to `grace` for the runner; one still inside a call is left to end on its own.
+/// Waits up to `grace` for the runner; one still inside a SQL call is left to end on its own.
 fn finish(handle: JoinHandle<()>, grace: Duration) {
     let deadline = Instant::now() + grace;
     while !handle.is_finished() && Instant::now() < deadline {
@@ -301,7 +302,7 @@ fn finish(handle: JoinHandle<()>, grace: Duration) {
     }
     if !handle.is_finished() {
         log::warn(
-            "hotellink runner still inside a hub or SQL call; it ends on its own, unfinished jobs stay queued",
+            "hotellink runner still inside a SQL call; it ends on its own, unfinished jobs stay queued",
             &[],
         );
         return;

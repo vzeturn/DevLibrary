@@ -41,6 +41,8 @@ pub enum Error {
         /// The proxy's status code (407 means proxy authentication is required).
         status: u16,
     },
+    /// The request was cancelled through its [`Cancel`](crate::Cancel) handle.
+    Cancelled,
 }
 
 impl fmt::Display for Error {
@@ -59,6 +61,7 @@ impl fmt::Display for Error {
             Error::ProxyConnect { status } => {
                 write!(f, "proxy refused the CONNECT tunnel with status {status}")
             }
+            Error::Cancelled => f.write_str("request cancelled"),
         }
     }
 }

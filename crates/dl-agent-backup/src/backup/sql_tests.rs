@@ -300,3 +300,6 @@ fn restore_with_replace_to_a_new_name() {
     }
     remove(&r.local_file_path);
 }
+
+#[path = "replace_tests.rs"]
+mod replace;
