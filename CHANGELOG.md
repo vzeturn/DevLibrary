@@ -94,6 +94,9 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent-arrival: the install report (`hello.installations`) uses the format the Check-In cloud parses (`processes=<n>`, both agents counted); 1.3.9 read as "unreadable report" in `agent_install_state`.
+- dl-agent-arrival: the service ending with exit 75 (restart into a new version after an update, SCM event 7024) is imported as Information, not as the last problem.
+
 - dl-agent: SQL error 4063 counts as no access.
 - agent-hub bench: with a Check-In step and `sql_grant_service`, the service login also gets `db_owner` in SMILE_PICTURE, created first when missing; Check-In installs its picture tables from `master` and failed with SQL error 916 (RT-0164).
 - einvoice: the collector install now includes the write-back procedure `sp_ApplyInvoiceWriteback` (MM-EINVOICE `writeback.sql`, missing from the port); a site without it gets it on the first cycle or on SQL error 2812 at write-back, never under a DBA-owned name (RT-0164).
