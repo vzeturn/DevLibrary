@@ -148,7 +148,7 @@ fn sql(e: &dl_tds::Error) -> String {
     }
 }
 
-fn read_facts(pms: &mut Client, connection: &str) -> Result<Facts, String> {
+fn read_facts(pms: &mut Client, target: tds::Target<'_>) -> Result<Facts, String> {
     let r = pms.query(
         "SELECT SUSER_SNAME(), DB_NAME(), CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(32)),
   IS_SRVROLEMEMBER('sysadmin'),
@@ -179,7 +179,7 @@ fn read_facts(pms: &mut Client, connection: &str) -> Result<Facts, String> {
     f.bundle_installed = installer::read_marker(pms, PROPERTY_NAME).map_err(|e| e.0)?;
     f.picture_installed = installer::read_marker(pms, PICTURE_PROPERTY_NAME).map_err(|e| e.0)?;
     if f.picture_access {
-        let mut pic = tds::connect(connection, Some(PICTURE_DB)).map_err(|e| sql(&e))?;
+        let mut pic = tds::connect(target, Some(PICTURE_DB)).map_err(|e| sql(&e))?;
         let r = pic.query(
             "SELECT HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'CREATE TABLE') & HAS_PERMS_BY_NAME('dbo', 'SCHEMA', 'ALTER'),
   HAS_PERMS_BY_NAME('dbo', 'SCHEMA', 'SELECT'),
@@ -250,14 +250,15 @@ pub fn to_json(f: &Facts, a: &Assessment) -> Value {
     Value::Object(m)
 }
 
-/// Runs the probe on `connection`.
+/// Runs the probe on `target`.
 ///
 /// # Errors
 /// The PMS cannot be reached or a query failed (no connection string in the message).
-pub fn probe(connection: &str) -> Result<(Facts, Assessment), String> {
-    let mut pms = tds::connect(connection, None)
+pub fn probe<'a>(target: impl Into<tds::Target<'a>>) -> Result<(Facts, Assessment), String> {
+    let target = target.into();
+    let mut pms = tds::connect(target, None)
         .map_err(|e| format!("cannot connect: {}", tds::exec_error(&e)))?;
-    let f = read_facts(&mut pms, connection)?;
+    let f = read_facts(&mut pms, target)?;
     let a = assess(&f, &installer::bundle().picture_hash);
     Ok((f, a))
 }

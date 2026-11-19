@@ -1,7 +1,8 @@
 //! The module's self-test (`dl-agent selftest`, the `selftest` command): the identity and
 //! where it came from, the tenant key (fingerprint) and every sealed legal vault file under
 //! the module's `install_dir`, the cloud answers over HTTP/1.1, the link's last state, the
-//! last recorded problem, the PMS connection runs the agent's read probe, the procedure
+//! last recorded problem, where the PMS connection comes from (the core's `sql.json` SMILE_FO
+//! entry or `PmsConnectionString`), the PMS connection runs the agent's read probe, the procedure
 //! bundle installed is this build's, and the SMILE_PICTURE phase. Read only: no poll is sent
 //! (a poll would take the cloud's requests), no key, vault or PMS object is created.
 
@@ -14,6 +15,7 @@ use dl_http::{Client, ClientOptions, Proxy, Version};
 
 use super::{ModuleConfig, NAME, NOT_ENROLLED, commands, picture};
 use crate::agent::cloud::{self, POLL_PATH};
+use crate::agent::core_sql;
 use crate::agent::installer::{self, PROPERTY_NAME};
 use crate::agent::layout::Layout;
 use crate::agent::link_status;
@@ -43,7 +45,7 @@ pub fn run(ctx: &ModuleContext) -> Vec<Check> {
         }
     };
     let layout = Layout::detect(config.install_dir.as_deref(), ctx.data_dir());
-    let settings = match Settings::load(layout.install_dir()) {
+    let mut settings = match Settings::load(layout.install_dir()) {
         Ok(s) => s,
         Err(e) => {
             let o = Outcome::fail(format!("{}: {e}", layout.install_dir().display()))
@@ -110,13 +112,28 @@ pub fn run(ctx: &ModuleContext) -> Vec<Check> {
         PROBE_TIMEOUT * 2,
         move || reachable(&base),
     ));
+    let core_sql = core_sql::apply(&mut settings, ctx.data_dir());
+    let source = settings.pms_source;
+    checks.push(Check::timed(
+        NAME,
+        "pms_source",
+        "PMS connection source",
+        || match core_sql {
+            Ok(s) => Outcome::pass(match s.pin() {
+                Some(rung) => format!("{} SMILE_FO, transport {}", s.name(), rung.name()),
+                None => s.name().to_string(),
+            }),
+            Err(e) => Outcome::warn(format!("{e}; PmsConnectionString is used"))
+                .remedy("run dl-agent sql-setup again for SMILE_FO"),
+        },
+    ));
     let connection = settings.pms_connection_string.clone();
     checks.push(Check::bounded(
         NAME,
         "pms",
         "PMS read query runs",
         PROBE_TIMEOUT * 2,
-        move || match tds::probe(&connection) {
+        move || match tds::probe(tds::Target::new(&connection, source)) {
             Ok(p) => Outcome::pass(p.line()),
             Err(e) if e.is_tls() => Outcome::fail(format!("TLS handshake failed: {e}"))
                 .remedy("set Encrypt=False (old SQL Server) or install a TLS 1.2 certificate"),
@@ -131,7 +148,7 @@ pub fn run(ctx: &ModuleContext) -> Vec<Check> {
         "bundle",
         "PMS procedure bundle is this build's",
         PROBE_TIMEOUT * 2,
-        move || bundle_outcome(&connection),
+        move || bundle_outcome(tds::Target::new(&connection, source)),
     ));
     let connection = settings.pms_connection_string;
     checks.push(Check::bounded(
@@ -139,7 +156,7 @@ pub fn run(ctx: &ModuleContext) -> Vec<Check> {
         "picture",
         "SMILE_PICTURE phase",
         PROBE_TIMEOUT * 3,
-        move || picture_outcome(&connection),
+        move || picture_outcome(tds::Target::new(&connection, source)),
     ));
     checks
 }
@@ -301,9 +318,9 @@ fn last_problem(identity: &Path) -> Check {
 }
 
 /// The bundle marker in the PMS against this build's.
-fn bundle_outcome(connection: &str) -> Outcome {
+fn bundle_outcome(target: tds::Target<'_>) -> Outcome {
     let want = &installer::bundle().hash;
-    let mut conn = match tds::connect(connection, None) {
+    let mut conn = match tds::connect(target, None) {
         Ok(c) => c,
         Err(e) => return Outcome::fail(format!("connect: {}", tds::exec_error(&e))),
     };
@@ -317,8 +334,8 @@ fn bundle_outcome(connection: &str) -> Outcome {
     }
 }
 
-fn picture_outcome(connection: &str) -> Outcome {
-    match picture::probe(connection) {
+fn picture_outcome(target: tds::Target<'_>) -> Outcome {
+    match picture::probe(target) {
         Ok((f, a)) => {
             let detail = format!(
                 "{}: SMILE_PICTURE {} as {}",

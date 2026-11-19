@@ -2,12 +2,16 @@
 //! through a `dl-agent` session pool (which also walks the TLS ladder for old servers when the
 //! connection string leaves encryption at login-only).
 
+use std::borrow::Cow;
 use std::time::Duration;
 
+use dl_agent::sql::transport::Rung;
 use dl_agent::sql::{Pool, PoolOptions, TdsConnector};
 use dl_tds::{Param, ResultSet};
 
+use crate::agent::core_sql::PmsSource;
 use crate::agent::executor::{self, ExecError, Executor, Sets};
+use crate::agent::settings::Settings;
 use crate::agent::sqlvalue;
 use crate::contracts::catalog::catalog;
 use crate::contracts::errors::COMMAND_TIMEOUT;
@@ -35,6 +39,69 @@ pub struct TdsOptions {
     pub command_timeout: Duration,
     /// `LockTimeoutSeconds` (at least one second).
     pub lock_timeout: Duration,
+}
+
+/// A PMS connection and how to read it: an appsettings string the SqlClient way
+/// ([`with_sqlclient_defaults`], the automatic TLS ladder), or the core's `sql.json` string
+/// as the core reads it, held to the rung setup proved.
+#[derive(Clone, Copy)]
+pub struct Target<'a> {
+    connection: &'a str,
+    source: PmsSource,
+}
+
+impl std::fmt::Debug for Target<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Target")
+            .field("source", &self.source)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> Target<'a> {
+    /// `connection` read as `source` says.
+    pub fn new(connection: &'a str, source: PmsSource) -> Target<'a> {
+        Target { connection, source }
+    }
+
+    /// The string `dl-tds` parses.
+    fn text(&self) -> Cow<'a, str> {
+        match self.source {
+            PmsSource::AppSettings => Cow::Owned(with_sqlclient_defaults(self.connection)),
+            PmsSource::Core { .. } => Cow::Borrowed(self.connection),
+        }
+    }
+
+    /// The rung to hold to (`None`: walk the ladder).
+    fn pin(&self) -> Option<Rung> {
+        self.source.pin()
+    }
+
+    /// The setting a bad string comes from, for error messages.
+    fn label(&self) -> &'static str {
+        match self.source {
+            PmsSource::AppSettings => "PmsConnectionString",
+            PmsSource::Core { .. } => "sql.json SMILE_FO connection",
+        }
+    }
+}
+
+impl<'a> From<&'a str> for Target<'a> {
+    fn from(connection: &'a str) -> Target<'a> {
+        Target::new(connection, PmsSource::AppSettings)
+    }
+}
+
+impl<'a> From<&'a String> for Target<'a> {
+    fn from(connection: &'a String) -> Target<'a> {
+        Target::new(connection, PmsSource::AppSettings)
+    }
+}
+
+impl<'a> From<&'a Settings> for Target<'a> {
+    fn from(settings: &'a Settings) -> Target<'a> {
+        Target::new(&settings.pms_connection_string, settings.pms_source)
+    }
 }
 
 /// The executor of a running agent.
@@ -93,21 +160,25 @@ fn key_value(connection: &str, key: &str) -> Option<String> {
         .map(|(_, v)| v.trim().to_string())
 }
 
-/// Opens one session outside the pool (installer, probe), walking the same TLS ladder;
-/// `database` replaces the connection string's.
+/// Opens one session outside the pool (installer, probe), walking the same TLS ladder (or
+/// holding to a `sql.json` pin); `database` replaces the connection string's.
 ///
 /// # Errors
 /// The `dl-tds` error (a connection string that does not parse is [`dl_tds::Error::Config`],
 /// whose message never echoes the string).
-pub fn connect(connection: &str, database: Option<&str>) -> Result<dl_tds::Client, dl_tds::Error> {
-    let mut config: dl_tds::Config = with_sqlclient_defaults(connection).parse()?;
+pub fn connect<'a>(
+    target: impl Into<Target<'a>>,
+    database: Option<&str>,
+) -> Result<dl_tds::Client, dl_tds::Error> {
+    let target = target.into();
+    let mut config: dl_tds::Config = target.text().parse()?;
     if config.app_name() == "dl-tds" {
         config = config.with_app_name("dl-agent");
     }
     if let Some(db) = database {
         config = config.with_database(db);
     }
-    let rungs = dl_agent::sql::transport::rungs(&config, None);
+    let rungs = dl_agent::sql::transport::rungs(&config, target.pin());
     dl_agent::sql::transport::walk(&rungs, 0, |rung| {
         dl_tds::Client::connect(&rung.apply(&config))
     })
@@ -140,8 +211,8 @@ impl Probe {
 ///
 /// # Errors
 /// The `dl-tds` error; [`dl_tds::Error::is_tls`] tells a failed TLS handshake apart.
-pub fn probe(connection: &str) -> Result<Probe, dl_tds::Error> {
-    let mut client = connect(connection, None)?;
+pub fn probe<'a>(target: impl Into<Target<'a>>) -> Result<Probe, dl_tds::Error> {
+    let mut client = connect(target, None)?;
     let results = client.query(
         "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(32)), DB_NAME()",
         &[],
@@ -163,13 +234,15 @@ pub fn has_key(connection: &str, key: &str) -> bool {
 }
 
 impl TdsExecutor {
-    /// An executor for `connection` (never echoed in errors).
+    /// An executor for `target` (the connection is never echoed in errors).
     ///
     /// # Errors
     /// [`Error::Config`] when the connection string does not parse.
-    pub fn new(connection: &str, opts: TdsOptions) -> Result<TdsExecutor, Error> {
-        let connector = TdsConnector::parse(&with_sqlclient_defaults(connection))
-            .map_err(|e| Error::Config(format!("PmsConnectionString: {e}")))?
+    pub fn new<'a>(target: impl Into<Target<'a>>, opts: TdsOptions) -> Result<TdsExecutor, Error> {
+        let target = target.into();
+        let connector = TdsConnector::parse(&target.text())
+            .map_err(|e| Error::Config(format!("{}: {e}", target.label())))?
+            .with_transport(target.pin())
             .with_lock_timeout(Some(opts.lock_timeout));
         let pool = Pool::new(
             "arrival",

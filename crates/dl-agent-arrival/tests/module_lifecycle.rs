@@ -192,12 +192,43 @@ fn picks_up_an_enrollment_links_up_and_stops_promptly() {
     let mut r = rig(section, Some(hooks));
     let st = r.tick_until(3000, |s| s.state == ModuleState::Degraded);
     assert!(st.detail.starts_with("not enrolled"), "{}", st.detail);
+    assert!(st.link.is_none(), "no link before enrolment: {:?}", st.link);
+    for file in ["agent-problems.json", "dl-enroll.json"] {
+        assert!(
+            st.diagnostic_files.iter().any(|p| p.ends_with(file)),
+            "{file} in the diagnostics bundle: {:?}",
+            st.diagnostic_files
+        );
+    }
+    // The core's SQL setup for SMILE_FO wins over PmsConnectionString.
+    let sql = json!({"databases": {"SMILE_FO": {
+        "connection": "Server=\"pms\";Database=\"SMILE_FO\";Integrated Security=SSPI;TrustServerCertificate=true",
+        "auth": "windows", "transport": "tls1.0"}}});
+    std::fs::write(
+        r._data.path().join("sql.json"),
+        dl_json::to_string_pretty(&sql),
+    )
+    .expect("sql.json");
 
     enroll(install.path(), &id, &cloud.url);
     let st = r.tick_until(10_000, |s| s.state == ModuleState::Running);
     assert_eq!(st.state, ModuleState::Running, "{st:?}");
-    let st = r.tick_until(3000, |s| s.metrics.contains_key("last_poll"));
+    let st = r.tick_until(3000, |s| {
+        s.metrics.contains_key("last_poll") && s.link.as_ref().is_some_and(|l| l.ok_at > 0)
+    });
     assert!(st.metrics.contains_key("requests_ok"), "{:?}", st.metrics);
+    let link = st.link.expect("the supervisor watches the arrival link");
+    assert_eq!(link.module, NAME);
+    assert!(
+        cloud.url.starts_with(&link.url),
+        "{} is the origin of {}",
+        link.url,
+        cloud.url
+    );
+    assert_eq!(
+        st.metrics.get("cloud_link_ok_at"),
+        Some(&Value::from(link.ok_at))
+    );
     let hello = cloud
         .exchanges()
         .iter()
@@ -220,7 +251,18 @@ fn picks_up_an_enrollment_links_up_and_stops_promptly() {
         answer.output
     );
     assert!(!answer.output.contains("Password"), "{}", answer.output);
+    for part in [
+        "\"source\":\"sql.json\"",
+        "\"transport\":\"tls1.0\"",
+        "\"sql_auth\":\"windows\"",
+    ] {
+        assert!(answer.output.contains(part), "{part}: {}", answer.output);
+    }
     assert!(r.stop() < Duration::from_secs(4));
+    assert!(
+        r.status().link.is_none(),
+        "a deliberate stop withdraws the link"
+    );
     let status =
         std::fs::read_to_string(install.path().join("link-status.json")).expect("link status");
     assert!(status.contains("\"state\": \"connected\""), "{status}");

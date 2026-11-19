@@ -35,6 +35,7 @@ use dl_json::{Map, Value};
 use dl_time::Offset;
 
 use crate::agent::clock::SystemClock;
+use crate::agent::core_sql;
 use crate::agent::executor::Executor;
 use crate::agent::health::{self, Health};
 use crate::agent::installer;
@@ -43,7 +44,7 @@ use crate::agent::problems::ProblemJournal;
 use crate::agent::runtime::{Installer, Parts, Wiring};
 use crate::agent::secrets::{self, Identity, TenantKeyStore};
 use crate::agent::settings::Settings;
-use crate::agent::tds::{TdsExecutor, TdsOptions};
+use crate::agent::tds::{Target, TdsExecutor, TdsOptions};
 use crate::agent::{eventlog, inventory};
 use crate::error::Error;
 use reporter::CtxSink;
@@ -182,6 +183,10 @@ impl Module for ArrivalModule {
                 Ok((parts, journal)) => {
                     let on_tick = || answer_commands(ctx);
                     let result = parts.run(ctx.stop(), &on_tick).map_err(Into::into);
+                    if result.is_ok() {
+                        // Stopped on purpose: the supervisor has no link to watch any more.
+                        sink.unlink();
+                    }
                     journal.mark_stopped();
                     return result;
                 }
@@ -210,12 +215,19 @@ impl ArrivalModule {
             format!("cannot start: {e}")
         };
         let layout = Layout::detect(config.install_dir.as_deref(), ctx.data_dir());
-        let settings = Settings::load(layout.install_dir()).map_err(cannot)?;
+        let mut settings = Settings::load(layout.install_dir()).map_err(cannot)?;
         let identity_path = layout.resolve(&settings.identity_file);
+        let journal = Arc::new(ProblemJournal::next_to(&identity_path));
+        // The diagnostics bundle takes them even before enrolment (the record says why not).
+        ctx.add_diagnostic_file(journal.path().to_path_buf());
+        ctx.add_diagnostic_file(
+            layout
+                .install_dir()
+                .join(crate::tools::files::ENROLL_RECORD),
+        );
         let identity = Identity::load(&identity_path)
             .map_err(cannot)?
             .ok_or_else(|| NOT_ENROLLED.to_string())?;
-        let journal = Arc::new(ProblemJournal::next_to(&identity_path));
         if let Err((code, message)) = key_ready(&settings, &layout) {
             dl_log::error!("the arrival link has no usable tenant key"; code = %code, error = %message);
             let mut context = Map::new();
@@ -226,21 +238,23 @@ impl ArrivalModule {
             ctx.report(Severity::Error, code, &message, context);
             return Err(format!("cannot start: {message}"));
         }
-        let (executor, installer): (Arc<dyn Executor>, Option<Installer>) = match &self
-            .hooks
-            .executor
-        {
-            Some(e) => (Arc::clone(e), None),
-            None => {
-                let tds = TdsExecutor::new(&settings.pms_connection_string, tds_options(&settings))
-                    .map_err(cannot)?;
-                let installer = settings.auto_install_procedures.then(|| {
-                    let connection = settings.pms_connection_string.clone();
-                    Box::new(move || installer::ensure_installed(&connection, false)) as Installer
-                });
-                (Arc::new(tds), installer)
-            }
-        };
+        pms_from_core(&mut settings, ctx);
+        let (executor, installer): (Arc<dyn Executor>, Option<Installer>) =
+            match &self.hooks.executor {
+                Some(e) => (Arc::clone(e), None),
+                None => {
+                    let tds =
+                        TdsExecutor::new(&settings, tds_options(&settings)).map_err(cannot)?;
+                    let installer = settings.auto_install_procedures.then(|| {
+                        let (connection, source) =
+                            (settings.pms_connection_string.clone(), settings.pms_source);
+                        Box::new(move || {
+                            installer::ensure_installed(Target::new(&connection, source), false)
+                        }) as Installer
+                    });
+                    (Arc::new(tds), installer)
+                }
+            };
         let wiring = Wiring {
             executor,
             clock: Arc::new(SystemClock),
@@ -253,7 +267,23 @@ impl ArrivalModule {
         let mut wiring = wiring;
         wiring.installations = start_journal(&journal, sink);
         let parts = Parts::assemble(&settings, &layout, &identity, wiring).map_err(cannot)?;
+        sink.link_to(&settings.cloud_base_url);
         Ok((parts, journal))
+    }
+}
+
+/// Takes the core's `sql.json` SMILE_FO connection when it declares one; an unusable entry is
+/// reported and the appsettings connection stays.
+fn pms_from_core(settings: &mut Settings, ctx: &ModuleContext) {
+    match core_sql::apply(settings, ctx.data_dir()) {
+        Ok(source) => {
+            let pin = source.pin().map_or("auto", |r| r.name());
+            dl_log::info!("PMS connection chosen"; source = source.name(), transport = pin);
+        }
+        Err(e) => {
+            dl_log::warn!("the core SQL settings cannot serve the PMS; using PmsConnectionString"; error = %e);
+            ctx.report(Severity::Warning, core_sql::UNUSABLE, &e, Map::new());
+        }
     }
 }
 

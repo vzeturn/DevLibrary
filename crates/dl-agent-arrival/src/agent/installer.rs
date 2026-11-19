@@ -152,9 +152,13 @@ fn sql_failure(what: &str, e: &dl_tds::Error) -> InstallError {
 ///
 /// # Errors
 /// [`InstallError`] with counts and SQL error numbers.
-pub fn ensure_installed(connection: &str, force: bool) -> Result<bool, InstallError> {
+pub fn ensure_installed<'a>(
+    target: impl Into<tds::Target<'a>>,
+    force: bool,
+) -> Result<bool, InstallError> {
+    let target = target.into();
     let b = bundle();
-    let mut conn = tds::connect(connection, None).map_err(|e| sql_failure("connect", &e))?;
+    let mut conn = tds::connect(target, None).map_err(|e| sql_failure("connect", &e))?;
     let installed = read_marker(&mut conn, PROPERTY_NAME)?;
     let installed_picture = read_marker(&mut conn, PICTURE_PROPERTY_NAME)?;
     let (run, run_picture) = plan(
@@ -182,7 +186,7 @@ pub fn ensure_installed(connection: &str, force: bool) -> Result<bool, InstallEr
     )?;
     if run_picture {
         // SMILE_PICTURE objects first: the signature procedures compile against them.
-        let mut master = tds::connect(connection, Some("master"))
+        let mut master = tds::connect(target, Some("master"))
             .map_err(|e| sql_failure("connect to master", &e))?;
         let failed = run_batches(&mut master, b, true);
         if !failed.is_empty() {

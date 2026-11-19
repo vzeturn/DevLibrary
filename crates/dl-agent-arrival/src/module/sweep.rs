@@ -179,15 +179,15 @@ fn clip(s: &str) -> String {
     }
 }
 
-/// Runs the sweep on a fresh session of `connection`.
+/// Runs the sweep on a fresh session of `target`.
 ///
 /// # Errors
 /// The PMS cannot be reached (a message without the connection string), or it does not hold
 /// the procedure bundle this agent ships.
-pub fn sweep(connection: &str, opts: &SweepOptions) -> Result<Value, String> {
+pub fn sweep<'a>(target: impl Into<tds::Target<'a>>, opts: &SweepOptions) -> Result<Value, String> {
+    let target = target.into();
     let open = || {
-        tds::connect(connection, None)
-            .map_err(|e| format!("cannot connect: {}", tds::exec_error(&e)))
+        tds::connect(target, None).map_err(|e| format!("cannot connect: {}", tds::exec_error(&e)))
     };
     let mut client = open()?;
     let shipped = installer::bundle().hash.as_str();

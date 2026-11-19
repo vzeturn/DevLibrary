@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
-import { ARRIVAL_SQL_STUB, installScript } from '../src/install/script';
+import { ARRIVAL_LEGACY_SQL_BODY } from '../src/install/arrival';
+import { installScript } from '../src/install/script';
 import { admin, createTenant, manifestText, setNow, T0, testEnv, type TestEnv } from './helpers';
 
 const BASE = 'https://hub.test';
@@ -97,9 +98,11 @@ describe('install script', () => {
   it('offers the old Check-In agent SQL connection when this machine saved none (arrival hook)', async () => {
     const text = await (await get('/install.ps1')).text();
     expect(text).not.toContain('__ARRIVAL_SQL__');
-    expect(text).toContain(ARRIVAL_SQL_STUB);
+    // The arrival slice's reader is the default body, spliced once.
+    expect(text).toContain(ARRIVAL_LEGACY_SQL_BODY);
+    expect(text.split('function Get-ArrivalLegacySql').length).toBe(2);
     // The arrival body needs $St, Add-Secret and Warn defined before it is spliced in.
-    const body = text.indexOf(ARRIVAL_SQL_STUB);
+    const body = text.indexOf(ARRIVAL_LEGACY_SQL_BODY);
     for (const before of ['$St = @{', 'function Add-Secret(', 'function Warn(']) {
       expect(text.indexOf(before)).toBeGreaterThan(0);
       expect(text.indexOf(before)).toBeLessThan(body);
@@ -109,11 +112,11 @@ describe('install script', () => {
     // Its password is offered in memory only: an empty answer keeps it, the source is named.
     expect(text).toContain('if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }');
     expect(text).toContain("Say ($saved.from + ': '");
-    // The arrival slice's body replaces the stub.
-    const real = "function Get-ArrivalLegacySql { $St.SqlFrom = 'old'; return 'Server=.;Integrated Security=True;' }";
-    const spliced = installScript(BASE, [], real);
-    expect(spliced).toContain(real);
-    expect(spliced).not.toContain(ARRIVAL_SQL_STUB);
+    // A caller can still splice another body in its place.
+    const other = "function Get-ArrivalLegacySql { $St.SqlFrom = 'old'; return 'Server=.;Integrated Security=True;' }";
+    const spliced = installScript(BASE, [], other);
+    expect(spliced).toContain(other);
+    expect(spliced).not.toContain(ARRIVAL_LEGACY_SQL_BODY);
     expect(spliced.split('function Get-ArrivalLegacySql').length).toBe(2);
   });
 

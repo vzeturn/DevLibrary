@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod cloud;
+pub mod core_sql;
 pub mod eventlog;
 pub mod executor;
 pub mod health;

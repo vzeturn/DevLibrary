@@ -97,6 +97,12 @@ retired for good, a later slice can move the files; the module would only need `
   is never added. Strings and dates map to `nvarchar` and `datetime2` parameters as SqlClient does.
   A pool login failure is reported as PMS unavailable (`arrival_pms_failed`), never with the
   connection string. The pool holds `MaxConcurrency + watches + 1` sessions.
+- **The core's SQL setup wins (2026-11-19).** When the agent's `sql.json` declares `SMILE_FO`
+  (`dl-agent sql-setup`: `auth` windows|sql, DPAPI-sealed password, the proven `transport` rung),
+  the module, its commands and its self-test use that entry, read as the core reads it (no
+  SqlClient defaults) and held to the pinned rung; `PmsConnectionString` serves only without it.
+  An unusable entry is reported (`arrival_core_sql_unusable`) and the appsettings string stays.
+  `arrival.status` shows `pms.source` (`sql.json` | `appsettings`) and `pms.transport`.
 - **Dropped:** `Update/`, `SelfCare/`, `Diagnostics/` (ProblemJournal, Event Log history), the
   service host. dl-agent owns updates and problem reports. The hello carries no problems, no
   inventory and no `UpdateCheck`; its `agentVersion` is `dl-agent/<version>`.

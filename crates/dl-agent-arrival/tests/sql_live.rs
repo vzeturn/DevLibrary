@@ -24,6 +24,8 @@
 
 use std::collections::BTreeMap;
 
+use dl_agent::sql::transport::Rung;
+use dl_agent_arrival::agent::core_sql::PmsSource;
 use dl_agent_arrival::agent::installer;
 use dl_agent_arrival::agent::tds;
 use dl_agent_arrival::contracts::catalog::catalog;
@@ -436,4 +438,28 @@ fn picture_grants_and_the_op_sweep_hold_on_sql_server() {
         "USE [master]; IF SUSER_ID(N'{LOGIN}') IS NOT NULL DROP LOGIN [{LOGIN}];"
     ))
     .expect("drop the service login");
+}
+
+/// The core's `sql.json` SMILE_FO connection, written as `dl-agent sql-setup` writes it (quoted
+/// values, `TrustServerCertificate`, no `Encrypt`), logs in held to its pinned rung. (The
+/// automatic ladder starts with TLS, which only the Windows build has.)
+#[test]
+fn the_core_sql_json_connection_logs_in_on_its_pinned_rung() {
+    let Some(server) = server() else {
+        eprintln!("{ENV} not set: live SQL checks skipped");
+        return;
+    };
+    let mut core = Vec::new();
+    for part in server.split(';').filter(|p| !p.trim().is_empty()) {
+        let (k, v) = part.split_once('=').expect("key=value");
+        if !k.trim().eq_ignore_ascii_case("encrypt") {
+            core.push(format!("{}=\"{}\"", k.trim(), v.trim()));
+        }
+    }
+    core.push("Database=\"master\";TrustServerCertificate=true".into());
+    let core = core.join(";");
+    let pin = Some(Rung::Unencrypted);
+    let p = tds::probe(tds::Target::new(&core, PmsSource::Core { pin })).expect("probe");
+    assert_eq!(p.database, "master");
+    assert!(!p.version.is_empty());
 }

@@ -15,6 +15,8 @@
  * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
  * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
  */
+import { ARRIVAL_LEGACY_SQL_BODY } from './arrival';
+
 const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Administrator):
 #   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 #   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
@@ -135,7 +137,7 @@ function Read-Secret([string]$label) {
 
 # -- arrival legacy SQL (RT-0164): the old Check-In agent's SQL Server connection is the saved
 #    answer when this machine saved none. Get-ArrivalLegacySql (the arrival slice's body from
-#    src/install/arrival.ts, else a stub that finds nothing) is spliced below; it needs $St,
+#    src/install/arrival.ts by default) is spliced below; it needs $St,
 #    Add-Secret and Warn. This script prints no transcript, so Add-Secret only keeps the list.
 $St = @{ SqlFrom = ''; Secrets = @() }
 function Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }
@@ -432,18 +434,11 @@ try {
 `;
 
 /**
- * Arrival hook (RT-0164 SMILE100): `Get-ArrivalLegacySql` returns the old Check-In agent's SQL
- * Server connection (server part, its authentication, '' when none) for `Get-SavedSql` to offer.
- * The arrival slice ships it as `ARRIVAL_LEGACY_SQL_BODY` in `./arrival`; until that is the
- * default of `installScript` below, this stub finds nothing and nothing changes.
- */
-export const ARRIVAL_SQL_STUB = String.raw`function Get-ArrivalLegacySql { return '' }`;
-
-/**
  * The installer with this hub's origin as its default hub, `hubs` (HUB_URLS) as the enrolment
- * fallbacks and `arrivalSql` as the `Get-ArrivalLegacySql` body.
+ * fallbacks and `arrivalSql` as the `Get-ArrivalLegacySql` body (by default the old Check-In
+ * agent's connection reader from `./arrival`).
  */
-export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_SQL_STUB): string {
+export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_LEGACY_SQL_BODY): string {
   return SCRIPT.split('__ARRIVAL_SQL__').join(arrivalSql).split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
 }
 

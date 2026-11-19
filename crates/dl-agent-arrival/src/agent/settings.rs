@@ -9,6 +9,7 @@ use std::path::Path;
 
 use dl_json::Value;
 
+use crate::agent::core_sql::PmsSource;
 use crate::contracts::Params;
 use crate::error::Error;
 use crate::stj;
@@ -25,8 +26,11 @@ pub const PRODUCTION_FILE: &str = "appsettings.Production.json";
 pub struct Settings {
     /// `CloudBaseUrl`.
     pub cloud_base_url: String,
-    /// `PmsConnectionString` (ADO form, plain text in the ACL-protected file).
+    /// `PmsConnectionString` (ADO form, plain text in the ACL-protected file), or the core's
+    /// `sql.json` connection once [`crate::agent::core_sql::apply`] took it.
     pub pms_connection_string: String,
+    /// Where `pms_connection_string` came from (not an appsetting).
+    pub pms_source: PmsSource,
     /// `IdentityFile`.
     pub identity_file: String,
     /// `TenantKey` (base64), wins over the key file when set.
@@ -67,6 +71,7 @@ impl Default for Settings {
         Settings {
             cloud_base_url: String::new(),
             pms_connection_string: String::new(),
+            pms_source: PmsSource::AppSettings,
             identity_file: "agent-identity.bin".into(),
             tenant_key: String::new(),
             tenant_key_file: "agent-tenant-key.bin".into(),
@@ -91,6 +96,7 @@ impl fmt::Debug for Settings {
                 "pms_connection_string",
                 &redact(&self.pms_connection_string),
             )
+            .field("pms_source", &self.pms_source)
             .field("identity_file", &self.identity_file)
             .field("tenant_key", &redact(&self.tenant_key))
             .field("tenant_key_file", &self.tenant_key_file)

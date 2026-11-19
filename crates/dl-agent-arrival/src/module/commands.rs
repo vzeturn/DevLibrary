@@ -22,10 +22,10 @@ use dl_json::{Map, Value};
 use dl_time::OffsetDateTime;
 
 use super::{ModuleConfig, NAME, picture, selftest, sweep};
-use crate::agent::installer;
 use crate::agent::layout::Layout;
 use crate::agent::secrets::{Identity, TenantKeyStore};
 use crate::agent::settings::Settings;
+use crate::agent::{core_sql, installer};
 use crate::contracts::catalog::catalog;
 use crate::contracts::key_vault::TenantKeyVault;
 use crate::legacy::sqlauth::{self, ConnStr};
@@ -149,13 +149,13 @@ fn slow(ctx: &ModuleContext, kind: &str, args: &Value) -> Result<Value, String> 
             Ok(Value::Object(m))
         }
         "picture_probe" => {
-            let (f, a) = picture::probe(&install.settings.pms_connection_string)?;
+            let (f, a) = picture::probe(&install.settings)?;
             ctx.set_metric("picture_phase", a.state);
             Ok(picture::to_json(&f, &a))
         }
         "op_sweep" => {
             let opts = sweep::SweepOptions::from_args(args, &install.today(ctx))?;
-            let out = sweep::sweep(&install.settings.pms_connection_string, &opts)?;
+            let out = sweep::sweep(&install.settings, &opts)?;
             if let Some(c) = out.get("counts") {
                 ctx.set_metric("last_sweep", c.clone());
             }
@@ -163,8 +163,7 @@ fn slow(ctx: &ModuleContext, kind: &str, args: &Value) -> Result<Value, String> 
         }
         "install_procedures" => {
             let force = matches!(args.get("force"), Some(Value::Bool(true)));
-            let ran = installer::ensure_installed(&install.settings.pms_connection_string, force)
-                .map_err(|e| e.0)?;
+            let ran = installer::ensure_installed(&install.settings, force).map_err(|e| e.0)?;
             let mut m = Map::new();
             m.insert("ran", ran);
             m.insert("bundle", installer::bundle().hash.as_str());
@@ -198,21 +197,29 @@ pub struct Install {
     config: ModuleConfig,
     layout: Layout,
     settings: Settings,
+    /// Why the core's `sql.json` SMILE_FO entry could not be used (appsettings serve then).
+    core_sql_error: Option<String>,
 }
 
 impl Install {
-    /// Reads the config section and the settings.
+    /// Reads the config section and the settings, with the core's `sql.json` SMILE_FO
+    /// connection in place of `PmsConnectionString` when it declares one.
     ///
     /// # Errors
     /// The config or the settings do not read.
     pub fn open(ctx: &ModuleContext) -> Result<Install, String> {
         let config = ModuleConfig::from_value(ctx.config()).map_err(|e| e.to_string())?;
         let layout = Layout::detect(config.install_dir.as_deref(), ctx.data_dir());
-        let settings = Settings::load(layout.install_dir()).map_err(|e| e.to_string())?;
+        let mut settings = Settings::load(layout.install_dir()).map_err(|e| e.to_string())?;
+        let core_sql_error = core_sql::apply(&mut settings, ctx.data_dir()).err();
+        if let Some(e) = &core_sql_error {
+            dl_log::warn!("the core SQL settings cannot serve the PMS; using PmsConnectionString"; error = %e);
+        }
         Ok(Install {
             config,
             layout,
             settings,
+            core_sql_error,
         })
     }
 
@@ -279,6 +286,13 @@ impl Install {
         pms.insert("sql_auth", sqlauth::detect(conn).as_str());
         if let Some(u) = sqlauth::user(conn) {
             pms.insert("sql_user", u);
+        }
+        pms.insert("source", self.settings.pms_source.name());
+        if let Some(rung) = self.settings.pms_source.pin() {
+            pms.insert("transport", rung.name());
+        }
+        if let Some(e) = &self.core_sql_error {
+            pms.insert("source_error", e.as_str());
         }
         m.insert("pms", Value::Object(pms));
         m.insert("cloud_base_url", self.settings.cloud_base_url.as_str());

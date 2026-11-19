@@ -2,6 +2,9 @@
 //! binary is the old .NET agent or dl-agent, and those processes running now. After the
 //! rollout (old agents removed, dl-agent enrolled fresh) it reads
 //! `services=1 [dl-agent -> ...] processes=MM.Arrival.Agent.exe:0 dl-agent.exe:1`.
+//! Processes come from `dl_winsvc::process` (one system call, no `tasklist` to start or parse).
+
+use dl_winsvc::process::{self, Process};
 
 /// `AgentInstallations.MaxLength`.
 pub const MAX_LENGTH: usize = 600;
@@ -11,13 +14,8 @@ pub const OLD_BINARY: &str = "MM.Arrival.Agent.exe";
 pub const BINARY: &str = "dl-agent.exe";
 
 /// The one-line summary from what was found.
-pub fn summarize(services: &[(String, String)], processes: &[String]) -> String {
-    let count = |exe: &str| {
-        processes
-            .iter()
-            .filter(|p| p.eq_ignore_ascii_case(exe))
-            .count()
-    };
+pub fn summarize(services: &[(String, String)], processes: &[Process]) -> String {
+    let count = |exe: &str| processes.iter().filter(|p| p.is(exe)).count();
     let list: Vec<String> = services
         .iter()
         .map(|(n, p)| format!("{n} -> {}", p.trim()))
@@ -33,23 +31,12 @@ pub fn summarize(services: &[(String, String)], processes: &[String]) -> String 
 }
 
 /// Whether the old .NET agent is still installed or running.
-pub fn old_agent_left(services: &[(String, String)], processes: &[String]) -> bool {
+pub fn old_agent_left(services: &[(String, String)], processes: &[Process]) -> bool {
     let old = OLD_BINARY.to_lowercase();
     services
         .iter()
         .any(|(_, p)| p.to_lowercase().contains(&old))
-        || processes.iter().any(|p| p.eq_ignore_ascii_case(OLD_BINARY))
-}
-
-/// Image names of `tasklist /FO CSV /NH`.
-pub fn parse_tasklist(csv: &str) -> Vec<String> {
-    csv.lines()
-        .filter_map(|l| {
-            let l = l.trim();
-            let rest = l.strip_prefix('"')?;
-            Some(rest[..rest.find('"')?].to_owned())
-        })
-        .collect()
+        || processes.iter().any(|p| p.is(OLD_BINARY))
 }
 
 /// Whether a service binary path is one of the agents.
@@ -58,13 +45,13 @@ pub fn is_agent(path: &str) -> bool {
     p.contains(&OLD_BINARY.to_lowercase()) || p.contains(&BINARY.to_lowercase())
 }
 
-/// Agent services (name, binary path) and the image names of running processes.
-pub type Found = (Vec<(String, String)>, Vec<String>);
+/// Agent services (name, binary path) and the running processes.
+pub type Found = (Vec<(String, String)>, Vec<Process>);
 
 /// The services and processes (`None` off Windows).
 ///
 /// # Errors
-/// The service manager or `tasklist` cannot be read (the reason).
+/// The service manager or the process list cannot be read (the reason).
 pub fn scan() -> Result<Option<Found>, String> {
     if !cfg!(windows) {
         return Ok(None);
@@ -84,14 +71,7 @@ pub fn scan() -> Result<Option<Found>, String> {
     if unreadable > 0 {
         dl_log::debug!("services whose configuration could not be read"; count = unreadable);
     }
-    let out = std::process::Command::new("tasklist")
-        .args(["/FO", "CSV", "/NH"])
-        .output()
-        .map_err(|e| format!("tasklist: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("tasklist exited {}", out.status));
-    }
-    let processes = parse_tasklist(&String::from_utf8_lossy(&out.stdout));
+    let processes = process::list().map_err(|e| format!("processes: {e}"))?;
     Ok(Some((services, processes)))
 }
 
@@ -120,11 +100,23 @@ pub fn describe() -> (Option<String>, bool) {
 mod tests {
     use super::*;
 
+    fn proc(pid: u32, name: &str) -> Process {
+        Process {
+            pid,
+            parent_pid: 0,
+            session_id: 0,
+            name: name.to_owned(),
+        }
+    }
+
     #[test]
     fn summary_counts_both_agents_and_flags_the_old_one() {
-        let csv = "\"System Idle Process\",\"0\",\"Services\",\"0\",\"8 K\"\r\n\"dl-agent.exe\",\"4120\",\"Services\",\"0\",\"21,004 K\"\r\n\"MM.Arrival.Agent.exe\",\"5000\",\"Services\",\"0\",\"80,000 K\"\r\n";
-        let p = parse_tasklist(csv);
-        assert_eq!(p.len(), 3);
+        // Image names as the system reports them; the case of `.exe` does not matter.
+        let p = vec![
+            proc(0, ""),
+            proc(4120, "dl-agent.exe"),
+            proc(5000, "MM.Arrival.Agent.EXE"),
+        ];
         let s = vec![(
             "dl-agent".to_owned(),
             "\"C:\\Program Files\\DevLibrary\\dl-agent.exe\" service".to_owned(),
