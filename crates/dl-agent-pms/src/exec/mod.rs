@@ -1,6 +1,9 @@
-//! Runs ops on the site database: parameterized calls of allow-listed procedures only,
-//! one transaction per op, results encoded to JSON exactly as the Go agent does
-//! (`internal/exec`). Args, results, request keys and connection strings are never
+//! Runs ops on the site's SMILE databases: parameterized calls of allow-listed vendor
+//! procedures only, on the database the op frame names (`target_db`, which must be the
+//! one the manifest gives the op's target), one transaction per op, results encoded to
+//! JSON exactly as the Go agent did (`internal/exec`). Nothing is written to a customer
+//! database by the agent itself: replays are answered by the local journal
+//! ([`crate::journal`]). Args, results, request keys and connection strings are never
 //! logged.
 
 use std::collections::BTreeMap;
@@ -29,6 +32,8 @@ pub const CODE_LOCK_TIMEOUT: &str = "LOCK_TIMEOUT";
 pub const CODE_DB_UNAVAILABLE: &str = "DB_UNAVAILABLE";
 /// Rejected: past the row or byte cap; a write is rolled back.
 pub const CODE_RESULT_TOO_LARGE: &str = "RESULT_TOO_LARGE";
+/// Failed: the vendor procedure answered without the data the op promises (a read only).
+pub const CODE_NO_DATA: &str = "NO_DATA";
 
 /// The stub's rejection message.
 pub const NOT_IMPLEMENTED_MESSAGE: &str = "not_implemented";
@@ -41,9 +46,6 @@ pub const DEFAULT_MAX_RESULT_BYTES: usize = 7 * 1024 * 1024;
 const SQL_DEADLOCK: i32 = 1205;
 const SQL_LOCK_TIMEOUT: i32 = 1222;
 const LOCK_TIMEOUT_SQL: &str = "SET LOCK_TIMEOUT 10000";
-const PROC_GET_LOG: &str = "MM_Op_GetLog";
-const PROC_CREATE_LOG: &str = "MM_Op_CreateLog";
-const AGENT_ENVELOPE: &str = "agent/1";
 
 /// Runs one op; must honour the context (cancelled at the op's deadline) and never log
 /// args or results.
@@ -52,21 +54,6 @@ pub trait Executor: Send + Sync {
     fn execute(&self, ctx: &Ctx, op: &Op) -> OpResult;
     /// The highest op contract version implemented.
     fn contract_max(&self) -> i64;
-}
-
-/// Reports the highest MM_PMS migration applied (0: cannot tell).
-pub trait SchemaVersion: Send + Sync {
-    /// The applied version.
-    fn schema_version(&self, ctx: &Ctx) -> Result<i64, String>;
-}
-
-/// Always [`wire::SCHEMA_VERSION_UNKNOWN`].
-pub struct UnknownSchema;
-
-impl SchemaVersion for UnknownSchema {
-    fn schema_version(&self, _: &Ctx) -> Result<i64, String> {
-        Ok(wire::SCHEMA_VERSION_UNKNOWN)
-    }
 }
 
 /// Refuses every op; nothing touches a database.
@@ -107,12 +94,7 @@ pub fn failed(id: &str, code: &str, message: &str) -> OpResult {
     outcome(id, wire::STATUS_FAILED, code, message)
 }
 
-fn applied(
-    sets: Vec<Vec<Row>>,
-    rowcounts: Vec<i64>,
-    outputs: BTreeMap<String, J>,
-    replayed: bool,
-) -> OpResult {
+fn applied(sets: Vec<Vec<Row>>, rowcounts: Vec<i64>, outputs: BTreeMap<String, J>) -> OpResult {
     OpResult {
         id: String::new(),
         status: wire::STATUS_APPLIED.to_owned(),
@@ -120,16 +102,21 @@ fn applied(
         rowcounts,
         outputs,
         error: None,
-        replayed: Some(replayed),
+        replayed: None,
     }
 }
 
-/// The database whose pool runs an op target (BO is read through MM_PMS synonyms).
-pub fn target_db(target: &str) -> &'static str {
-    match target {
-        "FO" => db::DB_FO,
-        "POS" => db::DB_POS,
-        _ => db::DB_PMS,
+/// What a read must return to count as answered: the cloud decoder takes the first row
+/// of the first set, and a missing value is never sent as `null`.
+fn missing_data(op: &str, sets: &[Vec<Row>]) -> Option<&'static str> {
+    let first = sets.first().and_then(|s| s.first());
+    match op {
+        // vendor GetHotelDate1: `Select HotelDate From HotelParameter`.
+        "fo.hotelDate.get" => match first.and_then(|r| r.get("HotelDate")) {
+            Some(J::String(s)) if s.len() >= 10 => None,
+            _ => Some("GetHotelDate1 returned no HotelDate"),
+        },
+        _ => None,
     }
 }
 
@@ -150,8 +137,6 @@ enum ExecErr {
     Db(DbError),
     Commit,
     TooLarge,
-    ReplayConflict,
-    LogCorrupt,
     NotAllowed,
     Encode(String),
 }
@@ -188,10 +173,6 @@ fn classify(id: &str, ctx: &Ctx, err: &ExecErr) -> OpResult {
     match err {
         ExecErr::Commit => return failed(id, CODE_DB_UNAVAILABLE, "commit_outcome_unknown"),
         ExecErr::TooLarge => return rejected(id, CODE_RESULT_TOO_LARGE, "result_too_large"),
-        ExecErr::ReplayConflict => {
-            return rejected(id, wire::ERR_OP_REJECTED, "request_key_conflict");
-        }
-        ExecErr::LogCorrupt => return rejected(id, wire::ERR_OP_REJECTED, "op_log_corrupt"),
         ExecErr::NotAllowed => return rejected(id, wire::ERR_OP_REJECTED, "proc_not_allowed"),
         ExecErr::Encode(m) => {
             return rejected(id, wire::ERR_OP_REJECTED, &format!("result_encoding: {m}"));
@@ -226,11 +207,9 @@ fn classify(id: &str, ctx: &Ctx, err: &ExecErr) -> OpResult {
 
 mod bind;
 mod encode;
-mod replay;
 
 use bind::*;
 pub use encode::*;
-use replay::*;
 
 // ---- the executor ------------------------------------------------------------------
 
@@ -259,7 +238,7 @@ impl Default for Limits {
 pub struct SqlExecutor {
     /// The op manifest.
     pub manifest: Arc<Manifest>,
-    /// One pool per database; a missing one fails its ops with DB_UNAVAILABLE.
+    /// One pool per SMILE database; a missing one fails its ops with DB_UNAVAILABLE.
     pub dbs: Pools,
     /// Limits.
     pub limits: Limits,
@@ -307,35 +286,6 @@ impl SqlExecutor {
         Ok(())
     }
 
-    fn get_log(
-        &self,
-        ctx: &Ctx,
-        conn: &mut db::Conn<'_>,
-        key: &str,
-    ) -> Result<Option<LogRow>, ExecErr> {
-        let r = conn.call(
-            ctx,
-            PROC_GET_LOG,
-            &[Param::new(
-                "RequestKey",
-                ParamValue::VarChar(Some(key.into())),
-            )],
-        )?;
-        let Some(row) = r.sets().iter().find_map(|s| s.rows().first()) else {
-            return Ok(None);
-        };
-        let s = |i: usize| -> Result<String, ExecErr> {
-            row.get::<String>(i)
-                .map_err(|e| ExecErr::Db(DbError::Tds(e)))
-        };
-        Ok(Some(LogRow {
-            op: s(1)?,
-            status: s(2)?,
-            hash: s(3)?,
-            json: s(4)?,
-        }))
-    }
-
     /// One try: one transaction, every call in order, commit or roll back.
     fn attempt(
         &self,
@@ -343,10 +293,9 @@ impl SqlExecutor {
         pool: &Pool,
         spec: &ops::Op,
         calls: &[BoundCall],
-        key: &str,
     ) -> Result<OpResult, ExecErr> {
         let mut conn = pool.get(ctx)?;
-        let res = self.attempt_on(ctx, &mut conn, spec, calls, key);
+        let res = self.attempt_on(ctx, &mut conn, spec, calls);
         match &res {
             Ok(_) => {}
             Err(ExecErr::Commit) => {}
@@ -361,16 +310,8 @@ impl SqlExecutor {
         conn: &mut db::Conn<'_>,
         spec: &ops::Op,
         calls: &[BoundCall],
-        key: &str,
     ) -> Result<OpResult, ExecErr> {
         conn.batch(ctx, &format!("BEGIN TRANSACTION; {LOCK_TIMEOUT_SQL}"))?;
-        if !key.is_empty()
-            && let Some(prior) = self.get_log(ctx, conn, key)?
-        {
-            let s = replay(&prior, &spec.name)?;
-            rollback(conn);
-            return Ok(applied(s.sets, s.rowcounts, s.outputs, true));
-        }
         let mut b = SetBuilder {
             max_rows: self.limits.max_rows_per_set,
             max_bytes: self.limits.max_result_bytes,
@@ -384,29 +325,12 @@ impl SqlExecutor {
         }
         if spec.kind == ops::KIND_READ {
             rollback(conn); // ends the read
-            return Ok(applied(b.sets, b.rowcounts, outputs, false));
-        }
-        if !key.is_empty() {
-            let stored = store_json(&b.sets, &b.rowcounts, &outputs);
-            conn.call(
-                ctx,
-                PROC_CREATE_LOG,
-                &[
-                    Param::new("RequestKey", ParamValue::VarChar(Some(key.into()))),
-                    Param::new("Op", ParamValue::VarChar(Some(spec.name.clone()))),
-                    Param::new("Status", ParamValue::VarChar(Some("applied".into()))),
-                    Param::new(
-                        "ResultHash",
-                        ParamValue::VarChar(Some(crate::sha256_hex(stored.as_bytes()))),
-                    ),
-                    Param::new("ResultJson", ParamValue::String(Some(stored))),
-                ],
-            )?;
+            return Ok(applied(b.sets, b.rowcounts, outputs));
         }
         if conn.batch(ctx, "COMMIT TRANSACTION").is_err() {
             return Err(ExecErr::Commit);
         }
-        Ok(applied(b.sets, b.rowcounts, outputs, false))
+        Ok(applied(b.sets, b.rowcounts, outputs))
     }
 }
 
@@ -437,23 +361,25 @@ impl Executor for SqlExecutor {
                 ),
             );
         }
-        let key = op.request_key.clone().unwrap_or_default();
-        if op.request_key.is_some() {
+        // The frame's database must be the one the manifest gives the op (FO -> SMILE_FO,
+        // POS -> SMILE_POS, BO -> SMILE_BO); the agent connects to that database only.
+        let dbname = match spec.target_db.as_deref() {
+            Some(d) if d == op.target_db => d,
+            _ => return rejected(&op.id, wire::ERR_OP_REJECTED, "target_db_mismatch"),
+        };
+        let keyed = op.request_key.is_some();
+        if let Some(key) = &op.request_key {
             if spec.kind == ops::KIND_READ {
                 return rejected(&op.id, wire::ERR_OP_REJECTED, "request_key_on_read");
             }
-            if !valid_request_key(&key) {
+            if !valid_request_key(key) {
                 return rejected(&op.id, wire::ERR_OP_REJECTED, "invalid_request_key");
-            }
-            if target_db(&spec.target) != db::DB_PMS {
-                return rejected(&op.id, wire::ERR_OP_REJECTED, "request_key_needs_pms");
             }
         }
         let calls = match bind_args(spec, &op.args) {
             Ok(c) => c,
             Err(e) => return rejected(&op.id, wire::ERR_OP_REJECTED, &e),
         };
-        let dbname = target_db(&spec.target);
         let Some(pool) = self.dbs.get(dbname) else {
             return failed(
                 &op.id,
@@ -462,16 +388,21 @@ impl Executor for SqlExecutor {
             );
         };
         let ctx = ctx.with_timeout(Duration::from_millis(spec.timeout_ms.max(0) as u64));
-        let attempts = if spec.kind == ops::KIND_READ || spec.idempotent || !key.is_empty() {
+        // A deadlock victim's transaction is rolled back by the server, so a retry cannot
+        // apply twice; writes still retry only when declared safe or keyed.
+        let attempts = if spec.kind == ops::KIND_READ || spec.idempotent || keyed {
             self.limits.deadlock_attempts.max(1)
         } else {
             1
         };
         let mut try_no = 1;
         loop {
-            let err = match self.attempt(&ctx, pool, spec, &calls, &key) {
+            let err = match self.attempt(&ctx, pool, spec, &calls) {
                 Ok(mut res) => {
                     res.id = op.id.clone();
+                    if let Some(why) = missing_data(&spec.name, &res.sets) {
+                        return failed(&op.id, CODE_NO_DATA, why);
+                    }
                     return res;
                 }
                 Err(e) => e,

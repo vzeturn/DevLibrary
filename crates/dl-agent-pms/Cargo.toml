@@ -1,6 +1,6 @@
 [package]
 name = "dl-agent-pms"
-description = "SMILE PMS site module for dl-agent: the outbound-only bridge between a site's MM_PMS database and SMILE PMS cloud (port of the Go site agent)."
+description = "SMILE PMS site module for dl-agent: the outbound-only bridge between a site's SMILE_FO, SMILE_POS and SMILE_BO databases and SMILE PMS cloud (SMILE-only contract)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

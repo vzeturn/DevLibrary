@@ -22,7 +22,8 @@ pub const ENV_ENROLLMENT_CODE: &str = "PMS_AGENT_ENROLLMENT_CODE";
 /// Overrides `log_level`.
 pub const ENV_LOG_LEVEL: &str = "PMS_AGENT_LOG_LEVEL";
 
-/// The pre-migration backup proof.
+/// The pre-migration backup proof of an old config (ignored: MM_PMS migrations run in
+/// the cloud since the SMILE-only contract).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MigrationBackup {
     /// `copy_only`, `attested` or empty (refuse files that need a backup).
@@ -35,7 +36,8 @@ pub struct MigrationBackup {
     pub max_age_minutes: i64,
 }
 
-/// Who may sign migration bundles and how the pre-migration backup is proven.
+/// The `migration` section of an old SmilePmsAgent config. Still parsed so such a file
+/// keeps loading; nothing reads it, since no migration runs on a site any more.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Migration {
     /// The pinned keyring JSON, `{"keys":[{"key_id","public_key"}]}` (public keys only).
@@ -61,7 +63,7 @@ pub struct Config {
     pub enrollment_code: String,
     /// debug, info, warn or error.
     pub log_level: String,
-    /// Schema migrator settings.
+    /// Old migrator settings, parsed and ignored.
     pub migration: Migration,
     /// The file this config was read from (`None` when there was none).
     pub path: Option<PathBuf>,

@@ -1,0 +1,16 @@
+{
+  "type": "op",
+  "id": "6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e70",
+  "op": "fo.folioLogDef.update",
+  "contract_ver": 1,
+  "target_db": "SMILE_FO",
+  "args": {
+    "logNo": 12,
+    "name": "Night audit",
+    "active": true
+  },
+  "request_key": "req-2026-11-04-0001",
+  "replay": true,
+  "expected_stamp": "0x00000000000007D1",
+  "deadline_ms": 15000
+}

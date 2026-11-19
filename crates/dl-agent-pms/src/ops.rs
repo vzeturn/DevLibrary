@@ -1,7 +1,8 @@
-//! The op manifest the agent executes from: the procedure allow-list and the call plan of
-//! every op, generated from the TypeScript OpRegistry (packages/shared/src/ops) into
-//! `apps/site-agent/internal/ops/ops-manifest.json` and embedded here from that same file.
-//! An op or procedure the manifest does not name never runs.
+//! The op manifest the agent executes from: the procedure allow-list, the call plan and the
+//! SMILE database of every op, generated from the TypeScript OpRegistry
+//! (packages/shared/src/ops) into `packages/shared/src/ops/ops-manifest.json` (manifest v2)
+//! and embedded here as a byte copy of that file. An op or procedure the manifest does not
+//! name never runs.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,6 +14,12 @@ use crate::pat;
 
 /// The manifest this build carries.
 pub const EMBEDDED: &str = include_str!("../assets/ops-manifest.json");
+
+/// The manifest format this build reads.
+pub const MANIFEST_VERSION: i64 = 2;
+
+/// The SMILE databases an op may run on, in FO, POS, BO order (`AGENT_TARGET_DB`).
+pub const TARGET_DBS: [&str; 3] = ["SMILE_FO", "SMILE_POS", "SMILE_BO"];
 
 /// A read op.
 pub const KIND_READ: &str = "read";
@@ -99,6 +106,8 @@ pub struct Op {
     pub kind: String,
     /// FO, POS, BO or PMS.
     pub target: String,
+    /// The SMILE database the op runs on (`None` for an op the cloud runs in process).
+    pub target_db: Option<String>,
     /// Statement timeout.
     pub timeout_ms: i64,
     /// Safe to retry.
@@ -110,7 +119,7 @@ pub struct Op {
 /// The decoded, validated manifest.
 #[derive(Debug, Clone)]
 pub struct Manifest {
-    /// Format version (1).
+    /// Format version (2).
     pub manifest_version: i64,
     /// Hash of the allow-list (logged at start).
     pub allowlist_hash: String,
@@ -202,6 +211,7 @@ fn parse_op(v: &Value) -> Result<Op, String> {
             "contract_ver",
             "kind",
             "target",
+            "target_db",
             "timeout_ms",
             "idempotent",
             "calls",
@@ -224,10 +234,21 @@ fn parse_op(v: &Value) -> Result<Op, String> {
         contract_ver: i(o, "contract_ver")?,
         kind: s(o, "kind")?,
         target: s(o, "target")?,
+        target_db: Some(s(o, "target_db")?).filter(|t| !t.is_empty()),
         timeout_ms: i(o, "timeout_ms")?,
         idempotent: b(o, "idempotent")?,
         calls,
     })
+}
+
+/// The SMILE database of a manifest target (`None` for PMS, which has none on the site).
+pub fn target_db_of(target: &str) -> Option<&'static str> {
+    match target {
+        "FO" => Some(TARGET_DBS[0]),
+        "POS" => Some(TARGET_DBS[1]),
+        "BO" => Some(TARGET_DBS[2]),
+        _ => None,
+    }
 }
 
 fn validate_op(op: &Op, allowed: &HashSet<String>) -> Result<(), String> {
@@ -245,6 +266,17 @@ fn validate_op(op: &Op, allowed: &HashSet<String>) -> Result<(), String> {
             "target {} is not FO|POS|BO|PMS",
             json::quote(&op.target)
         ));
+    }
+    match (&op.target_db, op.calls.is_empty()) {
+        (Some(db), _) if target_db_of(&op.target) != Some(db.as_str()) => {
+            return Err(format!(
+                "target_db {} does not match target {}",
+                json::quote(db),
+                op.target
+            ));
+        }
+        (None, false) => return Err("an op with agent calls needs a target_db".into()),
+        _ => {}
     }
     let mut outputs = HashSet::new();
     for c in &op.calls {
@@ -313,8 +345,10 @@ impl Manifest {
             "manifest",
         )?;
         let version = i(o, "manifest_version")?;
-        if version != 1 {
-            return Err(e(format!("manifest_version {version} is not 1")));
+        if version != MANIFEST_VERSION {
+            return Err(e(format!(
+                "manifest_version {version} is not {MANIFEST_VERSION}"
+            )));
         }
         let strings = |k: &str| -> Result<Vec<String>, String> {
             arr(o, k)?
@@ -386,6 +420,16 @@ impl Manifest {
             .map(|op| op.contract_ver)
             .fold(1, i64::max)
     }
+
+    /// `name@contract_ver` of every op this build executes (the ones with agent calls), in
+    /// manifest order: the `ops` list of the hello frame.
+    pub fn implemented_ops(&self) -> Vec<String> {
+        self.ops
+            .iter()
+            .filter(|op| !op.calls.is_empty())
+            .map(|op| format!("{}@{}", op.name, op.contract_ver))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -395,21 +439,24 @@ mod tests {
     #[test]
     fn embedded_manifest_loads() {
         let m = Manifest::load().unwrap();
-        assert_eq!(m.manifest_version, 1);
-        let op = m.lookup("pos.checkVersion.get").unwrap();
-        assert_eq!(op.calls.len(), 3);
-        assert_eq!(
-            op.calls[1].params[1].value.as_ref().and_then(Value::as_i64),
-            Some(500)
-        );
-        assert!(m.allowed("mm_pos_getbilldetail"));
+        assert_eq!(m.manifest_version, 2);
+        let op = m.lookup("fo.hotelDate.get").unwrap();
+        assert_eq!(op.calls.len(), 1);
+        assert_eq!(op.calls[0].proc_name, "GetHotelDate1");
+        assert_eq!(op.target_db.as_deref(), Some("SMILE_FO"));
+        assert_eq!(m.lookup("pos.checkVersion.get").unwrap().target_db, None);
+        assert!(m.allowed("gethoteldate1"));
+        assert!(!m.allowed("MM_Op_CreateLog"));
         assert_eq!(m.contract_max(), 1);
+        assert_eq!(m.implemented_ops(), vec!["fo.hotelDate.get@1".to_owned()]);
+        let hash = crate::sha256_hex(m.procs.join("\n").as_bytes());
+        assert_eq!(m.allowlist_hash, hash);
     }
 
     fn with(procs: &str, ops: &str) -> Result<Manifest, String> {
         Manifest::parse(
             format!(
-                r#"{{"manifest_version":1,"allowlist_hash":"x","procs":{procs},"excluded_proc_patterns":["^MM_Danger"],"ops":{ops}}}"#
+                r#"{{"manifest_version":2,"allowlist_hash":"x","procs":{procs},"excluded_proc_patterns":["^MM_Danger"],"ops":{ops}}}"#
             )
             .as_bytes(),
         )
@@ -422,11 +469,42 @@ mod tests {
         assert!(with(r#"["dbo.X"]"#, "[]").is_err());
         let op = |params: &str| {
             format!(
-                r#"[{{"name":"a.b.c","contract_ver":1,"kind":"read","target":"PMS","timeout_ms":1,"idempotent":true,"calls":[{{"proc":"P","params":{params}}}]}}]"#
+                r#"[{{"name":"a.b.c","contract_ver":1,"kind":"read","target":"FO","target_db":"SMILE_FO","timeout_ms":1,"idempotent":true,"calls":[{{"proc":"P","params":{params}}}]}}]"#
             )
         };
         assert!(with(r#"["P"]"#, &op("[]")).is_ok());
         assert!(with(r#"["Q"]"#, &op("[]")).is_err());
+        let routed = |target: &str, db: &str| {
+            with(
+                r#"["P"]"#,
+                &format!(
+                    r#"[{{"name":"a.b.c","contract_ver":1,"kind":"read","target":"{target}","target_db":{db},"timeout_ms":1,"idempotent":true,"calls":[{{"proc":"P","params":[]}}]}}]"#
+                ),
+            )
+        };
+        assert!(routed("POS", r#""SMILE_POS""#).is_ok());
+        assert!(routed("BO", r#""SMILE_BO""#).is_ok());
+        assert!(
+            routed("FO", r#""SMILE_POS""#).is_err(),
+            "target_db must match target"
+        );
+        assert!(
+            routed("PMS", r#""MM_PMS""#).is_err(),
+            "MM_PMS is never a target"
+        );
+        assert!(
+            routed("FO", "null").is_err(),
+            "an op with calls needs a target_db"
+        );
+        assert!(
+            Manifest::parse(
+                EMBEDDED
+                    .replace("\"manifest_version\": 2", "\"manifest_version\": 1")
+                    .as_bytes()
+            )
+            .is_err(),
+            "a v1 manifest is refused"
+        );
         assert!(
             with(
                 r#"["P"]"#,

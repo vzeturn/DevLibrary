@@ -19,7 +19,7 @@ fn rejections_never_touch_the_database() {
     let fx = json::parse(&std::fs::read(path).unwrap()).unwrap();
     let closed: dl_tds::Config = "sqlserver://sa:x@127.0.0.1:1".parse().unwrap();
     let mut dbs = db::Pools::new();
-    for name in [db::DB_PMS, db::DB_FO] {
+    for name in [db::DB_FO, db::DB_POS, db::DB_BO] {
         dbs.insert(
             name.to_owned(),
             Arc::new(Pool::new(name, closed.clone(), 1)),
@@ -32,7 +32,7 @@ fn rejections_never_touch_the_database() {
         log: Logger::discard(),
     };
     let cases = fx["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 8);
+    assert_eq!(cases.len(), 7);
     for c in cases {
         let name = c["name"].as_str().unwrap();
         let Frame::Op(op) = wire::decode_json(json::to_string(&c["op"]).as_bytes()).unwrap() else {

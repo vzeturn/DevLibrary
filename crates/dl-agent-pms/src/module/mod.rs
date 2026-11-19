@@ -1,5 +1,7 @@
-//! The dl-agent module: runs the PMS site agent (enroll, token, stream, executor,
-//! migrations, retention) under [`dl_agent::supervisor::Module`].
+//! The dl-agent module: runs the PMS site agent (enroll, token, stream, the executor over
+//! the SMILE databases and its op journal) under [`dl_agent::supervisor::Module`]. The
+//! SMILE databases come from the core's `sql.json` first (auth mode, sealed password, TLS
+//! rung), then from `databases.json` in the agent's state directory.
 //!
 //! The module is opt-in (`modules.pms-site.enabled = true`). Without an identity and
 //! without an enrollment code it stays degraded ("not enrolled") and looks again every
@@ -28,6 +30,7 @@ use crate::agent::{self, AgentError, Deps};
 use crate::config::Config;
 use crate::conn::ConnError;
 use crate::ctx::Ctx;
+use crate::db;
 use crate::exec::Executor;
 use crate::log::{self, Logger};
 use crate::telemetry::{self, Health, Level, Telemetry};
@@ -52,7 +55,7 @@ const WORKER_STOP_WAIT: Duration = Duration::from_secs(8);
 /// Parts a test or an embedding host can replace; `None` takes the production default.
 #[derive(Clone, Default)]
 pub struct Hooks {
-    /// The op executor (default: SQL over `databases.json`).
+    /// The op executor (default: SQL over the SMILE databases); it runs behind the journal.
     pub exec: Option<Arc<dyn Executor>>,
     /// The HTTP client for enroll, token and stream (default: OS TLS, env proxy).
     pub http: Option<Arc<dl_http::Client>>,
@@ -154,6 +157,7 @@ impl PmsSiteModule {
             log: Some(log.clone()),
             http: self.hooks.http.clone(),
             exec: self.hooks.exec.clone(),
+            sql: db::shared_pools(ctx),
             backoff: self.hooks.backoff,
             telemetry: Some(tel.clone()),
             version: hello_version(),

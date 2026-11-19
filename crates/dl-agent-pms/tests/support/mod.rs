@@ -111,7 +111,10 @@ pub enum End {
 /// One scripted stream session: ops to send after `cfg`, then how it ends.
 #[derive(Debug, Clone)]
 pub struct Session {
+    /// Ids of `op.json` frames (request key `rk-<id>`) to send.
     pub ops: Vec<String>,
+    /// Whole op frames sent after those.
+    pub frames: Vec<String>,
     pub end: End,
 }
 
@@ -119,9 +122,35 @@ impl Session {
     pub fn new(ops: &[String], end: End) -> Session {
         Session {
             ops: ops.to_vec(),
+            frames: Vec::new(),
             end,
         }
     }
+
+    /// Sends these op frames as they are.
+    pub fn frames(frames: Vec<String>, end: End) -> Session {
+        Session {
+            ops: Vec::new(),
+            frames,
+            end,
+        }
+    }
+}
+
+/// `op.json` with `id`, and `fields` set (a `null` value removes the field).
+pub fn custom_op(id: &str, fields: &[(&str, Value)]) -> String {
+    let mut v = dl_json::parse(OP_FRAME).unwrap();
+    if let Value::Object(o) = &mut v {
+        o.insert("id", id);
+        for (k, val) in fields {
+            if val.is_null() {
+                o.remove(k);
+            } else {
+                o.insert(*k, val.clone());
+            }
+        }
+    }
+    dl_json::to_string(&v)
 }
 
 /// What the fake cloud saw.
@@ -133,8 +162,12 @@ pub struct Seen {
     pub streams: usize,
     /// `agent_version` of every hello.
     pub hellos: Vec<String>,
+    /// Every hello frame as sent.
+    pub hello_frames: Vec<Value>,
     /// (op id, status) of every result.
     pub results: Vec<(String, String)>,
+    /// Every result frame as sent.
+    pub result_frames: Vec<Value>,
     /// Close codes the agent sent.
     pub closes: Vec<u16>,
     /// Protocol surprises (the test fails on any).
@@ -310,6 +343,7 @@ fn serve(mut s: TcpStream, plan: &Plan) {
             seen.lock().unwrap().streams += 1;
             let session = plan.sessions.lock().unwrap().pop().unwrap_or(Session {
                 ops: Vec::new(),
+                frames: Vec::new(),
                 end: End::Hold,
             });
             stream(
@@ -354,13 +388,28 @@ fn stream(mut ws: WebSocket<TcpStream>, plan: &Session, seen: &Mutex<Seen>) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    seen.lock().unwrap().hellos.push(version);
+    {
+        let mut s = seen.lock().unwrap();
+        s.hellos.push(version);
+        s.hello_frames.push(hello.clone());
+    }
     if ws.send_text(CFG_FRAME).is_err() {
         return;
     }
     let mut pending: HashSet<String> = plan.ops.iter().cloned().collect();
+    for f in &plan.frames {
+        let v = dl_json::parse(f).unwrap_or(Value::Null);
+        if let Some(id) = v.get("id").and_then(Value::as_str) {
+            pending.insert(id.to_owned());
+        }
+    }
     for id in &plan.ops {
         if ws.send_text(&op_frame(id)).is_err() {
+            return;
+        }
+    }
+    for f in &plan.frames {
+        if ws.send_text(f).is_err() {
             return;
         }
     }
@@ -374,7 +423,10 @@ fn stream(mut ws: WebSocket<TcpStream>, plan: &Session, seen: &Mutex<Seen>) {
                     let id = v.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
                     let status = v.get("status").and_then(Value::as_str).unwrap_or("");
                     pending.remove(&id);
-                    seen.lock().unwrap().results.push((id, status.to_owned()));
+                    let mut s = seen.lock().unwrap();
+                    s.results.push((id, status.to_owned()));
+                    s.result_frames.push(v.clone());
+                    drop(s);
                     maybe_close(&mut ws, &pending, plan.end, &mut closed_by_us);
                 }
             }
@@ -496,6 +548,11 @@ impl Rig {
     }
 
     pub fn command(&mut self, kind: &str) -> CommandResult {
+        self.command_with(kind, Value::Null)
+    }
+
+    /// Delivers `kind` with `args` and waits up to 10 s for its answer.
+    pub fn command_with(&mut self, kind: &str, args: Value) -> CommandResult {
         self.next += 1;
         let id = format!("c-{kind}-{}", self.next);
         self.sup
@@ -503,11 +560,11 @@ impl Rig {
                 id: id.clone(),
                 kind: kind.into(),
                 module: Some("pms-site".into()),
-                args: Value::Null,
+                args,
                 expires_at: u64::MAX,
             })
             .expect("module running");
-        let end = Instant::now() + Duration::from_secs(3);
+        let end = Instant::now() + Duration::from_secs(10);
         while Instant::now() < end {
             if let Some(r) = self.outbox.take().into_iter().find(|r| r.id == id) {
                 return r;

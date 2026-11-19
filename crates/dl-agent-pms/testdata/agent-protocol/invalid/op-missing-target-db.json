@@ -1,0 +1,9 @@
+{
+  "type": "op",
+  "id": "0b6a3b9e-2c1d-4e5f-8a7b-6c5d4e3f2a1b",
+  "op": "fo.hotelDate.get",
+  "contract_ver": 1,
+  "args": {},
+  "request_key": null,
+  "deadline_ms": 5000
+}

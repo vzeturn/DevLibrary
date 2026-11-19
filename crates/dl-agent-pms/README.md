@@ -9,14 +9,53 @@ in `apps/site-agent/rust`) inside the shared agent:
   token;
 - holds the WebSocket stream to the PMS cloud (`/agent/v1/stream`: `hello`, ping/pong, ops,
   at most 8 in flight, close codes, back-off 1 → 30 s);
-- runs allow-listed ops against the hotel's SQL Server (`MM_PMS`, `SMILE_FO`, `SMILE_BO`,
-  `SMILE_POS` from `databases.json`): procedures from the embedded ops manifest, binds,
-  request-key replay (`MM_Op_GetLog` / `MM_Op_CreateLog`), deadlock retry, result caps;
-- applies signed migration bundles (backup gate, drift check, dry run) and purges `MM_OpLog`
-  on a schedule.
+- runs allow-listed ops against the hotel's SMILE databases only: procedures from the
+  embedded ops manifest, binds, deadlock retry, result caps, each op on the database its
+  frame names;
+- answers replays of keyed writes from a local op journal.
 
-`assets/ops-manifest.json` is a copy of SMILE-PMS `apps/site-agent/internal/ops/ops-manifest.json`.
-`tests/ops_manifest_drift.rs` fails when it differs from the file named by `PMS_OPS_MANIFEST`.
+### The SMILE-only contract
+
+SMILE-PMS decided on 2026-11-19 that a site holds only the vendor databases. `MM_PMS` lives
+in the cloud, the cloud's ledger is authoritative, and the agent never creates an object on a
+customer database (no `MM_OpLog`, no migrations, no retention job).
+
+- **Databases**: `SMILE_FO`, `SMILE_POS`, `SMILE_BO`. Each comes from dl-agent's `sql.json`
+  when it declares that name (`dl-agent sql-setup` / `sql-add`: auth `windows` or `sql`,
+  sealed password, the saved TLS rung), else from `databases.json` in the state directory
+  (`SmilePmsAgent`'s file). An `MM_PMS` entry is ignored (`pms.status` lists it under
+  `ignored`). Pools are opened lazily; the module starts without any database.
+- **Routing**: an op frame carries `target_db` (`SMILE_FO` / `SMILE_POS` / `SMILE_BO`; any
+  other value is a bad frame, close 4400). The executor refuses an op whose manifest
+  `target_db` differs (`rejected`, `target_db_mismatch`) and one whose database is not
+  configured (`failed`, `DB_UNAVAILABLE`).
+- **`hello`**: `schema_version: 0`, `contract_max` and `ops: ["fo.hotelDate.get@1", …]`,
+  the ops of the embedded manifest that have agent calls (what this build runs). The cloud
+  gates on that list; the agent still answers a `contract_ver` it does not run `rejected`
+  `CONTRACT_UNSUPPORTED`, and an op it does not know or that runs in the cloud only
+  `rejected` `OP_REJECTED` (`unknown_op` / `in_process_only`), as SMILE-PMS's shared
+  `rejections.json` fixture says.
+- **Op journal** (`<state_dir>/op-journal`, one file per request key, named by its SHA-256;
+  the key itself is never stored): a keyed write that `applied` is recorded after its commit
+  (atomic write: temporary file, fsync, rename, fsync of the directory). Entries are kept 8
+  days; at 100 000 entries or 256 MiB new keyed writes are refused before they run
+  (`failed` `JOURNAL_FULL`) with a critical `pms_journal_failed` report. Reads carry no key
+  and are never journaled.
+- **Replay**: an op with `replay: true` is answered from the journal (`replayed: true`) or
+  `rejected` `REQUEST_KEY_UNKNOWN`; it never runs SQL. A keyed write already in the journal
+  is answered from it as well; the same key for another op is `request_key_conflict`.
+- `migrate` frames from a cloud on the old contract are logged (`agent.frame.retired`) and
+  ignored; `dl-agent pms-migrate` only prints that it is retired.
+
+### Ops
+
+| Op | Database | Procedure | Result |
+|---|---|---|---|
+| `fo.hotelDate.get@1` (read) | `SMILE_FO` | vendor `GetHotelDate1` (`Select HotelDate From HotelParameter`) | one set, first row `HotelDate` (datetime, wall clock as stored); no row or `NULL` → `failed` `NO_DATA`. The cloud returns `{hotelDate: 'YYYY-MM-DD'}`, the date part with no timezone shift. |
+
+`assets/ops-manifest.json` is a byte copy of SMILE-PMS `packages/shared/src/ops/ops-manifest.json`
+(manifest v2). `tests/ops_manifest_drift.rs` fails when it differs from the file named by
+`PMS_OPS_MANIFEST`.
 
 ## Turning it on
 
@@ -35,7 +74,7 @@ The `dl-agent` executable (package `dl-agent-bin`) registers the module. It is o
 |---|---|---|
 | `enabled` | `false` | Run the module on this site. |
 | `config_path` | `$PMS_AGENT_CONFIG`, else `SmilePmsAgent`'s: `%ProgramData%\SmilePMS\Agent\config.json` (off Windows the relative `pms-agent.json`, so set it there) | The PMS agent config file (`cloud_url`, `state_dir`, `enrollment_code`, `log_level`, …). |
-| `state_dir` | the config file's `state_dir`, else `SmilePmsAgent`'s (`…\Agent\state`) | Where `agent.key`, `identity.json` and `databases.json` live. |
+| `state_dir` | the config file's `state_dir`, else `SmilePmsAgent`'s (`…\Agent\state`) | Where `agent.key`, `identity.json`, `databases.json` and `op-journal` live. |
 
 The config file and the state directory are read and written exactly as `SmilePmsAgent` does,
 including its `PMS_AGENT_*` environment overrides. The module adds nothing under its own data
@@ -53,12 +92,10 @@ once on `pms.reconnect`, and removes the code from the file afterwards.
 - The code is never printed or logged.
 - No service step: dl-agent installs its own service.
 
-## Migrating by hand
+## Migrations
 
-`dl-agent pms-migrate --bundle DIR [--dry-run] [--check-drift] [--rerun-partial N] [--config PATH]`
-is `pms-agent migrate`: it verifies the signed bundle against the pinned keyring, then checks
-drift, dry-runs or applies it on `MM_PMS`, and prints the result as JSON. Flags take two dashes
-(dl-cli), not the Go agent's one. A failure exits with dl-agent's config exit code.
+None on a site. `dl-agent pms-migrate` is kept so an old script gets a clear answer: it
+accepts the old options, changes nothing and exits with dl-agent's config exit code.
 
 ## Behaviour
 
@@ -77,15 +114,23 @@ drift, dry-runs or applies it on `MM_PMS`, and prints the result as JSON. Flags 
 - `update` frames from the cloud are logged and ignored: dl-agent updates itself.
 
 Metrics: `connected`, `ops_inflight`, `ops_ok`, `ops_rejected`, `ops_failed`, `last_op_unix`,
-`reconnects`, `migrations_applied`.
+`reconnects`.
 
 Problem reports (each code at most once per 10 minutes, the next one counts what was held back;
-op names, error codes, SQL error numbers and ids only, never SQL text or bind values):
-`pms_stream_failed`, `pms_auth_failed`, `pms_sql_failed`, `pms_migration_failed`,
+op names, error codes, SQL error numbers and ids only, never SQL text, bind values, results or
+request keys): `pms_stream_failed`, `pms_auth_failed`, `pms_sql_failed`, `pms_journal_failed`,
 `pms_op_rejected`, `pms_config_invalid`.
 
-Commands: `pms.status` (the counters, `connected` and `detail` as JSON) and `pms.reconnect`
-(closes the stream with 1000 and connects again; also wakes a waiting or parked module).
+Commands:
+
+| Command | Answer |
+|---|---|
+| `pms.status` | the counters, `connected`, `detail`, `ops`, `contract_max`, `databases` (`configured`: name, source `sql.json`/`databases.json`, auth; `ignored`) and `journal` (dir, entries, bytes, caps, `full`); nothing connects. |
+| `pms.reconnect` | closes the stream with 1000 and connects again; also wakes a waiting or parked module. |
+| `pms.selftest` | the module's self-test rows as JSON (`checks`): config, cloud, op journal, databases configured, `SELECT 1` per database with its source, auth and TLS rung, and the `fo.hotelDate.get` probe; not ok when a row fails. |
+| `pms.op_dry_run` | runs one read (`args.op`, default `fo.hotelDate.get`; `args.args`) locally through the SQL executor, without the cloud or the journal: `{op, target_db, status, took_ms, hotelDate, result}`. Writes are refused. |
+
+The same self-test rows appear in `dl-agent selftest` on the site.
 
 ## Differences from the Go agent
 
@@ -96,8 +141,9 @@ Commands: `pms.status` (the counters, `connected` and `detail` as JSON) and `pms
 | `hello` `agent_version` | the agent's version | `dl-agent-<version>` (at most 32 characters) |
 | Logs | rotated service log file | dl-agent's log (target `pms-site`, same event names) |
 | Terminal stop | the service exits 0 | the module parks `degraded` with the next step |
-| CLI flags | `-bundle`, `-dry-run` | `--bundle`, `--dry-run` (`dl-agent pms-migrate`) |
-| SQL pools | own pools over `databases.json` | the same (not dl-agent's `sql` module) |
+| Migrations | `MM_PMS` bundles, `MM_OpLog` ledger and retention | none (SMILE-only contract) |
+| Replay | `MM_Op_GetLog` / `MM_Op_CreateLog` on `MM_PMS` | the local op journal |
+| SQL pools | own pools over `databases.json` | dl-agent's `sql.json` first, `databases.json` as fallback |
 
 ## Switching a live site over
 
@@ -111,7 +157,9 @@ Commands: `pms.status` (the counters, `connected` and `detail` as JSON) and `pms
    `pms.reconnect`.
 
 No re-enroll is needed: the module uses the same `agent.key`, `identity.json` and
-`databases.json`.
+`databases.json`. To move the connections into dl-agent's sealed store, run
+`dl-agent sql-setup` for `SMILE_FO`, `SMILE_POS` and `SMILE_BO`; `sql.json` wins once it
+names a database.
 
 ## Tests
 
@@ -119,13 +167,17 @@ No re-enroll is needed: the module uses the same `agent.key`, `identity.json` an
 cargo test -p dl-agent-pms
 ```
 
-- Unit tests per source file (ported, plus telemetry, settings, prepare and the tools).
-- `wire_fixtures`, `ops_contract`, `bundle_golden`: the port's golden frames, op fixtures and
-  signed bundle.
-- `fake_cloud`: the module against a fake PMS cloud on a local socket (enroll, token, hello, ops,
-  reconnect after a close, refused code, superseded close, `pms.reconnect`).
-- `module_lifecycle`: opt-in, not enrolled, invalid config, prompt stop with an op in flight, a
-  hung op cancelled after the grace.
+- Unit tests per source file (ported, plus telemetry, settings, prepare, the journal and the
+  tools).
+- `wire_fixtures`, `ops_contract`: the golden frames (hello with `ops`, op with `target_db`,
+  replay) and the op fixtures (`fo.hotelDate.get`, routing and argument rejections).
+- `fake_cloud`: the module against a fake PMS cloud on a local socket (enroll, token, hello with
+  `ops`, ops, replay hit and miss from the journal, a retired `migrate` frame, a bad
+  `target_db`, reconnect after a close, refused code, superseded close, `pms.reconnect`).
+- `module_lifecycle`: opt-in, not enrolled, invalid config, `pms.selftest` and
+  `pms.op_dry_run` answers, prompt stop with an op in flight, a hung op cancelled after the
+  grace.
 - `sql_integration`: set `PMS_AGENT_TEST_SQL=sqlserver://sa:<pw>@127.0.0.1:14333?encrypt=disable`
-  (a SQL Server 2022 container works); skipped without it.
+  (SQL Server 2017 and 2022 containers); skipped without it. It creates `pms_agent_it_fo` and
+  `pms_agent_it_pos` with the vendor's `HotelParameter` and `GetHotelDate1`.
 - `ops_manifest_drift`: set `PMS_OPS_MANIFEST` to SMILE-PMS's manifest; skipped without it.

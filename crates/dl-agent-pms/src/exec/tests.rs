@@ -3,7 +3,7 @@ use super::*;
 fn p(json_text: &str) -> ops::Param {
     let m = Manifest::parse(
         format!(
-            r#"{{"manifest_version":1,"allowlist_hash":"","procs":["P"],"excluded_proc_patterns":[],"ops":[{{"name":"a.b.c","contract_ver":1,"kind":"write","target":"PMS","timeout_ms":1,"idempotent":false,"calls":[{{"proc":"P","params":[{json_text}]}}]}}]}}"#
+            r#"{{"manifest_version":2,"allowlist_hash":"","procs":["P"],"excluded_proc_patterns":[],"ops":[{{"name":"a.b.c","contract_ver":1,"kind":"write","target":"FO","target_db":"SMILE_FO","timeout_ms":1,"idempotent":false,"calls":[{{"proc":"P","params":[{json_text}]}}]}}]}}"#
         )
         .as_bytes(),
     )
@@ -76,21 +76,38 @@ fn binds_like_go() {
 #[test]
 fn args_must_match_the_plan() {
     let m = Manifest::load().unwrap();
-    let op = m.lookup("pos.checkVersion.get").unwrap();
+    let op = m.lookup("fo.hotelDate.get").unwrap();
     let args = |s: &str| json::parse(s.as_bytes()).unwrap();
-    let calls = bind_args(op, &args(r#"{"checkNo":7,"rvcNo":2}"#)).unwrap();
-    assert_eq!(calls.len(), 3);
-    assert_eq!(calls[1].params[1].value(), &ParamValue::I64(Some(500)));
+    let calls = bind_args(op, &args("{}")).unwrap();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].params.is_empty());
     assert_eq!(
-        bind_args(op, &args(r#"{"checkNo":7}"#)).err().unwrap(),
-        "invalid_args: rvcNo: required"
-    );
-    assert_eq!(
-        bind_args(op, &args(r#"{"checkNo":7,"rvcNo":2,"z":1,"a":2}"#))
-            .err()
-            .unwrap(),
+        bind_args(op, &args(r#"{"z":1,"a":2}"#)).err().unwrap(),
         "invalid_args: a: not an argument of this op"
     );
+}
+
+#[test]
+fn hotel_date_needs_a_row_with_a_date() {
+    let row = |v: J| {
+        let mut r = Row::new();
+        r.insert("HotelDate".into(), v);
+        r
+    };
+    let ok = vec![vec![row(J::String("2026-11-19T00:00:00.000Z".into()))]];
+    assert_eq!(missing_data("fo.hotelDate.get", &ok), None);
+    for sets in [
+        vec![],
+        vec![vec![]],
+        vec![vec![row(J::Null)]],
+        vec![vec![Row::new()]],
+    ] {
+        assert_eq!(
+            missing_data("fo.hotelDate.get", &sets),
+            Some("GetHotelDate1 returned no HotelDate")
+        );
+    }
+    assert_eq!(missing_data("a.b.c", &[]), None);
 }
 
 #[test]
@@ -142,34 +159,6 @@ fn values_encode_like_go() {
     );
     assert!(encode_value("FLOAT", &V::F64(f64::NAN)).is_err());
     assert_eq!(go_str_len("a\"\u{1}é<"), 2 + 1 + 2 + 6 + 2 + 1);
-}
-
-#[test]
-fn stored_results_round_trip() {
-    let mut row = Row::new();
-    row.insert("b".into(), J::String("<x>".into()));
-    row.insert("a".into(), num("1".into()));
-    let mut outs = BTreeMap::new();
-    outs.insert("ReturnValue".to_owned(), num("0".into()));
-    let s = store_json(&[vec![row.clone()]], &[1], &outs);
-    assert_eq!(
-        s,
-        r#"{"v":"agent/1","sets":[[{"a":1,"b":"\u003cx\u003e"}]],"rowcounts":[1],"outputs":{"ReturnValue":0}}"#
-    );
-    let lr = LogRow {
-        op: "a.b.c".into(),
-        status: "applied".into(),
-        hash: crate::sha256_hex(s.as_bytes()).to_uppercase(),
-        json: s.clone(),
-    };
-    let st = replay(&lr, "a.b.c").unwrap();
-    assert_eq!(st.sets, vec![vec![row]]);
-    assert!(matches!(replay(&lr, "x.y.z"), Err(ExecErr::ReplayConflict)));
-    let bad = LogRow {
-        hash: "00".into(),
-        ..lr
-    };
-    assert!(matches!(replay(&bad, "a.b.c"), Err(ExecErr::LogCorrupt)));
 }
 
 #[test]

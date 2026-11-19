@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::wire::{MigrateError, OpError};
+use crate::wire::OpError;
 
 struct Rig {
     tel: Telemetry,
@@ -31,10 +31,12 @@ fn op(name: &str) -> Op {
         id: "6f1c2b7e-8d4a-4c3b-9e2f-1a2b3c4d5e6f".into(),
         op: name.into(),
         contract_ver: 1,
+        target_db: "SMILE_FO".into(),
         args: Value::Object(Map::new()),
         request_key: None,
         expected_stamp: None,
         deadline_ms: 1000,
+        replay: None,
     }
 }
 
@@ -123,29 +125,4 @@ fn health_goes_down_after_the_threshold_and_reports_once() {
     r.advance(REPORT_EVERY);
     assert!(matches!(r.tel.health(t), Health::Down { .. }));
     assert_eq!(r.rep.codes(), vec![CODE_STREAM_FAILED, CODE_AUTH_FAILED]);
-}
-
-#[test]
-fn migrations_count_applied_files_and_report_failures() {
-    let r = rig();
-    let mut res = MigrateResult {
-        id: "run".into(),
-        status: wire::MIGRATE_APPLIED.into(),
-        bundle_id: "b1".into(),
-        applied: 3,
-        ..MigrateResult::default()
-    };
-    r.tel.migration_done(&res);
-    res.status = wire::MIGRATE_DRY_RUN.into();
-    r.tel.migration_done(&res);
-    assert_eq!(r.tel.snapshot().migrations_applied, 3);
-    res.status = wire::MIGRATE_FAILED.into();
-    res.error = Some(MigrateError {
-        code: "MIGRATION_FAILED".into(),
-        ..MigrateError::default()
-    });
-    r.tel.migration_done(&res);
-    assert_eq!(r.rep.codes(), vec![CODE_MIGRATION_FAILED]);
-    let snap = r.tel.snapshot().to_map();
-    assert_eq!(snap.get("migrations_applied"), Some(&Value::from(3u64)));
 }

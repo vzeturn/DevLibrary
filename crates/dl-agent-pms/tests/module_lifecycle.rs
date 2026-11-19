@@ -44,6 +44,32 @@ fn not_enrolled_idles_degraded_answers_commands_and_stops_promptly() {
     );
     let unknown = r.command("pms.reboot");
     assert!(!unknown.ok);
+
+    // The SR bench commands answer on an idle module too.
+    let selftest = r.command("pms.selftest");
+    assert!(selftest.ok, "{}", selftest.output);
+    let v = dl_json::parse(&selftest.output).unwrap();
+    let checks = v.get("checks").and_then(Value::as_array).expect("checks");
+    assert_eq!(checks.len(), 1, "{checks:?}");
+    assert_eq!(checks[0].get("id").and_then(Value::as_str), Some("config"));
+    assert_eq!(
+        checks[0].get("status").and_then(Value::as_str),
+        Some("skip")
+    );
+    let dry = r.command("pms.op_dry_run");
+    assert!(!dry.ok);
+    assert!(dry.output.contains("not enrolled"), "{}", dry.output);
+    for (args, why) in [
+        (json!({"op": "pos.check.drop"}), "unknown op"),
+        (json!({"op": "fo.folioLogDef.update"}), "reads only"),
+        (json!({"op": "pos.checkVersion.get"}), "reads only"),
+        (json!({"op": 3}), "op: not a string"),
+        (json!({"args": [1]}), "args: not an object"),
+    ] {
+        let a = r.command_with("pms.op_dry_run", args);
+        assert!(!a.ok);
+        assert!(a.output.contains(why), "{}", a.output);
+    }
     assert!(r.codes().is_empty(), "not enrolled is not a problem report");
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(r.tick_until(0, |_| true).restarts, 0);

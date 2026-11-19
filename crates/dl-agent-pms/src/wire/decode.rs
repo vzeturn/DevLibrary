@@ -28,7 +28,7 @@ pub(super) fn spec(typ: &str) -> Option<KeySpec> {
                 "contract_max",
             ],
             &[],
-            &[],
+            &["ops"],
         ),
         "op" => s(
             &[
@@ -36,12 +36,13 @@ pub(super) fn spec(typ: &str) -> Option<KeySpec> {
                 "id",
                 "op",
                 "contract_ver",
+                "target_db",
                 "args",
                 "request_key",
                 "deadline_ms",
             ],
             &["request_key"],
-            &["expected_stamp"],
+            &["expected_stamp", "replay"],
         ),
         "result" => s(
             &[
@@ -68,32 +69,6 @@ pub(super) fn spec(typ: &str) -> Option<KeySpec> {
             &[],
         ),
         "update" => s(&["type", "version", "url", "sha256", "sig"], &[], &[]),
-        "migrate" => s(
-            &["type", "id", "bundle_id", "target_version", "dry_run"],
-            &[],
-            &["rerun_partial", "check_drift"],
-        ),
-        "migrate_progress" => s(
-            &["type", "id", "phase", "seq", "name", "duration_ms"],
-            &["name"],
-            &[],
-        ),
-        "migrate_result" => s(
-            &[
-                "type",
-                "id",
-                "status",
-                "bundle_id",
-                "head",
-                "applied",
-                "adopted",
-                "pending",
-                "duration_ms",
-                "error",
-            ],
-            &["error"],
-            &["drift"],
-        ),
         _ => None,
     }
 }
@@ -118,12 +93,6 @@ pub(super) const LIMITS_SPEC: KeySpec = KeySpec {
     nullable: &[],
     optional: &[],
 };
-pub(super) const MIG_ERR_SPEC: KeySpec = KeySpec {
-    required: &["code", "seq", "sql_number", "line"],
-    nullable: &["seq", "sql_number", "line"],
-    optional: &[],
-};
-
 pub(super) fn check_keys(prefix: &str, obj: &Map, spec: &KeySpec) -> Result<(), WireError> {
     for (k, v) in obj.iter() {
         if !spec.required.contains(&k.as_str()) && !spec.optional.contains(&k.as_str()) {
@@ -179,6 +148,19 @@ pub(super) fn decode_hello(o: &Map) -> D<Hello> {
         agent_version: json::string(o, "agent_version", "agent_version")?,
         schema_version: json::int(o, "schema_version", "schema_version")?,
         contract_max: json::int(o, "contract_max", "contract_max")?,
+        ops: match o.get("ops") {
+            None => None,
+            Some(Value::Array(items)) => Some(
+                items
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(s) => Ok(s.clone()),
+                        _ => Err(DecodeFail::Type("ops".into())),
+                    })
+                    .collect::<D<Vec<String>>>()?,
+            ),
+            Some(_) => return Err(DecodeFail::Type("ops".into())),
+        },
     })
 }
 
@@ -187,11 +169,13 @@ pub(super) fn decode_op(o: &Map) -> D<Op> {
         id: json::string(o, "id", "id")?,
         op: json::string(o, "op", "op")?,
         contract_ver: json::int(o, "contract_ver", "contract_ver")?,
+        target_db: json::string(o, "target_db", "target_db")?,
         // Raw JSON, as in Go; validate() refuses anything but an object.
         args: o.get("args").cloned().unwrap_or(Value::Null),
         request_key: json::opt_string(o, "request_key", "request_key")?,
         expected_stamp: json::opt_string(o, "expected_stamp", "expected_stamp")?,
         deadline_ms: json::int(o, "deadline_ms", "deadline_ms")?,
+        replay: json::opt_bool(o, "replay", "replay")?,
     })
 }
 
@@ -290,91 +274,6 @@ pub(super) fn decode_update(o: &Map) -> D<Update> {
     })
 }
 
-pub(super) fn decode_migrate(o: &Map) -> D<Migrate> {
-    Ok(Migrate {
-        id: json::string(o, "id", "id")?,
-        bundle_id: json::string(o, "bundle_id", "bundle_id")?,
-        target_version: json::int(o, "target_version", "target_version")?,
-        dry_run: json::boolean(o, "dry_run", "dry_run")?,
-        rerun_partial: json::int(o, "rerun_partial", "rerun_partial")?,
-        check_drift: json::boolean(o, "check_drift", "check_drift")?,
-    })
-}
-
-pub(super) fn decode_progress(o: &Map) -> D<MigrateProgress> {
-    Ok(MigrateProgress {
-        id: json::string(o, "id", "id")?,
-        phase: json::string(o, "phase", "phase")?,
-        seq: json::int(o, "seq", "seq")?,
-        name: json::opt_string(o, "name", "name")?,
-        duration_ms: json::int(o, "duration_ms", "duration_ms")?,
-    })
-}
-
-/// A Go struct field of `DriftFinding`: case-insensitive key match, unknown keys refused.
-pub(super) fn decode_drift(v: &Value) -> D<DriftFinding> {
-    let o = match v {
-        Value::Object(m) => m,
-        Value::Null => {
-            return Ok(DriftFinding {
-                kind: String::new(),
-                object: String::new(),
-                code: String::new(),
-            });
-        }
-        _ => return Err(DecodeFail::Type("drift".into())),
-    };
-    for (k, _) in o.iter() {
-        if !["kind", "object", "code"]
-            .iter()
-            .any(|f| k.eq_ignore_ascii_case(f))
-        {
-            return Err(DecodeFail::Other);
-        }
-    }
-    let s = |name: &str| -> D<String> {
-        match json::field_ci(o, name) {
-            None | Some(Value::Null) => Ok(String::new()),
-            Some(Value::String(s)) => Ok(s.clone()),
-            Some(_) => Err(DecodeFail::Type(format!("drift.{name}"))),
-        }
-    };
-    Ok(DriftFinding {
-        kind: s("kind")?,
-        object: s("object")?,
-        code: s("code")?,
-    })
-}
-
-pub(super) fn decode_migrate_result(o: &Map) -> D<MigrateResult> {
-    let drift = match o.get("drift") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) => items.iter().map(decode_drift).collect::<D<Vec<_>>>()?,
-        Some(_) => return Err(DecodeFail::Type("drift".into())),
-    };
-    let error = match nested(o, "error")? {
-        None => None,
-        Some(e) => Some(MigrateError {
-            code: json::string(e, "code", "error.code")?,
-            seq: json::opt_int(e, "seq", "error.seq")?,
-            sql_number: json::opt_i32(e, "sql_number", "error.sql_number")?,
-            line: json::opt_i32(e, "line", "error.line")?,
-        }),
-    };
-    Ok(MigrateResult {
-        id: json::string(o, "id", "id")?,
-        status: json::string(o, "status", "status")?,
-        bundle_id: json::string(o, "bundle_id", "bundle_id")?,
-        head: json::int(o, "head", "head")?,
-        applied: json::int(o, "applied", "applied")?,
-        adopted: json::int(o, "adopted", "adopted")?,
-        pending: json::int(o, "pending", "pending")?,
-        duration_ms: json::int(o, "duration_ms", "duration_ms")?,
-        drift,
-        error,
-    })
-}
-
 /// Parses and validates one frame of any type.
 pub fn decode_json(data: &[u8]) -> Result<Frame, WireError> {
     let Some(obj) = json::parse_object(data) else {
@@ -384,6 +283,9 @@ pub fn decode_json(data: &[u8]) -> Result<Frame, WireError> {
         Some(Value::String(s)) => s.clone(),
         _ => return Err(frame_err("type: must be a string")),
     };
+    if let Some(t) = RETIRED_FRAMES.iter().find(|t| **t == typ) {
+        return Err(WireError::Retired(t));
+    }
     let Some(sp) = spec(&typ) else {
         return Err(frame_err("unknown frame type"));
     };
@@ -394,7 +296,6 @@ pub fn decode_json(data: &[u8]) -> Result<Frame, WireError> {
             check_nested(&obj, "poll", &POLL_SPEC)?;
             check_nested(&obj, "limits", &LIMITS_SPEC)?;
         }
-        "migrate_result" => check_nested(&obj, "error", &MIG_ERR_SPEC)?,
         _ => {}
     }
     let decoded: D<Frame> = match typ.as_str() {
@@ -406,10 +307,7 @@ pub fn decode_json(data: &[u8]) -> Result<Frame, WireError> {
             .map_err(DecodeFail::from),
         "pong" => decode_pong(&obj).map(Frame::Pong),
         "cfg" => decode_cfg(&obj).map(Frame::Cfg),
-        "update" => decode_update(&obj).map(Frame::Update),
-        "migrate" => decode_migrate(&obj).map(Frame::Migrate),
-        "migrate_progress" => decode_progress(&obj).map(Frame::MigrateProgress),
-        _ => decode_migrate_result(&obj).map(Frame::MigrateResult),
+        _ => decode_update(&obj).map(Frame::Update),
     };
     let frame = match decoded {
         Ok(f) => f,

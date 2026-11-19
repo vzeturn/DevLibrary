@@ -1,8 +1,9 @@
-//! The module's self-test (`dl-agent selftest`, the `selftest` command): the PMS config and
-//! identity are where the module's settings point, `databases.json` opens and every
-//! database answers, the cloud accepts the agent's signed key, and the read op
-//! `pos.checkVersion.get` runs through the local executor. Read only: no op that writes,
-//! no enrollment, no key is created.
+//! The module's self-test (`dl-agent selftest`, the `selftest` and `pms.selftest`
+//! commands): the PMS config and identity are where the module's settings point, the SMILE
+//! databases are configured (`sql.json` through the core, then `databases.json`) and each
+//! answers with its auth mode, the op journal is healthy, the cloud accepts the agent's
+//! signed key, and the read op `fo.hotelDate.get` runs through the local executor. Read
+//! only: no op that writes, no enrollment, no key, no journal is created.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,25 +16,30 @@ use super::prepare::{Prepared, prepare};
 use super::settings::Settings;
 use crate::config::Config;
 use crate::ctx::Ctx;
-use crate::db::{self, Pools, PoolsError};
+use crate::db::{self, Pool, Pools, Source};
 use crate::enroll::{self, EnrollError};
 use crate::exec::{Executor, Limits, SqlExecutor};
+use crate::journal;
 use crate::keystore::{IDENTITY_FILE, Store};
 use crate::log::Logger;
 use crate::ops::Manifest;
 use crate::wire::{self, Op};
 
-/// The read op the self-test runs: an absent check, so the answer carries no guest data.
-pub const PROBE_OP: &str = "pos.checkVersion.get";
+/// The read op the self-test runs: the hotel date, no guest data.
+pub const PROBE_OP: &str = "fo.hotelDate.get";
 const KEY_FILE: &str = "agent.key";
 const REENROLL: &str = "enroll again: dl-agent pms-enroll --code <code>";
+const DB_REMEDY: &str = "set the SMILE databases with dl-agent sql-setup (sql.json), or list SMILE_FO, SMILE_POS and SMILE_BO in databases.json";
+/// A journal this full (percent of either cap) is a warning.
+const JOURNAL_WARN_PCT: u64 = 80;
 
 /// The self-test to register with `App::selftest`.
 pub fn pms_site_selftest() -> SelfTest {
     SelfTest { module: NAME, run }
 }
 
-fn run(ctx: &ModuleContext) -> Vec<Check> {
+/// Runs every row (the `selftest` command calls it too).
+pub fn run(ctx: &ModuleContext) -> Vec<Check> {
     let settings = Settings::from_config(ctx.config());
     let title = "Enroll config present";
     let cfg = match prepare(&settings) {
@@ -53,58 +59,116 @@ fn run(ctx: &ModuleContext) -> Vec<Check> {
     let mut checks = vec![Check::timed(NAME, "config", title, || config(&cfg))];
     let cfg = Arc::new(*cfg);
     checks.push(cloud(&cfg));
-    let pools = match db::open_pools(&cfg.state_dir.join(db::DB_CONFIG_FILE)) {
-        Ok(p) => p,
+    checks.push(Check::timed(NAME, "journal", "Op journal healthy", || {
+        journal_row(&cfg.state_dir)
+    }));
+    let dbs_title = "SMILE databases configured";
+    let site = match db::open(
+        &db::shared_pools(ctx),
+        &cfg.state_dir.join(db::DB_CONFIG_FILE),
+    ) {
+        Ok(s) => s,
         Err(e) => {
-            let missing = matches!(e, PoolsError::NoConfig);
-            let o = Outcome::fail(if missing {
-                format!("no {} in {}", db::DB_CONFIG_FILE, cfg.state_dir.display())
-            } else {
-                e.to_string()
-            })
-            .remedy(
-                "write databases.json with dl-agent pms-migrate (or copy it from SmilePmsAgent)",
-            );
-            checks.push(Check::timed(
-                NAME,
-                "databases",
-                "databases.json opens",
-                || o,
-            ));
+            let o = Outcome::fail(e.to_string()).remedy(DB_REMEDY);
+            checks.push(Check::timed(NAME, "databases", dbs_title, || o));
             return checks;
         }
     };
-    checks.push(Check::timed(
-        NAME,
-        "databases",
-        "databases.json opens",
-        || {
-            let names: Vec<&str> = pools.keys().map(String::as_str).collect();
-            Outcome::pass(format!("{} database(s): {}", names.len(), names.join(", ")))
-        },
-    ));
-    for (name, pool) in &pools {
-        let pool = Arc::clone(pool);
-        let title = format!("{name} connects");
-        checks.push(Check::bounded(
-            NAME,
-            &format!("db.{name}"),
-            &title,
-            PROBE_TIMEOUT * 2,
-            move || {
-                let ctx = Ctx::background().with_timeout(PROBE_TIMEOUT);
-                let result = pool.get(&ctx).and_then(|mut c| c.batch(&ctx, "SELECT 1"));
-                match result {
-                    Ok(_) => Outcome::pass("SELECT 1 answered"),
-                    Err(e) => Outcome::fail(e.to_string())
-                        .remedy("check SQL Server and the login in databases.json"),
-                }
-            },
+    checks.push(Check::timed(NAME, "databases", dbs_title, || {
+        databases(&site.pools, &site.ignored)
+    }));
+    for (name, pool) in &site.pools {
+        checks.push(connects(name, Arc::clone(pool)));
+    }
+    checks.push(op(&site.pools));
+    db::close_all(&site.pools);
+    checks
+}
+
+fn databases(pools: &Pools, ignored: &[String]) -> Outcome {
+    if pools.is_empty() {
+        return Outcome::fail("no SMILE database configured: every op fails DB_UNAVAILABLE")
+            .remedy(DB_REMEDY);
+    }
+    let names: Vec<String> = pools
+        .values()
+        .map(|p| format!("{} ({}, auth {})", p.name(), p.source().as_str(), p.auth()))
+        .collect();
+    let mut detail = format!("{} database(s): {}", names.len(), names.join(", "));
+    if !ignored.is_empty() {
+        detail.push_str(&format!(
+            "; {} in databases.json ignored (cloud-only)",
+            ignored.join(", ")
         ));
     }
-    checks.push(op(&pools));
-    db::close_all(&pools);
-    checks
+    if !pools.contains_key(db::DB_FO) {
+        return Outcome::warn(format!("{detail}; {} missing: {PROBE_OP} fails", db::DB_FO))
+            .remedy(DB_REMEDY);
+    }
+    Outcome::pass(detail)
+}
+
+/// `SELECT 1` on one database; the detail names where its settings come from.
+fn connects(name: &str, pool: Arc<Pool>) -> Check {
+    let title = format!("{name} connects");
+    Check::bounded(
+        NAME,
+        &format!("db.{name}"),
+        &title,
+        PROBE_TIMEOUT * 2,
+        move || {
+            let how = match pool.rung() {
+                Some(r) => format!("{}, auth {}, TLS {r}", pool.source().as_str(), pool.auth()),
+                None => format!("{}, auth {}", pool.source().as_str(), pool.auth()),
+            };
+            let ctx = Ctx::background().with_timeout(PROBE_TIMEOUT);
+            let result = pool.get(&ctx).and_then(|mut c| c.batch(&ctx, "SELECT 1"));
+            match result {
+                Ok(_) => Outcome::pass(format!("SELECT 1 answered ({how})")),
+                Err(e) => {
+                    let o = Outcome::fail(format!("{e} ({how})"));
+                    match pool.source() {
+                        Source::SqlJson => o.remedy(
+                            "check SQL Server and the login: dl-agent sql-test, then dl-agent sql-setup",
+                        ),
+                        Source::DatabasesJson => {
+                            o.remedy("check SQL Server and the login in databases.json")
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// The journal as it is on disk (read only: the service may be writing it).
+fn journal_row(state_dir: &Path) -> Outcome {
+    let h = match journal::inspect(state_dir) {
+        Ok(h) => h,
+        Err(e) => {
+            return Outcome::fail(e.to_string())
+                .remedy("give the service account full control of the state directory");
+        }
+    };
+    let detail = format!(
+        "{} entries, {} bytes in {} (keeps {} days; cap {} entries, {} bytes)",
+        h.entries,
+        h.bytes,
+        h.dir.display(),
+        h.limits.retention.as_secs() / 86_400,
+        h.limits.max_entries,
+        h.limits.max_bytes
+    );
+    let pct = |n: u64, cap: u64| n.saturating_mul(100) / cap.max(1);
+    let fill = pct(h.entries, h.limits.max_entries).max(pct(h.bytes, h.limits.max_bytes));
+    if h.full() {
+        return Outcome::fail(format!("full: {detail}; keyed writes are refused"))
+            .remedy("entries expire after the retention; report it to SMILE PMS support");
+    }
+    if fill >= JOURNAL_WARN_PCT {
+        return Outcome::warn(format!("{fill}% full: {detail}"));
+    }
+    Outcome::pass(detail)
 }
 
 fn config(cfg: &Config) -> Outcome {
@@ -177,9 +241,12 @@ fn cloud(cfg: &Arc<Config>) -> Check {
     })
 }
 
-/// `pos.checkVersion.get` for a check that does not exist, through the real executor.
+/// `fo.hotelDate.get` on SMILE_FO through the real executor.
 fn op(pools: &Pools) -> Check {
     let title = "Read op runs locally";
+    if !pools.contains_key(db::DB_FO) {
+        return Check::skip(NAME, "op", title, "SMILE_FO is not configured");
+    }
     let manifest = match Manifest::load() {
         Ok(m) => Arc::new(m),
         Err(e) => return Check::timed(NAME, "op", title, || Outcome::fail(e)),
@@ -195,10 +262,12 @@ fn op(pools: &Pools) -> Check {
             id: dl_uuid::Uuid::new_v4().to_string(),
             op: PROBE_OP.into(),
             contract_ver: 1,
-            args: dl_json::json!({"checkNo": 0, "rvcNo": 0}),
+            target_db: db::DB_FO.into(),
+            args: dl_json::json!({}),
             request_key: None,
             expected_stamp: None,
             deadline_ms: i64::try_from(PROBE_TIMEOUT.as_millis()).unwrap_or(15_000),
+            replay: None,
         };
         let ctx = Ctx::background().with_timeout(PROBE_TIMEOUT);
         let r = exec.execute(&ctx, &op);
@@ -207,17 +276,19 @@ fn op(pools: &Pools) -> Check {
             .as_ref()
             .map(|e| format!("{} {}", e.code, e.message))
             .unwrap_or_default();
-        match r.status.as_str() {
-            wire::STATUS_APPLIED => Outcome::pass(format!(
-                "{PROBE_OP} applied ({} result set(s))",
-                r.sets.len()
-            )),
-            wire::STATUS_REJECTED => Outcome::pass(format!(
-                "{PROBE_OP} ran and was rejected as expected: {error}"
-            )),
-            _ => Outcome::fail(format!("{PROBE_OP} failed: {error}"))
-                .remedy("check that MM_PMS has the agent procedures (dl-agent pms-migrate)"),
+        if r.status == wire::STATUS_APPLIED {
+            let date = r
+                .sets
+                .first()
+                .and_then(|s| s.first())
+                .and_then(|row| row.get("HotelDate"))
+                .and_then(|v| v.as_str())
+                .map_or("", |d| d.get(..10).unwrap_or(d));
+            return Outcome::pass(format!("{PROBE_OP} applied: hotel date {date}"));
         }
+        Outcome::fail(format!("{PROBE_OP} {}: {error}", r.status)).remedy(
+            "check that SMILE_FO has the vendor procedure GetHotelDate1 and one HotelParameter row",
+        )
     })
 }
 

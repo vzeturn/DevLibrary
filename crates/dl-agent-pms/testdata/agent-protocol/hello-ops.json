@@ -1,0 +1,10 @@
+{
+  "type": "hello",
+  "protocol": 1,
+  "agent_version": "0.3.0",
+  "schema_version": 0,
+  "contract_max": 1,
+  "ops": [
+    "fo.hotelDate.get@1"
+  ]
+}

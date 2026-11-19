@@ -1,28 +1,28 @@
-//! Wires the agent together: state permissions -> executor -> keystore -> enrollment
-//! (first run only) -> token source -> stream loop. The `pms-site` module calls [`run`] on
-//! a worker thread.
+//! Wires the agent together: state permissions -> executor (SMILE databases) behind the op
+//! journal -> keystore -> enrollment (first run only) -> token source -> stream loop. The
+//! `pms-site` module calls [`run`] on a worker thread.
 
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use dl_json::Map;
+
 use crate::acl::{self, Guard, Outcome};
 use crate::attrs;
-use crate::bundle::{self, Keyring};
 use crate::config::{self, Config};
-use crate::conn::{self, ConnError, MigrationHandler};
+use crate::conn::{self, ConnError};
 use crate::ctx::Ctx;
-use crate::db::{self, Pool, PoolsError};
+use crate::db;
 use crate::enroll::{self, EnrollError, HostInfo, TokenProvider, TokenSource};
-use crate::exec::{self, Executor, SchemaVersion, SqlExecutor};
+use crate::exec::{self, Executor, SqlExecutor};
+use crate::journal::Journal;
+use crate::journal::exec::Journaled;
 use crate::keystore::{Identity, KeystoreError, Store};
 use crate::log::Logger;
-use crate::migrate::{self, Event, Runner, backup};
 use crate::ops::Manifest;
-use crate::remotemigrate::{self, Handler, HttpFetcher};
-use crate::retention::{Purger, SqlStore};
-use crate::telemetry::Telemetry;
+use crate::telemetry::{self, Level, Telemetry};
 
 /// Injectable parts; `None` takes the production default.
 #[derive(Default)]
@@ -33,18 +33,18 @@ pub struct Deps {
     pub http: Option<Arc<dl_http::Client>>,
     /// Keystore.
     pub store: Option<Store>,
-    /// Op executor.
+    /// Op executor (it still runs behind the journal).
     pub exec: Option<Arc<dyn Executor>>,
-    /// Schema version provider.
-    pub schema: Option<Arc<dyn SchemaVersion>>,
+    /// The core's shared pools for the SMILE databases `sql.json` declares.
+    pub sql: db::SharedPools,
+    /// The op journal (default: `<state dir>/op-journal`).
+    pub journal: Option<Arc<Journal>>,
     /// State directory guard.
     pub guard: Option<Box<dyn Guard>>,
     /// Build version.
     pub version: String,
     /// Reconnect/retry back-off.
     pub backoff: Option<fn(u32) -> Duration>,
-    /// Cloud-triggered migrations.
-    pub migrator: Option<Arc<dyn MigrationHandler>>,
     /// Counters and reports for the module.
     pub telemetry: Option<Arc<Telemetry>>,
 }
@@ -158,18 +158,19 @@ pub fn secure_state(g: &dyn Guard, cfg: &Config, log: &Logger) -> Result<(), Age
 pub struct ExecSetup {
     /// The executor.
     pub exec: Arc<dyn Executor>,
-    /// The schema version provider.
-    pub schema: Arc<dyn SchemaVersion>,
-    /// The MM_PMS pool (`None` on the stub).
-    pub pms: Option<Arc<Pool>>,
     /// Every pool, closed at the end.
     pub pools: db::Pools,
 }
 
-/// The SQL executor over `<state dir>/databases.json`, or the stub that refuses every op
-/// when the site has no usable connection file yet (the agent still connects, so every
-/// op is answered instead of timing out).
-pub fn executor(cfg: &Config, log: &Logger) -> Result<ExecSetup, AgentError> {
+/// The SQL executor over the site's SMILE databases (`sql.json` through the core, then
+/// `<state dir>/databases.json`), or the stub that refuses every op when none is
+/// configured yet (the agent still connects, so every op is answered instead of timing
+/// out).
+pub fn executor(
+    cfg: &Config,
+    shared: &db::SharedPools,
+    log: &Logger,
+) -> Result<ExecSetup, AgentError> {
     let stub = |reason: &str| {
         log.warn(
             "agent.exec.stub",
@@ -177,8 +178,6 @@ pub fn executor(cfg: &Config, log: &Logger) -> Result<ExecSetup, AgentError> {
         );
         Ok(ExecSetup {
             exec: Arc::new(exec::Stub),
-            schema: Arc::new(exec::UnknownSchema),
-            pms: None,
             pools: db::Pools::new(),
         })
     };
@@ -187,101 +186,69 @@ pub fn executor(cfg: &Config, log: &Logger) -> Result<ExecSetup, AgentError> {
     }
     // A build defect: the embedded manifest is checked by the tests.
     let manifest = Arc::new(Manifest::load().map_err(AgentError::Other)?);
-    let pools = match db::open_pools(&cfg.state_dir.join(db::DB_CONFIG_FILE)) {
-        Ok(p) => p,
-        Err(PoolsError::NoConfig) => return stub("no_db_config"),
+    let site = match db::open(shared, &cfg.state_dir.join(db::DB_CONFIG_FILE)) {
+        Ok(s) => s,
         Err(e) => {
             // The error names the file and database, never a connection string.
             log.error("agent.exec.db_config", attrs!["reason" => e.to_string()]);
             return stub("db_config_invalid");
         }
     };
-    let names: Vec<String> = pools.keys().cloned().collect();
+    if !site.ignored.is_empty() {
+        log.info(
+            "agent.exec.db_ignored",
+            attrs!["databases" => site.ignored.clone(), "reason" => "cloud_only"],
+        );
+    }
+    if site.pools.is_empty() {
+        return stub("no_db_config");
+    }
+    let names: Vec<String> = site
+        .pools
+        .values()
+        .map(|p| format!("{}:{}", p.name(), p.source().as_str()))
+        .collect();
     log.info(
         "agent.exec.sql",
         attrs!["databases" => names, "ops_allowlist" => &manifest.allowlist_hash],
     );
-    let pms = pools.get(db::DB_PMS).cloned();
     Ok(ExecSetup {
         exec: Arc::new(SqlExecutor {
             manifest,
-            dbs: pools.clone(),
+            dbs: site.pools.clone(),
             limits: exec::Limits::default(),
             log: log.clone(),
         }),
-        schema: Arc::new(migrate::ledger::LedgerVersion { pool: pms.clone() }),
-        pms,
-        pools,
+        pools: site.pools,
     })
 }
 
-/// No bundle can be verified.
-pub const ERR_NO_KEYRING: &str = "migration.keyring is not configured: no bundle can be verified";
-
-/// The configured signing keys.
-pub fn pinned_keyring(cfg: &Config) -> Result<Keyring, String> {
-    match &cfg.migration.keyring {
-        None => Err(ERR_NO_KEYRING.into()),
-        Some(v) => bundle::parse_keyring(v),
+/// The journal of `cfg`'s state directory; `None` (keyed writes and replays refused) when
+/// it cannot be opened, which is logged and reported.
+pub fn open_journal(cfg: &Config, log: &Logger, tel: Option<&Telemetry>) -> Option<Arc<Journal>> {
+    if cfg.state_dir.as_os_str().is_empty() {
+        return None;
     }
-}
-
-/// A runner over the MM_PMS pool from the agent config (CLI and cloud-triggered runs).
-pub fn migration_runner(
-    cfg: &Config,
-    pool: Arc<Pool>,
-    version: &str,
-    rerun: i64,
-    progress: Box<dyn Fn(Event) + Send + Sync>,
-    log: &Logger,
-) -> Result<Runner, String> {
-    let gate = backup::new_backup_gate(&cfg.migration.backup, &cfg.state_dir)?;
-    let mut o = migrate::Options::new(pool, version);
-    o.backup = gate;
-    o.rerun_partial = rerun;
-    o.log = log.clone();
-    o.progress = progress;
-    o.legacy = migrate::LegacyDbs {
-        fo: cfg.migration.legacy_fo_db.clone(),
-        pos: cfg.migration.legacy_pos_db.clone(),
-        bo: cfg.migration.legacy_bo_db.clone(),
-    };
-    Ok(Runner::new(o))
-}
-
-fn migrator(
-    cfg: &Config,
-    log: &Logger,
-    version: &str,
-    pms: Option<Arc<Pool>>,
-    http: Arc<dl_http::Client>,
-    tokens: Arc<dyn TokenProvider>,
-) -> Option<Arc<dyn MigrationHandler>> {
-    let pms = pms?;
-    let keys = match pinned_keyring(cfg) {
-        Ok(k) => k,
+    match Journal::open(&cfg.state_dir) {
+        Ok(j) => Some(Arc::new(j)),
         Err(e) => {
-            log.warn("agent.migrate.disabled", attrs!["reason" => e]);
-            return None;
+            log.error(
+                "agent.journal.unavailable",
+                attrs!["reason" => e.to_string()],
+            );
+            if let Some(t) = tel {
+                let mut m = Map::new();
+                m.insert("state_dir", cfg.state_dir.display().to_string());
+                t.report(
+                    Level::Error,
+                    telemetry::CODE_JOURNAL_FAILED,
+                    &e.to_string(),
+                    m,
+                );
+            }
+            None
         }
-    };
-    let fetcher = HttpFetcher {
-        cloud_url: cfg.cloud_url.clone(),
-        http,
-        tokens,
-        max_bytes: crate::wire::MAX_BUNDLE_BYTES,
-    };
-    let (cfg2, log2, version) = (cfg.clone(), log.clone(), version.to_owned());
-    let factory: remotemigrate::RunnerFactory = Box::new(move |rerun, progress| {
-        migration_runner(&cfg2, pms.clone(), &version, rerun, progress, &log2)
-            .map(|r| Box::new(r) as Box<dyn remotemigrate::Runner>)
-    });
-    Some(Arc::new(Handler::new(
-        Some(Box::new(fetcher)),
-        keys,
-        Some(factory),
-        log.clone(),
-    )))
+    }
 }
 
 fn host_name() -> String {
@@ -385,51 +352,61 @@ pub fn run(ctx: &Ctx, cfg: &Config, d: Deps) -> Result<(), AgentError> {
     let backoff = d.backoff.unwrap_or(conn::backoff);
     let guard = d.guard.unwrap_or_else(acl::platform);
     secure_state(guard.as_ref(), cfg, &log)?;
-    // After secure_state: databases.json lives in the restricted state directory.
+    // The hello lists what this build executes: the embedded manifest's ops with calls.
+    let ops = Manifest::load()
+        .map_err(AgentError::Other)?
+        .implemented_ops();
+    // After secure_state: databases.json and the journal live in the restricted state
+    // directory.
     let setup = match d.exec {
         Some(e) => ExecSetup {
             exec: e,
-            schema: d
-                .schema
-                .clone()
-                .unwrap_or_else(|| Arc::new(exec::UnknownSchema)),
-            pms: None,
             pools: db::Pools::new(),
         },
-        None => executor(cfg, &log)?,
+        None => executor(cfg, &d.sql, &log)?,
     };
-    let schema = d.schema.unwrap_or_else(|| setup.schema.clone());
+    let journal = d
+        .journal
+        .or_else(|| open_journal(cfg, &log, d.telemetry.as_deref()));
+    let exec: Arc<dyn Executor> = Arc::new(Journaled::new(
+        setup.exec.clone(),
+        journal,
+        log.clone(),
+        d.telemetry.clone(),
+    ));
     let res = run_with(
         ctx,
         cfg,
         &log,
-        http,
-        backoff,
+        Stream {
+            http,
+            backoff,
+            exec,
+            ops,
+            telemetry: d.telemetry,
+        },
         d.store,
-        setup.exec.clone(),
-        schema,
-        setup.pms.clone(),
-        d.migrator,
-        d.telemetry,
         &d.version,
     );
     db::close_all(&setup.pools);
     res
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What the stream loop is built from.
+struct Stream {
+    http: Arc<dl_http::Client>,
+    backoff: fn(u32) -> Duration,
+    exec: Arc<dyn Executor>,
+    ops: Vec<String>,
+    telemetry: Option<Arc<Telemetry>>,
+}
+
 fn run_with(
     ctx: &Ctx,
     cfg: &Config,
     log: &Logger,
-    http: Arc<dl_http::Client>,
-    backoff: fn(u32) -> Duration,
+    st: Stream,
     store: Option<Store>,
-    exec: Arc<dyn Executor>,
-    schema: Arc<dyn SchemaVersion>,
-    pms: Option<Arc<Pool>>,
-    migrator_dep: Option<Arc<dyn MigrationHandler>>,
-    telemetry: Option<Arc<Telemetry>>,
     version: &str,
 ) -> Result<(), AgentError> {
     let store = match store {
@@ -442,14 +419,14 @@ fn run_with(
     }
     let client = Arc::new(enroll::Client {
         base_url: cfg.cloud_url.clone(),
-        http: http.clone(),
+        http: st.http.clone(),
         key,
         now: dl_time::OffsetDateTime::now_utc,
     });
     let id = match store.identity() {
         Ok(id) => id,
         Err(KeystoreError::NoIdentity) => {
-            match enroll_once(ctx, cfg, log, &store, &client, version, backoff)? {
+            match enroll_once(ctx, cfg, log, &store, &client, version, st.backoff)? {
                 Some(id) => id,
                 None => return Ok(()),
             }
@@ -463,31 +440,16 @@ fn run_with(
         "agent.start",
         attrs!["agent_id" => &id.agent_id, "site_id" => &id.site_id, "version" => version],
     );
-    let purge = pms.clone().map(|pool| {
-        let pctx = ctx.child();
-        let p = Purger::new(Box::new(SqlStore { pool }), log.clone());
-        let c = pctx.clone();
-        (pctx, std::thread::spawn(move || p.run(&c)))
-    });
     let tokens: Arc<dyn TokenProvider> = Arc::new(TokenSource::new(client, &id.agent_id));
-    let migrator =
-        migrator_dep.or_else(|| migrator(cfg, log, version, pms, http.clone(), tokens.clone()));
-    let mut o = conn::Options::new(&cfg.cloud_url, http, tokens, exec);
-    o.schema = schema;
+    let mut o = conn::Options::new(&cfg.cloud_url, st.http, tokens, st.exec);
+    o.ops = st.ops;
     o.log = log.clone();
     o.agent_version = version.to_owned();
-    o.migrator = migrator;
-    o.backoff = backoff;
-    if let Some(t) = telemetry {
+    o.backoff = st.backoff;
+    if let Some(t) = st.telemetry {
         o.telemetry = t;
     }
     let res = conn::Client::new(o).run(ctx).map_err(AgentError::Stopped);
-    if let Some((pctx, h)) = purge {
-        pctx.cancel();
-        if h.join().is_err() {
-            log.error("agent.retention.panicked", &[]);
-        }
-    }
     if let Err(e) = &res
         && let Some(reason) = stop_reason(e)
     {
