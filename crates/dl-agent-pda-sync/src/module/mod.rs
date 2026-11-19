@@ -29,7 +29,9 @@ use crate::contracts::time::TimeZone;
 use crate::hosting::HostContext;
 use crate::hosting::host::{AgentServices, build_host, hooks};
 use crate::reporting::agent_logging::{create_service_logger, new_run_id};
-use crate::reporting::{Sink, SiteEventLogBridge};
+use crate::reporting::{
+    CloudLinkPublisher, LinkUpdate, ModuleReports, ReportFn, Sink, SiteEventLogBridge, TeeSink,
+};
 use commands::Runtime;
 
 /// The module name (the `modules.pda-sync` section, `<data>/modules/pda-sync`).
@@ -64,7 +66,8 @@ impl Module for PdaSyncModule {
     fn run(&mut self, ctx: &ModuleContext) -> Result<(), Error> {
         let host = settings::host_context(ctx.config(), ctx.data_dir()).map_err(Error::Config)?;
         // The health record and the cloud's runtime settings carry no secret; the rolling
-        // logs, `secrets/` and the SQLite queues stay out of the bundle (phase B5).
+        // logs, `secrets/` and the SQLite queues stay out of the bundle (the core takes
+        // single files, not a rolling log folder: plan §6 H2).
         ctx.add_diagnostic_file(host.paths.status_file());
         ctx.add_diagnostic_file(host.paths.runtime_config_file());
         let Some(identity) = wait_for_identity(ctx, &host)? else {
@@ -116,11 +119,19 @@ fn run_enrolled(
     let clock = SystemClock::shared();
     let run_id = new_run_id("agent", clock.now());
     let bridge = Arc::new(SiteEventLogBridge::new(clock));
+    // B5: every Error site event also goes to the hub as a problem report (throttled).
+    let reports = {
+        let ctx = ctx.clone();
+        let report: ReportFn = Arc::new(move |code, message, context| {
+            ctx.report(Severity::Error, code, message, context);
+        });
+        Arc::new(ModuleReports::new(report)) as Arc<dyn Sink>
+    };
     let log = create_service_logger(
         &host.paths,
         &run_id,
         &identity,
-        Some(bridge.clone() as Arc<dyn Sink>),
+        Some(Arc::new(TeeSink(vec![bridge.clone() as Arc<dyn Sink>, reports])) as Arc<dyn Sink>),
     );
     let secrets = crate::security::create(&host.paths);
     let services = AgentServices::build(&host, identity.clone(), run_id, log.clone(), secrets)
@@ -139,6 +150,7 @@ fn run_enrolled(
         .name("pda-sync host".into())
         .spawn(move || agent_host.run(&stop))
         .map_err(|e| Error::Io("spawn pda-sync host", e))?;
+    let mut link = CloudLinkPublisher::new(&identity.cloud_url);
     let rt = Runtime::enrolled(&host, identity, &services);
     ctx.set_running("starting");
     let mut last = Published::default();
@@ -147,6 +159,13 @@ fn run_enrolled(
         if Instant::now() >= next_publish {
             next_publish = Instant::now() + PUBLISH;
             last = publish(ctx, &rt, last);
+            // B5: the watchdog watches the PDA cloud from the first accepted heartbeat.
+            let reenroll = last.state == REENROLL_REQUIRED;
+            match link.next(services.health.last_heartbeat_ok(), reenroll) {
+                LinkUpdate::Keep => {}
+                LinkUpdate::Set { url, ok_at } => ctx.set_cloud_link(&url, ok_at),
+                LinkUpdate::Clear => ctx.clear_cloud_link(),
+            }
         }
         while let Some(cmd) = ctx.next_command() {
             rt.answer(ctx, &cmd);
@@ -154,6 +173,9 @@ fn run_enrolled(
         if ctx.stop().wait_timeout(TICK) {
             break;
         }
+    }
+    if link.declared() {
+        ctx.clear_cloud_link();
     }
     rt.finish(ctx);
     match worker.join() {

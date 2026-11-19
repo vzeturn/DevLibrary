@@ -1,17 +1,24 @@
 //! The SMILE_POS-shaped database of the live tests, built like the PDAOrder side-by-side
 //! fixture (`apps/sql-sync-agent/rust/e2e/.tools/e2etool fixture`): the vendor tables and
-//! order routines of `testdata/sql/smile_pos_schema.sql`, then every classified catalog
-//! table and catalog column that is missing (generated, NULLable, typed as the tool types
-//! them), then the rows of `testdata/sql/smile_pos_seed.sql` with `@base` ten days back.
+//! order routines of `testdata/sql/smile_pos_schema.sql`, the order, combo and table verb
+//! shapes of the C# command tests (`testdata/sql/smile_pos_orders.sql`), then every
+//! classified catalog table and catalog column that is missing (generated, NULLable, typed
+//! as the tool types them), the cancel archive mirrored from the open-check header
+//! (`smile_pos_orders_post.sql`), then the rows of `testdata/sql/smile_pos_seed.sql` with
+//! `@base` ten days back.
 //! Gated on `PDA_SYNC_TEST_SQL` (a dl-tds URL of a login that may create databases and
 //! logins); the database and the `pda_sync` login it creates are dropped afterwards.
 
 #![allow(dead_code)]
 
+pub mod orders;
+
 use std::collections::{BTreeMap, HashSet};
 
 const SCHEMA: &str = include_str!("../../testdata/sql/smile_pos_schema.sql");
 const SEED: &str = include_str!("../../testdata/sql/smile_pos_seed.sql");
+const ORDERS: &str = include_str!("../../testdata/sql/smile_pos_orders.sql");
+const ORDERS_POST: &str = include_str!("../../testdata/sql/smile_pos_orders_post.sql");
 const CATALOG: &str = include_str!("../../assets/catalog/sync-catalog.json");
 const LOGICAL_KEYS: &str = include_str!("../../assets/catalog/logical-keys.json");
 
@@ -66,7 +73,9 @@ impl SmilePos {
         for batch in batches(SCHEMA) {
             pos.exec(batch);
         }
+        pos.exec(ORDERS);
         pos.generated = pos.add_catalog_shape();
+        pos.exec(ORDERS_POST);
         let seed = format!(
             "DECLARE @base datetime = DATEADD(day, -10, CAST(CAST(GETDATE() AS date) AS datetime));\n{SEED}"
         );
