@@ -1,0 +1,72 @@
+[
+  {
+    "kind": "text",
+    "text": "DECLARE @Since datetime = CAST(@SinceP AS datetime);\nWITH g AS (\n    SELECT ConfirmNum,\n           MIN(FolioNum)      AS FirstFolioNum,\n           MAX(ISNULL(CheckOutTime, DepartureDate)) AS CheckedOutAt,\n           COUNT(*)           AS Total,\n           SUM(CASE WHEN FolioStatus = 3 THEN 1 ELSE 0 END) AS Done\n    FROM Folio\n    WHERE ISNULL(CancelNum, 0) = 0\n      AND ExternalConfirmNumber IS NULL\n      AND (CheckOutTime >= @Since OR (CheckOutTime IS NULL AND DepartureDate >= @Since))\n      \n    GROUP BY ConfirmNum\n)\nSELECT TOP (@Max)\n       g.ConfirmNum     AS ConfirmNum,\n       g.FirstFolioNum  AS FirstFolioNum,\n       g.CheckedOutAt   AS CheckedOutAt,\n       n.GuestPhone     AS GuestPhone,\n       f.LastName       AS GuestName\nFROM g\nJOIN Folio f ON f.FolioNum = g.FirstFolioNum\nCROSS APPLY (\n    SELECT MIN(COALESCE(\n               NULLIF(LTRIM(RTRIM(a.[MobileNum])), ''),\n               NULLIF(LTRIM(RTRIM(a.TeleNum)), ''))) AS GuestPhone\n    FROM AdditionalName a\n    WHERE a.FolioNum = g.FirstFolioNum\n      AND ISNULL(a.ACancelNum, 0) = 0\n) n\nWHERE g.Total = g.Done\n  AND n.GuestPhone IS NOT NULL\nORDER BY g.CheckedOutAt, g.ConfirmNum",
+    "params": [
+      {
+        "name": "SinceP",
+        "type": "DateTime",
+        "value": "2026-11-15T12:00:00"
+      },
+      {
+        "name": "Max",
+        "type": "Int32",
+        "value": "100"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT f.RmChgTrn\nFROM dbo.Folio f\nWHERE f.ConfirmNum IN (@Keys0) AND f.ExternalConfirmNumber IS NULL\n  AND ISNULL(f.RmChgTrn, 0) <> 0",
+    "params": [
+      {
+        "name": "Keys0",
+        "type": "Decimal",
+        "value": "9001"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT LTRIM(RTRIM(TransactionCode)) AS Code, LTRIM(RTRIM(TransactionSubCode)) AS Sub,\n       ISNULL(AutoPost, 0) AS AutoPost\nFROM dbo.TransactionCode;\n\nSELECT DISTINCT CONVERT(varchar(12), TrnCode) AS Code, CONVERT(varchar(12), ISNULL(TrnSubCode, 0)) AS Sub\nFROM dbo.RoomType\nWHERE ISNULL(TrnCode, 0) <> 0;\n\nSELECT DISTINCT LTRIM(RTRIM(TrnCode)) AS Code, LTRIM(RTRIM(TrnSubCode)) AS Sub\nFROM dbo.PackageCode\nWHERE NULLIF(LTRIM(RTRIM(TrnCode)), '') IS NOT NULL;\n\nSELECT LTRIM(RTRIM(ParaName)) AS Code, LTRIM(RTRIM(ParaString)) AS Sub\nFROM dbo.GlobalParameter\nWHERE ParaName IN ('EBedSurChgTrnCode', 'EBedSurChgTrnSub');\n\nSELECT LTRIM(RTRIM(TrnCode)) AS Code, LTRIM(RTRIM(TrnSubCode)) AS Sub\nFROM dbo.SpecialService\nWHERE SpecialServiceCode = @ExtraBedCode\n  AND ISNULL(IncludeInRoomCharge, 0) = 0\n  AND NULLIF(LTRIM(RTRIM(TrnCode)), '') IS NOT NULL;",
+    "params": [
+      {
+        "name": "ExtraBedCode",
+        "type": "AnsiString",
+        "value": "EB"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT t.TransactionCode,\n       ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') AS TransactionSubCode,\n       tc.Description, t.TransactionAmount AS Amount,\n       CASE WHEN ((t.TransactionCode = @EarnC0 AND ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') = @EarnS0)) THEN 1 ELSE 0 END AS Qualifies\nFROM Folio f\nJOIN FolioTransaction t ON t.FolioNum = CONVERT(varchar(20), f.FolioNum)\nLEFT JOIN TransactionCode tc ON tc.TransactionCode = t.TransactionCode\n    AND tc.TransactionSubCode = ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0')\nWHERE f.ConfirmNum = @Conf AND f.ExternalConfirmNumber IS NULL\n  AND ISNULL(f.CancelNum, 0) = 0\n  AND f.FolioStatus = 3\n  AND t.FolioBalanceCode = 'A'",
+    "params": [
+      {
+        "name": "Conf",
+        "type": "Decimal",
+        "value": "9001"
+      },
+      {
+        "name": "EarnC0",
+        "type": "AnsiString",
+        "value": "110"
+      },
+      {
+        "name": "EarnS0",
+        "type": "AnsiString",
+        "value": "1"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT 'O' AS K, LTRIM(RTRIM(f.OriginCode)) AS V FROM Folio f\n  WHERE f.ConfirmNum = @Key AND f.ExternalConfirmNumber IS NULL AND ISNULL(f.CancelNum, 0) = 0\nUNION\nSELECT 'S', LTRIM(RTRIM(f.MarketSegmentCode)) FROM Folio f\n  WHERE f.ConfirmNum = @Key AND f.ExternalConfirmNumber IS NULL AND ISNULL(f.CancelNum, 0) = 0\nUNION\nSELECT 'R', LTRIM(RTRIM(f.RoomRateCode)) FROM Folio f\n  WHERE f.ConfirmNum = @Key AND f.ExternalConfirmNumber IS NULL AND ISNULL(f.CancelNum, 0) = 0",
+    "params": [
+      {
+        "name": "Key",
+        "type": "Decimal",
+        "value": "9001"
+      }
+    ]
+  }
+]

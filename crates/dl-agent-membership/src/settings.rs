@@ -73,6 +73,8 @@ pub struct Settings {
     pub write: WriteSettings,
     /// `Smile` and `Earn` (read side only).
     pub smile: SmileSettings,
+    /// `CheckoutScan`.
+    pub checkout: crate::checkout::CheckoutSettings,
 }
 
 /// `FolioObservationScan`.
@@ -140,6 +142,9 @@ pub struct WriteSettings {
     pub extra_bed_mode: String,
     /// `ExtraBedModeProblem`: set when the configured mode was not understood.
     pub extra_bed_mode_problem: Option<String>,
+    /// `Smile:SmileHotelId`: the SMILE `HotelID` whose extra-bed terms are read (`None`:
+    /// the only one SMILE has).
+    pub smile_hotel_id: Option<String>,
 }
 
 /// `ExtraBedMode`'s setter: an unknown value falls back to `FOLD_LEGACY` with a problem.
@@ -216,9 +221,11 @@ impl Settings {
             .map_or_else(|| config::default_dir(data_dir), PathBuf::from);
         let secs = |key, d| Duration::from_secs(uint(v, key, d));
         let (bed_mode, bed_problem) = extra_bed_mode(v);
+        let read_only = flag(v, "read_only", true);
         Settings {
             program_data_dir,
-            read_only: flag(v, "read_only", true),
+            read_only,
+            checkout: crate::checkout::CheckoutSettings::from_config(v, read_only),
             pull_jobs: flag(v, "pull_jobs", false),
             max_jobs_per_pull: u32::try_from(uint(v, "max_jobs_per_pull", 20)).unwrap_or(20),
             heartbeat: secs("heartbeat_seconds", 30),
@@ -272,6 +279,12 @@ impl Settings {
                 default_breakfast_code: code_or(v, "default_breakfast_code", "BFF"),
                 extra_bed_mode: bed_mode,
                 extra_bed_mode_problem: bed_problem,
+                smile_hotel_id: v
+                    .get("smile_hotel_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
             },
         }
     }

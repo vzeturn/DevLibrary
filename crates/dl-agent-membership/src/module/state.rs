@@ -11,7 +11,9 @@ use dl_json::Map;
 use dl_time::OffsetDateTime;
 
 use crate::folio::FolioScanState;
+use crate::log::{self, V};
 use crate::wire::parse::SyncConfig;
+use crate::writer::special_rows::HubSpecialCode;
 
 /// Stable report codes.
 pub mod codes {
@@ -129,6 +131,10 @@ pub struct Shared {
     pinned_identity: Mutex<Option<String>>,
     /// The folio scanner's cursor reading, for the heartbeat.
     pub folio: Arc<FolioScanState>,
+    /// The walk-in earn health (`WalkInEarnState`), for the heartbeat.
+    pub walk_in: Arc<crate::checkout::WalkInEarnState>,
+    /// The hub's extra-bed special code (sync-config), shared with the writer.
+    pub hub_special_code: HubSpecialCode,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -143,6 +149,18 @@ impl Shared {
 
     /// Stores a fresh sync-config.
     pub fn set_sync_config(&self, c: SyncConfig) {
+        if self
+            .hub_special_code
+            .set(c.extra_bed_special_code.as_deref())
+        {
+            log::info(
+                "hub picked the extra-bed special (extra_bed_special_code is the fallback only)",
+                &[(
+                    "code",
+                    V::S(c.extra_bed_special_code.as_deref().unwrap_or("(none)")),
+                )],
+            );
+        }
         *lock(&self.sync_config) = Some(c);
     }
 

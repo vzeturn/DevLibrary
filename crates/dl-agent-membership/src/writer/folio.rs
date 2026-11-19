@@ -1,25 +1,26 @@
 //! `FolioWriter`: the booking write (`WriteBookingAsync`), one room's create and update
-//! (`Reservation`), cancel (`Cancel`), the guest note (`Note`, `ExtraBed`) and the
-//! MM-marked `Folio_Special` rows (`ExtraBedSpecial`, fold mode only: the rows are
-//! removed, never written). Every statement and parameter mirrors the .NET agent.
+//! (`Reservation`), cancel (`Cancel`) and the guest note (`Note`, `ExtraBed`). The
+//! agent-marked `Folio_Special` rows (`ExtraBedSpecial`) are in
+//! [`super::special_rows`]. Every statement and parameter mirrors the .NET agent.
 
 use std::sync::Arc;
 
 use dl_decimal::Decimal;
-use dl_uuid::Uuid;
 
 use super::additional_name;
 use super::applock::{self, CANCEL_NUMBER_LOCK, DEFAULT_TIMEOUT_MS, FOLIO_NUMBER_LOCK};
 use super::lookup;
 use super::schema::{ColumnList, Mode, SchemaProbe, TableSchema};
 use super::session::{Rec, Session, bit, day, decimal, int, nvarchar, p, varchar};
+use super::special_rows::HubSpecialCode;
 use super::{CLERK_APP, format_user_info2, tcvn3};
 use crate::jobs::beds::{
-    BedDecision, GUEST_COUNT_MISMATCH, GuestPlan, MODE_SMILE_SPECIAL, compose_note, decide_fold,
+    BedDecision, GUEST_COUNT_MISMATCH, GuestPlan, MODE_SMILE_SPECIAL, compose_note,
     extract_bed_marker, night_rate, plan_guests,
 };
 use crate::jobs::payload::Room;
 use crate::jobs::plan::{BookingPlan, WriteContext, WriteError, Written};
+use crate::jobs::preflight::decide_extra_bed;
 use crate::log::{self, V};
 use crate::smile::SmileError;
 
@@ -41,8 +42,13 @@ pub struct WriteOptions {
     pub default_breakfast_code: Option<String>,
     /// `ExtraBedMode`.
     pub extra_bed_mode: String,
-    /// `EffectiveExtraBedSpecialCode`: the hub's code, else the configured one.
+    /// `ExtraBedSpecialCode`: the configured code (the hub's choice wins, see
+    /// [`FolioWriter::effective_special_code`]).
     pub extra_bed_special_code: String,
+    /// `HubExtraBedSpecialCode`: the hub's sync-config choice (runtime state).
+    pub hub_special_code: HubSpecialCode,
+    /// `SmileHotelId` (`None`: the only `HotelID` SMILE has).
+    pub smile_hotel_id: Option<String>,
 }
 
 impl Default for WriteOptions {
@@ -53,6 +59,8 @@ impl Default for WriteOptions {
             default_breakfast_code: Some("BFF".into()),
             extra_bed_mode: MODE_SMILE_SPECIAL.into(),
             extra_bed_special_code: "EB".into(),
+            hub_special_code: HubSpecialCode::default(),
+            smile_hotel_id: None,
         }
     }
 }
@@ -116,10 +124,6 @@ impl FolioWriter {
         })
     }
 
-    fn decide(&self, room: &Room) -> BedDecision {
-        decide_fold(room, &self.opts.extra_bed_mode)
-    }
-
     /// `WriteBookingAsync`: every room of the booking in one transaction under the counter
     /// applocks (folio number, then cancel number), with `SET LOCK_TIMEOUT`.
     pub fn write_booking(
@@ -149,6 +153,9 @@ impl FolioWriter {
             &[FOLIO_NUMBER_LOCK, CANCEL_NUMBER_LOCK]
         };
         let timeout = self.opts.write_lock_timeout_ms;
+        let decide = |room: &Room| {
+            decide_extra_bed(room, plan.extra_bed.as_ref(), &self.opts.extra_bed_mode)
+        };
         applock::in_lock(s, locks, timeout, Some(timeout), |s| {
             let mut confirm = plan.shared_confirm_num;
             let mut created = Vec::with_capacity(plan.creates.len());
@@ -158,7 +165,7 @@ impl FolioWriter {
                     &sc,
                     &plan.ctx,
                     room,
-                    &self.decide(room),
+                    &decide(room),
                     confirm,
                     plan.profile_number,
                 )?;
@@ -166,7 +173,7 @@ impl FolioWriter {
                 created.push((room.room_item_id, folio));
             }
             for (folio, room) in &plan.updates {
-                self.update_in_tx(s, &sc, *folio, room, &self.decide(room))?;
+                self.update_in_tx(s, &sc, *folio, room, &decide(room))?;
             }
             for folio in &plan.cancels {
                 self.cancel_in_tx(s, &sc.folio, *folio)?;
@@ -236,6 +243,9 @@ impl FolioWriter {
         );
         s.execute(&insert.insert_sql()?, insert.params())?;
         self.insert_rates(s, &sc.rate, folio_num, room, bed.use_net_excl_bed)?;
+        if !bed.special_rows.is_empty() {
+            self.write_mm_bed_rows_in_tx(s, &sc.special, folio_num, room.room_item_id, bed)?;
+        }
         log_guest_plan(&plan, room, Some(folio_num));
         let keys = additional_name::GuestKeys {
             confirm_num: Some(confirm),
@@ -635,49 +645,6 @@ impl FolioWriter {
         )?;
         Ok(())
     }
-
-    /// `WriteMmBedRowsInTxAsync` for a fold decision: this room's MM rows go.
-    fn write_mm_bed_rows_in_tx(
-        &self,
-        s: &mut dyn Session,
-        schema: &TableSchema,
-        folio_num: Decimal,
-        room_item_id: Uuid,
-        bed: &BedDecision,
-    ) -> Result<(), WriteError> {
-        if !bed.special_rows.is_empty() {
-            return Err(WriteError::NotPorted("SMILE_SPECIAL extra-bed rows"));
-        }
-        let cancelled = if schema.has("CancelNum") {
-            "CAST(CASE WHEN ISNULL(CancelNum, 0) = 0 THEN 0 ELSE 1 END AS bit)"
-        } else {
-            "CAST(0 AS bit)"
-        };
-        let marker = lookup::special_row_marker_pattern(room_item_id);
-        let params = [
-            p("@FolioNum", decimal(folio_num)),
-            p("@Marker", nvarchar(Some(&marker))),
-        ];
-        let current = s.rows(
-            &format!(
-                "SELECT LTRIM(RTRIM(ISNULL(SpecialCode, ''))) AS SpecialCode, CAST(ISNULL(Qty, 0) AS int) AS Qty,
-       CAST(ISNULL(Price, 0) AS decimal(18,2)) AS Price, CAST(ISNULL(FromDay, 0) AS int) AS FromDay,
-       CAST(ISNULL(ToDay, 0) AS int) AS ToDay, {cancelled} AS Cancelled
-FROM Folio_Special WITH (UPDLOCK)
-WHERE FolioNum = @FolioNum AND SPNotes LIKE @Marker"
-            ),
-            &params,
-        )?;
-        // Nothing wanted (fold): the rows are "as wanted" only when there are none.
-        if current.is_empty() {
-            return Ok(());
-        }
-        s.execute(
-            "DELETE FROM Folio_Special WHERE FolioNum = @FolioNum AND SPNotes LIKE @Marker",
-            &params,
-        )?;
-        Ok(())
-    }
 }
 
 fn warn_if_nights_mismatch(folio_num: Decimal, room: &Room) {
@@ -715,4 +682,4 @@ fn log_guest_plan(plan: &GuestPlan, room: &Room, folio_num: Option<Decimal>) {
 
 #[cfg(test)]
 #[path = "folio_tests.rs"]
-mod tests;
+pub(crate) mod tests;

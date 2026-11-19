@@ -1,10 +1,10 @@
 //! Extra beds (`FolioWriter.ExtraBed`, `ExtraBedWire`) and the guest-count plan
 //! (`FolioWriter.GuestCounts`).
 //!
-//! Only the fold decision is ported: the bed stays in the room rate and a TCVN3 note
-//! (`MM: +N giường phụ (đã gộp trong giá phòng)`) records it. The `SMILE_SPECIAL` preflight
-//! is not ported, so a hotel configured for it folds with `FINGERPRINT_UNVERIFIED`, which
-//! is the .NET agent's own safe fallback when the preflight cannot verify SMILE.
+//! The fold decision lives here: the bed stays in the room rate and a TCVN3 note
+//! (`MM: +N giường phụ (đã gộp trong giá phòng)`) records it. The `SMILE_SPECIAL`
+//! preflight that turns the bed into its own `Folio_Special` row is in
+//! [`super::preflight`].
 
 use dl_decimal::Decimal;
 
@@ -23,6 +23,16 @@ pub const FOLD_CONFIGURED: &str = "CONFIGURED_FOLD";
 pub const FOLD_PAYLOAD_LEGACY: &str = "PAYLOAD_LEGACY";
 /// `FoldFingerprintUnverified`.
 pub const FOLD_FINGERPRINT_UNVERIFIED: &str = "FINGERPRINT_UNVERIFIED";
+/// `FoldFingerprintDrift`.
+pub const FOLD_FINGERPRINT_DRIFT: &str = "FINGERPRINT_DRIFT";
+/// `FoldHotelIdMismatch`.
+pub const FOLD_HOTEL_ID_MISMATCH: &str = "HOTEL_ID_MISMATCH";
+/// `FoldSpecialMissing`.
+pub const FOLD_SPECIAL_MISSING: &str = "SPECIAL_MISSING";
+/// `FoldSpecialUnusable`.
+pub const FOLD_SPECIAL_UNUSABLE: &str = "SPECIAL_UNUSABLE";
+/// `FoldSpecialByDateOff`.
+pub const FOLD_SPECIAL_BY_DATE_OFF: &str = "SPECIAL_BY_DATE_OFF";
 
 const BED_NOTE_TAIL: &str = " giường phụ (đã gộp trong giá phòng)";
 const NOTE_SEPARATOR: &str = " | ";
@@ -40,7 +50,7 @@ pub struct SpecialBedRow {
     pub to_day: i32,
 }
 
-/// `ExtraBedWriteDecision` (fold only: no special rows).
+/// `ExtraBedWriteDecision`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BedDecision {
     /// `ExtraBedToWrite`.
@@ -53,8 +63,12 @@ pub struct BedDecision {
     pub mode: &'static str,
     /// `FoldReason`.
     pub fold_reason: Option<&'static str>,
-    /// `SpecialRows`.
+    /// `SpecialRows`: the agent's `Folio_Special` rows wanted (one per price band).
     pub special_rows: Vec<SpecialBedRow>,
+    /// `SpecialCode`: the code the rows are written under (`None`: the effective code).
+    pub special_code: Option<String>,
+    /// `NativeSurchargeActive`: SMILE's own surcharge is on, `Folio.ExtraBed` held at 0.
+    pub native_surcharge_active: bool,
 }
 
 impl BedDecision {
@@ -125,6 +139,8 @@ pub fn decide_fold(room: &Room, configured_mode: &str) -> BedDecision {
         mode: MODE_FOLD_LEGACY,
         fold_reason: Some(reason),
         special_rows: Vec::new(),
+        special_code: None,
+        native_surcharge_active: false,
     }
 }
 

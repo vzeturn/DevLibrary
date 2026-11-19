@@ -275,8 +275,9 @@ impl<'a> ColumnList<'a> {
 
     /// Whether a parameter `@column` was added.
     pub fn has_param(&self, column: &str) -> bool {
-        let name = format!("@{column}");
-        self.params.iter().any(|p| p.name() == name)
+        self.params
+            .iter()
+            .any(|p| p.name().trim_start_matches('@') == column)
     }
 
     /// `Core`: a column every SMILE install has.

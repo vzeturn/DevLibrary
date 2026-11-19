@@ -20,11 +20,26 @@ read-only and reports to the Membership hub:
 jobs against SMILE and acks them like the .NET agent: create / modify / cancel folios
 (applock, `GetFolioNumber` / `GetConfirmNum` / `GetCancelNum`, replay lookup, hand-entered
 duplicate guard), member profile (`GetProfileNumber`), link folio, voucher and reward
-discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity).
-Not ported yet: earn reporting (`EarnPoints` jobs are left un-acked), SMILE_SPECIAL
-extra-bed rows (a booking that needs them is left un-acked), the checkout / walk-in
-scanners and the extra-bed terms sync. Only one writer may run per hotel: stop the .NET
-`MM.Membership.Agent` service before turning writes on.
+discounts (`PostOneTransaction`), travel agent read, behind the write gate (DB identity),
+and `EarnPoints` jobs (revenue read from SMILE, `POST /api/agent/earn`).
+Extra beds follow `extra_bed_write_mode`: `SMILE_SPECIAL` runs the .NET preflight (terms
+read from `GlobalParameter` / `SpecialService` / `TransactionCode`, the hub's verified
+fingerprint, the special the hub picked in sync-config or in the job) and writes one
+agent-marked `Folio_Special` row per price band inside the folio transaction; any failed
+check folds the bed into the room rate with the .NET reason. With writes on, the module
+also reports the extra-bed terms and the `SpecialService` catalogue to the hub every
+300 s (`pms/extra-bed-terms`, `pms/special-services`). Only one writer may run per hotel:
+stop the .NET `MM.Membership.Agent` service before turning writes on.
+
+**Earn (checkout scan).** Every `checkout_interval_seconds` the scan thread asks the hub for
+the bookings still waiting to earn (`GET /api/agent/bookings/pending-checkout`), reports earn
+for those whose live folios are all checked out (`POST /api/agent/earn`, plus the
+`folio-revenue` audit), reports walk-in stays by the first guest's phone (`POST
+/api/agent/earn/walk-in`, remembered in memory so a group is asked once per process), reports
+bookings cancelled in SMILE (`bookings/pms-cancelled`; an older hub answering 401/404/405
+turns that off) and the daily summary (`checkout-scan-summary`). There is no cursor: the hub
+names what is pending. It only reads SMILE. A wrong `guest_phone_column` turns the walk-in
+half off (heartbeat `WalkInEarnOk: false`) without stopping booking earn.
 
 ## Turning it on
 
@@ -49,6 +64,10 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | `rooms_interval_seconds`, `rooms_full_push_every` | `300`, `12` | room inventory |
 | `extra_bed_special_code`, `guest_phone_column`, `earn_charge_codes`, `member_discount_code` | `EB`, `MobileNum`, SMILE's catalog, none | `Smile` / `Earn` |
 | `write_lock_timeout_ms`, `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode` | `10000`, `1`, `BFF`, `SMILE_SPECIAL` | `SmileWriteOptions`; an empty code is not written; an unknown mode falls back to `FOLD_LEGACY` with a warning |
+| `checkout_scan_enabled` | `true` when `read_only` is `false`, else `false` | the checkout scan (earn); the .NET agent always runs it, so a read-only module beside the .NET service leaves it off |
+| `checkout_interval_seconds`, `checkout_max_per_scan`, `checkout_grace_days` | `60`, `100`, `1` | `CheckoutScan` |
+| `walk_in_earn_enabled`, `walk_in_lookback_days`, `walk_in_max_per_scan` | `true`, `3`, `100` | `CheckoutScan` walk-in earn (phone column: `guest_phone_column`) |
+| `smile_hotel_id` | none | `Smile:SmileHotelId`: the `GlobalParameter.HotelID` whose extra-bed terms are read; needed only when SMILE has several |
 | `capabilities` | the .NET `FullCapabilities` | sent in the heartbeat |
 
 No secret is in the remote config: the hotel token and the SMILE connection string stay in
@@ -69,8 +88,63 @@ on the origin that was called, and writes `config.dpapi` the way the .NET instal
 the previous file is kept beside it. Without `DL_AGENT_MEMBERSHIP_SMILE` a forced re-enroll
 keeps the SMILE connection string of the previous config.
 
-A site already enrolled by the .NET installer needs nothing: the module reads the same
-`config.dpapi`.
+A site already enrolled by the .NET installer needs no new code: the module reads the same
+`config.dpapi`. Use `--switch` to take it over.
+
+## Switching from the .NET agent
+
+```
+dl-agent membership-enroll --switch --hub-url https://hub.example
+```
+
+`--switch` (safe on every installer run):
+
+1. finds the .NET configuration: `%ProgramData%\MM.Membership.Agent\config.dpapi`, else the
+   seed the .NET agent would seal on its first start (`appsettings.json`,
+   `appsettings.{DOTNET_ENVIRONMENT}.json`, `appsettings.hotel.json` beside its exe, `Agent__*`
+   variables; off Windows also the portable `{"Agent":{...}}` file at `Agent__SecretStorePath`
+   or `/var/lib/mm-membership-agent/config.json`) and seals that into `config.dpapi`;
+2. checks the token with one `GET api/agent/sync-config`. Only `AGENT_TOKEN_REJECTED`, an
+   unreadable `config.dpapi` or no configuration at all spends a code
+   (`DL_AGENT_MEMBERSHIP_TOKEN` or stdin); that enrolment keeps the old SMILE connection
+   string and backs the old file up as `config.dpapi.bak-*`. An unreachable hub keeps the file;
+3. stops the `MM.Membership.Agent` Windows service and sets it to disabled (a failure is an
+   error: stop it by hand before turning writes on);
+4. records what it did, without secrets, in `<data>\modules\membership\enrolled.json`. Later
+   runs keep what is there and only make sure the .NET service stays stopped.
+
+Then turn the module on (`enabled: true`; `read_only: false` with `pull_jobs: true` for writes).
+
+### Rollback
+
+```
+dl-agent membership-enroll --rollback
+```
+
+1. puts the recorded start type of `MM.Membership.Agent` back and starts it (by hand:
+   `sc config MM.Membership.Agent start= auto` then `sc start MM.Membership.Agent`);
+2. restores the `config.dpapi.bak-*` copy if the switch replaced the file. When the switch
+   enrolled again the hub replaced the token, so the backup's token no longer works: the
+   current file (same format) is kept for the .NET agent unless `--force`;
+3. marks the record rolled back: later `--switch` runs do nothing until `--force`;
+4. turn the module off in the remote config: `{"modules":{"membership":{"read_only":true}}}`
+   (or `"enabled": false`), so only the .NET agent writes.
+
+Real DPAPI and the service control only run on Windows; tests use a plain sealer and a fake
+service.
+
+## Walk-in backfill
+
+```
+dl-agent membership-backfill-walkin --from 2026-01-01 [--to 2026-09-19] [--page-size 200]
+    [--phone-column MobileNum] [--extra-bed-code EB] [--member-discount-code MD]
+```
+
+The .NET `--backfill-from` mode: reports every checked-out walk-in stay of the range (at most
+400 days) to the hub and exits non-zero unless the whole range went through without a failed
+group. It reads `config.dpapi`, only reads SMILE, and saves its cursor in
+`backfill-walkin.json` next to `config.dpapi` after each clean page, so re-running the same
+command resumes. Re-running never double-earns (the hub dedups by `CONF:{ConfirmNum}`).
 
 ## Behaviour
 
@@ -85,7 +159,7 @@ A site already enrolled by the .NET installer needs nothing: the module reads th
 - Commands: `membership.status` (whether the site is enrolled, the status detail and the
   metrics below; no token, no connection string).
 - Metrics: `heartbeat.count/failures/last`, `hub.failures_in_a_row`, `smile.ok`,
-  `scans.paused`, `jobs.seen/left`, per scanner `{availability,rooms,folio}.runs/rows/errors/
+  `scans.paused`, `jobs.seen/left`, per scanner `{availability,rooms,folio,checkout}.runs/rows/errors/
   last/last_run`, `folio.cursor`, `folio.lag_seconds`, `identity.pinned`.
 - Problem reports (rate-limited per code; no guest data, SQL text or token):
   `membership_hub_failed`, `membership_auth_failed`, `membership_smile_failed`,
@@ -93,9 +167,9 @@ A site already enrolled by the .NET installer needs nothing: the module reads th
 
 ## Not ported yet
 
-`CheckoutScanner`, the extra-bed terms and special-service sync, the TCVN3 decoding of
-legacy text, `SmileDiagnostics`, the walk-in backfill, the travel-agent reader, the SMILE
-schema probe, the folio revenue scan, the earn-pair drift check and the inventory fallback.
+The TCVN3 decoding of
+legacy text, `SmileDiagnostics`, the SMILE
+schema probe, the earn-pair drift check and the inventory fallback.
 Off Windows `config.dpapi` cannot be opened (no DPAPI); tests use a plain sealer.
 
 ## Tests
@@ -110,10 +184,16 @@ against SQL Server:
 
 ```
 MEMBERSHIP_AGENT_TEST_SQL='Data Source=127.0.0.1,14333;User ID=sa;Password=…;Encrypt=disable' \
-  cargo test -p dl-agent-membership --test sql_live
+  cargo test -p dl-agent-membership --test sql_live --test sql_live_writes --test sql_live_earn --test sql_live_extra_bed
 ```
+
+`sql_live_earn` seeds folios and `FolioTransaction` rows and runs the `EarnPoints` job through
+the real `SmileWriter`, the checkout scan and the walk-in backfill against the fake hub.
 
 It creates a throw-away database from the MM-MEMBERSHIP SMILE fixture schema
 (`tests/fixtures/smile_schema.sql`), seeds it, runs every SMILE read and the scan workers
 against the fake hub, and drops the database. macOS has no TLS backend, so use
-`Encrypt=disable` there.
+`Encrypt=disable` there. Run the SQL Server container in the hotel time zone
+(`-e TZ=Asia/Ho_Chi_Minh`), as SMILE servers are: the seeds use the server's `GETDATE()` and
+the probes the hotel date (UTC+7), so a UTC container fails `sql_live` between 17:00 and
+24:00 UTC.

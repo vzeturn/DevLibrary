@@ -16,7 +16,11 @@ use dl_agent::supervisor::{Factory, Module, ModuleContext};
 use dl_json::{Map, Value};
 use dl_winsvc::StopSignal;
 
+use crate::checkout::CheckoutScanner;
 use crate::config::{AgentConfig, ConfigStore, Dpapi, Sealer};
+use crate::earn::pairs::{EarnSettings, PairSource};
+use crate::earn::{EarnEnv, ModuleEnv};
+use crate::hub::earn::EarnHub;
 use crate::hub::gate::TokenGate;
 use crate::hub::{HubApi, HubClient};
 use crate::identity::{IdentityProbe, Snapshot, Tracker};
@@ -26,9 +30,10 @@ use crate::log::{self, V};
 use crate::settings::Settings;
 use crate::smile::{SmileError, SmileHealth, TdsSmile};
 use crate::sync::{SyncSettings, SyncWorker};
+use crate::terms::{TermsOptions, TermsSync};
 use crate::writer::folio::{FolioWriter, WriteOptions};
-use crate::writer::smile_writer::SmileWriter;
-use scan::{ScanDeps, ScanLoop};
+use crate::writer::smile_writer::{EarnPath, SmileWriter};
+use scan::{CheckoutPass, ScanDeps, ScanLoop};
 use state::{RateLimit, Shared};
 
 /// The module name (the `modules.membership` section).
@@ -172,7 +177,7 @@ type SmileHandles = (
 /// Runs the sync and scan threads until `ctx.stop()`.
 fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> Result<(), Error> {
     let gate = Arc::new(TokenGate::new(TOKEN_RETRY));
-    let hub: Arc<dyn HubApi> = Arc::new(
+    let hub_client = Arc::new(
         HubClient::new(
             &cfg.hub_base_url,
             &cfg.agent_token,
@@ -182,6 +187,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         )
         .map_err(|e| Error::Config(format!("membership hub address: {e}")))?,
     );
+    let hub: Arc<dyn HubApi> = hub_client.clone();
     let shared = Arc::new(Shared::default());
     let (health, probe, scan_src, write_smile): SmileHandles = match (
         TdsSmile::new(&cfg.smile_connection_string),
@@ -218,6 +224,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             ("pull_jobs", V::B(settings.pull_jobs)),
             ("read_only", V::B(settings.read_only)),
             ("folio_scan", V::B(settings.folio.enabled)),
+            ("checkout_scan", V::B(settings.checkout.enabled)),
         ],
     );
 
@@ -235,8 +242,35 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         },
         agent_version(),
     );
-    if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker) {
+    let env: Arc<dyn EarnEnv> = Arc::new(ModuleEnv {
+        tracker: tracker.clone(),
+        shared: shared.clone(),
+    });
+    let earn_hub: Arc<dyn EarnHub> = hub_client.clone();
+    if let Some(d) = dispatcher(
+        settings,
+        &cfg,
+        write_smile.clone(),
+        &hub,
+        &tracker,
+        (&earn_hub, &env),
+        &shared,
+    ) {
         sync = sync.with_dispatcher(d);
+        // The terms report belongs to the agent of record: only with writes on.
+        if let Some(smile) = write_smile {
+            sync = sync.with_terms(TermsSync::new(
+                smile,
+                hub.clone(),
+                TermsOptions {
+                    mode: settings.write.extra_bed_mode.clone(),
+                    configured_code: settings.smile.extra_bed_special_code.clone(),
+                    hub_code: shared.hub_special_code.clone(),
+                    smile_hotel_id: settings.write.smile_hotel_id.clone(),
+                    earn_charge_codes: settings.smile.earn_charge_codes.clone(),
+                },
+            ));
+        }
     }
     let s = stop.clone();
     let mut workers = vec![("sync", spawn("membership-sync", move || sync.run(&s))?)];
@@ -248,6 +282,9 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
             shared: shared.clone(),
         };
         let mut scans = ScanLoop::new(deps, settings, &cfg.hotel_id.to_string(), agent_version());
+        if let Some(pass) = checkout_pass(settings, &cfg, &shared, &earn_hub, &env) {
+            scans = scans.with_checkout(pass);
+        }
         let s = stop.clone();
         match spawn("membership-scan", move || scans.run(&s)) {
             Ok(h) => workers.push(("scan", h)),
@@ -272,6 +309,8 @@ fn dispatcher(
     smile: Option<Arc<TdsSmile>>,
     hub: &Arc<dyn HubApi>,
     tracker: &Arc<Tracker>,
+    (earn_hub, env): (&Arc<dyn EarnHub>, &Arc<dyn EarnEnv>),
+    shared: &Shared,
 ) -> Option<Arc<Dispatcher>> {
     if settings.read_only {
         return None;
@@ -290,6 +329,8 @@ fn dispatcher(
         default_breakfast_code: w.default_breakfast_code.clone(),
         extra_bed_mode: w.extra_bed_mode.clone(),
         extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+        hub_special_code: shared.hub_special_code.clone(),
+        smile_hotel_id: w.smile_hotel_id.clone(),
     });
     let gate = Arc::new(WriteGate::new(hub.clone(), tracker.clone()));
     log::warn(
@@ -297,7 +338,11 @@ fn dispatcher(
         &[("extra_bed_mode", V::S(&w.extra_bed_mode))],
     );
     Some(Arc::new(Dispatcher::new(
-        Arc::new(SmileWriter::new(smile, folio)),
+        Arc::new(SmileWriter::new(smile, folio).with_earn(EarnPath {
+            pairs: PairSource::new(earn_settings(settings)),
+            hub: earn_hub.clone(),
+            env: env.clone(),
+        })),
         Some(gate),
         DispatchSettings {
             origin_code: cfg.origin_code.clone(),
@@ -305,6 +350,42 @@ fn dispatcher(
             extra_bed_mode: w.extra_bed_mode.clone(),
         },
     )))
+}
+
+/// The checkout scan when `checkout_scan_enabled` (default: writes on), on a SMILE
+/// session of its own.
+fn checkout_pass(
+    settings: &Settings,
+    cfg: &AgentConfig,
+    shared: &Arc<Shared>,
+    hub: &Arc<dyn EarnHub>,
+    env: &Arc<dyn EarnEnv>,
+) -> Option<CheckoutPass> {
+    if !settings.checkout.enabled {
+        return None;
+    }
+    let smile = TdsSmile::new(&cfg.smile_connection_string).ok()?;
+    Some(CheckoutPass {
+        scanner: CheckoutScanner::new(
+            settings.checkout.clone(),
+            &settings.smile.guest_phone_column,
+            PairSource::new(earn_settings(settings)),
+            shared.walk_in.clone(),
+            agent_version(),
+        ),
+        db: Arc::new(smile),
+        hub: hub.clone(),
+        env: env.clone(),
+    })
+}
+
+/// `EarnOptions` plus the configured extra-bed code, for every earn path.
+pub(crate) fn earn_settings(settings: &Settings) -> EarnSettings {
+    EarnSettings {
+        charge_codes: settings.smile.earn_charge_codes.clone(),
+        member_discount_code: settings.smile.member_discount_code.clone(),
+        extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+    }
 }
 
 /// The module thread's loop: commands, reports, metrics, health and worker crashes.

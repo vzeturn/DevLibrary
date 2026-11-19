@@ -1,0 +1,723 @@
+[
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "Folio_Special"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT OBJECT_NAME(c.object_id) AS TableName, c.name AS ColumnName\nFROM sys.columns c\nWHERE c.object_id IN (OBJECT_ID(N'dbo.GlobalParameter'), OBJECT_ID(N'dbo.ExtraBedInv'),\n                      OBJECT_ID(N'dbo.TransactionCode'), OBJECT_ID(N'dbo.HotelParameter'),\n                      OBJECT_ID(N'dbo.SpecialService'), OBJECT_ID(N'dbo.TaxDef'),\n                      OBJECT_ID(N'dbo.ServiceCharge'))",
+    "params": []
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT TOP (2) LTRIM(RTRIM(HotelID)) AS HotelID\nFROM dbo.GlobalParameter\nWHERE ParaName IN (@Names1,@Names2,@Names3,@Names4,@Names5,@Names6) AND HotelID IS NOT NULL AND LTRIM(RTRIM(HotelID)) <> ''",
+    "params": [
+      {
+        "name": "Names1",
+        "type": "String",
+        "value": "ExtraBedSurChg"
+      },
+      {
+        "name": "Names2",
+        "type": "String",
+        "value": "EBedSurChgTrnCode"
+      },
+      {
+        "name": "Names3",
+        "type": "String",
+        "value": "EBedSurChgTrnSub"
+      },
+      {
+        "name": "Names4",
+        "type": "String",
+        "value": "ExtraBedInv"
+      },
+      {
+        "name": "Names5",
+        "type": "String",
+        "value": "SpecialByDate"
+      },
+      {
+        "name": "Names6",
+        "type": "String",
+        "value": "RateCodePP"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT LTRIM(RTRIM(ParaName)) AS ParaName, ParaString\nFROM dbo.GlobalParameter\nWHERE LTRIM(RTRIM(HotelID)) = @HotelId AND ParaName IN (@Names1,@Names2,@Names3,@Names4,@Names5,@Names6)",
+    "params": [
+      {
+        "name": "HotelId",
+        "type": "String",
+        "value": "VIC"
+      },
+      {
+        "name": "Names1",
+        "type": "String",
+        "value": "ExtraBedSurChg"
+      },
+      {
+        "name": "Names2",
+        "type": "String",
+        "value": "EBedSurChgTrnCode"
+      },
+      {
+        "name": "Names3",
+        "type": "String",
+        "value": "EBedSurChgTrnSub"
+      },
+      {
+        "name": "Names4",
+        "type": "String",
+        "value": "ExtraBedInv"
+      },
+      {
+        "name": "Names5",
+        "type": "String",
+        "value": "SpecialByDate"
+      },
+      {
+        "name": "Names6",
+        "type": "String",
+        "value": "RateCodePP"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT SUM(CAST(NumBed AS bigint)) FROM dbo.ExtraBedInv WHERE LTRIM(RTRIM(HotelID)) = @HotelId",
+    "params": [
+      {
+        "name": "HotelId",
+        "type": "String",
+        "value": "VIC"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT TOP (1) LTRIM(RTRIM(SpecialServiceCode)) AS Code,\n       NULLIF(LTRIM(RTRIM(CONVERT(varchar(20), TrnCode))), '') AS TrnCode,\n       NULLIF(LTRIM(RTRIM(CONVERT(varchar(20), TrnSubCode))), '') AS TrnSub,\n       TRY_CONVERT(int, OpenPrice) AS OpenPrice,\n       TRY_CONVERT(int, IncludeInRoomCharge) AS IncludeInRoomCharge,\n       TRY_CONVERT(decimal(18, 2), AmountCharge) AS AmountCharge\nFROM dbo.SpecialService\nWHERE LTRIM(RTRIM(SpecialServiceCode)) = @Code",
+    "params": [
+      {
+        "name": "Code",
+        "type": "String",
+        "value": "EB"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT TOP (1) LTRIM(RTRIM(CONVERT(nvarchar(20), TaxCode))) AS TaxCode,\n       LTRIM(RTRIM(CONVERT(nvarchar(20), ServiceChargeCode))) AS ServiceChargeCode,\n       LTRIM(RTRIM(CONVERT(nvarchar(20), STaxCode))) AS STaxCode\nFROM dbo.TransactionCode\nWHERE LTRIM(RTRIM(TransactionCode)) = @Code\n  AND (@Sub IS NULL OR LTRIM(RTRIM(CONVERT(varchar(20), TransactionSubCode))) = @Sub)\nORDER BY LTRIM(RTRIM(CONVERT(varchar(20), TransactionSubCode))), TaxCode, ServiceChargeCode",
+    "params": [
+      {
+        "name": "Code",
+        "type": "String",
+        "value": "110"
+      },
+      {
+        "name": "Sub",
+        "type": "String",
+        "value": "9"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT TOP (2) LTRIM(RTRIM(CONVERT(nvarchar(20), TaxCode))) AS TaxCode,\n       LTRIM(RTRIM(CONVERT(nvarchar(20), ServiceChargeCode))) AS ServiceChargeCode,\n       LTRIM(RTRIM(CONVERT(nvarchar(20), STaxCode))) AS STaxCode\nFROM dbo.TransactionCode\nWHERE AutoPost = 1",
+    "params": []
+  },
+  {
+    "kind": "text",
+    "text": "SELECT TOP (1) HotelDate FROM dbo.HotelParameter\nWHERE LTRIM(RTRIM(HotelID)) = @HotelId",
+    "params": [
+      {
+        "name": "HotelId",
+        "type": "String",
+        "value": "VIC"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT TOP (2) TRY_CONVERT(decimal(9, 6), ServiceRate) AS Rate\nFROM dbo.ServiceCharge\nWHERE LTRIM(RTRIM(ServiceChargeCode)) = @Code",
+    "params": [
+      {
+        "name": "Code",
+        "type": "String",
+        "value": "S5"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT DISTINCT TOP (2) TRY_CONVERT(decimal(9, 6), TaxRate) AS Rate\nFROM dbo.TaxDef\nWHERE LTRIM(RTRIM(TaxCode)) = @Code",
+    "params": [
+      {
+        "name": "Code",
+        "type": "String",
+        "value": "V8"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "Folio"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "FolioRate"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMN_NAME AS Name, CHARACTER_MAXIMUM_LENGTH AS MaxLength\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = @Table AND TABLE_SCHEMA IN (SCHEMA_NAME(), 'dbo')",
+    "params": [
+      {
+        "name": "Table",
+        "type": "String",
+        "value": "AdditionalName"
+      }
+    ]
+  },
+  {
+    "kind": "batch",
+    "text": "SET LOCK_TIMEOUT 10000",
+    "params": []
+  },
+  {
+    "kind": "batch",
+    "text": "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; BEGIN TRANSACTION",
+    "params": []
+  },
+  {
+    "kind": "proc",
+    "text": "sp_getapplock",
+    "params": [
+      {
+        "name": "Resource",
+        "type": "String",
+        "value": "SMILE_FolioNumber"
+      },
+      {
+        "name": "LockMode",
+        "type": "String",
+        "value": "Exclusive"
+      },
+      {
+        "name": "LockOwner",
+        "type": "String",
+        "value": "Transaction"
+      },
+      {
+        "name": "LockTimeout",
+        "type": "Int32",
+        "value": "10000"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "UPDATE Folio SET RoomTypeBooked = @RoomTypeBooked, ArrivalDate = @ArrivalDate, DepartureDate = @DepartureDate, NumAdult = @NumAdult, NumChild = @NumChild, NumEnf = @NumEnf, RateAmount = @RateAmount, LastName = @LastName, ExtraBed = @ExtraBed, FirstName = COALESCE(@FirstName, FirstName), RoomTypeCode = @RoomTypeCode, RateOverideFlag = @RateOverideFlag, LastChangeTime = GETDATE(), LastChangeClerkID = @LastChangeClerkID WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "RoomTypeBooked",
+        "type": "String",
+        "value": "DLX"
+      },
+      {
+        "name": "ArrivalDate",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "DepartureDate",
+        "type": "DateTime",
+        "value": "2026-12-03T00:00:00"
+      },
+      {
+        "name": "NumAdult",
+        "type": "Int32",
+        "value": "3"
+      },
+      {
+        "name": "NumChild",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "NumEnf",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "RateAmount",
+        "type": "Decimal",
+        "value": "1300000"
+      },
+      {
+        "name": "LastName",
+        "type": "AnsiString",
+        "value": "Nguyen"
+      },
+      {
+        "name": "ExtraBed",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "FirstName",
+        "type": "AnsiString",
+        "value": "An"
+      },
+      {
+        "name": "RoomTypeCode",
+        "type": "String",
+        "value": "DLX"
+      },
+      {
+        "name": "RateOverideFlag",
+        "type": "Boolean",
+        "value": "true"
+      },
+      {
+        "name": "LastChangeClerkID",
+        "type": "AnsiString",
+        "value": "APP"
+      },
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "DELETE FROM FolioRate WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO FolioRate (FolioNum, hDate, ToDate, RateAmount, isCancel, RateOverride, CreateBy, CreateTime, DscPcnt, DscAmount) VALUES (@FolioNum, @hDate, @ToDate, @RateAmount, 0, @RateOverride, @CreateBy, GETDATE(), @DscPcnt, @DscAmount)",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "hDate",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "ToDate",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "RateAmount",
+        "type": "Decimal",
+        "value": "1300000"
+      },
+      {
+        "name": "RateOverride",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "CreateBy",
+        "type": "AnsiString",
+        "value": "APP"
+      },
+      {
+        "name": "DscPcnt",
+        "type": "Decimal",
+        "value": "0"
+      },
+      {
+        "name": "DscAmount",
+        "type": "Decimal",
+        "value": "0"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO FolioRate (FolioNum, hDate, ToDate, RateAmount, isCancel, RateOverride, CreateBy, CreateTime, DscPcnt, DscAmount) VALUES (@FolioNum, @hDate, @ToDate, @RateAmount, 0, @RateOverride, @CreateBy, GETDATE(), @DscPcnt, @DscAmount)",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "hDate",
+        "type": "DateTime",
+        "value": "2026-12-02T00:00:00"
+      },
+      {
+        "name": "ToDate",
+        "type": "DateTime",
+        "value": "2026-12-02T00:00:00"
+      },
+      {
+        "name": "RateAmount",
+        "type": "Decimal",
+        "value": "1300000"
+      },
+      {
+        "name": "RateOverride",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "CreateBy",
+        "type": "AnsiString",
+        "value": "APP"
+      },
+      {
+        "name": "DscPcnt",
+        "type": "Decimal",
+        "value": "0"
+      },
+      {
+        "name": "DscAmount",
+        "type": "Decimal",
+        "value": "0"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT ConfirmNum, OriginCode FROM Folio WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT a.IdAddition,\n       CASE WHEN a.IdAddition <> m.IdAddition\n             AND ISNULL(a.FirstName, '') = ISNULL(m.FirstName, '')\n             AND ISNULL(a.LastName, '') = ISNULL(m.LastName, '')\n            THEN 1 ELSE 0 END AS IsPlaceholder,\n       CAST(ISNULL(a.IsChild, 0) AS int) AS IsChild\nFROM AdditionalName a\nCROSS APPLY (SELECT TOP 1 x.IdAddition, x.FirstName, x.LastName FROM AdditionalName x\n             WHERE x.FolioNum = @FolioNum AND ISNULL(x.ACancelNum, 0) = 0\n             ORDER BY x.IdAddition) m\nWHERE a.FolioNum = @FolioNum AND ISNULL(a.ACancelNum, 0) = 0\nORDER BY a.IdAddition",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO AdditionalName (FirstName, LastName, ArrivalTime, DepartureTime, FolioNum, ACancelNum, AdtStatus, IsChild, VIPLevel, FolioSubNum, ConfirmNum, AOriginCode) VALUES (@FirstName, @LastName, @ArrivalTime, @DepartureTime, @FolioNum, 0, @AdtStatus, @IsChild, @VIPLevel, @FolioSubNum, @ConfirmNum, @AOriginCode)",
+    "params": [
+      {
+        "name": "FirstName",
+        "type": "AnsiString",
+        "value": "An"
+      },
+      {
+        "name": "LastName",
+        "type": "AnsiString",
+        "value": "Nguyen"
+      },
+      {
+        "name": "ArrivalTime",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "DepartureTime",
+        "type": "DateTime",
+        "value": "2026-12-03T00:00:00"
+      },
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "AdtStatus",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "IsChild",
+        "type": "Boolean",
+        "value": "false"
+      },
+      {
+        "name": "VIPLevel",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "FolioSubNum",
+        "type": "Decimal",
+        "value": "0"
+      },
+      {
+        "name": "ConfirmNum",
+        "type": "Decimal",
+        "value": "9001"
+      },
+      {
+        "name": "AOriginCode",
+        "type": "String",
+        "value": "MEM"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO AdditionalName (FirstName, LastName, ArrivalTime, DepartureTime, FolioNum, ACancelNum, AdtStatus, IsChild, VIPLevel, FolioSubNum, ConfirmNum, AOriginCode) VALUES (@FirstName, @LastName, @ArrivalTime, @DepartureTime, @FolioNum, 0, @AdtStatus, @IsChild, @VIPLevel, @FolioSubNum, @ConfirmNum, @AOriginCode)",
+    "params": [
+      {
+        "name": "FirstName",
+        "type": "AnsiString",
+        "value": "An"
+      },
+      {
+        "name": "LastName",
+        "type": "AnsiString",
+        "value": "Nguyen"
+      },
+      {
+        "name": "ArrivalTime",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "DepartureTime",
+        "type": "DateTime",
+        "value": "2026-12-03T00:00:00"
+      },
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "AdtStatus",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "IsChild",
+        "type": "Boolean",
+        "value": "false"
+      },
+      {
+        "name": "VIPLevel",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "FolioSubNum",
+        "type": "Decimal",
+        "value": "0"
+      },
+      {
+        "name": "ConfirmNum",
+        "type": "Decimal",
+        "value": "9001"
+      },
+      {
+        "name": "AOriginCode",
+        "type": "String",
+        "value": "MEM"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO AdditionalName (FirstName, LastName, ArrivalTime, DepartureTime, FolioNum, ACancelNum, AdtStatus, IsChild, VIPLevel, FolioSubNum, ConfirmNum, AOriginCode) VALUES (@FirstName, @LastName, @ArrivalTime, @DepartureTime, @FolioNum, 0, @AdtStatus, @IsChild, @VIPLevel, @FolioSubNum, @ConfirmNum, @AOriginCode)",
+    "params": [
+      {
+        "name": "FirstName",
+        "type": "AnsiString",
+        "value": "An"
+      },
+      {
+        "name": "LastName",
+        "type": "AnsiString",
+        "value": "Nguyen"
+      },
+      {
+        "name": "ArrivalTime",
+        "type": "DateTime",
+        "value": "2026-12-01T00:00:00"
+      },
+      {
+        "name": "DepartureTime",
+        "type": "DateTime",
+        "value": "2026-12-03T00:00:00"
+      },
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "AdtStatus",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "IsChild",
+        "type": "Boolean",
+        "value": "false"
+      },
+      {
+        "name": "VIPLevel",
+        "type": "Int32",
+        "value": "0"
+      },
+      {
+        "name": "FolioSubNum",
+        "type": "Decimal",
+        "value": "0"
+      },
+      {
+        "name": "ConfirmNum",
+        "type": "Decimal",
+        "value": "9001"
+      },
+      {
+        "name": "AOriginCode",
+        "type": "String",
+        "value": "MEM"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT LTRIM(RTRIM(ISNULL(SpecialCode, ''))) AS SpecialCode, CAST(ISNULL(Qty, 0) AS int) AS Qty,\n       CAST(ISNULL(Price, 0) AS decimal(18,2)) AS Price, CAST(ISNULL(FromDay, 0) AS int) AS FromDay,\n       CAST(ISNULL(ToDay, 0) AS int) AS ToDay, CAST(CASE WHEN ISNULL(CancelNum, 0) = 0 THEN 0 ELSE 1 END AS bit) AS Cancelled\nFROM Folio_Special WITH (UPDLOCK)\nWHERE FolioNum = @FolioNum AND SPNotes LIKE @Marker",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "Marker",
+        "type": "String",
+        "value": "MM:11111111-2222-3333-4444-555555555555 %"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "DELETE FROM Folio_Special WHERE FolioNum = @FolioNum AND SPNotes LIKE @Marker",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "Marker",
+        "type": "String",
+        "value": "MM:11111111-2222-3333-4444-555555555555 %"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT COLUMNPROPERTY(OBJECT_ID(N'dbo.Folio_Special'), 'nSeq', 'IsIdentity')",
+    "params": []
+  },
+  {
+    "kind": "text",
+    "text": "INSERT INTO Folio_Special (FolioNum, SpecialCode, Qty, Price, FromDay, ToDay, SPNotes, CancelNum) VALUES (@FolioNum, @SpecialCode, @Qty, @Price, @FromDay, @ToDay, @SPNotes, 0)",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      },
+      {
+        "name": "SpecialCode",
+        "type": "AnsiString",
+        "value": "EB"
+      },
+      {
+        "name": "Qty",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "Price",
+        "type": "Decimal",
+        "value": "453600"
+      },
+      {
+        "name": "FromDay",
+        "type": "Int32",
+        "value": "1"
+      },
+      {
+        "name": "ToDay",
+        "type": "Int32",
+        "value": "2"
+      },
+      {
+        "name": "SPNotes",
+        "type": "AnsiString",
+        "value": "MM:11111111-2222-3333-4444-555555555555 gi­êng phô (MM)"
+      }
+    ]
+  },
+  {
+    "kind": "text",
+    "text": "SELECT UserInfo3 FROM Folio WHERE FolioNum = @FolioNum",
+    "params": [
+      {
+        "name": "FolioNum",
+        "type": "Decimal",
+        "value": "7001"
+      }
+    ]
+  },
+  {
+    "kind": "batch",
+    "text": "COMMIT TRANSACTION",
+    "params": []
+  },
+  {
+    "kind": "batch",
+    "text": "SET LOCK_TIMEOUT -1",
+    "params": []
+  }
+]

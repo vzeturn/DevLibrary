@@ -9,6 +9,7 @@ use dl_uuid::Uuid;
 
 use super::payload::LinkFolioPayload;
 use super::plan::{BookingPlan, PmsWriter, ProfileRequest, WriteError, Written};
+use super::preflight::PreflightInputs;
 use super::result::Ack;
 use super::room_diff::ExistingFolio;
 use super::travel_agent::TravelAgent;
@@ -28,6 +29,20 @@ pub struct Hub {
     pub jobs: Mutex<Vec<Job>>,
     pub acks: Mutex<Vec<Ack>>,
     pub fail_acks: Mutex<bool>,
+    /// Bodies posted to `pms/extra-bed-terms` and `pms/special-services`.
+    pub pms_posts: Mutex<Vec<(&'static str, String)>>,
+    /// Whether the hub has those endpoints.
+    pub has_pms_endpoints: Mutex<bool>,
+}
+
+impl Hub {
+    fn pms_post(&self, what: &'static str, body: String) -> Result<bool, HubError> {
+        if !*self.has_pms_endpoints.lock().unwrap() {
+            return Ok(false);
+        }
+        self.pms_posts.lock().unwrap().push((what, body));
+        Ok(true)
+    }
 }
 
 impl HubApi for Hub {
@@ -36,6 +51,12 @@ impl HubApi for Hub {
     }
     fn sync_config(&self) -> Result<SyncConfig, HubError> {
         Ok(self.config.lock().unwrap().clone())
+    }
+    fn post_extra_bed_terms(&self, req: &crate::terms::TermsRequest) -> Result<bool, HubError> {
+        self.pms_post("terms", req.to_j().to_json())
+    }
+    fn post_special_services(&self, req: &crate::terms::CatalogRequest) -> Result<bool, HubError> {
+        self.pms_post("catalog", req.to_j().to_json())
     }
     fn pull_jobs(&self, max: u32) -> Result<Vec<Job>, HubError> {
         let mut jobs = self.jobs.lock().unwrap();
@@ -112,6 +133,10 @@ pub struct Pms {
     pub fail_profile: Mutex<Option<i32>>,
     pub refuse: Mutex<Option<String>>,
     pub not_ported: Mutex<bool>,
+    /// What `read_extra_bed_inputs` answers (`None`: `FOLD_LEGACY`).
+    pub bed_inputs: Mutex<Option<PreflightInputs>>,
+    /// The last plan `write_booking` received.
+    pub last_plan: Mutex<Option<BookingPlan>>,
 }
 
 impl Pms {
@@ -142,9 +167,22 @@ impl PmsWriter for Pms {
         self.call(format!("lookup_nums {}", nums.len()));
         Ok(Vec::new())
     }
+    fn read_extra_bed_inputs(
+        &self,
+        fingerprint: Option<&str>,
+        code: Option<&str>,
+    ) -> Result<Option<PreflightInputs>, WriteError> {
+        self.call(format!(
+            "lookup_bed {} {}",
+            fingerprint.unwrap_or("-"),
+            code.unwrap_or("-")
+        ));
+        Ok(self.bed_inputs.lock().unwrap().clone())
+    }
     fn write_booking(&self, plan: &BookingPlan) -> Result<Written, WriteError> {
+        *self.last_plan.lock().unwrap() = Some(plan.clone());
         if *self.not_ported.lock().unwrap() {
-            return Err(WriteError::NotPorted("SMILE_SPECIAL extra beds"));
+            return Err(WriteError::NotPorted("an unported write"));
         }
         if let Some(code) = self.refuse.lock().unwrap().clone() {
             return Err(WriteError::Refused {

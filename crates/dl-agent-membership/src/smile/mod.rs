@@ -6,7 +6,7 @@
 //! [`safe_identifier`] (the guest-phone column) or a fixed fragment chosen by a schema
 //! probe. Errors carry the SQL Server error number, never the statement text or data.
 
-mod folio_sql;
+pub(crate) mod folio_sql;
 mod occupancy_sql;
 mod rows;
 mod tds;

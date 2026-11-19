@@ -3,7 +3,7 @@
 
 use dl_decimal::Decimal;
 use dl_tds::{Client, Param, ParamValue, ResultSet, Row, Value};
-use dl_time::Date;
+use dl_time::{Date, DateTime};
 
 use crate::smile::SmileError;
 
@@ -107,11 +107,36 @@ impl Rec {
         })
     }
 
+    /// A nullable date-time (`date` columns at midnight).
+    pub fn opt_datetime(&self, col: &'static str) -> Result<Option<DateTime>, SmileError> {
+        Ok(match self.value(col)? {
+            Value::Null => None,
+            Value::DateTime(dt) => Some(*dt),
+            Value::Date(d) => Some(d.midnight()),
+            _ => return Err(SmileError::Decode(col)),
+        })
+    }
+
+    /// The first column of the row (an unnamed scalar such as `SELECT MAX(...)`).
+    pub fn first(&self) -> Option<Rec> {
+        self.0
+            .first()
+            .map(|(_, v)| Rec(vec![("_".to_owned(), v.clone())]))
+    }
+
     /// The first column as an integer (an unnamed scalar such as `SELECT CASE ... END`).
     pub fn scalar_int(&self) -> Result<Option<i64>, SmileError> {
         match self.0.first() {
             None => Ok(None),
             Some((_, v)) => Rec(vec![("_".to_owned(), v.clone())]).opt_int("_"),
+        }
+    }
+
+    /// The first column as a date (an unnamed scalar such as `SELECT TOP (1) HotelDate`).
+    pub fn scalar_date(&self) -> Result<Option<Date>, SmileError> {
+        match self.0.first() {
+            None => Ok(None),
+            Some((_, v)) => Rec(vec![("_".to_owned(), v.clone())]).opt_date("_"),
         }
     }
 
