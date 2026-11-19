@@ -2,8 +2,7 @@
 //! pushes may go to the hub, given the hub's sync-config (baseline identity, write gate)
 //! and the current identity reading.
 //!
-//! In .NET the same decision also guards SMILE writes; in M1 only the push side is used
-//! (the write side is M2).
+//! The same decision guards SMILE writes ([`crate::jobs::gate::WriteGate`]).
 
 use std::sync::Mutex;
 

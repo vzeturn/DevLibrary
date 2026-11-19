@@ -1,6 +1,7 @@
-//! `SyncWorker` (read side): the heartbeat, the shared sync-config and, when enabled, the
-//! job pull. M1 counts pulled jobs and leaves them: it never executes or acknowledges one,
-//! so the hub leases them again (the writers are M2).
+//! `SyncWorker`: the heartbeat, the shared sync-config and, when enabled, the job pull.
+//! Read-only, pulled jobs are counted and left (the hub leases them again). With a
+//! [`Dispatcher`] (not read-only) each job runs and is acknowledged with its lease
+//! (`PumpCoreAsync`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,6 +12,7 @@ use dl_winsvc::StopSignal;
 
 use crate::hub::{HubApi, HubError};
 use crate::identity::{self, Refresh, Tracker};
+use crate::jobs::dispatch::{Dispatcher, Outcome};
 use crate::log::{self, V};
 use crate::module::state::{Shared, codes};
 use crate::smile::{SmileHealth, hotel_offset};
@@ -55,6 +57,7 @@ pub struct SyncWorker {
     smile_was_ok: bool,
     failures: u32,
     diagnostics_logged: bool,
+    dispatcher: Option<Arc<Dispatcher>>,
 }
 
 impl std::fmt::Debug for SyncWorker {
@@ -88,7 +91,14 @@ impl SyncWorker {
             smile_was_ok: true,
             failures: 0,
             diagnostics_logged: false,
+            dispatcher: None,
         }
+    }
+
+    /// Executes pulled jobs through `dispatcher` instead of leaving them.
+    pub fn with_dispatcher(mut self, dispatcher: Arc<Dispatcher>) -> SyncWorker {
+        self.dispatcher = Some(dispatcher);
+        self
     }
 
     /// Hub failures in a row.
@@ -171,7 +181,10 @@ impl SyncWorker {
     /// The jobs (when enabled), the heartbeat when due, and sync-config when due.
     pub fn step(&mut self, now: Instant) -> Result<(), HubError> {
         if self.settings.pull_jobs {
-            self.pull_and_leave()?;
+            match self.dispatcher.clone() {
+                Some(d) => self.pump(&d)?,
+                None => self.pull_and_leave()?,
+            }
         }
         let heartbeat_due = self
             .last_heartbeat
@@ -206,6 +219,41 @@ impl SyncWorker {
             );
         }
         Ok(())
+    }
+
+    /// `PumpCoreAsync`: runs and acknowledges each pulled job. One failed ack never stops
+    /// the batch; when every ack failed, the last error goes to the back-off.
+    fn pump(&mut self, dispatcher: &Dispatcher) -> Result<(), HubError> {
+        let jobs = self.hub.pull_jobs(self.settings.max_jobs_per_pull.max(1))?;
+        let n = jobs.len() as u64;
+        self.shared.update_stats(|s| s.jobs_seen += n);
+        let (mut acked, mut left, mut ack_failures) = (0u64, 0u64, 0usize);
+        let mut last_error = None;
+        for job in &jobs {
+            match dispatcher.process(job) {
+                Outcome::Ack(ack) => match self.hub.ack_job(&ack) {
+                    Ok(()) => acked += 1,
+                    Err(e) => {
+                        ack_failures += 1;
+                        log::error(
+                            "job ack failed; the hub delivers the job again",
+                            &[("job", V::S(&job.job_id)), ("error", V::S(&e.to_string()))],
+                        );
+                        last_error = Some(e);
+                    }
+                },
+                Outcome::Leave(_) => left += 1,
+            }
+        }
+        self.shared.update_stats(|s| {
+            s.jobs_executed += acked + ack_failures as u64;
+            s.jobs_acked += acked;
+            s.jobs_left = left;
+        });
+        match last_error {
+            Some(e) if ack_failures == jobs.len() => Err(e),
+            _ => Ok(()),
+        }
     }
 
     /// `SendHeartbeatAsync`: SMILE probe, identity refresh, then the heartbeat.
@@ -333,5 +381,114 @@ mod tests {
             (s(0), s(1), s(2), s(3), s(6), s(7), s(40)),
             (5, 5, 10, 20, 160, 300, 300)
         );
+    }
+
+    mod pump {
+        use std::sync::Arc;
+
+        use super::*;
+        use crate::jobs::beds::MODE_FOLD_LEGACY;
+        use crate::jobs::dispatch::{DispatchSettings, Dispatcher};
+        use crate::jobs::fakes::{self, Hub, Pms};
+        use crate::smile::SmileError;
+        use crate::wire::parse::Job;
+
+        struct Up;
+        impl SmileHealth for Up {
+            fn ping(&self) -> Result<(), SmileError> {
+                Ok(())
+            }
+        }
+
+        fn job(id: &str, action: &str, attempts: i64) -> Job {
+            Job {
+                job_id: id.into(),
+                action: action.into(),
+                booking_id: None,
+                payload_json: r#"{"bookingId":"6f1c2d3e-0000-4000-8000-000000000001"}"#.into(),
+                attempts,
+            }
+        }
+
+        fn worker(hub: &Arc<Hub>, pms: Option<&Arc<Pms>>) -> (SyncWorker, Arc<Shared>) {
+            let shared = Arc::new(Shared::default());
+            let w = SyncWorker::new(
+                hub.clone(),
+                Arc::new(Up),
+                fakes::tracker("SMILE_DB"),
+                shared.clone(),
+                SyncSettings {
+                    pull_jobs: true,
+                    max_jobs_per_pull: 10,
+                    heartbeat: Duration::from_secs(3600),
+                    capabilities: Vec::new(),
+                },
+                "test",
+            );
+            let w = match pms {
+                Some(p) => w.with_dispatcher(Arc::new(Dispatcher::new(
+                    p.clone(),
+                    None,
+                    DispatchSettings {
+                        origin_code: "AZ".into(),
+                        member_discount_code: String::new(),
+                        extra_bed_mode: MODE_FOLD_LEGACY.into(),
+                    },
+                ))),
+                None => w,
+            };
+            (w, shared)
+        }
+
+        #[test]
+        fn pulled_jobs_run_and_are_acked_with_their_lease() {
+            let hub = Arc::new(Hub::default());
+            *hub.jobs.lock().unwrap() = vec![job("a", "Cancel", 3), job("b", "Teleport", 1)];
+            let pms = Arc::new(Pms::default());
+            let (mut w, shared) = worker(&hub, Some(&pms));
+            w.step(Instant::now()).unwrap();
+            let acks = hub.acks.lock().unwrap().clone();
+            assert_eq!(acks.len(), 2);
+            assert!(acks[0].success && acks[0].attempts == Some(3));
+            assert!(!acks[1].success && acks[1].attempts == Some(1));
+            let s = shared.stats();
+            assert_eq!(
+                (s.jobs_seen, s.jobs_executed, s.jobs_acked, s.jobs_left),
+                (2, 2, 2, 0)
+            );
+        }
+
+        #[test]
+        fn read_only_jobs_are_counted_and_never_acked() {
+            let hub = Arc::new(Hub::default());
+            *hub.jobs.lock().unwrap() = vec![job("a", "Cancel", 1)];
+            let (mut w, shared) = worker(&hub, None);
+            w.step(Instant::now()).unwrap();
+            assert!(hub.acks.lock().unwrap().is_empty());
+            assert_eq!(shared.stats().jobs_left, 1);
+        }
+
+        #[test]
+        fn when_every_ack_fails_the_loop_backs_off() {
+            let hub = Arc::new(Hub::default());
+            *hub.jobs.lock().unwrap() = vec![job("a", "Cancel", 1)];
+            *hub.fail_acks.lock().unwrap() = true;
+            let pms = Arc::new(Pms::default());
+            let (mut w, shared) = worker(&hub, Some(&pms));
+            assert!(w.step(Instant::now()).is_err());
+            assert_eq!(shared.stats().jobs_acked, 0);
+        }
+
+        #[test]
+        fn unported_writes_are_left_unacked() {
+            let hub = Arc::new(Hub::default());
+            *hub.jobs.lock().unwrap() = vec![job("a", "Create", 1)];
+            let pms = Arc::new(Pms::default());
+            *pms.not_ported.lock().unwrap() = true;
+            let (mut w, shared) = worker(&hub, Some(&pms));
+            w.step(Instant::now()).unwrap();
+            assert!(hub.acks.lock().unwrap().is_empty());
+            assert_eq!(shared.stats().jobs_left, 1);
+        }
     }
 }

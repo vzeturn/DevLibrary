@@ -23,6 +23,7 @@ dl-http.workspace = true
 dl-winsvc.workspace = true
 dl-log.workspace = true
 dl-cli.workspace = true
+dl-vn.workspace = true
 
 [lints]
 workspace = true

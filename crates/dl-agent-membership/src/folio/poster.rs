@@ -181,6 +181,9 @@ mod tests {
         fn pull_jobs(&self, _: u32) -> Result<Vec<Job>, HubError> {
             Ok(Vec::new())
         }
+        fn ack_job(&self, _: &crate::jobs::result::Ack) -> Result<(), HubError> {
+            Ok(())
+        }
         fn post_availability(&self, _: &AvailabilityRequest) -> Result<(), HubError> {
             Ok(())
         }

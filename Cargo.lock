@@ -120,6 +120,7 @@ dependencies = [
  "dl-tds",
  "dl-time",
  "dl-uuid",
+ "dl-vn",
  "dl-winsvc",
 ]
 
