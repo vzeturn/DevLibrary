@@ -12,12 +12,16 @@
 //! The hub may tune the limits per database through remote config
 //! (`{"sql": {"SMILE_FO": {"max_connections": 8}}}`); a `connection` key from the hub is
 //! ignored. `transport` (see [`transport`]) and `lock_timeout_seconds` are local only.
+//! Passwords are kept sealed beside the string and `auth` names the login mode
+//! ([`secret`]); `sql-setup` ([`setup`]) writes such entries after testing them.
 
 pub mod bundle;
 pub mod install;
 pub mod module;
 pub mod pool;
 pub mod probe;
+pub mod secret;
+pub mod setup;
 pub mod survey;
 pub mod transport;
 
@@ -150,9 +154,15 @@ impl Connector for TdsConnector {
         Ok(client)
     }
     fn describe(&self) -> Value {
+        let auth = secret::AuthMode::of(&self.config);
         json!({
             "rung": self.rung().map(transport::Rung::name),
             "lock_timeout_ms": self.lock_timeout.map(|t| t.as_millis() as u64),
+            "auth": auth.as_str(),
+            "login": (auth == secret::AuthMode::Sql).then(|| self.config.user().to_string()),
+            "server": self.config.host(),
+            "instance": self.config.instance(),
+            "port": self.config.port().map(u64::from),
         })
     }
 }
@@ -384,10 +394,7 @@ impl SqlPools {
             if !valid_name(name) {
                 return Err(bad("name must be 1-64 letters, digits, '_' or '-'"));
             }
-            let connection = entry
-                .get("connection")
-                .and_then(Value::as_str)
-                .ok_or_else(|| bad("missing \"connection\""))?;
+            let (connection, _) = secret::resolve(entry).map_err(|e| bad(&e.to_string()))?;
             let pin = match entry.get("transport") {
                 None | Some(Value::Null) => None,
                 Some(v) => {
@@ -399,7 +406,7 @@ impl SqlPools {
             };
             let lock = seconds(entry, "lock_timeout_seconds", Some(DEFAULT_LOCK_TIMEOUT))
                 .map_err(|e| bad(&e.to_string()))?;
-            let connector = TdsConnector::parse(connection)
+            let connector = TdsConnector::parse(&connection)
                 .map_err(|e| bad(&e.to_string()))?
                 .with_transport(pin)
                 .with_lock_timeout(lock);
@@ -457,7 +464,13 @@ impl Site {
 pub fn declare(data_dir: &Path, name: &str, connection: &str, max: usize) -> Result<(), Error> {
     let path = data_dir.join(SQL_FILE);
     let mut doc = crate::store::read_json(&path)?.unwrap_or_else(|| json!({"databases": {}}));
-    let entry = json!({"connection": connection, "max_connections": max as u64});
+    let (stored, password) = secret::split_password(connection)?;
+    let (_, auth) = secret::resolve(&json!({"connection": connection}))?;
+    let mut entry =
+        json!({"connection": stored, "auth": auth.as_str(), "max_connections": max as u64});
+    if let (Some(pw), Some(o)) = (password, entry.as_object_mut()) {
+        o.insert(secret::PASSWORD_KEY, Value::String(secret::seal(&pw)?));
+    }
     let mut probe = Map::new();
     probe.insert(name, entry.clone());
     SqlPools::from_json(&json!({"databases": Value::Object(probe)}))?;
@@ -472,7 +485,7 @@ pub fn declare(data_dir: &Path, name: &str, connection: &str, max: usize) -> Res
         .ok_or_else(|| Error::Config(format!("{SQL_FILE}: databases is not an object")))?
         .insert(name, entry);
     crate::store::write_json(&path, &doc)?;
-    // Connection strings carry passwords: only the service account and admins may read them.
+    // Sealed passwords and server names: only the service account and admins may read them.
     crate::identity::restrict_file(&path)
 }
 

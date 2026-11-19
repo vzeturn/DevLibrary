@@ -176,6 +176,7 @@ pub fn command(app: &App) -> Command {
                 .arg(Arg::positional("name").help("Only this database"))
                 .arg(data()),
         )
+        .subcommand(crate::cli_sql::grammar(data()))
         .subcommand(crate::selftest::cli::grammar(data()));
     app.tools.iter().fold(cmd, |cmd, t| {
         cmd.subcommand((t.grammar)(Command::new(t.name)).arg(data()))
@@ -208,6 +209,7 @@ pub fn main(app: App) -> i32 {
         }
         "sql-add" => sql_add(&dir, sub),
         "sql-test" => return sql_test(&dir, sub.value("name")),
+        "sql-setup" => return crate::cli_sql::main(&app.service, &dir, sub),
         crate::selftest::COMMAND => return crate::selftest::cli::main(&app, &dir, sub),
         "status" => {
             println!(
@@ -277,8 +279,9 @@ fn sql_test(dir: &Path, only: Option<&str>) -> i32 {
                     .cloned()
                     .unwrap_or(Value::Null);
                 let rung = t.get("rung").and_then(Value::as_str).unwrap_or("-");
+                let auth = t.get("auth").and_then(Value::as_str).unwrap_or("-");
                 println!(
-                    "{}: ok ({} ms, transport {rung})",
+                    "{}: ok ({} ms, transport {rung}, auth {auth})",
                     pool.name(),
                     d.as_millis()
                 );

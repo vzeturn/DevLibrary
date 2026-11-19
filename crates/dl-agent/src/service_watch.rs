@@ -22,7 +22,7 @@ pub fn task_name(app: &App) -> String {
     format!("{} Watchdog", app.display)
 }
 
-fn run_tool(tool: &str, args: &[&str]) -> Result<String, Error> {
+pub(crate) fn run_tool(tool: &str, args: &[&str]) -> Result<String, Error> {
     let out = crate::error::io("run a service tool", Command::new(tool).args(args).output())?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if out.status.success() {

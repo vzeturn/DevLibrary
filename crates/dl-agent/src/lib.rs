@@ -4,6 +4,8 @@ pub mod agent;
 pub mod channel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_sql;
 pub mod command;
 pub mod config;
 mod error;
