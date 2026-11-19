@@ -1,0 +1,332 @@
+{
+ "_comment": "Logical keys for classified tables whose vendor schema has no PK/identity usable as key (S0 report section 3). Uniqueness verified against dev smile-sql 2026-10-24; tables in duplicate_rows_tolerated contain exact duplicate rows on dev, so the apply side must treat the key as non-unique (row multiset by hash).",
+ "duplicate_rows_tolerated": [
+  "CashierRVC",
+  "tmpInvoiceInfo"
+ ],
+ "logical_keys": {
+  "AutoClientNumber": [
+   "TblName"
+  ],
+  "BillConfig": [
+   "RVC",
+   "SeqNo",
+   "FieldName"
+  ],
+  "BillNumber": [
+   "BillSeri"
+  ],
+  "card": [
+   "c_number"
+  ],
+  "Card_trans": [
+   "C_number",
+   "t_date",
+   "CheckNo",
+   "TrnNo"
+  ],
+  "CardDiscount": [
+   "c_number",
+   "ClsCode"
+  ],
+  "CashierRVC": [
+   "Cashier",
+   "RVC",
+   "Notes"
+  ],
+  "CashierSecurity": [
+   "Cashier",
+   "RVC",
+   "AMFunction"
+  ],
+  "CashierShift": [
+   "ShiftNo",
+   "RVCNo"
+  ],
+  "CCGetwayPara": [
+   "GWName",
+   "GWSub",
+   "ParaName"
+  ],
+  "CGGroupIClass": [
+   "CGGCode",
+   "IClass"
+  ],
+  "CGGroupRVC": [
+   "CGGCode",
+   "RVC"
+  ],
+  "CGItem": [
+   "ItemID"
+  ],
+  "CGTrn": [
+   "SeqNo"
+  ],
+  "ChangePOSDateLog": [
+   "RVCNo",
+   "ChangeTime"
+  ],
+  "CheckActivities": [
+   "sSeq"
+  ],
+  "CheckOpenLog": [
+   "nSeq"
+  ],
+  "ClerkPermission": [
+   "ClerkID",
+   "FunctionID"
+  ],
+  "CurrencyDef": [
+   "RVC",
+   "CrCode"
+  ],
+  "DailyCashLog": [
+   "TrnSeq"
+  ],
+  "DiscountCode": [
+   "RVC",
+   "DscCode"
+  ],
+  "DiscountDtl": [
+   "RVC",
+   "MealPeriod",
+   "DscCode",
+   "ClsCode"
+  ],
+  "GetBillLog": [
+   "BillSeri",
+   "BillNumber",
+   "BillDate",
+   "GetApp",
+   "GetFromPC",
+   "GetBy",
+   "RVC"
+  ],
+  "GlobPara": [
+   "RVC",
+   "ParaName"
+  ],
+  "InforsInvoiceToPrint": [
+   "CheckNo"
+  ],
+  "InvoiceMerged": [
+   "nSeq"
+  ],
+  "InvoiceToPrint": [
+   "CheckNo"
+  ],
+  "IPriceDef": [
+   "Icode"
+  ],
+  "ItemSum": [
+   "ItemCode",
+   "TRNcode",
+   "ClsCode",
+   "ItemPrice",
+   "TrnQty",
+   "Basesub"
+  ],
+  "KitchenOrder": [
+   "RVC",
+   "CheckNo",
+   "OrderNo",
+   "TableNo",
+   "TableSub",
+   "OrderTime"
+  ],
+  "KitchenOrderDetail": [
+   "DisplayID",
+   "RVC",
+   "CheckNo",
+   "OrderNo",
+   "TrnNo"
+  ],
+  "ListPayment": [
+   "PmtCode"
+  ],
+  "MBRPaymentMode": [
+   "PaymentCode"
+  ],
+  "MBRPointPolicy": [
+   "nSeq"
+  ],
+  "MealPeriod": [
+   "RVCNo",
+   "MealNo"
+  ],
+  "MemberCategory": [
+   "CatID"
+  ],
+  "MemberList": [
+   "MemberID",
+   "MemberSubID"
+  ],
+  "MemberStatus": [
+   "StsCode"
+  ],
+  "MemberType": [
+   "TypeID"
+  ],
+  "MoneyCardTrn": [
+   "TrnSeq"
+  ],
+  "OrderLog": [
+   "Seq"
+  ],
+  "OrderToPrinter": [
+   "RVC",
+   "IClass",
+   "PNo",
+   "TableArea"
+  ],
+  "OtherPaymentDef": [
+   "PmtCode"
+  ],
+  "Para": [
+   "RVC",
+   "ParaName"
+  ],
+  "PaymentMode": [
+   "PNo"
+  ],
+  "PaymentOffline": [
+   "OType"
+  ],
+  "PDABillPrint": [
+   "nSeq"
+  ],
+  "PDASendOrder": [
+   "nSeq"
+  ],
+  "PkgDef": [
+   "PkgCode",
+   "ItemCode"
+  ],
+  "POSFolio": [
+   "FolioNum"
+  ],
+  "POSFolioTrn": [
+   "TrnID"
+  ],
+  "PricePolicy": [
+   "pCode"
+  ],
+  "PricePolicyFlItem": [
+   "PCode",
+   "ICode"
+  ],
+  "PricePolicyItem": [
+   "PCode",
+   "ICode"
+  ],
+  "PrinterList": [
+   "PNo"
+  ],
+  "PrintLog": [
+   "pSeq"
+  ],
+  "RecipeDef": [
+   "RecipeCode"
+  ],
+  "RecipeLink": [
+   "RVC",
+   "IClass",
+   "RData",
+   "RRVC"
+  ],
+  "ReOpenLog": [
+   "CheckNo",
+   "OpenTime",
+   "CloseTime"
+  ],
+  "SB_ActiveRVC": [
+   "RVCNo"
+  ],
+  "ShiftMoney": [
+   "SeqNo"
+  ],
+  "Staff_PR": [
+   "sCode"
+  ],
+  "STaxDef": [
+   "STaxCode"
+  ],
+  "TableAddition": [
+   "TableAddID"
+  ],
+  "TableArea": [
+   "RVC",
+   "TableArea"
+  ],
+  "TableGroup": [
+   "RVC",
+   "GrpCode"
+  ],
+  "TableList": [
+   "RVC",
+   "TableNum"
+  ],
+  "TableMapInfor": [
+   "RVC",
+   "TableCode"
+  ],
+  "TableReservation": [
+   "nID"
+  ],
+  "TableType": [
+   "TableType"
+  ],
+  "TaxDef": [
+   "ID"
+  ],
+  "TaxTypeDef": [
+   "TCode"
+  ],
+  "TmpInvoiceDetail": [
+   "CheckNo",
+   "TrnSeq"
+  ],
+  "tmpInvoiceInfo": [
+   "CheckNo",
+   "CurPage",
+   "CurLine",
+   "Printed",
+   "Ordered",
+   "PrintType"
+  ],
+  "tmpTrnInfo": [
+   "CheckNo",
+   "TrnNo"
+  ],
+  "TrnActivities": [
+   "nSeq"
+  ],
+  "TrnCodeDef": [
+   "RVC",
+   "DefTrnCode",
+   "DefSubCode"
+  ],
+  "TrnLinkByRVC": [
+   "RVC",
+   "TrnCode",
+   "TrnSubCode"
+  ],
+  "VATBillInfor": [
+   "nSeq"
+  ],
+  "VoidReason": [
+   "vReason"
+  ],
+  "VoucherDtl": [
+   "SRVC",
+   "SCheckNo",
+   "STrnSeq",
+   "VSeri",
+   "VNumber"
+  ],
+  "WSPara": [
+   "WSID",
+   "ParaName"
+  ]
+ }
+}

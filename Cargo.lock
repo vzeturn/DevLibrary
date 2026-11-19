@@ -127,6 +127,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-agent-pda-sync"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-cli",
+ "dl-decimal",
+ "dl-ed25519",
+ "dl-encoding",
+ "dl-flate",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-rand",
+ "dl-signalr",
+ "dl-sqlite",
+ "dl-tds",
+ "dl-time",
+ "dl-uuid",
+ "dl-winos",
+ "dl-winsvc",
+ "dl-ws",
+ "dl-zip",
+]
+
+[[package]]
 name = "dl-agent-pms"
 version = "0.2.1"
 dependencies = [

@@ -1,0 +1,7585 @@
+{
+ "catalog_version": 1,
+ "generated": "2026-10-24",
+ "source_db": "SMILE_POS (dev docker smile-sql)",
+ "conventions": {
+  "tenant_id": "every PG key is implicitly prefixed by tenant_id",
+  "classes": {
+   "A": "master/config (up, diff)",
+   "B": "open checks (up, snapshot-diff ~2s)",
+   "C": "closed ledger/payments/logs (up, watermark+rescan)",
+   "D": "counters/business date/shifts (up)",
+   "E": "PDA-owned (both ways, per-row version LWW)",
+   "skip": "not synced, reason given",
+   "unclassified": "probed, rows>0, not referenced by PDA; owner decision needed (a test fails until classified)",
+   "A+D": "mixed table; split by row predicate"
+  },
+  "capture_strategies": [
+   "snapshot-diff",
+   "watermark+rescan",
+   "scan-diff"
+  ],
+  "time": "vendor datetime = site-local, no tz; convert with tenant tz to UTC",
+  "money": "vendor numeric(p,s) -> invariant decimal string -> PG numeric",
+  "never_sync": [
+   "CashierDef.PassWord",
+   "CashierDef.CardID",
+   "CashierDef.TouchID",
+   "tbAccount.Pass",
+   "Invoice/TmpInvoice/InvoiceCxl/ReOpenLog.CardNumber",
+   "MoneyCardTrn.CCardNo/CCardHolder/CCardExpDate",
+   "CCInterface.CardNumber",
+   "CCGetwayTrn.CCToken"
+  ],
+  "never_sync_note": "never_sync binds capture: these columns are never selected into a batch. One reader outside capture: the staff sync (ADR 0101) reads CashierDef.TouchID on the store machine only to send HMAC(K_t, pin), never the PIN; PassWord and CardID are never read.",
+  "pda_owned_storage": "Class E tables live in SQLite %ProgramData%\\MM-PDA\\pda.db (ADR/P6b), not SQL Server"
+ },
+ "tables": [
+  {
+   "table": "AMCrReports",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APAccGroup",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APBillingCycleCode",
+   "class": "unclassified",
+   "rows": 8,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APClassCode",
+   "class": "unclassified",
+   "rows": 10,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APInvoicePayment",
+   "class": "unclassified",
+   "rows": 726,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APLateCharge",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "APOrderField",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APPayment",
+   "class": "unclassified",
+   "rows": 11,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "AppForms",
+   "class": "unclassified",
+   "rows": 108,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "AppFormsCaption",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Apps",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APTransactionDetail",
+   "class": "unclassified",
+   "rows": 1041,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "APTransferDataReport",
+   "class": "unclassified",
+   "rows": 484,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ARAccGroup",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ARApply",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARBillingCycleCode",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARClassCode",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ARClassDef",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "ARClsCode"
+   ]
+  },
+  {
+   "table": "ARGetPosDataSettings",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARINV",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": [
+    "ARCheckNo"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "ARCheckNo",
+   "datetime_columns": [
+    "ARDate",
+    "StmDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TotalPref",
+     "TotalBase",
+     "PaidPref",
+     "PaidBase",
+     "BalPref",
+     "BalBase"
+    ],
+    "local_time_to_utc": [
+     "ARDate",
+     "StmDate"
+    ]
+   }
+  },
+  {
+   "table": "ARInvoicePayment",
+   "class": "unclassified",
+   "rows": 4317,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ARLateCharge",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARMasterDef",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "ARCode"
+   ]
+  },
+  {
+   "table": "AROrderField",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARPayment",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ARTransactionDetail",
+   "class": "unclassified",
+   "rows": 4335,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ARTransferDataReport",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "AuditLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "AutoClientNumber",
+   "class": "D",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "BarCodePrint",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "BillConfig",
+   "class": "A",
+   "rows": 76,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "BillConfigVAT",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "BillInfo",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "BillNumber",
+   "class": "D",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "c_Person",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CaptionAndMessage",
+   "class": "unclassified",
+   "rows": 543,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "ID"
+   ]
+  },
+  {
+   "table": "card",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "c_date",
+    "d_valid",
+    "d_die"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "C_Discount"
+    ],
+    "local_time_to_utc": [
+     "c_date",
+     "d_valid",
+     "d_die"
+    ]
+   }
+  },
+  {
+   "table": "Card_trans",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "t_date",
+    "date_exec"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "t_date",
+     "date_exec"
+    ]
+   }
+  },
+  {
+   "table": "CardDiscount",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "CashCountDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CashierClsDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CashierDef",
+   "class": "A",
+   "rows": 41,
+   "used_by_pda": true,
+   "pg_target": "app.users",
+   "note": "credentials never synced by capture; staff accounts are provisioned by the staff sync (ADR 0101: POST /sync/v1/staff, PIN sent as HMAC(K_t, pin) only)",
+   "source_keys": [
+    "Initial"
+   ],
+   "pg_keys": [
+    "Initial"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "FullName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "exclude_columns": [
+    "PassWord",
+    "TouchID",
+    "CardID"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "app.users is keyed by a cloud-generated uuid user_id and carries password hashes; no deterministic vendor mapping"
+  },
+  {
+   "table": "CashierDrawer",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CashierRVC",
+   "class": "A",
+   "rows": 309,
+   "used_by_pda": true,
+   "pg_target": "app.user_branch_roles",
+   "note": "role mapping is derived; not 1:1",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "app.user_branch_roles keys on uuid user_id/branch_id and a role id; vendor rows are (Cashier, RVC)"
+  },
+  {
+   "table": "CashierSecurity",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "CashierShift",
+   "class": "D",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity ShiftNo is the row key",
+   "watermark_candidates": [
+    "ShiftNo"
+   ],
+   "monotonic_key": "ShiftNo",
+   "datetime_columns": [
+    "StartTime",
+    "EndTime",
+    "OpenDate",
+    "CloseDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "StartTime",
+     "EndTime",
+     "OpenDate",
+     "CloseDate"
+    ]
+   }
+  },
+  {
+   "table": "CashNotes",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCardDef",
+   "class": "A",
+   "rows": 10,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "CCardNo"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "CCardNo",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "Address1",
+     "Address2",
+     "Address3",
+     "Company",
+     "Contact",
+     "PostAccLink",
+     "PreAccLink",
+     "Tel"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "exclude_columns": [
+    "CCardNo"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site"
+  },
+  {
+   "table": "CCBatch",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCGetwayComm",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCGetwayPara",
+   "class": "A",
+   "rows": 9,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "CCGetwayTrn",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCGWLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCInterface",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CCINV",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": [
+    "CCCheckNo"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "CCCheckNo",
+   "datetime_columns": [
+    "CCDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TotalPref",
+     "TotalBase",
+     "PaidPref",
+     "PaidBase",
+     "BalPref",
+     "BalBase"
+    ],
+    "local_time_to_utc": [
+     "CCDate"
+    ]
+   }
+  },
+  {
+   "table": "CGGroup",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": true,
+   "pg_target": "app.modifier_groups",
+   "source_keys": [
+    "CGGroupCode"
+   ],
+   "pg_keys": [
+    "cg_group_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "PrintDraft",
+    "PrintInvoice"
+   ],
+   "pg_columns": {
+    "CGGroupCode": "cg_group_code",
+    "CGGroupName": "name",
+    "PrintOrder": "print_order"
+   }
+  },
+  {
+   "table": "CGGroupIClass",
+   "class": "A",
+   "rows": 31,
+   "used_by_pda": true,
+   "pg_target": "app.modifier_group_item_classes",
+   "source_keys": null,
+   "pg_keys": [
+    "cg_group_code",
+    "item_class"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_columns": {
+    "CGGCode": "cg_group_code",
+    "IClass": "item_class"
+   }
+  },
+  {
+   "table": "CGGroupRVC",
+   "class": "A",
+   "rows": 28,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "CGItem",
+   "class": "A",
+   "rows": 13,
+   "used_by_pda": true,
+   "pg_target": "app.modifier_items",
+   "source_keys": null,
+   "pg_keys": [
+    "item_id"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK; identity ItemID is the row key",
+   "watermark_candidates": [
+    "ItemID"
+   ],
+   "monotonic_key": "ItemID",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "CGPrice"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_columns": {
+    "ItemID": "item_id",
+    "CGGroup": "cg_group_code",
+    "ItemName": "name",
+    "CGOpenItem": "is_open",
+    "CGPrice": "price"
+   }
+  },
+  {
+   "table": "CGTrn",
+   "class": "C",
+   "rows": 112798,
+   "used_by_pda": true,
+   "pg_target": "app.check_line_modifiers",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity SeqNo is the row key",
+   "watermark_candidates": [
+    "SeqNo"
+   ],
+   "monotonic_key": "SeqNo",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "CGName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor CGTrn has no CheckNo; app.check_line_modifiers keys on (check_no, parent_seq, line_no)"
+  },
+  {
+   "table": "ChangeMBRStatusLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ChangePOSDateLog",
+   "class": "D",
+   "rows": 95,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": [
+    "ChangeTime"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "OldPOSDate",
+    "NewPOSDate",
+    "ChangeTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "OldPOSDate",
+     "NewPOSDate",
+     "ChangeTime"
+    ]
+   }
+  },
+  {
+   "table": "ChangeTaxServiceLog",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CheckActivities",
+   "class": "C",
+   "rows": 140036,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity sSeq is the row key",
+   "watermark_candidates": [
+    "sSeq"
+   ],
+   "monotonic_key": "sSeq",
+   "datetime_columns": [
+    "sTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "sTime"
+    ]
+   }
+  },
+  {
+   "table": "CheckOpenLog",
+   "class": "C",
+   "rows": 109061,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq",
+    "LastAction"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime",
+    "LastAction",
+    "OverrideTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime",
+     "LastAction",
+     "OverrideTime"
+    ]
+   }
+  },
+  {
+   "table": "ChoiceGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ChoiceItem",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ChucNang",
+   "class": "unclassified",
+   "rows": 108,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ChucNang2",
+   "class": "unclassified",
+   "rows": 101,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ClerkPermission",
+   "class": "A",
+   "rows": 3264,
+   "used_by_pda": true,
+   "pg_target": "app.user_branch_roles",
+   "note": "role mapping is derived; not 1:1",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor function ids have no equivalent in app.user_branch_roles"
+  },
+  {
+   "table": "CLIENT",
+   "class": "A",
+   "rows": 4,
+   "used_by_pda": true,
+   "pg_target": "app.bill_client",
+   "source_keys": [
+    "ClientFolioNum"
+   ],
+   "pg_keys": [
+    "ClientFolioNum"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "LastChargeDate",
+    "LastPaymentDate",
+    "LastStatementDate",
+    "LastChangeTime",
+    "LastCheckDate"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "EstablishedDate",
+    "LastChargeDate",
+    "LastPaymentDate",
+    "AutoPostStartDate",
+    "AutoPostEndDate",
+    "LastStatementDate",
+    "LastChangeTime",
+    "LastCheckDate",
+    "DeleteTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "CommisionRate",
+     "CommisionAmount",
+     "ARBalance",
+     "TotalAmountStanding",
+     "TotalNumCommissionUnPaid",
+     "LastCheckAmount",
+     "CheckAmountLocal",
+     "APBalance",
+     "ARGLBalance",
+     "APGLBalance"
+    ],
+    "local_time_to_utc": [
+     "EstablishedDate",
+     "LastChargeDate",
+     "LastPaymentDate",
+     "AutoPostStartDate",
+     "AutoPostEndDate",
+     "LastStatementDate",
+     "LastChangeTime",
+     "LastCheckDate",
+     "DeleteTime"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor CLIENT is a client master; app.bill_client is per check (check_no)"
+  },
+  {
+   "table": "ClientContacts",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ClockInOut",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ClockInOutEditLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ConsignerDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Country",
+   "class": "unclassified",
+   "rows": 174,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CREXPORT",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CrReportNewVersion",
+   "class": "unclassified",
+   "rows": 33,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CrReports",
+   "class": "unclassified",
+   "rows": 46,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "ReportName",
+    "RptGroup"
+   ]
+  },
+  {
+   "table": "CrRptFilter",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "CrRptGroup",
+   "class": "unclassified",
+   "rows": 7,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "GroupName"
+   ]
+  },
+  {
+   "table": "CtrlCap",
+   "class": "unclassified",
+   "rows": 1827,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "CurrencyDef",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": true,
+   "pg_target": "app.currencies",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "cr_code"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "CrName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "ExRate"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "DecNo",
+    "DecDiv",
+    "CrPref",
+    "CrRound",
+    "PreAccLink",
+    "MidAccLink",
+    "PostAccLink",
+    "RSifLZ",
+    "AccDtl",
+    "AccStatus",
+    "Status",
+    "CurrencyCode",
+    "CurrencyName",
+    "DivBase",
+    "IsRpt"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "CrCode": "cr_code",
+    "CrSymbol": "symbol",
+    "CrName": "name",
+    "ExRate": "ex_rate",
+    "DivideBase": "divide_base",
+    "NoOfDec": "no_of_dec",
+    "IsBase": "is_base"
+   },
+   "null_key_defaults": {
+    "rvc_no": "0"
+   }
+  },
+  {
+   "table": "DailyCashLog",
+   "class": "D",
+   "rows": 0,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity TrnSeq is the row key",
+   "watermark_candidates": [
+    "TrnSeq"
+   ],
+   "monotonic_key": "TrnSeq",
+   "datetime_columns": [
+    "TrnDate",
+    "PostTime",
+    "CheckTime",
+    "VoidTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TrnAmount"
+    ],
+    "local_time_to_utc": [
+     "TrnDate",
+     "PostTime",
+     "CheckTime",
+     "VoidTime"
+    ]
+   }
+  },
+  {
+   "table": "DefRVCList",
+   "class": "A",
+   "rows": 5,
+   "used_by_pda": true,
+   "pg_target": "app.outlet_details",
+   "source_keys": [
+    "RVCNo"
+   ],
+   "pg_keys": [
+    "RVCNo"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "RVCNo",
+   "datetime_columns": null,
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "Picture"
+   ],
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "app.outlet_details only holds a location column with no vendor counterpart"
+  },
+  {
+   "table": "Department",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DepositPrintSum",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DeptGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "diary",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "DiscountCode",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": true,
+   "pg_target": "app.discount_codes",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "dsc_code"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "VoidedAt"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "DscAmount"
+    ],
+    "local_time_to_utc": [
+     "VoidedAt"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "MbrDefault",
+    "isAuto",
+    "AutoFromTime",
+    "AutoToTime",
+    "DscOnTotal",
+    "DscPriority",
+    "isVoucher",
+    "RequireStaff"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "DscCode": "dsc_code",
+    "DscName": "name",
+    "DscByAmount": "by_amount",
+    "DscAmount": "amount",
+    "isOpen": "is_open",
+    "IsVoided": "is_voided",
+    "VoidedBy": "voided_by",
+    "VoidedAt": "voided_at"
+   },
+   "null_key_defaults": {
+    "rvc_no": "0"
+   }
+  },
+  {
+   "table": "DiscountDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DiscountDtl",
+   "class": "A",
+   "rows": 802,
+   "used_by_pda": true,
+   "pg_target": "app.discount_details",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "meal_period",
+    "dsc_code",
+    "cls_code"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Discount"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "AccountCode",
+    "LinkCode",
+    "LinkFolio",
+    "SrcAccount",
+    "STaxAccount",
+    "TaxAccount",
+    "DeptCode"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "MealPeriod": "meal_period",
+    "DscCode": "dsc_code",
+    "ClsCode": "cls_code",
+    "Discount": "discount_pct"
+   }
+  },
+  {
+   "table": "DRBudgetTable",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DRDatabases",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DRDetailTable",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DRForeCastTable",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DRResult",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "DRUpdateLog",
+   "class": "unclassified",
+   "rows": 8,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "dtproperties",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "EmployeeJobs",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "EmployeeShiftLog",
+   "class": "D",
+   "rows": 12,
+   "used_by_pda": true,
+   "pg_target": "app.cash_shifts",
+   "note": "cashier shift; confirm vs app.cash_shifts",
+   "source_keys": [
+    "ShiftLogId"
+   ],
+   "pg_keys": [
+    "ShiftLogId"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": [
+    "ShiftLogId"
+   ],
+   "monotonic_key": "ShiftLogId",
+   "datetime_columns": [
+    "ClockInAt",
+    "ClockOutAt"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "ClockInAt",
+     "ClockOutAt"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor rows are clock in/out; app.cash_shifts models cash drawer shifts"
+  },
+  {
+   "table": "Employer",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "EmployerKill",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ExportstarNew",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ExRateLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "FixDataLog",
+   "class": "unclassified",
+   "rows": 75,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "FixID"
+   ]
+  },
+  {
+   "table": "FixFile",
+   "class": "unclassified",
+   "rows": 51,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "FloorPlans",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "FOCStaff",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": true,
+   "pg_target": "app.complimentary_staff",
+   "source_keys": [
+    "StaffCode"
+   ],
+   "pg_keys": [
+    "StaffCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "exclude_columns": [
+    "CardNumber"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor FOCStaff has no RVC; app.complimentary_staff keys on (rvc_no, staff_id)"
+  },
+  {
+   "table": "Folio",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Folio_Special",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "GetBillLog",
+   "class": "C",
+   "rows": 21083,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "BillDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "BillDate"
+    ]
+   }
+  },
+  {
+   "table": "GLCOA",
+   "class": "unclassified",
+   "rows": 510,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "GLCOAName",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "GLMSTB",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "GLMSTH",
+   "class": "unclassified",
+   "rows": 2072,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "GlobPara",
+   "class": "A",
+   "rows": 245,
+   "used_by_pda": true,
+   "pg_target": "app.config",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "key"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "ParaType",
+    "ParaDesc",
+    "nSeq",
+    "Status"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "ParaName": "key",
+    "ParaStr": "value"
+   },
+   "null_key_defaults": {
+    "rvc_no": "0"
+   }
+  },
+  {
+   "table": "GLTRN",
+   "class": "unclassified",
+   "rows": 8348,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "HHClose",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "HHDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "HHItem",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "HotelList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "IClassDef",
+   "class": "A",
+   "rows": 20,
+   "used_by_pda": true,
+   "pg_target": "app.item_classes",
+   "source_keys": [
+    "ClsCode"
+   ],
+   "pg_keys": [
+    "cls_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "LastChangeTime"
+   ],
+   "monotonic_key": "ClsCode",
+   "datetime_columns": [
+    "LastChangeTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "ClsName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "LastChangeTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "SLevel",
+    "DscAble",
+    "TaxClass",
+    "SurChgCls",
+    "Itemize",
+    "PreAccLink",
+    "MidAccLink",
+    "PostAccLink",
+    "RSifLZ",
+    "AccDtl",
+    "AccStatus",
+    "RVC",
+    "Status",
+    "PriceIncludeTax",
+    "STaxClass",
+    "Tax1Code",
+    "Tax2Code",
+    "Tax3Code",
+    "Tax4Code",
+    "Tax5Code",
+    "IsService",
+    "IsSale",
+    "AllowMinus",
+    "ClsEName",
+    "isINV",
+    "IsAsset",
+    "AssetAccount",
+    "AssetDeprAcc",
+    "PriceIncludeSrc",
+    "PriceIncludeSTax",
+    "LastChangeBy",
+    "LastChangeTime"
+   ],
+   "pg_columns": {
+    "ClsCode": "cls_code",
+    "ClsName": "cls_name"
+   }
+  },
+  {
+   "table": "IColorDef",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "CLRCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "CLRCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "IGroupDef",
+   "class": "A",
+   "rows": 12,
+   "used_by_pda": true,
+   "pg_target": "app.item_groups",
+   "source_keys": [
+    "GCode"
+   ],
+   "pg_keys": [
+    "g_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "GCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "GName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "RptGroup",
+    "GLevel",
+    "GParent",
+    "RVC",
+    "Status"
+   ],
+   "pg_columns": {
+    "GCode": "g_code",
+    "GName": "g_name"
+   }
+  },
+  {
+   "table": "IMizerDef",
+   "class": "A",
+   "rows": 5,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "IMNo"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "IMNo",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "InforsInvoiceToPrint",
+   "class": "C",
+   "rows": 22,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "InWordBase",
+     "sAddress",
+     "sClientName",
+     "sCompany"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "PrefExrate",
+     "dCashAmount1",
+     "dCashAmountOrg1",
+     "dCashAmount2",
+     "dCashAmountOrg2"
+    ],
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "InterfaceFolio",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "InterfaceSend",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "InterfaceTrn",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Inventory",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "InvMinMax",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "Invoice",
+   "class": "C",
+   "rows": 44403,
+   "used_by_pda": true,
+   "pg_target": "app.closed_checks",
+   "source_keys": [
+    "CheckNo"
+   ],
+   "pg_keys": [
+    "check_no"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": [
+    "LastChgTime"
+   ],
+   "monotonic_key": "CheckNo",
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime",
+    "OrderTime",
+    "LastChgTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "PONumber",
+     "PaymentInfo"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubTotal",
+     "Discount",
+     "SurCharge",
+     "BeforeTax",
+     "TaxTotal",
+     "TotalBase",
+     "TotalPref",
+     "TotalPaid",
+     "ExRate",
+     "ISubR",
+     "ISrcR",
+     "ISTaxR",
+     "ITaxR",
+     "ITotalR"
+    ],
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime",
+     "OrderTime",
+     "LastChgTime"
+    ]
+   },
+   "exclude_columns": [
+    "CardNumber"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [
+    "CloseBy",
+    "ClientCode",
+    "PONumber",
+    "InvStatus",
+    "TaxOmit",
+    "DeliverBy",
+    "ReceiveBy",
+    "Refund",
+    "RefundOf",
+    "AuthorCashier",
+    "Status",
+    "SalesAgent1",
+    "Commision1",
+    "SalesAgent2",
+    "Commision2",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "StsCode5",
+    "StsCode6",
+    "StsCode7",
+    "StsCode8",
+    "WSID",
+    "InvType",
+    "MealPeriod",
+    "ShiftPeriod",
+    "SubTableNo",
+    "PostedToInterface",
+    "PrintChkSummary",
+    "TableID",
+    "RoomCode",
+    "FolioNum",
+    "PaymentMode",
+    "PaymentType",
+    "PaymentInfo",
+    "MemberID",
+    "MemberSubID",
+    "OrderTime",
+    "LastChgCashier",
+    "LastChgTime"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "RVC": "rvc_no",
+    "TableNo": "table_no",
+    "NGuest": "n_guest",
+    "NChild": "n_child",
+    "OpenBy": "cashier",
+    "ExRate": "ex_rate",
+    "OmitSrc": "omit_src",
+    "OmitSTax": "omit_stax",
+    "OmitTax": "omit_tax",
+    "SubTotal": "sub_total",
+    "Discount": "discount",
+    "SurCharge": "sur_charge",
+    "STaxTotal": "stax_total",
+    "TaxTotal": "tax_total",
+    "BeforeTax": "before_tax",
+    "TotalBase": "total_base",
+    "TotalPaid": "total_paid",
+    "TotalPref": "total_pref",
+    "ITotalR": "i_total_r",
+    "ITaxR": "i_tax_r",
+    "ISTaxR": "i_stax_r",
+    "ISrcR": "i_src_r",
+    "ISubR": "i_sub_r",
+    "OpenTime": "opened_at",
+    "IYear": "i_year",
+    "IMonth": "i_month",
+    "IDay": "i_day",
+    "CloseTime": "closed_at"
+   }
+  },
+  {
+   "table": "InvoiceCxl",
+   "class": "C",
+   "rows": 4276,
+   "used_by_pda": true,
+   "pg_target": "app.closed_check_cancellations",
+   "source_keys": [
+    "CheckNo"
+   ],
+   "pg_keys": [
+    "check_no"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": [
+    "LastChgTime"
+   ],
+   "monotonic_key": "CheckNo",
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime",
+    "OrderTime",
+    "LastChgTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubTotal",
+     "Discount",
+     "SurCharge",
+     "BeforeTax",
+     "TaxTotal",
+     "TotalBase",
+     "TotalPref",
+     "TotalPaid",
+     "ExRate",
+     "ISubR",
+     "ISrcR",
+     "ISTaxR",
+     "ITaxR",
+     "ITotalR"
+    ],
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime",
+     "OrderTime",
+     "LastChgTime"
+    ]
+   },
+   "exclude_columns": [
+    "CardNumber"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [
+    "IYear",
+    "IMonth",
+    "IDay",
+    "SubTotal",
+    "Discount",
+    "SurCharge",
+    "BeforeTax",
+    "TaxTotal",
+    "TotalBase",
+    "TotalPref",
+    "TotalPaid",
+    "ClientCode",
+    "PONumber",
+    "InvStatus",
+    "TaxOmit",
+    "DeliverBy",
+    "ReceiveBy",
+    "Refund",
+    "RefundOf",
+    "AuthorCashier",
+    "Status",
+    "SalesAgent1",
+    "Commision1",
+    "SalesAgent2",
+    "Commision2",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "StsCode5",
+    "StsCode6",
+    "StsCode7",
+    "StsCode8",
+    "WSID",
+    "InvType",
+    "MealPeriod",
+    "ShiftPeriod",
+    "SubTableNo",
+    "NGuest",
+    "NChild",
+    "PostedToInterface",
+    "PrintChkSummary",
+    "TableID",
+    "STaxTotal",
+    "ExRate",
+    "RoomCode",
+    "FolioNum",
+    "PaymentMode",
+    "PaymentType",
+    "PaymentInfo",
+    "MemberID",
+    "MemberSubID",
+    "OrderTime",
+    "ISubR",
+    "ISrcR",
+    "ISTaxR",
+    "ITaxR",
+    "ITotalR",
+    "OmitSrc",
+    "OmitSTax",
+    "OmitTax",
+    "LastChgCashier",
+    "LastChgTime"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "RVC": "rvc_no",
+    "TableNo": "table_no",
+    "OpenBy": "cashier",
+    "OpenTime": "opened_at",
+    "CloseBy": "cancelled_by",
+    "CloseTime": "cancelled_at"
+   }
+  },
+  {
+   "table": "InvoiceMerged",
+   "class": "C",
+   "rows": 12168,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "PrintDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "Address",
+     "BillContent",
+     "BillSeri",
+     "ClientName",
+     "Company",
+     "Email"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "PrintDate"
+    ]
+   }
+  },
+  {
+   "table": "InvoiceToPrint",
+   "class": "C",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubTotal",
+     "Discount",
+     "SurCharge",
+     "BeforeTax",
+     "TaxTotal",
+     "TotalBase",
+     "TotalPref",
+     "TotalPaid"
+    ],
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime"
+    ]
+   }
+  },
+  {
+   "table": "InvSession",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "InvSSDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "INVTrn",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "INVVoucher",
+   "class": "unclassified",
+   "rows": 706,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "IOrgInvoice",
+   "class": "unclassified",
+   "rows": 5489,
+   "used_by_pda": true,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "CheckNo"
+   ]
+  },
+  {
+   "table": "IOriginDef",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "ORGCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "ORGCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "IPackingDef",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "PCKCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "PCKCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "IPriceDef",
+   "class": "A",
+   "rows": 3413,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Price",
+     "WholePrice",
+     "SPrice",
+     "SWholePrice"
+    ],
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "IPriceLog",
+   "class": "unclassified",
+   "rows": 5325,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "LogNo"
+   ]
+  },
+  {
+   "table": "IRegionDef",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "RGCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "RGCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ISGroupDef",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "SGCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "SGCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ISizeDef",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "SZCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "SZCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ItemChoice",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ItemDef",
+   "class": "A",
+   "rows": 1407,
+   "used_by_pda": true,
+   "pg_target": "app.items",
+   "source_keys": [
+    "ICode"
+   ],
+   "pg_keys": [
+    "item_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "LastChangeTime"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "LastChangeTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "IName",
+     "PrintName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Price",
+     "WPrice",
+     "ICost",
+     "CommAmount",
+     "UnitCost"
+    ],
+    "local_time_to_utc": [
+     "LastChangeTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "IBarCode",
+    "PrintName",
+    "ISGroup",
+    "IMenu",
+    "WPrice",
+    "ICurrency",
+    "ItemType",
+    "OpenItem",
+    "IOrg",
+    "IRegion",
+    "IColor",
+    "ISize",
+    "IPacking",
+    "RVC",
+    "IVendor",
+    "IUnit",
+    "Stock",
+    "ICost",
+    "Status",
+    "AllLoc",
+    "InTaxCode",
+    "Commision",
+    "CommOnPrice",
+    "CommAmount",
+    "CommPercent",
+    "StockInterface",
+    "UseRecipe",
+    "RecipeCode",
+    "StockICode",
+    "StockQty",
+    "MenuColor",
+    "IName1",
+    "IName2",
+    "IName3",
+    "IName4",
+    "RequireCG",
+    "PRLevel",
+    "ExtraFieldn",
+    "ExtraEmployern",
+    "Comment",
+    "TourStartTime",
+    "TourEndTime",
+    "HideOnGBill",
+    "NextMenu",
+    "isBOItem",
+    "IUnit1",
+    "IUnit1Cnv",
+    "IUnit2",
+    "IUnit2Cnv",
+    "isPOSItem",
+    "IUDiv1",
+    "IUDiv2",
+    "isVoucher",
+    "LastChangeBy",
+    "LastChangeTime"
+   ],
+   "pg_columns": {
+    "ICode": "item_code",
+    "IName": "item_name",
+    "Price": "price",
+    "IClass": "item_class",
+    "IGroup": "item_group",
+    "isPkg": "is_combo",
+    "OpenPrice": "open_price",
+    "IActive": "is_active",
+    "ItemDescription": "description",
+    "UnitCost": "unit_cost"
+   }
+  },
+  {
+   "table": "ItemINVList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ItemMenu",
+   "class": "A",
+   "rows": 273,
+   "used_by_pda": true,
+   "pg_target": "app.menu_categories",
+   "source_keys": [
+    "MenuNo",
+    "RVC"
+   ],
+   "pg_keys": [
+    "rvc_no",
+    "menu_no"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "MenuName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "MainMenuNo",
+    "Status",
+    "Image",
+    "TvM",
+    "Comment",
+    "MColor",
+    "WebActive",
+    "ParentMenu",
+    "HasSubMenu",
+    "PNo",
+    "ShowWPrice"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "MenuNo": "menu_no",
+    "MenuName": "menu_name",
+    "MenuActive": "is_active",
+    "MenuOrder": "sort_order"
+   }
+  },
+  {
+   "table": "ItemOOO",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ItemPrepTime",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ItemSum",
+   "class": "A",
+   "rows": 4,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Basesub",
+     "BaseTax",
+     "Basesrc",
+     "BaseTTL",
+     "ItemPrice"
+    ],
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ItemTimeDef",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "ICode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "IUnitDef",
+   "class": "A",
+   "rows": 26,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "UnitCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "UnitCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "UnitName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "JobList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "JType",
+   "class": "unclassified",
+   "rows": 39,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "JType"
+   ]
+  },
+  {
+   "table": "JVoucher",
+   "class": "unclassified",
+   "rows": 2451,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "KHUVUC1",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "KHUVUCHH",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "KHUVUCHH1",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "KitchenOrder",
+   "class": "C",
+   "rows": 70279,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "OrderTime",
+    "ShowTime",
+    "PrintTime",
+    "FinishTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "OrderTime",
+     "ShowTime",
+     "PrintTime",
+     "FinishTime"
+    ]
+   }
+  },
+  {
+   "table": "KitchenOrderDetail",
+   "class": "C",
+   "rows": 134736,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "EnterTime",
+    "ShowTime",
+    "DoneTime",
+    "VoidTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "IName",
+     "VoidReason"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "EnterTime",
+     "ShowTime",
+     "DoneTime",
+     "VoidTime"
+    ]
+   }
+  },
+  {
+   "table": "LangDef",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "LangCode"
+   ]
+  },
+  {
+   "table": "ListPayment",
+   "class": "A",
+   "rows": 6,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MacaddressRooms",
+   "class": "unclassified",
+   "rows": 7,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MainMenu",
+   "class": "unclassified",
+   "rows": 30,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MarketList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MarketListDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MBRAmountType",
+   "class": "unclassified",
+   "rows": 5,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MBRAPPType",
+   "class": "unclassified",
+   "rows": 6,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MBRBusinessType",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MBRCrdCardType",
+   "class": "unclassified",
+   "rows": 9,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MBRInterest",
+   "class": "unclassified",
+   "rows": 20,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MBRPaymentMode",
+   "class": "A",
+   "rows": 5,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MBRPointPolicy",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "ValidFrom",
+    "ValidTo",
+    "CancelTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Amount"
+    ],
+    "local_time_to_utc": [
+     "ValidFrom",
+     "ValidTo",
+     "CancelTime"
+    ]
+   }
+  },
+  {
+   "table": "MealCardLog",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "Seq"
+   ]
+  },
+  {
+   "table": "MealCheckConfig",
+   "class": "A",
+   "rows": 4,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "Seq"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "Seq"
+   ],
+   "monotonic_key": "Seq",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MealPeriod",
+   "class": "A",
+   "rows": 15,
+   "used_by_pda": true,
+   "pg_target": "app.meal_periods",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "meal_no"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "AutoChange",
+    "BookFromTime",
+    "BookToTime"
+   ],
+   "pg_columns": {
+    "RVCNo": "rvc_no",
+    "MealNo": "meal_no",
+    "MealName": "meal_name",
+    "FromTime": "from_time",
+    "ToTime": "to_time",
+    "Status": "status"
+   }
+  },
+  {
+   "table": "MealPlanDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Member",
+   "class": "E",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": "app.members",
+   "note": "PDA-created dbo table (migration 295), SQL Server resident",
+   "source_keys": [
+    "MemberID",
+    "MemberSubID"
+   ],
+   "pg_keys": [
+    "member_id",
+    "member_sub_id"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "LastVisitAt"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "JoinedAt",
+    "LastVisitAt"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "JoinedAt",
+     "LastVisitAt"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_columns": {
+    "MemberID": "member_id",
+    "MemberSubID": "member_sub_id",
+    "MemberName": "member_name",
+    "Phone": "phone",
+    "Email": "email",
+    "JoinedAt": "joined_at",
+    "LastVisitAt": "last_visit_at"
+   }
+  },
+  {
+   "table": "MemberCategory",
+   "class": "A",
+   "rows": 10,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MemberIClassForbiden",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberInterest",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberList",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": true,
+   "pg_target": "app.members",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "ValidTo",
+    "Dateofbirth",
+    "StsFrom",
+    "StsTo",
+    "JoinDate",
+    "CancelDate",
+    "TrxfDate",
+    "CardExpDate",
+    "WedDate",
+    "QDate",
+    "QNextDate",
+    "ReDesignateDate"
+   ],
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "Picture"
+   ],
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TrxfFee",
+     "JoiningFee",
+     "ReDesignateFee"
+    ],
+    "local_time_to_utc": [
+     "ValidTo",
+     "Dateofbirth",
+     "StsFrom",
+     "StsTo",
+     "JoinDate",
+     "CancelDate",
+     "TrxfDate",
+     "CardExpDate",
+     "WedDate",
+     "QDate",
+     "QNextDate",
+     "ReDesignateDate"
+    ]
+   },
+   "exclude_columns": [
+    "CardID"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "second vendor source for app.members (Member is the PDA-owned one); keeps full vendor shape"
+  },
+  {
+   "table": "MemberList_Temp",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MemberLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberParameter",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberPoint",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberQDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MemberRelation",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "MemberStatus",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MemberType",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "MoneyCardAccount",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MoneyCardTrn",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity TrnSeq is the row key",
+   "watermark_candidates": [
+    "TrnSeq"
+   ],
+   "monotonic_key": "TrnSeq",
+   "datetime_columns": [
+    "TrnTime",
+    "TrnDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TrnAmount"
+    ],
+    "local_time_to_utc": [
+     "TrnTime",
+     "TrnDate"
+    ]
+   },
+   "exclude_columns": [
+    "CCardNo",
+    "CCardHolder",
+    "CCardExpDate"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site"
+  },
+  {
+   "table": "MoneyCardType",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "MoneyNoteList",
+   "class": "unclassified",
+   "rows": 12,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "NComboCategory",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "NComboDetails",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "NComboItem",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "NComboPostLog",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "News",
+   "class": "unclassified",
+   "rows": 15,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "NewsBigSubject",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "NewsBooked",
+   "class": "unclassified",
+   "rows": 16,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "BookID"
+   ]
+  },
+  {
+   "table": "NewsSubject",
+   "class": "unclassified",
+   "rows": 7,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "NGiftCard",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "NGiftCardSold",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "NGiftCardUsed",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderByGuest",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderCourseFire",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "OrderHold",
+   "class": "B",
+   "rows": 5348,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": [
+    "nSeq"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "HoldTime",
+    "HoldTo",
+    "PrintTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "HoldTime",
+     "HoldTo",
+     "PrintTime"
+    ]
+   }
+  },
+  {
+   "table": "OrderInfo",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderItemFire",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderLog",
+   "class": "C",
+   "rows": 4623,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity Seq is the row key",
+   "watermark_candidates": [
+    "Seq",
+    "LastTryTime"
+   ],
+   "monotonic_key": "Seq",
+   "datetime_columns": [
+    "oTime",
+    "PrintedTime",
+    "DeletedTime",
+    "LastTryTime"
+   ],
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "OrderContent"
+   ],
+   "transforms": {
+    "tcvn3_decode": [
+     "OrderText"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "oTime",
+     "PrintedTime",
+     "DeletedTime",
+     "LastTryTime"
+    ]
+   }
+  },
+  {
+   "table": "OrderMessage",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderPrintCrRpt",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderPrinterPorts",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "OrderToPrinter",
+   "class": "A",
+   "rows": 207,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "OtherPaymentDef",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "Para",
+   "class": "A+D",
+   "rows": 1637,
+   "used_by_pda": true,
+   "pg_target": "app.outlet_params",
+   "note": "mixed config + RVC sequence counters (GetRVCSeqNumber writes Para); split by ParaName in S1",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "para_name"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "ParaType",
+    "ParaDesc",
+    "Status"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "ParaName": "para_name",
+    "ParaStr": "para_str"
+   }
+  },
+  {
+   "table": "Payment",
+   "class": "C",
+   "rows": 27857,
+   "used_by_pda": true,
+   "pg_target": "app.payment_detail",
+   "source_keys": [
+    "PaymentNo"
+   ],
+   "pg_keys": [
+    "payment_no"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": null,
+   "monotonic_key": "PaymentNo",
+   "datetime_columns": [
+    "PayTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "PmtRef"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "AmountORG",
+     "AmountPref",
+     "AmountBase"
+    ],
+    "local_time_to_utc": [
+     "PayTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "PYear",
+    "PMonth",
+    "PDay",
+    "PmtApp",
+    "Status"
+   ],
+   "pg_columns": {
+    "PaymentNo": "payment_no",
+    "TrnNo": "line_seq",
+    "PmtCode": "pmt_code",
+    "PmtDesc": "pmt_desc",
+    "PmtRef": "pmt_ref",
+    "CheckNo": "check_no",
+    "PayTime": "paid_at",
+    "Cashier": "cashier",
+    "CrCode": "cr_code",
+    "AmountORG": "amount_org",
+    "AmountPref": "amount_pref",
+    "AmountBase": "amount_base",
+    "RVC": "rvc_no"
+   }
+  },
+  {
+   "table": "PaymentDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PaymentMode",
+   "class": "A",
+   "rows": 11,
+   "used_by_pda": true,
+   "pg_target": "app.payment_modes",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK; identity PNo is the row key",
+   "watermark_candidates": [
+    "PNo"
+   ],
+   "monotonic_key": "PNo",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor PaymentMode has no RVC; app.payment_modes keys on (rvc_no, p_no)"
+  },
+  {
+   "table": "PaymentOffline",
+   "class": "A",
+   "rows": 11,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "Pda_MigrationHistory",
+   "class": "skip",
+   "reason": "runner-local migration history; per-site, never synced",
+   "rows": 274
+  },
+  {
+   "table": "PDABillPrint",
+   "class": "C",
+   "rows": 32,
+   "used_by_pda": false,
+   "pg_target": "app.print_documents",
+   "note": "closest PG home; confirm in S1",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "OrderTime",
+    "PrintTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "OrderTime",
+     "PrintTime"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor print queue; app.print_documents stores rendered html"
+  },
+  {
+   "table": "PdaReopenLineAudit",
+   "class": "E",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": "app.reopen_log",
+   "note": "PDA-created dbo table (migration 293); per-line reopen audit, PG has only app.reopen_log.lines json",
+   "source_keys": [
+    "AuditId"
+   ],
+   "pg_keys": [
+    "AuditId"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "AuditId"
+   ],
+   "monotonic_key": "AuditId",
+   "datetime_columns": [
+    "ReopenTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "ReopenTime"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor rows are per-line JSON audits; app.reopen_log has cloud-generated reopen_no"
+  },
+  {
+   "table": "PDASendOrder",
+   "class": "C",
+   "rows": 9422,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "SendTime",
+    "OrderTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "SendTime",
+     "OrderTime"
+    ]
+   }
+  },
+  {
+   "table": "PkgDef",
+   "class": "A",
+   "rows": 260,
+   "used_by_pda": true,
+   "pg_target": "app.combo_items",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "IPrice"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor PkgDef has no line number; app.combo_items keys on (combo_code, line_no)"
+  },
+  {
+   "table": "PMTMode",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "POSFolio",
+   "class": "C",
+   "rows": 9,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "ArrivalTime",
+    "DepartureTime",
+    "CreatedTime",
+    "CheckOutTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "ExRate"
+    ],
+    "local_time_to_utc": [
+     "ArrivalTime",
+     "DepartureTime",
+     "CreatedTime",
+     "CheckOutTime"
+    ]
+   }
+  },
+  {
+   "table": "POSFolioTrn",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity TrnID is the row key",
+   "watermark_candidates": [
+    "TrnID"
+   ],
+   "monotonic_key": "TrnID",
+   "datetime_columns": [
+    "TrnDate",
+    "TrnTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubAmount",
+     "SrcAmount",
+     "STaxAmount",
+     "TaxAmount",
+     "TotalAmount",
+     "SubAmountRpt",
+     "SrcAmountRpt",
+     "STaxAmountRpt",
+     "TaxAmountRpt",
+     "TotalAmountRpt",
+     "OrgAmount",
+     "ExRate"
+    ],
+    "local_time_to_utc": [
+     "TrnDate",
+     "TrnTime"
+    ]
+   }
+  },
+  {
+   "table": "POSInvDetail",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "POSInventory",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "POSInvHeader",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "POSInvUpdateDate",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "POSMealCheck",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PostField",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PosTransactions",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PR",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PRDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "PricePolicy",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "ValidFrom",
+    "ValidTo",
+    "CreateTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "pDesc"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "PricePcnt"
+    ],
+    "local_time_to_utc": [
+     "ValidFrom",
+     "ValidTo",
+     "CreateTime"
+    ]
+   }
+  },
+  {
+   "table": "PricePolicyFlItem",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "PricePolicyItem",
+   "class": "A",
+   "rows": 16,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "PrinterList",
+   "class": "A",
+   "rows": 5,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "PrintLog",
+   "class": "C",
+   "rows": 32,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity pSeq is the row key",
+   "watermark_candidates": [
+    "pSeq"
+   ],
+   "monotonic_key": "pSeq",
+   "datetime_columns": [
+    "PrintTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "PrintTime"
+    ]
+   }
+  },
+  {
+   "table": "ReceivingDetail",
+   "class": "unclassified",
+   "rows": 3399,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ReceivingHeader",
+   "class": "unclassified",
+   "rows": 501,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ReceivingInvoice",
+   "class": "unclassified",
+   "rows": 352,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "RecepeLink",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RecipeDef",
+   "class": "A",
+   "rows": 2931,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": [
+    "LastChangeTime"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "LastChangeTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "RecipeName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "LastChangeTime"
+    ]
+   }
+  },
+  {
+   "table": "RecipeDtl",
+   "class": "A",
+   "rows": 12319,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "rID"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "rID",
+    "LastChangeTime"
+   ],
+   "monotonic_key": "rID",
+   "datetime_columns": [
+    "LastChangeTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "IName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "LastChangeTime"
+    ]
+   }
+  },
+  {
+   "table": "recipeDTl_bk",
+   "class": "unclassified",
+   "rows": 2398,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "RecipeLink",
+   "class": "A",
+   "rows": 47,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ReOpenLog",
+   "class": "C",
+   "rows": 152,
+   "used_by_pda": true,
+   "pg_target": "app.reopen_log",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": [
+    "LastChgTime"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime",
+    "OrderTime",
+    "LastChgTime",
+    "ReOpenTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubTotal",
+     "Discount",
+     "SurCharge",
+     "BeforeTax",
+     "TaxTotal",
+     "TotalBase",
+     "TotalPref",
+     "TotalPaid",
+     "ExRate",
+     "ISubR",
+     "ISrcR",
+     "ISTaxR",
+     "ITaxR",
+     "ITotalR"
+    ],
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime",
+     "OrderTime",
+     "LastChgTime",
+     "ReOpenTime"
+    ]
+   },
+   "exclude_columns": [
+    "CardNumber"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor rows are full Invoice snapshots; app.reopen_log has cloud-generated reopen_no"
+  },
+  {
+   "table": "ReportColumnConfig",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportDatabase",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportDesription",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportInfo",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "InfoName"
+   ]
+  },
+  {
+   "table": "ReportInfoGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowConfig",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilter",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterDept",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterString",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterStsCode1",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterStsCode2",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterStsCode3",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportRowFilterStsCode4",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Reports",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReportSecurity",
+   "class": "unclassified",
+   "rows": 3855,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ReportTemplate",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ReservationItem",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ReturnReason",
+   "class": "unclassified",
+   "rows": 4,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "RptControl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RptDetail",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RptGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RptGroupDef",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "RptCode"
+   ]
+  },
+  {
+   "table": "RptMain",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RVCDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "RVCItem",
+   "class": "A",
+   "rows": 8161,
+   "used_by_pda": true,
+   "pg_target": "app.rvc_items",
+   "source_keys": [
+    "RVC",
+    "ItemCode"
+   ],
+   "pg_keys": [
+    "rvc_no",
+    "item_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "PrintName"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Price",
+     "WPrice"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "WPrice",
+    "Status",
+    "OpenPrice",
+    "OpenItem"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "ItemCode": "item_code",
+    "PrintName": "show_name",
+    "Active": "is_active",
+    "Price": "price"
+   }
+  },
+  {
+   "table": "RVCItemMenu",
+   "class": "A",
+   "rows": 6292,
+   "used_by_pda": true,
+   "pg_target": "app.rvc_item_menus",
+   "source_keys": [
+    "RVC",
+    "ItemCode",
+    "ItemMenu"
+   ],
+   "pg_keys": [
+    "rvc_no",
+    "menu_no",
+    "item_code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "Status"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "ItemMenu": "menu_no",
+    "ItemCode": "item_code",
+    "ItemShow": "is_shown"
+   },
+   "pg_implied_parents": [
+    "app.rvc_items"
+   ]
+  },
+  {
+   "table": "RvcLC_Tam",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "RVCLinkCode",
+   "class": "A",
+   "rows": 150,
+   "used_by_pda": true,
+   "pg_target": "app.discount_link",
+   "note": "semantics differ (folio link); confirm in S1",
+   "source_keys": [
+    "RVC",
+    "MealPeriod",
+    "LinkItem"
+   ],
+   "pg_keys": [
+    "RVC",
+    "MealPeriod",
+    "LinkItem"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor link config; app.discount_link keys on (check_no, line_seq)"
+  },
+  {
+   "table": "RVCPrintingLogo",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SalesAgent",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "AgentCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "AgentCommRate"
+    ],
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "Say_Num",
+   "class": "unclassified",
+   "rows": 40,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "Say_Ten",
+   "class": "unclassified",
+   "rows": 16,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "Say_Uni",
+   "class": "unclassified",
+   "rows": 8,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "SB_ActiveRVC",
+   "class": "A",
+   "rows": 11,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "ServiceBooking",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ServiceBookingType",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ServiceCharge",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ServiceDetail",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ServiceDtlProperty",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ServiceProperty",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "ShiftMoney",
+   "class": "D",
+   "rows": 50,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "counter/shift/business-date; PG home is app.rvc_sequences/app.business_date (derived, not 1:1)",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity SeqNo is the row key",
+   "watermark_candidates": [
+    "SeqNo"
+   ],
+   "monotonic_key": "SeqNo",
+   "datetime_columns": [
+    "POSDate",
+    "TrnTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Amount"
+    ],
+    "local_time_to_utc": [
+     "POSDate",
+     "TrnTime"
+    ]
+   }
+  },
+  {
+   "table": "ShoppingCart",
+   "class": "unclassified",
+   "rows": 53,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "ShoppingCartDetail",
+   "class": "unclassified",
+   "rows": 74,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "SMILEReportColumn",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SMILEReportDetail",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SMILEReportItem",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SMILEReports",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SMILEReportSection",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SMILEReportUserPara",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "SpecialService",
+   "class": "unclassified",
+   "rows": 34,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "speHIEP",
+   "class": "unclassified",
+   "rows": 18,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "Staff_PR",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "Statistic1",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic2",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic3",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic4",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic5",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic6",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic7",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Statistic8",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "STaxDef",
+   "class": "A",
+   "rows": 2,
+   "used_by_pda": true,
+   "pg_target": "app.billing_rates",
+   "note": "kind column distinguishes stax/surchg",
+   "source_keys": null,
+   "pg_keys": [
+    "kind",
+    "code"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "STaxRate"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "STaxName",
+    "LinkCode"
+   ],
+   "pg_columns": {
+    "STaxCode": "code",
+    "STaxRate": "rate"
+   },
+   "pg_constants": {
+    "kind": "STAX"
+   }
+  },
+  {
+   "table": "StockInterface",
+   "class": "unclassified",
+   "rows": 55,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "StoreItem",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Suggestion",
+   "class": "unclassified",
+   "rows": 2,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "SurChgDef",
+   "class": "A",
+   "rows": 8,
+   "used_by_pda": true,
+   "pg_target": "app.billing_rates",
+   "note": "kind column distinguishes stax/surchg",
+   "source_keys": [
+    "SurChgCode"
+   ],
+   "pg_keys": [
+    "kind",
+    "code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "SurChgCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SurChgRate",
+     "SurChgAmount",
+     "SurChgMin",
+     "StartAmount"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "SurCharge",
+    "SurChgAmount",
+    "SurChgMin",
+    "StartAmount",
+    "TaxClass",
+    "Included",
+    "isRate",
+    "PreAccLink",
+    "MidAccLink",
+    "PostAccLink",
+    "RSifLZ",
+    "AccDtl",
+    "AccStatus",
+    "RVC",
+    "Status"
+   ],
+   "pg_columns": {
+    "SurChgCode": "code",
+    "SurChgRate": "rate"
+   },
+   "pg_constants": {
+    "kind": "SRC"
+   }
+  },
+  {
+   "table": "TableAddition",
+   "class": "A",
+   "rows": 1,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity TableAddID is the row key",
+   "watermark_candidates": [
+    "TableAddID"
+   ],
+   "monotonic_key": "TableAddID",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TableArea",
+   "class": "A",
+   "rows": 5,
+   "used_by_pda": true,
+   "pg_target": "app.table_areas",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "area_id"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "Img1"
+   ],
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "BuildingCode",
+    "Img1",
+    "OrderInRed",
+    "SectionID",
+    "HHExclude"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "TableArea": "area_id",
+    "TableAreaName": "area_name"
+   }
+  },
+  {
+   "table": "TableAreaObject",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TableBookGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TableControl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TableGroup",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TableList",
+   "class": "A",
+   "rows": 145,
+   "used_by_pda": true,
+   "pg_target": "app.tables",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "table_no"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": [
+    "LastChangedTime"
+   ],
+   "monotonic_key": null,
+   "datetime_columns": [
+    "LastChangedTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "LastChangedTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "TableType",
+    "TableStatus",
+    "LastChangedBy",
+    "LastChangedTime",
+    "TableGroup",
+    "GrpOrder",
+    "ShowBookBeforeMin"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "TableNum": "table_no",
+    "Description": "description",
+    "TableArea": "area_id",
+    "IsActive": "is_active"
+   }
+  },
+  {
+   "table": "TableMapBackground",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TableMapInfor",
+   "class": "A",
+   "rows": 145,
+   "used_by_pda": true,
+   "pg_target": "app.table_map",
+   "source_keys": null,
+   "pg_keys": [
+    "rvc_no",
+    "table_no"
+   ],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "Img1",
+    "Img2"
+   ],
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "TableArea",
+    "BuildingCode",
+    "F8",
+    "Rotate90",
+    "Img1",
+    "Img2",
+    "HasImg",
+    "Trans",
+    "TScale",
+    "PositionData",
+    "ApplyPaymentOnline"
+   ],
+   "pg_columns": {
+    "RVC": "rvc_no",
+    "TableCode": "table_no",
+    "TableLeft": "x",
+    "TableTop": "y",
+    "TableWidth": "width",
+    "TableHeight": "height"
+   }
+  },
+  {
+   "table": "TableOOO",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TableReservation",
+   "class": "C",
+   "rows": 4,
+   "used_by_pda": true,
+   "pg_target": "app.table_reservations",
+   "source_keys": null,
+   "pg_keys": [
+    "reservation_id"
+   ],
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nID is the row key",
+   "watermark_candidates": [
+    "nID"
+   ],
+   "monotonic_key": "nID",
+   "datetime_columns": [
+    "FromDateTime",
+    "ToDateTime",
+    "CheckInDate",
+    "CheckOutDate",
+    "CancelTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "RateAmount",
+     "TotalAmount",
+     "DepositAmount"
+    ],
+    "local_time_to_utc": [
+     "FromDateTime",
+     "ToDateTime",
+     "CheckInDate",
+     "CheckOutDate",
+     "CancelTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "GuestCode",
+    "TableType",
+    "RateAmount",
+    "FaxNum",
+    "TotalAmount",
+    "CheckOutDate",
+    "DepositAmount",
+    "CancelBy",
+    "CancelTime",
+    "ClientCode",
+    "CancelReason",
+    "KeepBookingMin",
+    "AlertBookingMin",
+    "BookStatus",
+    "CheckInTable",
+    "TableGroup",
+    "BookGroup"
+   ],
+   "pg_columns": {
+    "nID": "reservation_id",
+    "RVC": "rvc_no",
+    "GuestInfo": "guest_info",
+    "NumAdult": "num_adult",
+    "NumChild": "num_child",
+    "FromDateTime": "from_date_time",
+    "ToDateTime": "to_date_time",
+    "TableNum": "table_num",
+    "TelNum": "tel_num",
+    "Booker": "booker",
+    "CompanyName": "company_name",
+    "VATCode": "vat_code",
+    "Address": "address",
+    "CheckInDate": "check_in_date",
+    "CheckNo": "check_no",
+    "isCancel": "is_cancel"
+   }
+  },
+  {
+   "table": "TableReservationDtl",
+   "class": "C",
+   "rows": 7,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": [
+    "nSeq"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "PostTime",
+    "FinishTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Price"
+    ],
+    "local_time_to_utc": [
+     "PostTime",
+     "FinishTime"
+    ]
+   }
+  },
+  {
+   "table": "TableType",
+   "class": "A",
+   "rows": 4,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TAClassCode",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TAuditManage",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "IDAudit"
+   ]
+  },
+  {
+   "table": "TaxClassDef",
+   "class": "A",
+   "rows": 8,
+   "used_by_pda": true,
+   "pg_target": "app.billing_rates",
+   "source_keys": [
+    "TaxCode"
+   ],
+   "pg_keys": [
+    "kind",
+    "code"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "TaxCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TaxRate",
+     "TaxMin",
+     "TaxStart"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "TaxName",
+    "TaxMin",
+    "TaxStart",
+    "TaxInclude",
+    "PreAccLink",
+    "MidAccLink",
+    "PostAccLink",
+    "RSifLZ",
+    "AccDtl",
+    "AccStatus",
+    "RVC",
+    "Status"
+   ],
+   "pg_columns": {
+    "TaxCode": "code",
+    "TaxRate": "rate"
+   },
+   "pg_constants": {
+    "kind": "TAX"
+   }
+  },
+  {
+   "table": "TaxDef",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK; identity ID is the row key",
+   "watermark_candidates": [
+    "ID"
+   ],
+   "monotonic_key": "ID",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TaxRate",
+     "TaxMin",
+     "taxStart"
+    ],
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TaxTable",
+   "class": "C",
+   "rows": 44403,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": [
+    "TCheckNo"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": null,
+   "monotonic_key": "TCheckNo",
+   "datetime_columns": [
+    "TDate",
+    "PrintDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "Address",
+     "ClientName",
+     "Company",
+     "Email",
+     "InvContent"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Sub1",
+     "Tax1",
+     "Sub2",
+     "Tax2",
+     "Sub3",
+     "Tax3",
+     "Sub4",
+     "Tax4",
+     "Sub5",
+     "Tax5",
+     "Sub6",
+     "Tax6",
+     "Sub7",
+     "Tax7",
+     "Sub8",
+     "Tax8",
+     "TSubTTL",
+     "TTaxTTL",
+     "TTotal"
+    ],
+    "local_time_to_utc": [
+     "TDate",
+     "PrintDate"
+    ]
+   }
+  },
+  {
+   "table": "TaxTypeDef",
+   "class": "A",
+   "rows": 0,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "tb1",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tbAccount",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "UserName"
+   ]
+  },
+  {
+   "table": "tbComment",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tblQRCode",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tblSettingSync",
+   "class": "unclassified",
+   "rows": 20,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "tablename"
+   ]
+  },
+  {
+   "table": "TempItemBrowse",
+   "class": "unclassified",
+   "rows": 5730,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TicketBatch",
+   "class": "unclassified",
+   "rows": 14,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TicketIssue",
+   "class": "unclassified",
+   "rows": 22,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TicketTrn",
+   "class": "unclassified",
+   "rows": 22,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TimeDiscount",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TipGroup",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TItemCGuild",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "source_keys": [
+    "ID"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "ID",
+    "LastChangeDate"
+   ],
+   "monotonic_key": "ID",
+   "datetime_columns": [
+    "CreateDate",
+    "LastChangeDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "CreateDate",
+     "LastChangeDate"
+    ]
+   }
+  },
+  {
+   "table": "Title",
+   "class": "unclassified",
+   "rows": 7,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TLangControl",
+   "class": "unclassified",
+   "rows": 4,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "ID"
+   ]
+  },
+  {
+   "table": "TMenuWeb",
+   "class": "unclassified",
+   "rows": 174,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "MenuNo"
+   ]
+  },
+  {
+   "table": "TmpARINV",
+   "class": "B",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": [
+    "ARCheckNo"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "ARCheckNo",
+   "datetime_columns": [
+    "ARDate",
+    "StmDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TotalPref",
+     "TotalBase",
+     "PaidPref",
+     "PaidBase",
+     "BalPref",
+     "BalBase"
+    ],
+    "local_time_to_utc": [
+     "ARDate",
+     "StmDate"
+    ]
+   }
+  },
+  {
+   "table": "tmpBangKeHang",
+   "class": "unclassified",
+   "rows": 37,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpBarCode",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TmpCCINV",
+   "class": "B",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": [
+    "CCCheckNo"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "CCCheckNo",
+   "datetime_columns": [
+    "CCDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TotalPref",
+     "TotalBase",
+     "PaidPref",
+     "PaidBase",
+     "BalPref",
+     "BalBase"
+    ],
+    "local_time_to_utc": [
+     "CCDate"
+    ]
+   }
+  },
+  {
+   "table": "TmpClientNum",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpConsignerDtl",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpGLTransaction",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpGLTRN",
+   "class": "unclassified",
+   "rows": 1141,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpGLVoucher",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpImport",
+   "class": "unclassified",
+   "rows": 250,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpINVAdjust",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpINVAdjustDetail",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpINVCode",
+   "class": "unclassified",
+   "rows": 286,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TmpInvoice",
+   "class": "B",
+   "rows": 4,
+   "used_by_pda": true,
+   "pg_target": "app.open_checks",
+   "source_keys": [
+    "CheckNo"
+   ],
+   "pg_keys": [
+    "check_no"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": [
+    "LastChgTime"
+   ],
+   "monotonic_key": "CheckNo",
+   "datetime_columns": [
+    "OpenTime",
+    "CloseTime",
+    "OrderTime",
+    "LastChgTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "SubTotal",
+     "Discount",
+     "SurCharge",
+     "BeforeTax",
+     "TaxTotal",
+     "TotalBase",
+     "TotalPref",
+     "TotalPaid",
+     "ExRate",
+     "ISubR",
+     "ISrcR",
+     "ISTaxR",
+     "ITaxR",
+     "ITotalR"
+    ],
+    "local_time_to_utc": [
+     "OpenTime",
+     "CloseTime",
+     "OrderTime",
+     "LastChgTime"
+    ]
+   },
+   "exclude_columns": [
+    "CardNumber"
+   ],
+   "exclude_reason": "PAN/credential/token: never leaves the site",
+   "unmapped_vendor_columns": [
+    "IYear",
+    "IMonth",
+    "IDay",
+    "CloseTime",
+    "CloseBy",
+    "ClientCode",
+    "PONumber",
+    "InvStatus",
+    "TaxOmit",
+    "DeliverBy",
+    "ReceiveBy",
+    "Refund",
+    "RefundOf",
+    "AuthorCashier",
+    "Status",
+    "SalesAgent1",
+    "Commision1",
+    "SalesAgent2",
+    "Commision2",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "StsCode5",
+    "StsCode6",
+    "StsCode7",
+    "StsCode8",
+    "WSID",
+    "InvType",
+    "MealPeriod",
+    "ShiftPeriod",
+    "SubTableNo",
+    "PostedToInterface",
+    "PrintChkSummary",
+    "TableID",
+    "RoomCode",
+    "FolioNum",
+    "PaymentMode",
+    "PaymentType",
+    "PaymentInfo",
+    "MemberID",
+    "MemberSubID",
+    "OrderTime",
+    "LastChgCashier",
+    "LastChgTime"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "RVC": "rvc_no",
+    "TableNo": "table_no",
+    "NGuest": "n_guest",
+    "NChild": "n_child",
+    "OpenBy": "cashier",
+    "ExRate": "ex_rate",
+    "OmitSrc": "omit_src",
+    "OmitSTax": "omit_stax",
+    "OmitTax": "omit_tax",
+    "SubTotal": "sub_total",
+    "Discount": "discount",
+    "SurCharge": "sur_charge",
+    "STaxTotal": "stax_total",
+    "TaxTotal": "tax_total",
+    "BeforeTax": "before_tax",
+    "TotalBase": "total_base",
+    "TotalPaid": "total_paid",
+    "TotalPref": "total_pref",
+    "ITotalR": "i_total_r",
+    "ITaxR": "i_tax_r",
+    "ISTaxR": "i_stax_r",
+    "ISrcR": "i_src_r",
+    "ISubR": "i_sub_r",
+    "OpenTime": "opened_at"
+   }
+  },
+  {
+   "table": "TmpInvoiceDetail",
+   "class": "B",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": null,
+   "capture": "snapshot-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "tmpInvoiceInfo",
+   "class": "B",
+   "rows": 10959,
+   "used_by_pda": true,
+   "pg_target": "app.check_info",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "snapshot-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor holds print state; app.check_info models PDA check metadata"
+  },
+  {
+   "table": "tmpINVTrn",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpINVVoucher",
+   "class": "unclassified",
+   "rows": 51,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpItemInvoice",
+   "class": "unclassified",
+   "rows": 58966,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpJVoucher",
+   "class": "unclassified",
+   "rows": 8,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpMarketList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpMealCheckInfo1",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpMealCheckInfo2",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "tmpMealCheckInfo3",
+   "class": "unclassified",
+   "rows": 556,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpMealCheckInfo4",
+   "class": "unclassified",
+   "rows": 519,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpMealCheckInfo5",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TmpMenuWeb",
+   "class": "unclassified",
+   "rows": 39,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TmpPayment",
+   "class": "B",
+   "rows": 1,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": [
+    "PaymentNo"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "PaymentNo",
+   "datetime_columns": [
+    "PayTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "AmountORG",
+     "AmountPref",
+     "AmountBase"
+    ],
+    "local_time_to_utc": [
+     "PayTime"
+    ]
+   }
+  },
+  {
+   "table": "tmpPO",
+   "class": "unclassified",
+   "rows": 7,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpPODtl",
+   "class": "unclassified",
+   "rows": 11,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpPrintMerge",
+   "class": "unclassified",
+   "rows": 1,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpReceivingDetail",
+   "class": "unclassified",
+   "rows": 5,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpReceivingHeader",
+   "class": "unclassified",
+   "rows": 4,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "tmpRptInvoice",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TmpRVCItem",
+   "class": "unclassified",
+   "rows": 509,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "TmpTaxTable",
+   "class": "B",
+   "rows": 7000,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "open-check satellite; no PG home yet",
+   "source_keys": [
+    "TCheckNo"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "TCheckNo",
+   "datetime_columns": [
+    "TDate",
+    "PrintDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "Address"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Sub1",
+     "Tax1",
+     "Sub2",
+     "Tax2",
+     "Sub3",
+     "Tax3",
+     "Sub4",
+     "Tax4",
+     "Sub5",
+     "Tax5",
+     "Sub6",
+     "Tax6",
+     "Sub7",
+     "Tax7",
+     "Sub8",
+     "Tax8",
+     "TSubTTL",
+     "TTaxTTL",
+     "TTotal"
+    ],
+    "local_time_to_utc": [
+     "TDate",
+     "PrintDate"
+    ]
+   }
+  },
+  {
+   "table": "TmpTrn",
+   "class": "B",
+   "rows": 13,
+   "used_by_pda": true,
+   "pg_target": "app.open_check_lines",
+   "source_keys": [
+    "TrnSeq"
+   ],
+   "pg_keys": [
+    "check_no",
+    "line_seq"
+   ],
+   "capture": "snapshot-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "TrnSeq",
+   "datetime_columns": [
+    "TrnTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "ItemPrice",
+     "BaseSub",
+     "BaseTax",
+     "BaseTTL",
+     "TrnOrg",
+     "TrnBase",
+     "TrnPref",
+     "BaseSrc",
+     "SubR",
+     "SrcR",
+     "STaxR",
+     "TaxR",
+     "TotalR",
+     "OrgPrice",
+     "ICost"
+    ],
+    "local_time_to_utc": [
+     "TrnTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "NYear",
+    "NMonth",
+    "NDay",
+    "TrnTime",
+    "Cashier",
+    "TrnSub",
+    "TrnDesc",
+    "RVC",
+    "NewTrn",
+    "Refund",
+    "RefundRef",
+    "AuthorCashier",
+    "Status",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "MealPeriod",
+    "ShiftPeriod",
+    "Split",
+    "FromRVC",
+    "OrderNo",
+    "OrgCheck",
+    "ICost",
+    "DscRef",
+    "Rsv1",
+    "Rsv2",
+    "Rsv3",
+    "Rsv4"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "TrnSeq": "line_seq",
+    "TrnCode": "transaction_code",
+    "ItemCode": "item_code",
+    "ClassCode": "class_code",
+    "GroupCode": "group_code",
+    "TaxNo": "tax_no",
+    "SrcNo": "src_no",
+    "STaxNo": "stax_no",
+    "ItemPrice": "item_price",
+    "OrgPrice": "org_price",
+    "TrnQty": "trn_qty",
+    "OrgCrCode": "org_cr_code",
+    "BaseSub": "base_sub",
+    "BaseTax": "base_tax",
+    "BaseSrc": "base_src",
+    "BaseSTax": "base_stax",
+    "TrnBase": "trn_base",
+    "BaseTTL": "base_ttl",
+    "TrnOrg": "trn_org",
+    "TrnPref": "trn_pref",
+    "SubR": "sub_r",
+    "SrcR": "src_r",
+    "STaxR": "stax_r",
+    "TaxR": "tax_r",
+    "TotalR": "total_r"
+   }
+  },
+  {
+   "table": "tmpTrnInfo",
+   "class": "B",
+   "rows": 6410,
+   "used_by_pda": true,
+   "pg_target": "app.check_line_details",
+   "source_keys": null,
+   "pg_keys": [
+    "check_no",
+    "line_seq"
+   ],
+   "capture": "snapshot-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "PCheckTime",
+    "POrderTime",
+    "VoidTime",
+    "DoneTime",
+    "KdsAcceptedTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": [
+     "PCheckTime",
+     "POrderTime",
+     "VoidTime",
+     "DoneTime",
+     "KdsAcceptedTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "PToCheck",
+    "PCheckTime",
+    "PToOrder",
+    "POrderPrinter",
+    "Void",
+    "VoidTime",
+    "OrderQty",
+    "ChkQty",
+    "IsDone",
+    "OrderHold"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "TrnNo": "line_seq",
+    "DoneTime": "done_at",
+    "KdsAcceptedTime": "kds_accepted_at",
+    "KdsAcceptedBy": "accepted_by",
+    "POrderTime": "sent_at"
+   }
+  },
+  {
+   "table": "TmpTTLPay",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TourBooked",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "id"
+   ]
+  },
+  {
+   "table": "TourDetail",
+   "class": "unclassified",
+   "rows": 3,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "id"
+   ]
+  },
+  {
+   "table": "TourGroup",
+   "class": "unclassified",
+   "rows": 4,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "GroupID"
+   ]
+  },
+  {
+   "table": "TourPrice",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TransactionCode",
+   "class": "A",
+   "rows": 29,
+   "used_by_pda": true,
+   "pg_target": "app.transaction_codes",
+   "source_keys": [
+    "TrnCode",
+    "TrnSubCode"
+   ],
+   "pg_keys": [
+    "transaction_code",
+    "trn_sub"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [
+    "SystemUse",
+    "IntCode1",
+    "IntCode2",
+    "IntCode3",
+    "IntCode4",
+    "IntCode5",
+    "IntCode6",
+    "IntCode7",
+    "IntCode8",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "StsCode5",
+    "StsCode6",
+    "StsCode7",
+    "StsCode8",
+    "IntDebit",
+    "IntChgSgn",
+    "IntCodeE",
+    "IntCodeF",
+    "Status"
+   ],
+   "pg_columns": {
+    "TrnCode": "transaction_code",
+    "TrnSubCode": "trn_sub",
+    "Description": "description",
+    "TrnType": "trn_type",
+    "TrnActive": "is_active"
+   }
+  },
+  {
+   "table": "TransactionServiceBooking",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TransactionType",
+   "class": "A",
+   "rows": 21,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": [
+    "TrnTypeCode"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": null,
+   "monotonic_key": "TrnTypeCode",
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TReview",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "Trn",
+   "class": "C",
+   "rows": 172267,
+   "used_by_pda": true,
+   "pg_target": "app.closed_check_lines",
+   "source_keys": [
+    "TrnSeq"
+   ],
+   "pg_keys": [
+    "check_no",
+    "line_seq"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": null,
+   "monotonic_key": "TrnSeq",
+   "datetime_columns": [
+    "TrnTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "TrnDesc"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "ItemPrice",
+     "BaseSub",
+     "BaseTax",
+     "BaseTTL",
+     "TrnOrg",
+     "TrnBase",
+     "TrnPref",
+     "BaseSrc",
+     "SubR",
+     "SrcR",
+     "STaxR",
+     "TaxR",
+     "TotalR",
+     "OrgPrice",
+     "ICost"
+    ],
+    "local_time_to_utc": [
+     "TrnTime"
+    ]
+   },
+   "unmapped_vendor_columns": [
+    "NYear",
+    "NMonth",
+    "NDay",
+    "TrnTime",
+    "Cashier",
+    "TrnSub",
+    "TrnDesc",
+    "RVC",
+    "NewTrn",
+    "Refund",
+    "RefundRef",
+    "AuthorCashier",
+    "Status",
+    "StsCode1",
+    "StsCode2",
+    "StsCode3",
+    "StsCode4",
+    "MealPeriod",
+    "ShiftPeriod",
+    "Split",
+    "FromRVC",
+    "OrderNo",
+    "OrgCheck",
+    "ICost",
+    "DscRef",
+    "Rsv1",
+    "Rsv2",
+    "Rsv3",
+    "Rsv4"
+   ],
+   "pg_columns": {
+    "CheckNo": "check_no",
+    "TrnSeq": "line_seq",
+    "TrnCode": "transaction_code",
+    "ItemCode": "item_code",
+    "ClassCode": "class_code",
+    "GroupCode": "group_code",
+    "TaxNo": "tax_no",
+    "SrcNo": "src_no",
+    "STaxNo": "stax_no",
+    "ItemPrice": "item_price",
+    "OrgPrice": "org_price",
+    "TrnQty": "trn_qty",
+    "OrgCrCode": "org_cr_code",
+    "BaseSub": "base_sub",
+    "BaseTax": "base_tax",
+    "BaseSrc": "base_src",
+    "BaseSTax": "base_stax",
+    "TrnBase": "trn_base",
+    "BaseTTL": "base_ttl",
+    "TrnOrg": "trn_org",
+    "TrnPref": "trn_pref",
+    "SubR": "sub_r",
+    "SrcR": "src_r",
+    "STaxR": "stax_r",
+    "TaxR": "tax_r",
+    "TotalR": "total_r"
+   }
+  },
+  {
+   "table": "TrnActivities",
+   "class": "C",
+   "rows": 51696,
+   "used_by_pda": true,
+   "pg_target": "app.check_line_activities",
+   "source_keys": null,
+   "pg_keys": [
+    "act_no"
+   ],
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "tTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TrnAmount"
+    ],
+    "local_time_to_utc": [
+     "tTime"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_columns": {
+    "nSeq": "act_no",
+    "RVC": "rvc_no",
+    "CheckNo": "check_no",
+    "TrnNo": "line_seq",
+    "ActCode": "act_code",
+    "ActName": "act_name",
+    "TrnAmount": "trn_amount",
+    "Cashier": "cashier",
+    "tTime": "act_at",
+    "ToCheckNo": "to_check_no"
+   }
+  },
+  {
+   "table": "TrnCodeDef",
+   "class": "A",
+   "rows": 86,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  },
+  {
+   "table": "TrnLinkByRVC",
+   "class": "A",
+   "rows": 93,
+   "used_by_pda": true,
+   "pg_target": "app.discount_link",
+   "note": "semantics differ (folio link); confirm in S1",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor link config; app.discount_link keys on (check_no, line_seq)"
+  },
+  {
+   "table": "TRVCItem",
+   "class": "A",
+   "rows": 2150,
+   "used_by_pda": true,
+   "pg_target": "app.rvc_items",
+   "source_keys": [
+    "ID"
+   ],
+   "pg_keys": [
+    "ID"
+   ],
+   "capture": "scan-diff",
+   "watermark_candidates": [
+    "ID"
+   ],
+   "monotonic_key": "ID",
+   "datetime_columns": null,
+   "hash_columns": "all-columns-except-blob",
+   "hash_exclude": [
+    "ImageItem"
+   ],
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "Price"
+    ],
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "second vendor source for app.rvc_items (RVCItem is the typed one); keeps touch-menu shape"
+  },
+  {
+   "table": "tttARApply",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "TVShow",
+   "class": "unclassified",
+   "rows": 4,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": [
+    "id"
+   ]
+  },
+  {
+   "table": "UpdateLog",
+   "class": "unclassified",
+   "rows": 237,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "UPLOP",
+   "class": "unclassified",
+   "rows": 87,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "UserDefineDef",
+   "class": "unclassified",
+   "rows": 8,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "UserMenu",
+   "class": "unclassified",
+   "rows": 294,
+   "used_by_pda": false,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "VATBillInfor",
+   "class": "C",
+   "rows": 11714,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "watermark+rescan",
+   "key_note": "no PK; identity nSeq is the row key",
+   "watermark_candidates": [
+    "nSeq"
+   ],
+   "monotonic_key": "nSeq",
+   "datetime_columns": [
+    "PrintDate",
+    "CancelTime",
+    "INVDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "Address",
+     "BillSeri",
+     "ClientName",
+     "Company",
+     "Email",
+     "InvContent"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "TotalAmount",
+     "SubAmount",
+     "TaxAmount"
+    ],
+    "local_time_to_utc": [
+     "PrintDate",
+     "CancelTime",
+     "INVDate"
+    ]
+   }
+  },
+  {
+   "table": "VDClassDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "VendorDef",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "VendorPriceList",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "VoidReason",
+   "class": "A",
+   "rows": 3,
+   "used_by_pda": true,
+   "pg_target": "app.void_reasons",
+   "source_keys": null,
+   "pg_keys": [],
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "vendor VoidReason has no RVC; app.void_reasons keys on (rvc_no, reason)"
+  },
+  {
+   "table": "VoidTrn",
+   "class": "C",
+   "rows": 835,
+   "used_by_pda": true,
+   "pg_target": "app.voided_check_lines",
+   "source_keys": [
+    "TrnSeq"
+   ],
+   "pg_keys": [
+    "TrnSeq"
+   ],
+   "capture": "watermark+rescan",
+   "watermark_candidates": null,
+   "monotonic_key": "TrnSeq",
+   "datetime_columns": [
+    "TrnTime"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": [
+     "StsCode1",
+     "TrnDesc"
+    ],
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "ItemPrice",
+     "BaseSub",
+     "BaseTax",
+     "BaseTTL",
+     "TrnOrg",
+     "TrnBase",
+     "TrnPref",
+     "BaseSrc",
+     "SubR",
+     "SrcR",
+     "STaxR",
+     "TaxR",
+     "TotalR",
+     "OrgPrice",
+     "ICost"
+    ],
+    "local_time_to_utc": [
+     "TrnTime"
+    ]
+   },
+   "unmapped_vendor_columns": [],
+   "pg_raw": true,
+   "pg_raw_reason": "app.voided_check_lines has a cloud-generated void_no; vendor key is TrnSeq"
+  },
+  {
+   "table": "VoucherDtl",
+   "class": "C",
+   "rows": 0,
+   "used_by_pda": true,
+   "pg_target": null,
+   "note": "ledger/log table without PG home",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": [
+    "SDate",
+    "VValid",
+    "UDate"
+   ],
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": [
+     "VAmount",
+     "UAmount"
+    ],
+    "local_time_to_utc": [
+     "SDate",
+     "VValid",
+     "UDate"
+    ]
+   }
+  },
+  {
+   "table": "VoucherType",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "WebItemDef",
+   "class": "unclassified",
+   "rows": 13,
+   "used_by_pda": true,
+   "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
+   "pk": []
+  },
+  {
+   "table": "WebItemDesc",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "WebItemLanguage",
+   "class": "skip",
+   "reason": "not referenced by PDA; 0 rows on dev (dormant vendor module)",
+   "rows": 0
+  },
+  {
+   "table": "WSPara",
+   "class": "A",
+   "rows": 5177,
+   "used_by_pda": false,
+   "pg_target": null,
+   "note": "master/config; no PG home yet",
+   "source_keys": null,
+   "capture": "scan-diff",
+   "key_note": "no PK and no identity: mapper must define a logical key (see report) else row-hash identity",
+   "watermark_candidates": null,
+   "monotonic_key": null,
+   "datetime_columns": null,
+   "hash_columns": "all-columns",
+   "transforms": {
+    "tcvn3_decode": null,
+    "tcvn3_policy": "decode every char/varchar free-text column (names, descriptions, addresses); detected columns listed",
+    "money_decimal_string": null,
+    "local_time_to_utc": null
+   }
+  }
+ ],
+ "sqlite_tables": [
+  {
+   "table": "_migrated_domain",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "sqlite runner bookkeeping"
+  },
+  {
+   "table": "pda_ai_suggestion_feedback",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.ai_suggestion_feedback",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_audit_log",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.audit_log",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_branding",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.branding",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_cash_declaration",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.cash_declarations",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_check_assignment",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.check_assignments",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_check_course",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.check_course",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_check_invoice_token",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.invoice_token",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_check_prebill",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_check_split",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.check_split",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_check_version",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.check_version",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_class_station",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.kds_class_station",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_clerk_role",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_config",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.config",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_diet_allergen_catalog",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.diet_allergen_catalog",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_einvoice",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.einvoice_requests",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_gift_card",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.gift_cards",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_gift_card_redeem_ledger",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.gift_card_ledger",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_guest_hidden",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.guest_hidden",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_guest_request",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.guest_requests",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_guest_session",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.guest_sessions",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_inventory_movement",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.inventory_movement",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_ird_config",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.in_room_dining_settings",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_ird_delivery",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.in_room_dining_deliveries",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_meta",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.item_meta",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_option_assignment",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.item_option_assignments",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_recommend",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.item_recommends",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_sla",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.kds_item_sla",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_station",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.kds_item_station",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_item_stock",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.item_stock",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_kds_auto_done",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_kds_event",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "derived analytics event stream; rebuilt per side"
+  },
+  {
+   "table": "pda_kds_line",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_kds_rollup_",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "derived analytics rollup; rebuilt per side"
+  },
+  {
+   "table": "pda_kds_threshold",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_kitchen_station",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.kds_station",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_legacy_item_image",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_login_attempt",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "security telemetry; per-side"
+  },
+  {
+   "table": "pda_mealplan_entitlement",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.meal_plans",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_mealplan_reserve",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_mfa_schema_migration",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "sqlite runner bookkeeping"
+  },
+  {
+   "table": "pda_modifier_group_meta",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.modifier_group_meta",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_op_idempotency",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "per-side idempotency claims; not replicated (command channel has its own log)"
+  },
+  {
+   "table": "pda_option_group",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.option_groups",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_option_group_item",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.option_group_items",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_option_profile",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.option_profiles",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_option_profile_group",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.option_profile_groups",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_order_item_companion",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_payment_idempotency",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "per-side idempotency; cloud uses its own"
+  },
+  {
+   "table": "pda_print_job",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_jobs_legacy",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "0226 renamed the 0002 table to app.print_jobs_legacy; app.print_jobs is now the live print relay queue and never takes synced rows"
+  },
+  {
+   "table": "pda_print_profile",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_profiles",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_profile_printer",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_profile_printers",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_rule",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_profile_rules",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_template",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_templates",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_template_version",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_template_versions",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_theme",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_themes",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_print_theme_version",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.print_theme_versions",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_printer",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.printers",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_refresh_token",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "session secrets; per-side, never synced"
+  },
+  {
+   "table": "pda_removed_payment_audit",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.removed_payment_audit",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_reservation_audit",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.reservation_audit",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_review_meta",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": null,
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": "no PG home found in migrations 0010-0190"
+  },
+  {
+   "table": "pda_section",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.sections",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_appointment",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_appointments",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_appointment_line",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_appointment_lines",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_guest_package",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_guest_packages",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_package_def",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_package_defs",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_package_use",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_package_uses",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_service",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_services",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_settings",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_settings",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_therapist",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_therapists",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_spa_therapist_shift",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.spa_therapist_shifts",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_speaker_device",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.speaker_devices",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_sts_slot",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.service_timing_slots",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_table_assignment",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.table_assignments",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_table_note",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.table_notes",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_table_status",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.table_status",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "pda_waitlist",
+   "source": "sqlite",
+   "class": "E",
+   "pg_target": "app.waitlist",
+   "capture": "scan-diff",
+   "conflict": "per-row version, last-writer-wins, loser to sync.conflicts",
+   "note": null
+  },
+  {
+   "table": "schema_version",
+   "source": "sqlite",
+   "class": "skip",
+   "reason": "sqlite runner bookkeeping"
+  }
+ ]
+}
