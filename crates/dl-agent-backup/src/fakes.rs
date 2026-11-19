@@ -30,6 +30,10 @@ pub struct SqlState {
     pub databases: Vec<String>,
     pub connects: Vec<Target>,
     pub statements: Vec<(String, Vec<(String, String)>)>,
+    /// Databases the login may not `BACKUP`.
+    pub backup_denied: Vec<String>,
+    /// Databases whose BACKUP permission was asked for.
+    pub perm_checked: Vec<String>,
 }
 
 impl Default for SqlState {
@@ -69,6 +73,8 @@ impl Default for SqlState {
             ],
             connects: Vec::new(),
             statements: Vec::new(),
+            backup_denied: Vec::new(),
+            perm_checked: Vec::new(),
         }
     }
 }
@@ -116,6 +122,12 @@ impl SqlConn for FakeConn {
 
     fn backup_dir(&mut self) -> Result<Option<String>, Error> {
         Ok(self.shared.lock().unwrap().backup_dir.clone())
+    }
+
+    fn can_backup(&mut self, database: &str) -> Result<Option<bool>, Error> {
+        let mut s = self.shared.lock().unwrap();
+        s.perm_checked.push(database.to_owned());
+        Ok(Some(!s.backup_denied.iter().any(|d| d == database)))
     }
 
     fn recovery_model(&mut self, database: &str) -> Result<Option<String>, Error> {

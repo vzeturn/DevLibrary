@@ -102,6 +102,7 @@ All notable changes are listed here. The format follows
   processes through `dl_winsvc::process` instead of `tasklist`.
 
 ### Fixed
+- dl-agent-backup selftest: the BACKUP permission check covers only databases a schedule backs up; the other databases the hub lists on the server (MM_*, test copies) no longer fail it (RT-0164).
 
 - dl-agent-arrival: the install report (`hello.installations`) uses the format the Check-In cloud parses (`processes=<n>`, both agents counted); 1.3.9 read as "unreadable report" in `agent_install_state`.
 - dl-agent-arrival: the service ending with exit 75 (restart into a new version after an update, SCM event 7024) is imported as Information, not as the last problem.

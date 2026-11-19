@@ -29,8 +29,8 @@ fn server(dbs: &[&str]) -> ServerConfig {
         databases: dbs
             .iter()
             .map(|d| DatabaseConfig {
+                id: format!("db-{d}"),
                 database_name: (*d).into(),
-                ..DatabaseConfig::default()
             })
             .collect(),
         ..ServerConfig::default()
@@ -140,4 +140,32 @@ fn schedules_without_a_destination_skip() {
     let checks = destinations(&up, &r);
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].status, Status::Skip);
+}
+
+#[test]
+fn only_scheduled_databases_need_backup_permission() {
+    let sql = FakeSql::new(SqlState {
+        backup_denied: vec!["MM_PMS".into(), "SMILE_HR".into()],
+        ..SqlState::default()
+    });
+    let mut r = remote(vec![]);
+    r.config.schedules = vec![crate::hub::ScheduleConfig {
+        database_id: "db-SMILE_FO".into(),
+        ..crate::hub::ScheduleConfig::default()
+    }];
+    let s = server(&["SMILE_FO", "MM_PMS", "SMILE_HR"]);
+    let (perm, _) = probe_server(&sql, &r, &s, "");
+    assert_eq!(perm.status, Status::Pass, "{}", perm.detail);
+    assert!(perm.detail.contains("1 scheduled"), "{}", perm.detail);
+    assert!(
+        perm.detail.contains("2 database(s) without a schedule"),
+        "{}",
+        perm.detail
+    );
+    assert_eq!(sql.state().perm_checked, ["SMILE_FO"]);
+
+    r.config.schedules[0].database_id = "db-MM_PMS".into();
+    let (perm, _) = probe_server(&sql, &r, &s, "");
+    assert_eq!(perm.status, Status::Fail);
+    assert!(perm.detail.contains("denied on MM_PMS"), "{}", perm.detail);
 }
