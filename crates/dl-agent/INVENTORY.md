@@ -64,10 +64,14 @@ shared by every module on the site.
   `sync.*`) in one SQL tx with log row, WebSocket + long-poll fallback, SignalR print relay (TCP 9100 +
   spooler RAW, crash-safe journal), SQL bootstrap/grants, legacy-export/archive/upload verbs. Phase A built as
   `dl-agent-pda-sync` (opt-in `modules.pda-sync`; tools `pda-enroll`, `pda-grants`; commands `status`, `selftest`,
-  `capture_dry_run`); phase B (verify, live order verbs, watchdog link, capture.db carry-over) in
-  docs/plans/2026-11-19-pda-sync-plan.md.
+  `capture_dry_run`); phase B (RT-0257, PR #64): `sync.verify` + repair by key, order/combo/table verbs exactly-once live on SQL 2017/2022,
+  watchdog cloud link, site events as reports. Open: closed open-checks are not healed by verify (C# parity, owner
+  decision), capture.db carry-over (B8, owner decision), Windows bench (B6) and printer (B7). Report:
+  docs/plans/2026-11-19-pda-sync-b-report.md.
 - **speaker**: SignalR `JoinRvc`, embedded WAV tones, SAPI vi/en, sound mode per RVC. Replace 365-day
-  plaintext JWT with enrolled identity.
+  plaintext JWT with enrolled identity. Built as `dl-agent-speaker` (RT-0257): uses the pda-sync enrolment, no
+  print relay. Live use needs the PDA cloud to accept a SyncAgent in `OrderHub.JoinRvc` and on
+  `speaker/sound-mode`.
 - **pms-site**: WSS stream with JWT, allow-listed ops on SMILE_FO/SMILE_BO/SMILE_POS only (`target_db` per op,
   SMILE-only contract of SMILE-PMS ADR 2026-11-19), ≤ 8 ops in flight, deadlock retry, result caps, local op
   journal for request-key replay; settings from core `sql.json` (`databases.json` only as fallback); commands
@@ -79,12 +83,18 @@ shared by every module on the site.
   change watcher, LegalVault, proc bundle install, tenant master key wrap/unwrap, idempotency journal 48 h.
 - **membership**: job pull/ack (Create/Modify/Cancel/Redeem/Earn/Availability/GrantReward/LinkFolio),
   checkout/availability/room-inventory/folio scanners with hub-confirmed cursors, backfill mode,
-  DB identity fingerprint, 401 gate, older-hub fallbacks.
+  DB identity fingerprint, 401 gate, older-hub fallbacks. Built as `dl-agent-membership`; RT-0256 (PR #63) added
+  EarnPoints, the checkout / walk-in scanner + backfill tool, SMILE_SPECIAL extra beds and terms sync, and
+  `membership-enroll --switch/--rollback` that keeps the .NET `config.dpapi`. Open: Windows DPAPI/SCM run and real
+  SMILE_FO data at Victory.
 - **hotellink**: job long-poll + local queue + re-ack, availability push, mapping commands, PMS circuit
-  breaker, local config UI on 127.0.0.1:8088.
+  breaker, local config UI on 127.0.0.1:8088. Built as `dl-agent-hotellink`; RT-0259 (PR #66) added the SQL
+  end-to-end tests (booking, ack replay after a crash, breaker), site `Encrypt=false;TrustServerCertificate=true`
+  strings and a prompt stop.
 - **backup**: cron schedules with tz, BACKUP/RESTORE, uploads (Drive/OneDrive/S3/Azure), retention,
   per-instance serialisation, bbolt-style job queue with leases + dead letter. **Fix: per-tenant keys
-  instead of the shared global master key.**
+  instead of the shared global master key.** Built as `dl-agent-backup`; RT-0259 (PR #66) added the
+  RESTORE WITH REPLACE end-to-end test and per-tenant sealing of uploads (agent side; SRBackup hub route pending).
 
 ## 4. Known risks to carry into the migration
 
@@ -99,6 +109,20 @@ shared by every module on the site.
 - SMILE-HL and SRBackup allow downgrades; EINVOICE has no hash check at install; speaker token in plaintext.
 - No code signing anywhere except Membership's self-signed Authenticode; antivirus (Kaspersky/Defender)
   untested on most.
+
+## 4b. Coverage status (2026-11-19, task 644)
+
+| Module | Crate | Ported | Verified on Linux (unit + live SQL) | Still open |
+|---|---|---|---|---|
+| core | `dl-agent`, `dl-tds`, `dl-http` | service, enrol, signed update + rollback, reports, remote config, canary gate, SQL ladder, survey, diagnostics, NTLMv2, named instance, TDS 7.3 (RT-0258) | yes; Windows build by cross clippy | Windows SSPI/SCM bench, SQL 2008 at Mũi Né (RT-0252) |
+| einvoice | `dl-agent-einvoice` | full | yes (SQL 2017/2022) | SR bench Windows checks |
+| pms-site / pms-device | `dl-agent-pms`, `dl-agent-pms-device` | full | yes | device hardware (locks, printers) on bench |
+| hotellink | `dl-agent-hotellink` | full | yes (RT-0259 e2e) | real kill -9, site UI |
+| backup | `dl-agent-backup` | full + per-tenant sealing | yes (RT-0259 restore REPLACE) | SRBackup hub `backup-key` route |
+| arrival | `dl-agent-arrival` | full | yes | Check-In pilot RT-0252 / task 646, 727 |
+| membership | `dl-agent-membership` | full (RT-0256) | yes (SQL 2022) | Victory cutover on Windows |
+| pda-sync | `dl-agent-pda-sync` | phase A + B (RT-0257) | yes (SQL 2017/2022) | B6/B7/B8, open-check healing decision |
+| speaker | `dl-agent-speaker` | full, no print relay | fake hub only | PDA cloud change, real audio |
 
 ## 5. Migration order (all inside RT-0164 as tasks, one demo/canary tenant first each)
 
