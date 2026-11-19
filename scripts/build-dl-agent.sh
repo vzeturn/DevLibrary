@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Builds dl-agent release binaries for every site target in a container.
 #
-#   scripts/build-dl-agent.sh <version> [out-dir] [targets...]
+#   scripts/build-dl-agent.sh [--fault probation] <version> [out-dir] [targets...]
+#
+# --fault probation builds the rollback smoke test (crates/dl-agent/PROTOCOL.md §6.6): a
+# binary that never passes probation, so every agent that takes it rolls back and reports
+# `update_rolled_back`. Off unless given here; DL_AGENT_FAULT from the environment is ignored.
+# The output goes to dist/dl-agent/<version>-fault-<fault> unless out-dir is given.
 #
 # Targets (release target name -> rust triple):
 #   linux-x86_64     x86_64-unknown-linux-gnu
@@ -16,8 +21,17 @@
 # dl-tls loads the system libssl with dlopen, and a static glibc next to the libc that
 # libssl pulls in crashed in OpenSSL when two threads opened TLS at once (1.2.0 canary).
 set -euo pipefail
-version=${1:?usage: build-dl-agent.sh <version> [out-dir] [targets...]}
-out=${2:-dist/dl-agent/$version}
+fault=
+if [ "${1:-}" = --fault ]; then
+  case ${2:-} in
+    probation) fault=probation ;;
+    *) echo "unknown fault '${2:-}' (only: probation)" >&2; exit 2 ;;
+  esac
+  shift 2
+  echo "warning: FAULT BUILD ($fault): never publish it to stable or to a customer site" >&2
+fi
+version=${1:?usage: build-dl-agent.sh [--fault probation] <version> [out-dir] [targets...]}
+out=${2:-dist/dl-agent/$version${fault:+-fault-$fault}}
 shift $(( $# >= 2 ? 2 : 1 ))
 targets=("$@")
 [ ${#targets[@]} -eq 0 ] && targets=(linux-x86_64 windows-x86_64 windows-x86 windows7-x86_64 windows7-x86)
@@ -41,7 +55,7 @@ for t in "${targets[@]}"; do
     *) echo "unknown target $t" >&2; exit 2 ;;
   esac
   docker run --rm -v "$root:/src" -e DL_AGENT_VERSION="$version" -e DL_AGENT_RELEASE_KEYS="$keys" \
-    -e MMEI_BUILD_DEFAULT_SQL_PASSWORD \
+    -e MMEI_BUILD_DEFAULT_SQL_PASSWORD ${fault:+-e DL_AGENT_FAULT=$fault} \
     -e CARGO_TARGET_DIR=/src/target/xbuild -e RUSTFLAGS="$rf" "$image" \
     cargo $tc build -q --release -p dl-agent-bin --bin dl-agent --target "$triple" $std
   mkdir -p "$root/$out/$t"

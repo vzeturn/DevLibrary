@@ -175,7 +175,10 @@ admin bearer token is the audit boundary.
 ## 6. Update, probation and rollback (agent side)
 
 1. Download the artifact for the agent's target, check size and SHA-256, stage it.
-2. Keep the running binary as `previous`, put the new one in place, record
+2. Drain: every module is asked to stop and gets up to 30 s to finish in-flight work on the
+   old binary (a module still running after that is reported `module_stuck` and left to the
+   restart). If the swap then fails, the drained modules start again on the next tick.
+   Keep the running binary as `previous`, put the new one in place, record
    `pending = {version, previous, probation_until, unhealthy_before}` and exit with code 75;
    the service manager restarts the agent. `unhealthy_before` names the modules already
    degraded or stopped at install time: probation ignores them (a site problem must not
@@ -250,6 +253,27 @@ fetched, nothing installs). It says so: the heartbeat carries `"update_blocked":
 while the file exists (absent otherwise), one `info` report `update_blocked_local` is sent per
 start, and `selftest` shows a warn row `core/no_update`. The `update_now` command still runs,
 as does `retry_update`. Hubs that do not know the field ignore it.
+
+### 6.6 Rollback smoke test (fault build)
+
+`scripts/build-dl-agent.sh --fault probation <version>` compiles `DL_AGENT_FAULT=probation`
+into the binary (never set otherwise; the variable in the builder's environment is ignored).
+`--version` then prints `<version> (fault build: probation)`. Such a build installs and runs
+normally but never commits: when probation ends it rolls back as in step 4, with the reason
+`fault build (DL_AGENT_FAULT=probation) never passes probation`. Procedure on a canary test
+machine:
+
+1. Build `X` with `--fault probation`, sign it as a canary manifest, `PUT /admin/releases/dl-agent/X`.
+2. The canary agent installs `X`, restarts, and after its probation (120 s on canary) restores
+   the previous binary, records one failure of `X` (§6.2) and restarts.
+3. Visible on the hub: the `critical` report `update_rolled_back` with `version = X`
+   (`GET /admin/reports?severity=critical&version=X`), the heartbeat `update.state =
+   "rolled_back"`, the `core/update_state` selftest row listing `X` as failed, and the gate of
+   `X` failing `no_rollback`. Pause `X` (`POST /admin/releases/dl-agent/X/pause`).
+4. Publish the fixed build `X+1` (no fault): the agent takes it and commits it.
+
+The fault build is for canary test machines only; publishing one to stable is a mistake the
+gate (`no_rollback`) already refuses.
 
 ## 7. Problem reports
 

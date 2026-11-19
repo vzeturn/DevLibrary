@@ -101,7 +101,10 @@ pub fn command(app: &App) -> Command {
             .help("State directory (default: %ProgramData%\\<service> or /var/lib/<service>)")
     };
     let cmd = Command::new(app.service.clone())
-        .version(app.version.to_string())
+        .version(crate::fault::version_label(
+            &app.version.to_string(),
+            crate::fault::COMPILED,
+        ))
         .about(format!(
             "{}: shared on-prem agent (modules, signed self-update, reports)",
             app.display

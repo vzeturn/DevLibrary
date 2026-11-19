@@ -9,6 +9,7 @@ pub mod cli_sql;
 pub mod command;
 pub mod config;
 mod error;
+pub mod fault;
 pub mod host;
 pub mod hub;
 pub mod hub_urls;
