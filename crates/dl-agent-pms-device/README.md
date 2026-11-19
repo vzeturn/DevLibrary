@@ -90,7 +90,7 @@ There is no `pms-device-test` sub-command: the port has no diagnostic tool to ca
 | Logs | console, Warning and above to the Event Log | dl-agent's log, target `pms-device`, the same messages with `category` and `exception` fields; exceptions without stack traces |
 | Settings | appsettings files and the service's environment | the same files; the environment is dl-agent's, so set what the old service had in its environment through `overrides` |
 | `RunOnce` | one poll, then exit | ignored |
-| Proxy | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` and the Windows proxy | the variables only |
+| Proxy | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` and the Windows proxy | dl-agent's choice: the variables, then WinHTTP, then Internet Options |
 | Result bodies | chunked | `Content-Length`, same bytes |
 | OPOS | refuses every verb | drives the registered CashDrawer and LineDisplay controls, else the same refusal |
 
