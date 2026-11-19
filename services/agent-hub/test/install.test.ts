@@ -42,9 +42,47 @@ describe('install script', () => {
     expect(replace).toBeGreaterThan(setup);
     expect(install).toBeGreaterThan(replace);
     expect(text).toContain('Remove-Item Env:DL_AGENT_SETUP_ARGS');
-    // A reinstall with -SqlPrompt keeps the declared databases that still connect.
-    expect(text).toContain('if (Test-SavedSql) { Say');
-    expect(text).toContain("Invoke-Agent @('sql-test', '--data', $Data)");
+  });
+
+  it('asks Windows or SQL login, defaulting to what this machine saved, and tests before enrolling', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("SQL login: [1] Windows  [2] SQL login");
+    // The saved choice is the default (a reinstall with no change reuses it); else Windows.
+    expect(text).toContain('& $Exe sql-setup --show --data $Data');
+    expect(text).toContain("if ($saved.auth -eq 'sql') { $mode = '2' }");
+    expect(text).toContain("$mode = '1'");
+    expect(text).toContain("Read-Secret 'Password (Enter keeps the saved one)'");
+    // Windows mode is tested as the service account (LocalSystem).
+    expect(text).toContain("$argv += '--as-service'");
+    // A failed test re-prompts.
+    const loop = text.slice(text.indexOf('function Read-SqlLogin'), text.indexOf('function Set-SqlLoginUnattended'));
+    expect(loop).toContain('while ($true)');
+    expect(loop).toContain('Choose again');
+    // The SQL step runs before enrolment so a failure never spends the code.
+    const sql = text.indexOf('Set-SqlLoginUnattended)');
+    const enroll = text.indexOf("@('enroll', '--hub'");
+    expect(sql).toBeGreaterThan(0);
+    expect(enroll).toBeGreaterThan(sql);
+    expect(text.indexOf('    Read-SqlLogin\n')).toBeLessThan(enroll);
+  });
+
+  it('takes the SQL login unattended without echoing the password and exits 1 on failure', async () => {
+    const text = await (await get('/install.ps1')).text();
+    expect(text).toContain("[ValidateSet('', 'windows', 'sql')][string]$SqlAuth = ''");
+    expect(text).toContain('[string]$SqlUser = ');
+    expect(text).toContain('[string]$SqlPassword = $env:DL_AGENT_SQL_PASSWORD');
+    // The password reaches the agent only through the environment, removed right after.
+    expect(text).toContain('$env:DL_AGENT_SQL_PASSWORD = $pw');
+    expect(text).toContain('Remove-Item Env:DL_AGENT_SQL_PASSWORD');
+    expect(text).not.toMatch(/--password/);
+    for (const line of text.split('\n')) {
+      if (/Say|Warn|Write-Host/.test(line)) expect(line).not.toMatch(/\$SqlPassword|\$pw\b/);
+    }
+    // A failure prints the structured result and exits 1; a new machine is not enrolled.
+    expect(text).toContain("'[dl-agent] SQL_SETUP_RESULT '");
+    expect(text).toContain("if ($SqlFailed -and -not $enrolled) { throw");
+    expect(text).toContain('if ($SqlAuth) { exit 1 }');
+    expect(text).toContain("FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1");
   });
 
   it('keeps the verified download until Move-Item installs it (RT-0164 test PC)', async () => {

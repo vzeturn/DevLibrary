@@ -6,8 +6,9 @@
  *
  * Steps: admin + TLS 1.2 → OS gate (NT < 10 → windows7 build, x86/x64) → clock check against
  * the hub → Defender exclusion → download + size + SHA-256 → stop and remove older copies
- * (the old exe uninstalls itself, other services are deleted) → optional SQL Server prompt,
- * tested before the code is spent → enroll unless already enrolled (re-run keeps the identity)
+ * (the old exe uninstalls itself, other services are deleted) → SQL login (PROTOCOL.md §9.8:
+ * Windows or SQL login, defaulting to what this machine saved, tested on every SMILE database as
+ * the service account before anything is saved, and before the code is spent) → enroll unless already enrolled (re-run keeps the identity)
  * → optional product setup sub-command (`-Setup`) → remove the product's previous agent
  * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
  * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
@@ -15,6 +16,11 @@
 const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Administrator):
 #   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 #   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
+# SQL login: asked when run interactively on a machine with SQL Server (or with -SqlPrompt):
+#   "SQL login: [1] Windows  [2] SQL login"; Enter keeps what this machine saved.
+#   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile] with the password
+#   in -SqlPassword or env DL_AGENT_SQL_PASSWORD (never echoed or logged; sealed with DPAPI).
+#   A failed test prints the exact SQL error and exits 1; nothing is saved.
 # Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
 #          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
 #          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
@@ -28,6 +34,10 @@ param(
   [string]$SqlName = '',
   [string]$SqlConnection = '',
   [switch]$SqlPrompt,
+  [ValidateSet('', 'windows', 'sql')][string]$SqlAuth = '',
+  [string]$SqlServer = '',
+  [string]$SqlUser = '',
+  [string]$SqlPassword = $env:DL_AGENT_SQL_PASSWORD,
   [switch]$Reenroll,
   [switch]$NoDefender,
   [int]$LinkTimeout = 120,
@@ -113,40 +123,82 @@ function Ask([string]$label, [string]$default) {
   if ($a) { return $a } else { return $default }
 }
 
-function Quote([string]$v) { return '"' + ($v -replace '"', '""') + '"' }
+function Read-Secret([string]$label) {
+  $sec = Read-Host $label -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+  try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
 
-function Read-SqlDatabases {
-  $d = @{ name = 'SMILE_FO'; server = ''; database = ''; user = 'sa' }
+# What this machine saved (sql-setup --show: auth, server, user, databases; never the password).
+function Get-SavedSql {
+  $s = @{ auth = ''; server = ''; user = ''; databases = '' }
+  foreach ($l in @(& $Exe sql-setup --show --data $Data 2>$null)) {
+    $i = ([string]$l).IndexOf('=')
+    if ($i -gt 0) { $s[([string]$l).Substring(0, $i)] = ([string]$l).Substring($i + 1) }
+  }
+  return $s
+}
+
+function Get-LocalSqlServer {
+  $svc = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'MSSQLSERVER' -or $_.Name -like 'MSSQL$*' })
+  if ($svc.Count -eq 0) { return '' }
+  if (@($svc | Where-Object { $_.Name -eq 'MSSQLSERVER' }).Count -gt 0) { return '.' }
+  return ('.\' + $svc[0].Name.Substring(6))
+}
+
+# Tests the login on every SMILE database (Windows: as LocalSystem, the service account) and
+# saves it only when all connect. The password travels in env DL_AGENT_SQL_PASSWORD, removed after.
+function Invoke-SqlSetup([string]$auth, [string]$server, [string]$user, [string]$pw) {
+  $argv = @('sql-setup', '--auth', $auth, '--server', $server, '--data', $Data, '--result', $SqlResult)
+  if ($auth -eq 'sql') { $argv += @('--user', $user) } else { $argv += '--as-service' }
+  if ($pw) { $env:DL_AGENT_SQL_PASSWORD = $pw }
+  try { & $Exe @argv | Out-Host; $code = $LASTEXITCODE } finally { Remove-Item Env:DL_AGENT_SQL_PASSWORD -ErrorAction SilentlyContinue }
+  return $code
+}
+
+function Read-SqlLogin {
+  $saved = Get-SavedSql
+  $mode = '1'
+  if ($saved.auth -eq 'sql') { $mode = '2' }
+  $server = $saved.server
+  if (-not $server) { $server = Get-LocalSqlServer }
+  if (-not $server) { $server = '.' }
+  $user = $saved.user
+  if (-not $user) { $user = 'sa' }
+  if ($saved.auth) { Say ('Saved SQL login: ' + $saved.auth + ' on ' + $saved.server + ' (' + $saved.databases + '). Enter keeps it.') }
   while ($true) {
-    $d.name = Ask 'Database key (SMILE_FO, SMILE_POS, PDA...)' $d.name
-    $d.server = Ask 'SQL Server (host\instance or host,port)' $d.server
-    $d.database = Ask 'Database name' $d.database
-    $d.user = Ask 'SQL login' $d.user
-    $sec = Read-Host 'Password' -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-    try { $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-    $conn = 'Server=' + (Quote $d.server) + ';Database=' + (Quote $d.database) + ';User Id=' + (Quote $d.user) + ';Password=' + (Quote $pw) + ';'
-    if (Add-Sql $d.name $conn) {
-      Say ('SQL ' + $d.name + ' connected.')
-      if ((Read-Host 'Add another database? (y/N)') -ne 'y') { return }
-      $d.name = ''
-    } else {
-      Warn 'Connection failed (see above). Enter the values again; Enter keeps the previous answer.'
+    $mode = Ask 'SQL login: [1] Windows  [2] SQL login  [0] skip' $mode
+    if ($mode -eq '0') { Warn 'SQL login not changed.'; return }
+    if ($mode -ne '1' -and $mode -ne '2') { Warn 'Type 1, 2 or 0.'; $mode = '1'; continue }
+    $server = Ask 'SQL Server (., .\SQLEXPRESS, host\instance or host,port)' $server
+    $pw = ''
+    $auth = 'windows'
+    if ($mode -eq '2') {
+      $auth = 'sql'
+      $user = Ask 'SQL login name' $user
+      if ($saved.auth -eq 'sql' -and $user -eq $saved.user) { $pw = Read-Secret 'Password (Enter keeps the saved one)' } else { $pw = Read-Secret 'Password' }
     }
+    $code = Invoke-SqlSetup $auth $server $user $pw
+    $pw = $null
+    if ($code -eq 0) { Say 'SQL login tested and saved.'; return }
+    Warn 'The SQL login test failed (exact error above). Choose again; Enter keeps the previous answer.'
   }
 }
 
-# A reinstall keeps the databases already declared in sql.json when they all still connect
-# (Enter at the question), so -SqlPrompt asks for them again only when something changed.
-function Test-SavedSql {
-  $f = Join-Path $Data 'sql.json'
-  if (-not (Test-Path $f)) { return $false }
-  try { $names = @((Get-Content -Raw -Path $f | ConvertFrom-Json).databases.PSObject.Properties | Where-Object { $_ } | ForEach-Object { $_.Name }) }
-  catch { Warn ('sql.json could not be read (' + $_.Exception.Message + '): asking for the databases.'); return $false }
-  if ($names.Count -eq 0) { return $false }
-  Say ('SQL databases already declared: ' + ($names -join ', ') + '.')
-  if (-not (Invoke-Agent @('sql-test', '--data', $Data))) { Warn 'A declared database did not connect (see above): enter it again.'; return $false }
-  return ((Read-Host 'Keep them? (Y/n)') -ne 'n')
+# Unattended (-SqlAuth): unset values fall back to what this machine saved. Returns $false on a
+# failed test after printing the structured result (sql-setup.last.json).
+function Set-SqlLoginUnattended {
+  $saved = Get-SavedSql
+  $server = $SqlServer
+  if (-not $server) { $server = $saved.server }
+  if (-not $server) { $server = Get-LocalSqlServer }
+  if (-not $server) { $server = '.' }
+  $user = $SqlUser
+  if (-not $user) { $user = $saved.user }
+  $code = Invoke-SqlSetup $SqlAuth $server $user $SqlPassword
+  if ($code -eq 0) { Say ('SQL login ' + $SqlAuth + ' tested and saved.'); return $true }
+  if (Test-Path $SqlResult) { Write-Host ('[dl-agent] SQL_SETUP_RESULT ' + [IO.File]::ReadAllText($SqlResult).Trim()) }
+  return $false
 }
 
 function Remove-OldCopies {
@@ -224,6 +276,8 @@ try {
   $InstallDir = Join-Path $pf ('DevLibrary\' + $Product)
   $Exe = Join-Path $InstallDir ($Product + '.exe')
   $Data = Join-Path $env:ProgramData $Product
+  $SqlResult = Join-Path $Data 'sql-setup.last.json'
+  $SqlFailed = $false
   Say ('Windows NT ' + $v + ', build ' + $target + ', channel ' + $Channel + ', hub ' + $Hub)
 
   $info = Get-Info $target
@@ -257,13 +311,20 @@ try {
   Move-Item -Force $tmp $Exe
   Say ('Installed ' + $Exe + ' (SHA-256 ' + $sha + ')')
 
+  $enrolled = Test-Path (Join-Path $Data 'identity.json')
   if ($SqlName -and $SqlConnection) {
     if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
-  } elseif ($SqlPrompt) {
-    if (Test-SavedSql) { Say 'Keeping the declared SQL databases.' } else { Read-SqlDatabases }
+  } elseif ($SqlAuth) {
+    $SqlFailed = -not (Set-SqlLoginUnattended)
+    $SqlPassword = $null
+    # Nothing was saved: a new machine stops before the code is spent; a reinstall comes back
+    # with its previous SQL settings and reports sql_setup_failed to the hub.
+    if ($SqlFailed -and -not $enrolled) { throw 'The SQL login test failed (see above); nothing was saved or enrolled.' }
+    if ($SqlFailed) { Warn 'The SQL login test failed (see above): the previous SQL settings are kept.' }
+  } elseif ($SqlPrompt -or ([Environment]::UserInteractive -and ((Get-LocalSqlServer) -or (Test-Path (Join-Path $Data 'sql.json'))))) {
+    Read-SqlLogin
   }
 
-  $enrolled = Test-Path (Join-Path $Data 'identity.json')
   if ($enrolled -and -not $Reenroll) {
     Say 'Already enrolled: keeping this machine''s identity.'
   } else {
@@ -300,8 +361,11 @@ try {
     if (Test-Path $log) { Get-Content $log | Select-Object -Last 15 | ForEach-Object { Write-Host $_ } }
     & $Exe status --data $Data | Out-Host
   }
+  if ($SqlFailed) { Write-Host '[dl-agent] FAILED: SQL login test (see above).' -ForegroundColor Red; exit 1 }
 } catch {
   Write-Host ('[dl-agent] FAILED: ' + $_.Exception.Message) -ForegroundColor Red
+  # Unattended runs report failure through the exit code.
+  if ($SqlAuth) { exit 1 }
 }
 `;
 
