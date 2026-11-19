@@ -112,3 +112,34 @@ export const manifest = z.object({
   signature: z.string().min(1),
 });
 export type Manifest = z.infer<typeof manifest>;
+
+/** Largest self-test upload the hub accepts. */
+export const MAX_SELFTEST_BYTES = 256 * 1024;
+
+export const selftestStatus = z.enum(['pass', 'warn', 'fail', 'skip']);
+export type SelftestStatus = z.infer<typeof selftestStatus>;
+
+/** `dl-agent selftest` result (`POST /v1/agent/selftest`). */
+export const selftestBody = z.object({
+  run_id: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
+  trigger: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+  started_at: z.number().int(),
+  finished_at: z.number().int(),
+  agent_version: versionString,
+  os: z.string().max(50).optional(),
+  hostname: z.string().max(255).optional(),
+  checks: z
+    .array(
+      z.object({
+        module: name,
+        id: z.string().min(1).max(100),
+        title: z.string().max(300),
+        status: selftestStatus,
+        detail: z.string().max(4000).default(''),
+        remedy: z.string().max(2000).optional(),
+        duration_ms: z.number().int().min(0),
+      }),
+    )
+    .max(500),
+});
+export type SelftestBody = z.infer<typeof selftestBody>;

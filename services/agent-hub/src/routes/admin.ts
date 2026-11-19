@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { nowSeconds, type AppEnv } from '../env';
+import { benchBody } from '../domain/bench';
 import { productName, severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
@@ -12,9 +13,11 @@ import { listReports } from '../repo/reports';
 import { listTenants, upsertTenant } from '../repo/tenants';
 import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
+import { benchView, createBench, revokeBenchBundle } from '../services/bench';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { gateStatus, promote, publishCanary } from '../services/releases';
+import { selftestView } from '../services/selftest';
 import { renderStatusPage } from './statusPage';
 
 const id = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'letters, digits, . _ - only');
@@ -94,6 +97,7 @@ adminRoutes.post('/agents/:id/revoke', async (c) => {
   return c.json({});
 });
 adminRoutes.get('/agents/:id/survey', async (c) => c.json(await surveyOf(c.env, c.req.param('id'))));
+adminRoutes.get('/agents/:id/selftest', async (c) => c.json(await selftestView(c.env, c.req.param('id'))));
 adminRoutes.put('/agents/:id/config', async (c) => {
   const body = validate(configBody, await jsonBody(c.req));
   return c.json(await setConfig(c.env.DB, c.req.param('id'), body.body, nowSeconds()));
@@ -104,6 +108,17 @@ adminRoutes.post('/commands', async (c) => {
   return c.json(await enqueueCommand(c.env, body, nowSeconds()), 201);
 });
 adminRoutes.get('/commands', async (c) => c.json({ commands: await commandsView(c.env, c.req.query('agent_id'), nowSeconds()) }));
+
+/** Bench bundles: one `irm … | iex` line that sets up a test PC (README "Bench (test PC)"). */
+adminRoutes.post('/bench', async (c) => {
+  const body = validate(benchBody, await jsonBody(c.req));
+  return c.json(await createBench(c.env, body, new URL(c.req.url).origin, nowSeconds()), 201);
+});
+adminRoutes.get('/bench', async (c) => c.json({ bundles: await benchView(c.env, nowSeconds()) }));
+adminRoutes.delete('/bench/:id', async (c) => {
+  await revokeBenchBundle(c.env, c.req.param('id'), nowSeconds());
+  return c.json({});
+});
 
 adminRoutes.get('/releases', async (c) => c.json({ releases: await listReleases(c.env.DB) }));
 adminRoutes.put('/releases/:product/:version', async (c) => {

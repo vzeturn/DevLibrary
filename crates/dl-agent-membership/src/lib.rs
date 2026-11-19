@@ -1,5 +1,5 @@
-//! Azolo Membership module for `dl-agent`: the read side of the .NET
-//! `MM.Membership.Agent` (milestone M1 of the port).
+//! Azolo Membership module for `dl-agent`: a port of the .NET `MM.Membership.Agent`
+//! (read side M1, write side M2).
 //!
 //! The module heartbeats the Membership hub, reads `sync-config`, and runs the read-only
 //! SMILE scanners that report to the hub: availability (occupancy per room type and
@@ -7,9 +7,9 @@
 //! observations behind a cursor. Every JSON body matches what the .NET agent sends for
 //! the same SMILE data byte for byte ([`stj`]).
 //!
-//! Hub jobs (bookings written into SMILE, folio links, profile updates) belong to the
-//! write side (M2). In M1 the module may pull jobs to count them, but never executes or
-//! acknowledges one, so the hub's lease expires and the .NET agent (or M2) picks it up.
+//! Hub jobs (bookings written into SMILE, folio links, profile updates) run only when
+//! `read_only` is `false` ([`jobs`], [`writer`]), behind the SMILE write gate. Read-only
+//! (the default), pulled jobs are counted and left, so the hub's lease expires.
 //!
 //! The agent identity lives where the .NET installer put it:
 //! `%ProgramData%\MM.Membership.Agent\config.dpapi`, sealed with DPAPI (LocalMachine,
@@ -21,6 +21,7 @@ pub mod enroll;
 pub mod folio;
 pub mod hub;
 pub mod identity;
+pub mod jobs;
 pub mod log;
 pub mod module;
 pub mod rooms;
@@ -29,6 +30,7 @@ pub mod smile;
 pub mod stj;
 pub mod sync;
 pub mod wire;
+pub mod writer;
 
 pub use enroll::tool::membership_enroll_tool;
 pub use module::{MembershipModule, membership_module};

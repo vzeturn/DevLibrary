@@ -232,6 +232,16 @@ impl TdsSmile {
         timeout: Option<Duration>,
         f: impl FnOnce(&mut Client) -> Result<T, dl_tds::Error>,
     ) -> Result<T, SmileError> {
+        self.session(timeout, |c| f(c).map_err(|e| SmileError::from_tds(&e)))
+    }
+
+    /// [`Self::with`] for callers with their own error type (the SMILE writers): the same
+    /// connect, timeout and broken-session handling.
+    pub(crate) fn session<T, E: From<SmileError>>(
+        &self,
+        timeout: Option<Duration>,
+        f: impl FnOnce(&mut Client) -> Result<T, E>,
+    ) -> Result<T, E> {
         let mut slot = self
             .client
             .lock()
@@ -243,12 +253,12 @@ impl TdsSmile {
             *slot = Some(Client::connect(&self.cfg).map_err(|e| SmileError::from_tds(&e))?);
         }
         let Some(client) = slot.as_mut() else {
-            return Err(SmileError::Unavailable("connection not open".into()));
+            return Err(SmileError::Unavailable("connection not open".into()).into());
         };
         let wanted = timeout.unwrap_or(self.command_timeout);
         if let Err(e) = client.set_timeout(Some(wanted)) {
             *slot = None;
-            return Err(SmileError::from_tds(&e));
+            return Err(SmileError::from_tds(&e).into());
         }
         let out = f(client);
         // A session whose timeout cannot be restored is dropped and reopened next time.
@@ -257,7 +267,7 @@ impl TdsSmile {
         if restore_failed || client.is_broken() {
             *slot = None;
         }
-        out.map_err(|e| SmileError::from_tds(&e))
+        out
     }
 
     /// The rows of the first result set.

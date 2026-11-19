@@ -19,6 +19,6 @@
     "GATE_MIN_AGENTS": "1",
     "GATE_SOAK_HOURS": "2"
   },
-  // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`.
+  // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`; `BENCH_KEY` (base64 of 32 random bytes) enables /admin/bench.
   "observability": { "enabled": true }
 }

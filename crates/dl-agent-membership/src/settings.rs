@@ -8,6 +8,16 @@
 //! }}}
 //! ```
 //!
+//! `read_only` (default `true`) keeps the M1 behaviour: SMILE is only read and pulled jobs
+//! are never acked. With `read_only: false` (and `pull_jobs: true`) the agent runs the hub's
+//! jobs against SMILE and acks them, like the .NET service. Only one writer may run per
+//! hotel: stop the .NET `MM.Membership.Agent` service before turning writes on.
+//!
+//! ```text
+//! write keys: write_lock_timeout_ms (10000), default_payment_code ("1", "" = not written),
+//! default_breakfast_code ("BFF", "" = not written), extra_bed_write_mode (SMILE_SPECIAL)
+//! ```
+//!
 //! `enabled` is read by the supervisor (the module is opt-in). The other keys mirror the
 //! .NET `appsettings.json` sections (`Worker`, `CheckoutScan`, `AvailabilityScan`,
 //! `FolioObservationScan`, `Smile`, `Earn`) with the same defaults; absent or wrongly typed
@@ -20,6 +30,7 @@ use std::time::Duration;
 use dl_json::Value;
 
 use crate::config;
+use crate::jobs::beds::{MODE_FOLD_LEGACY, MODE_SMILE_SPECIAL};
 
 /// The .NET `FullCapabilities`: what the agent tells the hub it understands.
 pub const FULL_CAPABILITIES: [&str; 7] = [
@@ -40,7 +51,7 @@ pub const MAX_OBSERVATION_BATCH: usize = 500;
 pub struct Settings {
     /// Where `config.dpapi` and the cursor files live.
     pub program_data_dir: PathBuf,
-    /// M1 never writes SMILE nor acks jobs; `false` is refused until M2 exists.
+    /// `true`: SMILE is only read and pulled jobs are never acked (M1). `false`: jobs run.
     pub read_only: bool,
     /// Pull jobs to count them (they are leased and left to expire, never acked).
     pub pull_jobs: bool,
@@ -58,6 +69,8 @@ pub struct Settings {
     pub availability: AvailabilitySettings,
     /// The room inventory scan.
     pub rooms: RoomSettings,
+    /// `Smile`, write side.
+    pub write: WriteSettings,
     /// `Smile` and `Earn` (read side only).
     pub smile: SmileSettings,
 }
@@ -114,6 +127,52 @@ pub struct SmileSettings {
     pub member_discount_code: String,
 }
 
+/// `SmileWriteOptions`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriteSettings {
+    /// `Smile:WriteLockTimeoutMs` (non-positive: the default 10000).
+    pub write_lock_timeout_ms: i32,
+    /// `Smile:DefaultPaymentCode` (`None`: `Folio.PaymentCode` is not written).
+    pub default_payment_code: Option<String>,
+    /// `Smile:DefaultBreakfastCode` (`None`: neither `BreakfastCode` nor `IncludeBF`).
+    pub default_breakfast_code: Option<String>,
+    /// `Smile:ExtraBedWriteMode`: `FOLD_LEGACY` or `SMILE_SPECIAL`.
+    pub extra_bed_mode: String,
+    /// `ExtraBedModeProblem`: set when the configured mode was not understood.
+    pub extra_bed_mode_problem: Option<String>,
+}
+
+/// `ExtraBedMode`'s setter: an unknown value falls back to `FOLD_LEGACY` with a problem.
+fn extra_bed_mode(v: &Value) -> (String, Option<String>) {
+    let raw = v
+        .get("extra_bed_write_mode")
+        .and_then(Value::as_str)
+        .unwrap_or(MODE_SMILE_SPECIAL);
+    let mode = raw.trim().to_uppercase();
+    if mode == MODE_FOLD_LEGACY || mode == MODE_SMILE_SPECIAL {
+        return (mode, None);
+    }
+    let problem = (!raw.trim().is_empty()).then(|| {
+        format!(
+            "Smile:ExtraBedWriteMode = '{}' is not valid (only {MODE_FOLD_LEGACY} | {MODE_SMILE_SPECIAL}); the agent uses {MODE_FOLD_LEGACY}.",
+            raw.trim()
+        )
+    });
+    (MODE_FOLD_LEGACY.to_owned(), problem)
+}
+
+/// A code key: absent takes `default`; present but blank means "not written".
+fn code_or(v: &Value, key: &str, default: &str) -> Option<String> {
+    match v.get(key) {
+        None | Some(Value::Null) => Some(default.to_owned()),
+        Some(x) => x
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+    }
+}
+
 fn str_or(v: &Value, key: &str, default: &str) -> String {
     v.get(key)
         .and_then(Value::as_str)
@@ -156,6 +215,7 @@ impl Settings {
             .filter(|s| !s.is_empty())
             .map_or_else(|| config::default_dir(data_dir), PathBuf::from);
         let secs = |key, d| Duration::from_secs(uint(v, key, d));
+        let (bed_mode, bed_problem) = extra_bed_mode(v);
         Settings {
             program_data_dir,
             read_only: flag(v, "read_only", true),
@@ -201,6 +261,18 @@ impl Settings {
                 earn_charge_codes: strings(v, "earn_charge_codes").unwrap_or_default(),
                 member_discount_code: str_or(v, "member_discount_code", ""),
             },
+            write: WriteSettings {
+                write_lock_timeout_ms: v
+                    .get("write_lock_timeout_ms")
+                    .and_then(Value::as_i64)
+                    .filter(|n| *n > 0)
+                    .and_then(|n| i32::try_from(n).ok())
+                    .unwrap_or(10_000),
+                default_payment_code: code_or(v, "default_payment_code", "1"),
+                default_breakfast_code: code_or(v, "default_breakfast_code", "BFF"),
+                extra_bed_mode: bed_mode,
+                extra_bed_mode_problem: bed_problem,
+            },
         }
     }
 }
@@ -245,5 +317,29 @@ mod tests {
         assert_eq!(s.capabilities, vec!["DB_IDENTITY".to_owned()]);
         assert_eq!(s.smile.earn_charge_codes, vec!["RM".to_owned()]);
         assert_eq!(s.smile.member_discount_code, "MD");
+    }
+
+    #[test]
+    fn write_settings_follow_smile_write_options() {
+        let d = Settings::from_config(&Value::Null, Path::new("/data")).write;
+        assert_eq!(d.write_lock_timeout_ms, 10_000);
+        assert_eq!(d.default_payment_code.as_deref(), Some("1"));
+        assert_eq!(d.default_breakfast_code.as_deref(), Some("BFF"));
+        assert_eq!(d.extra_bed_mode, MODE_SMILE_SPECIAL);
+        assert_eq!(d.extra_bed_mode_problem, None);
+        let w = Settings::from_config(
+            &json!({"write_lock_timeout_ms": -5, "default_payment_code": " ",
+                    "default_breakfast_code": " BF ", "extra_bed_write_mode": " fold_legacy "}),
+            Path::new("/data"),
+        )
+        .write;
+        assert_eq!(w.write_lock_timeout_ms, 10_000);
+        assert_eq!(w.default_payment_code, None);
+        assert_eq!(w.default_breakfast_code.as_deref(), Some("BF"));
+        assert_eq!(w.extra_bed_mode, MODE_FOLD_LEGACY);
+        let bad =
+            Settings::from_config(&json!({"extra_bed_write_mode": "BOTH"}), Path::new("/d")).write;
+        assert_eq!(bad.extra_bed_mode, MODE_FOLD_LEGACY);
+        assert!(bad.extra_bed_mode_problem.unwrap().contains("'BOTH'"));
     }
 }
