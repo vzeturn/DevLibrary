@@ -31,9 +31,10 @@ from a table, the machine plays the RVC's alert tone and says the phrase
   tone first, then speech. On Windows both go through SAPI 5 over `dl-winos` COM on a
   dedicated STA thread: the tone as a WAV file stream (`SAPI.SpFileStream` +
   `SpeakStream`, the files written once to `<data>/modules/speaker/tones`), the phrase with
-  `SAPI.SpVoice.Speak` and the first installed voice of the language (LCID 042A for `vi`,
-  0409 then 0809 for `en`; none installed: the default voice, as the Go agent did). Off
-  Windows the output only logs.
+  `SAPI.SpVoice.Speak` and the first installed voice of the language (LCID 042A for `vi`;
+  0409, 0809, then every other English LCID for `en`, since the Go agent took any English
+  voice; none installed: the default voice, as the Go agent did). Off Windows the output
+  only logs.
 - **Commands**: `status` (settings, joined/refused RVCs, modes, fetch failures, counters;
   no secrets) and `test` (`{"rvc": 1, "kind": "order", "table": "5"}`: plays what that
   event would, to check the speaker on site).
