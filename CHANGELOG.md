@@ -21,6 +21,28 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-backup`: the SRBackup Go agent as an opt-in dl-agent module
+  (`modules.backup.enabled = true`; optional `backup_dir`, `concurrency`, `stop_grace_seconds`,
+  `poll_interval_seconds`). Hub config polling, cron schedules in the schedule's time zone, a
+  sealed durable queue with leases, three attempts and a dead letter, one backup per SQL Server
+  instance at a time, restore requests and hub commands (once each), discovery, retention, and a
+  sealed report outbox that survives hub outages. Credentials are opened with the agent master key
+  (re-fetched once on a failed decrypt); a `credentialError` fails only that work, with a report.
+  SQL through dl-tds (SQL login or SSPI), names and paths as parameters, `COMPRESSION` /
+  `CHECKSUM` only where the edition supports them (recorded in the job's steps), a log backup on
+  SIMPLE recovery fails with `backup_recovery_model`. Uploads to a local folder, S3 / R2 (SigV4,
+  multipart) and Azure Blob (Shared Key or SAS, block lists); Google Drive and OneDrive report
+  `backup_destination_unsupported` for now. `degraded` while not enrolled, when the hub stays
+  unreachable past one back-off or rejects the agent; stop gives a running `BACKUP`
+  `stop_grace_seconds`, then cancels it and keeps the job queued. Metrics (queue and outbox depth,
+  jobs ok / failed / dead-lettered, bytes uploaded, last success per database), rate-limited
+  reports `backup_hub_failed`, `backup_auth_failed`, `backup_sql_failed`, `backup_upload_failed`,
+  `backup_credential_error`, `backup_destination_unsupported`, `backup_recovery_model`; commands
+  `backup.status`, `backup.run-now`; sub-command `dl-agent backup-enroll --hub-url <origin>` (key
+  from `DL_AGENT_BACKUP_KEY` or stdin). The crate is left out of `cargo wasm`.
+- `dl-tds`: `CancelToken` and `Client::set_cancel` stop a running request from another thread:
+  the client sends ATTENTION, the call returns `Error::Cancelled` within about 200 ms and later
+  requests fail the same way until a fresh token is set.
 - `dl-agent-pms-device`: the SMILE PMS device agent (`SmilePmsDeviceAgent`) as an opt-in dl-agent
   module (`modules.pms-device.enabled = true`; optional `appsettings_dir`, `overrides`). It reads the
   old service's `appsettings.json` / `appsettings.{env}.json` from its install folder and keeps
