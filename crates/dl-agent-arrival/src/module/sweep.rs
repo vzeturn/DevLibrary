@@ -3,18 +3,32 @@
 //! (classified) or was skipped, and why.
 //!
 //! Every call runs inside a transaction that is rolled back, reads included (some read
-//! procedures write, e.g. `group.auto-assign`), so a sweep leaves the PMS as it was. Only
-//! `commit: true` together with an explicit `only` list commits. Parameters are type-valid
-//! placeholders (required ones a neutral value, optional ones SQL NULL) unless the command
-//! gives them (`params: {"<op>": {"<name>": "<value>" | null}}`). Messages are kept only for
-//! the classes that point at the install (schema, permission, other), never for business or
-//! data errors, which may echo PMS values.
+//! procedures write, e.g. `group.auto-assign`), so a sweep leaves the PMS as it was. Nothing
+//! commits: `commit: true` is refused. A procedure that ends the sweep's transaction itself
+//! (its own `COMMIT`/`ROLLBACK` past the sweep's `BEGIN`) is caught after the call: a temp
+//! table made inside the sweep's transaction must still be there after the call and gone after
+//! the rollback, and `@@TRANCOUNT` must not be 0; otherwise the row says `transaction:
+//! "escaped"` and the operation `failed` (its writes may be kept). One case is told apart: a
+//! call that failed with a SQL error, left `@@TRANCOUNT` at 0 and took the mark with it was
+//! rolled back by that error (`XACT_ABORT`), so the row says `transaction: "aborted"`; that
+//! holds because the bundle's procedures have no `ROLLBACK`, `TRY`/`CATCH` or nested `EXEC`
+//! (a test pins it), so nothing of theirs runs after the abort. Each call waits at most
+//! [`LOCK_TIMEOUT_MS`] for a lock; the write procedures hold theirs (e.g. `HOLDLOCK` on
+//! `AutoFolioNumber`) until the rollback, up to the per-operation timeout, so a sweep runs
+//! off-peak. The sweep refuses to start unless the PMS holds the procedure bundle this agent
+//! ships (its marker hash).
+//!
+//! Parameters are type-valid placeholders (required ones a neutral value, optional ones SQL
+//! NULL) unless the command gives them (`params: {"<op>": {"<name>": "<value>" | null}}`).
+//! Messages are kept only for the classes that point at the install (schema, permission,
+//! other), never for business or data errors, which may echo PMS values.
 
 use std::time::{Duration, Instant};
 
 use dl_json::{Map, Value};
-use dl_tds::{Client, Error as TdsError};
+use dl_tds::{Client, Error as TdsError, Results};
 
+use crate::agent::installer;
 use crate::agent::tds::{self, TdsExecutor};
 use crate::contracts::catalog::{Operation, OperationKind, ParamType, catalog};
 use crate::contracts::messages::Params;
@@ -23,14 +37,14 @@ use crate::contracts::messages::Params;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
 /// The longest message kept per operation (characters).
 const MESSAGE_CHARS: usize = 240;
-/// Lock waits inside a sweep: a busy PMS must not hold the sweep.
-const LOCK_TIMEOUT_MS: u32 = 5000;
+/// Lock waits inside a sweep (per operation): a busy PMS must not hold the sweep.
+pub const LOCK_TIMEOUT_MS: u32 = 2000;
+/// Made inside each operation's transaction: proof the rollback undid that transaction.
+const MARK: &str = "#dl_sweep_tx";
 
 /// What the command asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SweepOptions {
-    /// Commit instead of rolling back (needs `only`).
-    pub commit: bool,
     /// Only these operations (all when empty).
     pub only: Vec<String>,
     /// Operations to leave out.
@@ -47,7 +61,7 @@ impl SweepOptions {
     /// Reads the command arguments.
     ///
     /// # Errors
-    /// A wrong type, an unknown operation, or `commit` without `only`.
+    /// A wrong type, an unknown operation, or `commit` (the sweep never commits).
     pub fn from_args(args: &Value, today: &str) -> Result<SweepOptions, String> {
         let names = |key: &str| -> Result<Vec<String>, String> {
             match args.get(key) {
@@ -63,11 +77,14 @@ impl SweepOptions {
                 Some(_) => Err(format!("{key} must be an array of operation names")),
             }
         };
-        let commit = match args.get("commit") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(b)) => *b,
-            Some(_) => return Err("commit must be true or false".into()),
-        };
+        if !matches!(
+            args.get("commit"),
+            None | Some(Value::Null | Value::Bool(false))
+        ) {
+            return Err(
+                "op_sweep never commits: every call is rolled back; leave commit out".into(),
+            );
+        }
         let only = names("only")?;
         let skip = names("skip")?;
         let params = match args.get("params") {
@@ -91,11 +108,7 @@ impl SweepOptions {
                 return Err(format!("unknown operation {n}"));
             }
         }
-        if commit && only.is_empty() {
-            return Err("commit: true needs an explicit only list".into());
-        }
         Ok(SweepOptions {
-            commit,
             only,
             skip,
             params,
@@ -169,17 +182,28 @@ fn clip(s: &str) -> String {
 /// Runs the sweep on a fresh session of `connection`.
 ///
 /// # Errors
-/// The PMS cannot be reached (a message without the connection string).
+/// The PMS cannot be reached (a message without the connection string), or it does not hold
+/// the procedure bundle this agent ships.
 pub fn sweep(connection: &str, opts: &SweepOptions) -> Result<Value, String> {
     let open = || {
         tds::connect(connection, None)
             .map_err(|e| format!("cannot connect: {}", tds::exec_error(&e)))
     };
     let mut client = open()?;
+    let shipped = installer::bundle().hash.as_str();
+    let installed =
+        installer::read_marker(&mut client, installer::PROPERTY_NAME).map_err(|e| e.0)?;
+    if installed.as_deref() != Some(shipped) {
+        return Err(format!(
+            "the PMS holds procedure bundle {}, this agent ships {shipped}: run install_procedures first; nothing was swept",
+            installed.as_deref().unwrap_or("none")
+        ));
+    }
     let cat = catalog().map_err(|e| e.to_string())?;
     let started = Instant::now();
     let mut results = Vec::new();
     let mut counts = Map::new();
+    let mut all_rolled_back = true;
     for op in cat.operations() {
         if !opts.only.is_empty() && !opts.only.contains(&op.name) {
             continue;
@@ -194,16 +218,29 @@ pub fn sweep(connection: &str, opts: &SweepOptions) -> Result<Value, String> {
             }
             row
         };
-        let result = row.get("class").or_else(|| row.get("result"));
-        if let Some(k) = result.and_then(Value::as_str) {
+        let result = row.get("result").and_then(Value::as_str);
+        let key = match result {
+            Some("sql_error") => row.get("class").and_then(Value::as_str),
+            other => other,
+        };
+        if let Some(k) = key {
             let n = counts.get(k).and_then(Value::as_u64).unwrap_or(0) + 1;
             counts.insert(k.to_string(), n);
+        }
+        if result != Some("skipped")
+            && !matches!(
+                row.get("transaction").and_then(Value::as_str),
+                Some("rolled_back" | "aborted")
+            )
+        {
+            all_rolled_back = false;
         }
         results.push(Value::Object(row));
     }
     let mut out = Map::new();
     out.insert("catalog_version", i64::from(cat.version));
-    out.insert("commit", opts.commit);
+    out.insert("bundle", shipped);
+    out.insert("rolled_back", all_rolled_back);
     out.insert("total", results.len() as u64);
     out.insert("counts", Value::Object(counts));
     out.insert("ms", started.elapsed().as_millis() as u64);
@@ -247,7 +284,7 @@ fn run_one(client: &mut Client, op: &Operation, opts: &SweepOptions) -> Map {
     let begin = client.set_timeout(Some(opts.timeout)).and_then(|()| {
         client
             .batch(&format!(
-                "SET LOCK_TIMEOUT {LOCK_TIMEOUT_MS}; BEGIN TRANSACTION"
+                "SET LOCK_TIMEOUT {LOCK_TIMEOUT_MS}; BEGIN TRANSACTION; CREATE TABLE {MARK} (n INT);"
             ))
             .map(|_| ())
     });
@@ -257,15 +294,16 @@ fn run_one(client: &mut Client, op: &Operation, opts: &SweepOptions) -> Map {
             "why",
             format!("could not open the transaction: {}", tds::exec_error(&e)),
         );
+        if !client.is_broken()
+            && let Err(e) = client.batch(&end_batch())
+        {
+            dl_log::warn!("op_sweep could not undo a half-opened transaction"; op = %op.name, error = %e);
+        }
         return m;
     }
     let called = client.call(&op.procedure, &sql_params);
-    let end = if opts.commit {
-        "IF @@TRANCOUNT > 0 COMMIT TRANSACTION"
-    } else {
-        "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION"
-    };
-    let closed = client.batch(end);
+    let call_failed = called.is_err();
+    let closed = close(client);
     m.insert("ms", started.elapsed().as_millis() as u64);
     match called {
         Ok(results) => {
@@ -281,28 +319,108 @@ fn run_one(client: &mut Client, op: &Operation, opts: &SweepOptions) -> Map {
         Err(e) => sql_error(&mut m, &e),
     }
     match closed {
-        Ok(_) => {
-            m.insert(
-                "transaction",
-                if opts.commit {
-                    "committed"
-                } else {
-                    "rolled_back"
-                },
-            );
+        Ok(c) => {
+            if c.trancount != 1 {
+                m.insert("trancount", c.trancount);
+            }
+            if c.rolled_back() {
+                m.insert("transaction", "rolled_back");
+            } else if c.aborted_by(call_failed) {
+                m.insert("transaction", "aborted");
+            } else {
+                dl_log::error!("op_sweep: a procedure ended the sweep's transaction"; op = %op.name, trancount = c.trancount);
+                m.insert("transaction", "escaped");
+                m.insert("result", "failed");
+                m.insert(
+                    "why",
+                    "the procedure ended the sweep's transaction itself: what it wrote may be kept in the PMS; check this operation by hand and leave it out of the next sweep",
+                );
+            }
         }
         Err(e) => {
             // The session is dropped by the caller when broken; otherwise make sure.
             dl_log::warn!("op_sweep could not end its transaction"; op = %op.name, error = %e);
             m.insert("transaction", "dropped");
             if !client.is_broken()
-                && let Err(e) = client.batch("IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION")
+                && let Err(e) = client.batch(&end_batch())
             {
                 dl_log::warn!("op_sweep rollback retry failed"; op = %op.name, error = %e);
             }
         }
     }
     m
+}
+
+/// How an operation's transaction ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Closing {
+    /// `@@TRANCOUNT` right after the call (1: the sweep's own transaction still open).
+    trancount: i64,
+    /// The mark was there after the call: the procedure did not end the sweep's transaction.
+    alive: bool,
+    /// The mark outlived the rollback: the sweep's transaction had been committed.
+    survived: bool,
+}
+
+impl Closing {
+    /// The rollback undid the sweep's own transaction and with it every write of the call
+    /// (a `ROLLBACK` at any nesting level ends the outermost transaction).
+    fn rolled_back(self) -> bool {
+        self.trancount >= 1 && self.alive && !self.survived
+    }
+
+    /// The call's SQL error rolled the sweep's transaction back (`XACT_ABORT`): nothing open,
+    /// and the mark went with the transaction (a commit would have kept it).
+    fn aborted_by(self, call_failed: bool) -> bool {
+        call_failed && self.trancount == 0 && !self.alive && !self.survived
+    }
+}
+
+fn mark_test() -> String {
+    format!("CAST(CASE WHEN OBJECT_ID('tempdb..{MARK}') IS NULL THEN 0 ELSE 1 END AS BIGINT)")
+}
+
+/// Rolls back whatever is open, then answers whether the mark is still there (and drops it).
+fn end_batch() -> String {
+    format!(
+        "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION; SELECT {}; IF OBJECT_ID('tempdb..{MARK}') IS NOT NULL DROP TABLE {MARK};",
+        mark_test()
+    )
+}
+
+/// Reads the state the call left, then rolls back.
+fn close(client: &mut Client) -> Result<Closing, TdsError> {
+    let after = client.batch(&format!(
+        "SELECT CAST(@@TRANCOUNT AS BIGINT), {}",
+        mark_test()
+    ))?;
+    let ended = client.batch(&end_batch())?;
+    let a = numbers(&after);
+    let e = numbers(&ended);
+    Ok(Closing {
+        trancount: a.first().copied().unwrap_or(-1),
+        alive: a.get(1) == Some(&1),
+        survived: e.first() != Some(&0),
+    })
+}
+
+/// The first row of the first result set with columns, as integers (-1 for anything else).
+fn numbers(results: &Results) -> Vec<i64> {
+    results
+        .sets()
+        .iter()
+        .find(|s| !s.columns().is_empty())
+        .and_then(|s| s.rows().first())
+        .map(|r| {
+            r.values()
+                .iter()
+                .map(|v| match v {
+                    dl_tds::Value::I64(n) => *n,
+                    _ => -1,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn sql_error(m: &mut Map, e: &TdsError) {
@@ -342,16 +460,14 @@ mod tests {
     }
 
     #[test]
-    fn options_need_only_to_commit_and_known_names() {
+    fn options_take_known_names_only() {
         let o = SweepOptions::from_args(&Value::Null, "2026-11-19").unwrap();
-        assert!(!o.commit && o.only.is_empty());
+        assert!(o.only.is_empty() && o.skip.is_empty());
         assert_eq!(o.timeout, DEFAULT_TIMEOUT);
         let bad = [
-            r#"{"commit":true}"#,
             r#"{"only":["nope.op"]}"#,
             r#"{"params":{"nope":{}}}"#,
             r#"{"timeout_seconds":0}"#,
-            r#"{"commit":"yes"}"#,
         ];
         for b in bad {
             assert!(
@@ -359,8 +475,97 @@ mod tests {
                 "{b}"
             );
         }
-        let ok = dl_json::parse(r#"{"commit":true,"only":["checkin.online"]}"#).unwrap();
-        assert!(SweepOptions::from_args(&ok, "2026-11-19").unwrap().commit);
+    }
+
+    #[test]
+    fn the_sweep_never_commits() {
+        for b in [
+            r#"{"commit":true}"#,
+            r#"{"commit":true,"only":["checkin.online"]}"#,
+            r#"{"commit":"yes"}"#,
+            r#"{"commit":1}"#,
+        ] {
+            let e =
+                SweepOptions::from_args(&dl_json::parse(b).unwrap(), "2026-11-19").expect_err(b);
+            assert!(e.contains("never commits"), "{b}: {e}");
+        }
+        for b in [r#"{"commit":false}"#, r#"{"commit":null}"#] {
+            assert!(
+                SweepOptions::from_args(&dl_json::parse(b).unwrap(), "2026-11-19").is_ok(),
+                "{b}"
+            );
+        }
+        const {
+            assert!(
+                LOCK_TIMEOUT_MS <= 2000,
+                "a sweep waits at most 2 s for a lock"
+            )
+        };
+        let end = end_batch();
+        assert!(end.contains("ROLLBACK TRANSACTION") && !end.contains("COMMIT"));
+    }
+
+    #[test]
+    fn only_the_sweeps_own_transaction_rolled_back_counts() {
+        let c = |trancount, alive, survived| Closing {
+            trancount,
+            alive,
+            survived,
+        };
+        assert!(c(1, true, false).rolled_back());
+        assert!(
+            c(2, true, false).rolled_back(),
+            "a nested level left open is undone by the outer rollback"
+        );
+        assert!(
+            !c(0, false, false).rolled_back(),
+            "the procedure ended the transaction"
+        );
+        assert!(
+            !c(1, false, false).rolled_back(),
+            "the procedure ended it and began another"
+        );
+        assert!(
+            !c(1, true, true).rolled_back(),
+            "the sweep's transaction was committed"
+        );
+        assert!(!c(-1, true, false).rolled_back(), "unreadable");
+        assert!(
+            c(0, false, false).aborted_by(true),
+            "the call's error rolled the transaction back"
+        );
+        assert!(
+            !c(0, false, false).aborted_by(false),
+            "no error: the procedure ended the transaction itself"
+        );
+        assert!(
+            !c(0, true, false).aborted_by(true),
+            "the mark outlived the call: committed"
+        );
+        assert!(!c(1, false, false).aborted_by(true), "a new transaction");
+    }
+
+    /// What makes `aborted` sound: nothing of the bundle runs after an aborting error, and
+    /// every catalog operation calls a procedure of the bundle.
+    #[test]
+    fn the_bundle_never_rolls_back_catches_or_calls_out() {
+        let text = installer::bundle().text.to_uppercase();
+        for word in ["ROLLBACK", "BEGIN TRY", "BEGIN CATCH", "SAVE TRAN"] {
+            assert!(!text.contains(word), "the bundle has {word}");
+        }
+        for line in text.lines() {
+            let t = line.trim_start();
+            let calls_out = (t.starts_with("EXEC ") || t.starts_with("EXECUTE "))
+                && !t.contains("SP_EXECUTESQL");
+            assert!(!calls_out, "the bundle calls a procedure: {line}");
+        }
+        for op in catalog().expect("catalog").operations() {
+            let made = format!("CREATE PROCEDURE DBO.{}", op.procedure.to_uppercase());
+            let found = text
+                .match_indices(&made)
+                .any(|(i, _)| text[i + made.len()..].starts_with(char::is_whitespace));
+            assert!(found, "{} is not in the bundle", op.procedure);
+        }
     }
 
     #[test]

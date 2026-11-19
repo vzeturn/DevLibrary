@@ -37,7 +37,7 @@ use crate::agent::settings::{BASE_FILE, PRODUCTION_FILE, Settings};
 use crate::agent::tds;
 use crate::legacy::installs::{self, LegacyInstall};
 use crate::legacy::sqlauth::{self, SqlAuth};
-use crate::legacy::tenant_key::{self, KeyPlan, PlanInput};
+use crate::legacy::tenant_key::{self, KeyPlan, KeySource, PlanInput};
 use crate::module;
 use crate::tools::files::{self, AgentKeys};
 
@@ -218,7 +218,7 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
     if !base_file.exists() {
         files::write_file(&base_file, BASE_SETTINGS.as_bytes(), false).map_err(|e| fail(&e))?;
     }
-    // The key file first: settings naming a missing key file would make a new key.
+    // The key file first: settings naming a missing key file leave the link without a key.
     tenant_key::import(&key_plan).map_err(|e| fail(&e))?;
     if let Some(file) = &key_plan.tenant_key_file {
         files::restrict(file).map_err(|e| fail(&e))?;
@@ -241,6 +241,13 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
     files::write_file(&production, text.as_bytes(), true).map_err(|e| fail(&e))?;
     say(io, &format!("{NAME}: wrote {}", production.display()))?;
 
+    // The key before the identity: a refusal here leaves the site without an enrolment.
+    let settings = Settings::load(&install).map_err(|e| fail(&e))?;
+    let key_file = layout.resolve(&settings.tenant_key_file);
+    let vault_dir = layout.resolve(&settings.vault_directory);
+    let fingerprint =
+        install_key(&settings, &key_plan, &key_file, &vault_dir).map_err(|e| fail(&e))?;
+
     // The settings now name this file; an identity at an older path is left as it was.
     identity.save(&identity_path).map_err(|e| fail(&e))?;
     files::restrict(&identity_path).map_err(|e| fail(&e))?;
@@ -254,18 +261,6 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
         ),
     )?;
 
-    let settings = Settings::load(&install).map_err(|e| fail(&e))?;
-    let key_file = layout.resolve(&settings.tenant_key_file);
-    let keys = TenantKeyStore::new(&settings.tenant_key, key_file.clone());
-    let fingerprint = keys.vault().map_err(|e| fail(&e))?.fingerprint();
-    if let Some(expected) = &key_plan.fingerprint
-        && *expected != fingerprint
-    {
-        return Err(fail(&format!(
-            "the install holds tenant key {fingerprint} but {expected} was planned; stop the module and report this"
-        )));
-    }
-    let vault_dir = layout.resolve(&settings.vault_directory);
     write_record(
         &install,
         &identity,
@@ -303,6 +298,33 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
             install.display()
         ),
     )
+}
+
+/// The key the settings now reach: made only for a `created` plan with an empty vault,
+/// otherwise the existing one, which must be the planned one. Answers its fingerprint.
+fn install_key(
+    settings: &Settings,
+    plan: &KeyPlan,
+    key_file: &Path,
+    vault_dir: &Path,
+) -> Result<String, String> {
+    let keys = TenantKeyStore::new(&settings.tenant_key, key_file.to_path_buf());
+    if plan.source == KeySource::Created {
+        if plan.vault.iter().any(|s| s.files > 0 || s.malformed > 0) {
+            return Err(
+                "the plan found sealed vault files, so it cannot make a new key; stop and report this"
+                    .into(),
+            );
+        }
+        keys.create(vault_dir).map_err(|e| e.to_string())?;
+    }
+    let fingerprint = keys.vault().map_err(|e| e.to_string())?.fingerprint();
+    match &plan.fingerprint {
+        Some(expected) if *expected != fingerprint => Err(format!(
+            "the install holds tenant key {fingerprint} but {expected} was planned; stop the module and report this"
+        )),
+        _ => Ok(fingerprint),
+    }
 }
 
 /// The old .NET installs with their settings (an unreadable one stops the enrol: it might

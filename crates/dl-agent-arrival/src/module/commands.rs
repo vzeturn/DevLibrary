@@ -10,8 +10,9 @@
 //! - `op_sweep`: see [`super::sweep`];
 //! - `install_procedures` (`force`): installs the procedure bundle now.
 //!
-//! The slow ones run on their own thread, one at a time (a second gets `busy`), so the link
-//! keeps polling. Unknown commands are answered `false`.
+//! Every command but `status` reads the disk or the PMS at length (`vault_check` reads each
+//! sealed file's header), so they run on their own thread, one at a time (a second gets
+//! `busy`), and the link keeps polling. Unknown commands are answered `false`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -33,6 +34,16 @@ use crate::tools::files;
 
 /// One slow command at a time.
 static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// The commands answered on their own thread (all but `status`).
+const SLOW: &[&str] = &[
+    "vault_check",
+    "selftest",
+    "diagnostics",
+    "picture_probe",
+    "op_sweep",
+    "install_procedures",
+];
 
 const SERVER_KEYS: &[&str] = &[
     "server",
@@ -66,17 +77,13 @@ fn answer(ctx: &ModuleContext, cmd: &Command) {
         .to_string();
     let fast = match kind.as_str() {
         "status" => Some(Install::open(ctx).and_then(|i| i.status())),
-        "vault_check" => Some(Install::open(ctx).and_then(|i| i.vault_check())),
         _ => None,
     };
     if let Some(result) = fast {
         finish(ctx, &cmd.id, result);
         return;
     }
-    if !matches!(
-        kind.as_str(),
-        "selftest" | "diagnostics" | "picture_probe" | "op_sweep" | "install_procedures"
-    ) {
+    if !SLOW.contains(&kind.as_str()) {
         ctx.complete(
             &cmd.id,
             false,
@@ -125,6 +132,7 @@ fn finish(ctx: &ModuleContext, id: &str, result: Result<Value, String>) {
 fn slow(ctx: &ModuleContext, kind: &str, args: &Value) -> Result<Value, String> {
     let install = Install::open(ctx)?;
     match kind {
+        "vault_check" => install.vault_check(),
         "selftest" => Ok(selftest_json(ctx)),
         "diagnostics" => {
             let mut m = Map::new();
@@ -463,11 +471,11 @@ mod tests {
         let dir = temp("vault");
         // The key file as the agent writes it (protected), not raw bytes.
         let key = TenantKeyStore::new("", dir.join("agent-tenant-key.bin"))
-            .load_or_create()
+            .create(&dir.join("vault"))
             .unwrap();
         let foreign = temp("vault-other");
         let other_key = TenantKeyStore::new("", foreign.join("agent-tenant-key.bin"))
-            .load_or_create()
+            .create(&foreign.join("vault"))
             .unwrap();
         let vault = dir.join("vault").join("guests");
         std::fs::create_dir_all(&vault).unwrap();
@@ -490,6 +498,14 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
         std::fs::remove_dir_all(&foreign).unwrap();
+    }
+
+    #[test]
+    fn only_status_answers_on_the_polling_thread() {
+        for kind in ["vault_check", "selftest", "diagnostics", "op_sweep"] {
+            assert!(SLOW.contains(&kind), "{kind} must not hold the poll loop");
+        }
+        assert!(!SLOW.contains(&"status"));
     }
 
     #[test]

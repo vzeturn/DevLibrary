@@ -239,3 +239,31 @@ fn a_failed_probe_names_no_secret_and_writes_nothing() {
     }
     assert!(!dir.path().join("data").exists());
 }
+
+#[test]
+fn a_fresh_key_is_never_made_over_a_vault_with_files() {
+    let dir = TempDir::new("enroll-vault");
+    let layout = Layout::new(dir.path().to_path_buf(), None);
+    let vault = layout.resolve(&Settings::default().vault_directory);
+    std::fs::create_dir_all(vault.join("guests")).expect("vault");
+    std::fs::write(vault.join("guests").join("doc"), [0xAA_u8; 64]).expect("sealed file");
+    let id = identity("agt-v");
+    let (result, out) = run(
+        &args(dir.path()),
+        &[(TOKEN_ENV, &token(&id)), (PMS_ENV, PMS)],
+        "",
+    );
+    let e = result.expect_err("a new key would not open the vault");
+    assert!(e.contains("legal vault"), "{e}");
+    no_secrets(&out, &id);
+    no_secrets(&e, &id);
+    let settings = Settings::load(dir.path()).expect("settings");
+    assert!(
+        !layout.resolve(&settings.tenant_key_file).exists(),
+        "no key was made"
+    );
+    assert!(
+        !layout.resolve(&settings.identity_file).exists(),
+        "the site is not enrolled"
+    );
+}

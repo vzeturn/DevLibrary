@@ -32,8 +32,6 @@ use crate::legacy::installs::LegacyInstall;
 
 /// Where an imported key is written, under the install directory.
 pub const IMPORTED_KEY_FILE: &str = "data/agent-tenant-key.bin";
-/// Vault files checked per directory (each check reads only the 8-byte fingerprint).
-pub const VAULT_SCAN_LIMIT: usize = 10_000;
 
 /// What happened to the tenant key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +106,8 @@ pub struct VaultScan {
     pub by_fingerprint: Vec<(String, usize)>,
     /// Files shorter than a sealed header.
     pub malformed: usize,
-    /// Files seen (at most [`VAULT_SCAN_LIMIT`]).
+    /// Files seen: every file under the directory (no cap: a file left out would be a legal
+    /// document nobody proved this install can open).
     pub files: usize,
 }
 
@@ -460,7 +459,9 @@ fn read_file(path: &Path) -> Result<Option<FoundKey>, String> {
     }))
 }
 
-/// Counts the sealed files of a vault directory by the key fingerprint in their header.
+/// Counts the sealed files of a vault directory by the key fingerprint in their header: every
+/// file, read one at a time and only its header (36 bytes), so memory stays flat however many
+/// there are.
 ///
 /// # Errors
 /// A directory or file that cannot be read.
@@ -482,9 +483,6 @@ pub fn scan_vault(dir: &Path) -> Result<VaultScan, String> {
             }
             if path.extension().is_some_and(|x| x == "tmp") {
                 continue;
-            }
-            if files >= VAULT_SCAN_LIMIT {
-                break;
             }
             files += 1;
             match header(&path)? {
@@ -521,4 +519,41 @@ fn header(path: &Path) -> Result<Option<String>, String> {
         got += n;
     }
     Ok((got == head.len()).then(|| crate::crypto::hex(&head[..8])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_scan_reads_every_file_past_ten_thousand() {
+        let dir = std::env::temp_dir().join(format!(
+            "arr-vault-scan-{}-{:016x}",
+            std::process::id(),
+            dl_rand::u64()
+        ));
+        let mut head = [0u8; 8 + 12 + 16];
+        head[..8].copy_from_slice(&[0xAA; 8]);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..10_000 {
+            std::fs::write(dir.join(format!("{i:05}")), head).unwrap();
+        }
+        // Read last: the scan takes a folder's files before its subfolders.
+        let deep = dir.join("z").join("guests");
+        std::fs::create_dir_all(&deep).unwrap();
+        head[..8].copy_from_slice(&[0xBB; 8]);
+        std::fs::write(deep.join("late"), head).unwrap();
+        std::fs::write(deep.join("short"), b"x").unwrap();
+        let scan = scan_vault(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(scan.files, 10_002);
+        assert_eq!(scan.malformed, 1);
+        assert_eq!(
+            scan.by_fingerprint,
+            vec![
+                (crate::crypto::hex(&[0xAA; 8]), 10_000),
+                (crate::crypto::hex(&[0xBB; 8]), 1)
+            ]
+        );
+    }
 }

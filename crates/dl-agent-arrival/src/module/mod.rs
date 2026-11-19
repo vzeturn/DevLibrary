@@ -4,7 +4,9 @@
 //! The module is opt-in (`modules.arrival.enabled = true`) and reads the existing .NET
 //! install in place (see [`crate::agent::layout`]). While the site is not enrolled, or the
 //! settings cannot be used, it stays degraded with the reason and looks again every
-//! [`RECHECK`]; it does not fail and restart. Once the link runs, the module turns running
+//! [`RECHECK`]; it does not fail and restart. An install without its tenant key does not
+//! start either (the agent never makes one at run time): it reports `tenant_key_missing` /
+//! `tenant_key_unreadable` and waits for the key. Once the link runs, the module turns running
 //! after the first answered poll and degraded while the cloud or the PMS keeps failing.
 //!
 //! Config section:
@@ -27,8 +29,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use dl_agent::report::Severity;
 use dl_agent::supervisor::{Factory, Module, ModuleContext};
-use dl_json::Value;
+use dl_json::{Map, Value};
 use dl_time::Offset;
 
 use crate::agent::clock::SystemClock;
@@ -38,7 +41,7 @@ use crate::agent::installer;
 use crate::agent::layout::Layout;
 use crate::agent::problems::ProblemJournal;
 use crate::agent::runtime::{Installer, Parts, Wiring};
-use crate::agent::secrets::Identity;
+use crate::agent::secrets::{self, Identity, TenantKeyStore};
 use crate::agent::settings::Settings;
 use crate::agent::tds::{TdsExecutor, TdsOptions};
 use crate::agent::{eventlog, inventory};
@@ -213,6 +216,16 @@ impl ArrivalModule {
             .map_err(cannot)?
             .ok_or_else(|| NOT_ENROLLED.to_string())?;
         let journal = Arc::new(ProblemJournal::next_to(&identity_path));
+        if let Err((code, message)) = key_ready(&settings, &layout) {
+            dl_log::error!("the arrival link has no usable tenant key"; code = %code, error = %message);
+            let mut context = Map::new();
+            let path = |p: &str| crate::tools::files::path_text(&layout.resolve(p));
+            context.insert("tenant_key_file", path(&settings.tenant_key_file));
+            context.insert("vault_directory", path(&settings.vault_directory));
+            journal.record("Error", "TenantKey", &message, Some(code));
+            ctx.report(Severity::Error, code, &message, context);
+            return Err(format!("cannot start: {message}"));
+        }
         let (executor, installer): (Arc<dyn Executor>, Option<Installer>) = match &self
             .hooks
             .executor
@@ -241,6 +254,20 @@ impl ArrivalModule {
         wiring.installations = start_journal(&journal, sink);
         let parts = Parts::assemble(&settings, &layout, &identity, wiring).map_err(cannot)?;
         Ok((parts, journal))
+    }
+}
+
+/// The tenant key the settings reach, read without ever making one; `Err` is the problem
+/// code and the message (paths only, never the key).
+fn key_ready(settings: &Settings, layout: &Layout) -> Result<(), (&'static str, String)> {
+    let file = layout.resolve(&settings.tenant_key_file);
+    match TenantKeyStore::new(&settings.tenant_key, file.clone()).load_existing() {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(("tenant_key_missing", secrets::missing(&file))),
+        Err(e) => Err((
+            "tenant_key_unreadable",
+            format!("the tenant key cannot be read ({e}); restore it and enrol again"),
+        )),
     }
 }
 

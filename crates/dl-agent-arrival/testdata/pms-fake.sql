@@ -377,3 +377,21 @@ GO
 -- Folio columns that only surface once the guest tables above exist (procedures joining them are no longer deferred).
 ALTER TABLE dbo.Folio ADD CompanyName NVARCHAR(200) NULL, TravelAgent1Code INT NULL;
 GO
+-- Rooms and the numbering counters, for op_sweep's rollback proof (tests/sql_live.rs): the columns the room and
+-- walk-in procedures (srCI_HousekeepingRooms, srCI_HousekeepingUpdateRoomStatus, srCI_AssignRoomToFolio,
+-- srCI_WalkInCreateReservation) touch, with seeded rows the sweep's writes hit.
+CREATE TABLE dbo.Room (
+    RoomCode VARCHAR(20) NOT NULL PRIMARY KEY, RoomTypeCode VARCHAR(10), HskpStation VARCHAR(10), HSKPOccupied BIT,
+    HSKPClean BIT, Inspected BIT, SYSOccupied BIT, RStatus INT);
+CREATE TABLE dbo.HSKPStatusLog (
+    SeqNo INT IDENTITY(1,1) PRIMARY KEY, RoomCode VARCHAR(20), ClerkID NVARCHAR(100), ChangeTime DATETIME,
+    OldClean BIT, OldIns BIT, NewClean BIT, NewIns BIT);
+CREATE TABLE dbo.AutoFolioNumber (FolioNumber DECIMAL(18,0), FolioSubNumber DECIMAL(5,0));
+CREATE TABLE dbo.AutoConfNumber (ConfNumber DECIMAL(18,0));
+CREATE TABLE dbo.FolioRate (
+    FolioNum DECIMAL(18,0), hDate DATETIME, RateAmount DECIMAL(18,2), ToDate DATETIME, isCancel BIT, RateOverride BIT);
+INSERT dbo.Room (RoomCode, RoomTypeCode, HskpStation, HSKPOccupied, HSKPClean, Inspected, SYSOccupied, RStatus)
+    VALUES ('101', 'DLX', 'A', 0, 0, 0, 0, 1), ('102', 'DLX', 'A', 0, 1, 1, 0, 1);
+INSERT dbo.AutoFolioNumber (FolioNumber, FolioSubNumber) VALUES (20000, 0);
+INSERT dbo.AutoConfNumber (ConfNumber) VALUES (500);
+GO
