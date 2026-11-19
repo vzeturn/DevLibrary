@@ -1,6 +1,7 @@
 //! `AgentOptions`, read in place from the .NET install: `appsettings.json`, then
-//! `appsettings.Production.json` on top, `Agent` section. Keys match case-insensitively and
-//! arrays merge by index, as `Microsoft.Extensions.Configuration` binds them.
+//! `appsettings.Production.json` on top, then `Agent__*` environment variables, `Agent` section.
+//! Keys match case-insensitively and arrays merge by index, as `Microsoft.Extensions.Configuration`
+//! binds them.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -132,6 +133,18 @@ impl Flat {
         Ok(())
     }
 
+    /// Adds environment variables on top, as the host's environment provider does: `__` stands
+    /// for `:`. Only the `Agent` section is taken (`Agent__Watches__0__Operation`).
+    pub fn add_env<I: IntoIterator<Item = (String, String)>>(&mut self, vars: I) {
+        let prefix = format!("{}__", SECTION.to_lowercase());
+        for (name, value) in vars {
+            if name.to_lowercase().starts_with(&prefix) {
+                let path = name.replace("__", ":");
+                self.entries.insert(path.to_lowercase(), (path, value));
+            }
+        }
+    }
+
     fn visit(&mut self, path: String, v: &Value) {
         let join = |seg: &str| {
             if path.is_empty() {
@@ -189,7 +202,9 @@ impl Flat {
 }
 
 impl Settings {
-    /// Reads `dir/appsettings.json` and `dir/appsettings.Production.json` (each optional).
+    /// Reads `dir/appsettings.json` and `dir/appsettings.Production.json` (each optional), then
+    /// this process's `Agent__*` environment variables (names or values that are not Unicode are
+    /// left out, as no .NET host could have read them either).
     ///
     /// # Errors
     /// [`Error::Io`] for an unreadable file, [`Error::Config`] for invalid JSON or values.
@@ -207,6 +222,10 @@ impl Settings {
                 Err(e) => return Err(Error::io(file, e)),
             }
         }
+        flat.add_env(
+            std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))),
+        );
         Settings::bind(&flat)
     }
 
@@ -319,6 +338,40 @@ mod tests {
         assert_eq!(s.snapshot_capacity, 2000);
         let dbg = format!("{s:?}");
         assert!(!dbg.contains("SMILE_FO"), "{dbg}");
+    }
+
+    #[test]
+    fn agent_environment_variables_override_both_files() {
+        let mut flat = Flat::new();
+        flat.add_json("a", SHIPPED).unwrap();
+        flat.add_env([
+            (
+                "AGENT__CloudBaseUrl".to_string(),
+                "https://env.example".to_string(),
+            ),
+            ("Agent__MaxConcurrency".to_string(), "8".to_string()),
+            (
+                "Agent__Watches__0__IntervalSeconds".to_string(),
+                "60".to_string(),
+            ),
+            (
+                "Agent__Watches__1__Operation".to_string(),
+                "hotel.info".to_string(),
+            ),
+            (
+                "Logging__LogLevel__Default".to_string(),
+                "Trace".to_string(),
+            ),
+            ("AgentX__CloudBaseUrl".to_string(), "https://no".to_string()),
+        ]);
+        let s = Settings::bind(&flat).unwrap();
+        assert_eq!(s.cloud_base_url, "https://env.example");
+        assert_eq!(s.max_concurrency, 8);
+        assert_eq!(s.watches.len(), 2);
+        assert_eq!(s.watches[0].operation, "dashboard.fo-command-center");
+        assert_eq!(s.watches[0].interval_seconds, 60);
+        assert_eq!(s.watches[1].operation, "hotel.info");
+        assert_eq!(flat.get("Logging:LogLevel:Default"), Some("Information"));
     }
 
     #[test]
