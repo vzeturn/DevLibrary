@@ -295,7 +295,9 @@ fn a_crashed_or_stuck_module_test_is_one_fail() {
         &d.0,
         &RemoteConfig::default(),
         &SqlPools::default(),
-        Duration::from_millis(300),
+        // Well under the 3 s `hangs` sleep, yet long enough that a panicking module whose
+        // backtrace is symbolized (RUST_BACKTRACE=1) on a loaded machine still reports in time.
+        Duration::from_millis(1500),
     );
     assert_eq!(checks.len(), 2);
     assert!(
