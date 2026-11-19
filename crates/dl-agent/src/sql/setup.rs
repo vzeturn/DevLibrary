@@ -10,6 +10,7 @@ use std::path::Path;
 use dl_json::{Map, Value, json};
 
 use super::secret::{self, AuthMode};
+use super::transport::Rung;
 use super::{SQL_FILE, TdsConnector};
 use crate::Error;
 
@@ -34,6 +35,10 @@ pub struct Request {
     pub password: String,
     /// Databases to set up; empty = every SMILE database present on the server.
     pub databases: Vec<String>,
+    /// `--allow-unencrypted`: a SQL login to another computer may end on the unencrypted
+    /// rung (an old server without TLS 1.2). Off, such a server fails as
+    /// `sql_tls_unavailable`.
+    pub allow_unencrypted: bool,
 }
 
 impl core::fmt::Debug for Request {
@@ -43,6 +48,7 @@ impl core::fmt::Debug for Request {
             .field("auth", &self.auth)
             .field("user", &self.user)
             .field("databases", &self.databases)
+            .field("allow_unencrypted", &self.allow_unencrypted)
             .finish_non_exhaustive()
     }
 }
@@ -69,20 +75,32 @@ impl From<dl_tds::Error> for Failure {
     }
 }
 
-/// The SQL calls setup makes (a fake in tests).
+/// The SQL calls setup makes (a fake in tests). `clear` lets the transport ladder end
+/// unencrypted for a SQL login to another computer ([`Request::allow_unencrypted`]).
 pub trait Sql {
     /// The databases of `wanted` that exist on the server `connection` points at.
-    fn present(&self, connection: &str, wanted: &[&str]) -> Result<Vec<String>, Failure>;
-    /// Logs in with `connection` and runs `SELECT 1`.
-    fn test(&self, connection: &str) -> Result<(), Failure>;
+    fn present(
+        &self,
+        connection: &str,
+        wanted: &[&str],
+        clear: bool,
+    ) -> Result<Vec<String>, Failure>;
+    /// Logs in with `connection`, runs `SELECT 1` and answers the transport rung that worked
+    /// (saved as `transport` in `sql.json`).
+    fn test(&self, connection: &str, clear: bool) -> Result<Rung, Failure>;
 }
 
 /// The real server, through the agent's transport ladder.
 pub struct Live;
 
 impl Sql for Live {
-    fn present(&self, connection: &str, wanted: &[&str]) -> Result<Vec<String>, Failure> {
-        let mut c = open(connection)?;
+    fn present(
+        &self,
+        connection: &str,
+        wanted: &[&str],
+        clear: bool,
+    ) -> Result<Vec<String>, Failure> {
+        let (mut c, _) = open(connection, clear)?;
         let list = wanted
             .iter()
             .map(|w| format!("N'{}'", w.replace('\'', "''")))
@@ -98,18 +116,33 @@ impl Sql for Live {
             .collect())
     }
 
-    fn test(&self, connection: &str) -> Result<(), Failure> {
-        open(connection)?.query("SELECT 1", &[])?;
-        Ok(())
+    fn test(&self, connection: &str, clear: bool) -> Result<Rung, Failure> {
+        let (mut c, rung) = open(connection, clear)?;
+        c.query("SELECT 1", &[])?;
+        Ok(rung)
     }
 }
 
-fn open(connection: &str) -> Result<dl_tds::Client, Failure> {
-    let c = TdsConnector::parse(connection).map_err(|e| Failure {
+/// A session through the ladder and the rung it settled on; a guarded ladder's handshake
+/// failure is `sql_tls_unavailable` ([`TdsConnector::tls_refusal`]).
+fn open(connection: &str, clear: bool) -> Result<(dl_tds::Client, Rung), Failure> {
+    let mut c = TdsConnector::parse(connection).map_err(|e| Failure {
         message: e.to_string(),
         number: None,
     })?;
-    Ok(c.open()?)
+    if clear {
+        c = c.allow_unencrypted();
+    }
+    match c.open() {
+        Ok(client) => Ok((client, c.rung().unwrap_or(Rung::AsConfigured))),
+        Err(e) => Err(match c.tls_refusal(&e) {
+            Some(message) => Failure {
+                message,
+                number: None,
+            },
+            None => e.into(),
+        }),
+    }
 }
 
 /// One database's test.
@@ -119,6 +152,8 @@ pub struct DbResult {
     pub name: String,
     /// `None` when the login worked.
     pub error: Option<Failure>,
+    /// The transport rung that worked (`None` on failure).
+    pub transport: Option<Rung>,
 }
 
 /// The result of a setup run, printed as JSON and kept for the installer.
@@ -150,7 +185,10 @@ impl Outcome {
         let dbs: Vec<Value> = self
             .databases
             .iter()
-            .map(|d| json!({"name": d.name, "ok": d.error.is_none(), "error": fail(&d.error)}))
+            .map(|d| {
+                json!({"name": d.name, "ok": d.error.is_none(), "error": fail(&d.error),
+                       "transport": d.transport.map(Rung::name)})
+            })
             .collect();
         json!({"ok": self.ok, "auth": self.auth.as_str(), "server": self.server, "login": self.login,
                "databases": dbs, "error": fail(&self.error), "hint": self.hint})
@@ -180,6 +218,10 @@ impl Outcome {
                     .map(|d| DbResult {
                         name: s(d, "name"),
                         error: fail(d.get("error")),
+                        transport: d
+                            .get("transport")
+                            .and_then(Value::as_str)
+                            .and_then(|t| Rung::parse(t).ok().flatten()),
                     })
                     .collect()
             })
@@ -282,7 +324,11 @@ pub fn run(req: &Request, sql: &dyn Sql) -> Outcome {
         hint: None,
     };
     let names = if req.databases.is_empty() {
-        match sql.present(&connection(req, "master"), &SMILE_DATABASES) {
+        match sql.present(
+            &connection(req, "master"),
+            &SMILE_DATABASES,
+            req.allow_unencrypted,
+        ) {
             Ok(n) if n.is_empty() => {
                 out.error = Some(Failure {
                     message: format!(
@@ -304,8 +350,15 @@ pub fn run(req: &Request, sql: &dyn Sql) -> Outcome {
         req.databases.clone()
     };
     for name in names {
-        let error = sql.test(&connection(req, &name)).err();
-        out.databases.push(DbResult { name, error });
+        let (transport, error) = match sql.test(&connection(req, &name), req.allow_unencrypted) {
+            Ok(rung) => (Some(rung), None),
+            Err(f) => (None, Some(f)),
+        };
+        out.databases.push(DbResult {
+            name,
+            error,
+            transport,
+        });
     }
     let failed: Vec<&Failure> = out
         .databases
@@ -331,7 +384,9 @@ fn hint(req: &Request, login: &str, failures: &[&Failure], dbs: &[String]) -> Op
 }
 
 /// Writes the tested databases to `sql.json`: connection without password, `auth`, the
-/// sealed password in SQL mode. Other keys of an existing entry (limits, transport) stay.
+/// sealed password in SQL mode, and the rung that worked as `transport` (a pin: the
+/// runtime never steps below what setup proved, so nobody on the path can force a weaker
+/// rung later). Other keys of an existing entry (limits) stay.
 ///
 /// # Errors
 /// [`Error::Config`] when the outcome is not ok; I/O and DPAPI errors.
@@ -370,6 +425,9 @@ pub fn save(data_dir: &Path, req: &Request, outcome: &Outcome) -> Result<(), Err
         entry.insert("connection", Value::String(conn));
         entry.insert(secret::AUTH_KEY, Value::String(req.auth.as_str().into()));
         entry.remove(secret::PASSWORD_KEY);
+        if let Some(rung) = db.transport {
+            entry.insert("transport", Value::String(rung.name().into()));
+        }
         if req.auth == AuthMode::Sql {
             entry.insert(
                 secret::PASSWORD_KEY,

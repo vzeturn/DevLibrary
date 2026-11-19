@@ -393,6 +393,14 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   drops are outages. `encrypt=true|strict|disable` never steps down; `transport` may pin
   `as_configured`, `tls1.0` or `unencrypted`. Ending unencrypted files one `sql_unencrypted`
   (warning); the rung is in stats (`transport.rung`) and in `sql-test` output.
+  The automatic ladder reaches *unencrypted* only for a Windows login or a server on this
+  computer (`.`, `(local)`, `localhost`, loopback, or exactly `COMPUTERNAME`). A SQL login
+  to another computer stops at TLS 1.0: a handshake failure there is an error report
+  `sql_tls_unavailable` (the module turns degraded) and no password is ever sent in clear,
+  so nobody on the path can force a downgrade. To accept it anyway, an operator pins
+  `"transport": "unencrypted"` or runs `dl-agent sql-setup --allow-unencrypted`.
+  `sql-setup` writes the rung each database connected on as its `transport` pin, so the
+  runtime never steps below what setup proved; re-run `sql-setup` after a server upgrade.
 - **Lock waits**: every new session runs `SET LOCK_TIMEOUT` (`lock_timeout_seconds`, default
   8, 0 = wait forever), so a row locked by the product fails fast with SQL error 1222
   instead of holding a slot until `query_timeout` (default 15 s, below the hub's 20 s wait).

@@ -47,6 +47,9 @@ pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(8);
 pub struct TdsConnector {
     config: dl_tds::Config,
     rungs: Vec<transport::Rung>,
+    /// An automatic ladder that left out the unencrypted rung ([`transport::clear_allowed`]):
+    /// a handshake failure on its last rung is `sql_tls_unavailable`.
+    guarded: bool,
     at: AtomicUsize,
     settled: AtomicBool,
     lock_timeout: Option<Duration>,
@@ -66,8 +69,10 @@ impl TdsConnector {
         if config.app_name() == "dl-tds" {
             config = config.with_app_name("dl-agent");
         }
+        let rungs = transport::rungs(&config, None);
         Ok(TdsConnector {
-            rungs: transport::rungs(&config, None),
+            guarded: guarded(&config, None, &rungs),
+            rungs,
             config,
             at: AtomicUsize::new(0),
             settled: AtomicBool::new(false),
@@ -79,7 +84,41 @@ impl TdsConnector {
     /// Fixes the transport rung (`None` = walk the ladder).
     pub fn with_transport(mut self, pin: Option<transport::Rung>) -> TdsConnector {
         self.rungs = transport::rungs(&self.config, pin);
+        self.guarded = guarded(&self.config, pin, &self.rungs);
         self
+    }
+
+    /// Lets an automatic ladder end unencrypted even for a SQL login to another computer:
+    /// the operator's explicit choice (`sql-setup --allow-unencrypted`).
+    pub fn allow_unencrypted(mut self) -> TdsConnector {
+        self.rungs = transport::ladder(&self.config, None, true);
+        self.guarded = false;
+        self
+    }
+
+    /// The `sql_tls_unavailable` message when `e` ended a guarded ladder: the server took no
+    /// TLS handshake this client offers, and a lower rung would send a SQL password in clear
+    /// to another computer. `None` for any other failure.
+    pub fn tls_refusal(&self, e: &dl_tds::Error) -> Option<String> {
+        (self.guarded && !self.settled.load(Ordering::Acquire) && transport::should_step_down(e))
+            .then(|| {
+                format!(
+                    "sql_tls_unavailable: {e}: the server ({}) completed no TLS handshake and a \
+                     SQL login to another computer is never sent unencrypted; install the SQL \
+                     Server TLS 1.2 update, use a Windows login, or accept it explicitly \
+                     (sql-setup --allow-unencrypted, or \"transport\": \"unencrypted\" for \
+                     this database in sql.json)",
+                    self.config.host()
+                )
+            })
+    }
+
+    /// [`tds`] for a connect failure, `sql_tls_unavailable` when [`Self::tls_refusal`] says so.
+    fn connect_error(&self, e: dl_tds::Error) -> Error {
+        match self.tls_refusal(&e) {
+            Some(m) => Error::Sql(m),
+            None => tds(e),
+        }
     }
 
     /// `SET LOCK_TIMEOUT` on every new session (`None` = wait forever).
@@ -133,6 +172,18 @@ impl TdsConnector {
     }
 }
 
+/// Whether `rungs` (for `config`, `pin`) is an automatic ladder that dropped the unencrypted
+/// rung for safety.
+fn guarded(
+    config: &dl_tds::Config,
+    pin: Option<transport::Rung>,
+    rungs: &[transport::Rung],
+) -> bool {
+    pin.is_none()
+        && config.encrypt() == dl_tds::Encrypt::Off
+        && !rungs.contains(&transport::Rung::Unencrypted)
+}
+
 /// A session error, prefixed with its [`probe::Problem`] code when it is one the agent acts
 /// on (`sql_missing_object: Invalid column name 'MaCQT'.`); see [`problem_code`].
 fn tds(e: dl_tds::Error) -> Error {
@@ -142,20 +193,25 @@ fn tds(e: dl_tds::Error) -> Error {
     }
 }
 
-/// The problem code of an [`Error::Sql`] (`sql_missing_object`, `sql_locked`, …), or
-/// `fallback` for any other error.
+/// The problem code of an [`Error::Sql`] (`sql_missing_object`, `sql_locked`, …), at the
+/// start or after the pool's `<db>: connect failed: ` prefix, or `fallback` for any other
+/// error.
 pub fn problem_code<'a>(e: &Error, fallback: &'a str) -> &'a str {
-    const CODES: [&str; 5] = [
+    const CODES: [&str; 6] = [
         "sql_missing_object",
         "sql_locked",
         "sql_deadlock",
         "sql_access_denied",
         "sql_timeout",
+        "sql_tls_unavailable",
     ];
     match e {
         Error::Sql(m) => CODES
             .into_iter()
-            .find(|c| m.strip_prefix(c).is_some_and(|r| r.starts_with(':')))
+            .find(|c| {
+                m.strip_prefix(c).is_some_and(|r| r.starts_with(':'))
+                    || m.contains(&format!(": {c}:"))
+            })
             .unwrap_or(fallback),
         _ => fallback,
     }
@@ -164,7 +220,7 @@ pub fn problem_code<'a>(e: &Error, fallback: &'a str) -> &'a str {
 impl Connector for TdsConnector {
     type Conn = dl_tds::Client;
     fn connect(&self) -> Result<dl_tds::Client, Error> {
-        let mut client = self.open().map_err(tds)?;
+        let mut client = self.open().map_err(|e| self.connect_error(e))?;
         if let Some(t) = self.lock_timeout {
             client
                 .execute(&format!("SET LOCK_TIMEOUT {}", t.as_millis()), &[])

@@ -33,6 +33,7 @@ pub fn grammar(data: Arg) -> Command {
         .arg(Arg::option("user").env("DL_AGENT_SQL_USER").help("SQL login name (auth sql); the password comes from DL_AGENT_SQL_PASSWORD"))
         .arg(Arg::option("databases").help("Comma list (default: every SMILE_FO, SMILE_POS, SMILE_BO present)"))
         .arg(Arg::flag("test-only").help("Test only; do not save"))
+        .arg(Arg::flag("allow-unencrypted").help("SQL login to another computer whose SQL Server has no TLS 1.2: accept an unencrypted login (saved as transport unencrypted)"))
         .arg(Arg::flag("as-service").help("Windows auth: test as LocalSystem, the service account, via a one-shot scheduled task"))
         .arg(Arg::flag("show").help("Print the saved auth, server, user and databases (never the password)"))
         .arg(Arg::flag("json").help("Print the result as one JSON line"))
@@ -124,6 +125,7 @@ pub fn request(dir: &Path, m: &Matches) -> Result<Request, Error> {
         user: String::new(),
         password: String::new(),
         databases,
+        allow_unencrypted: m.flag("allow-unencrypted"),
     };
     if auth == AuthMode::Sql {
         req.user = m.value("user").unwrap_or("").trim().to_string();
@@ -176,7 +178,11 @@ fn print(o: &Outcome, as_json: bool) {
     }
     for d in &o.databases {
         match &d.error {
-            None => println!("  {}: ok", d.name),
+            None => println!(
+                "  {}: ok ({})",
+                d.name,
+                d.transport.map_or("as_configured", |t| t.name())
+            ),
             Some(e) => println!("  {}: FAILED{}: {}", d.name, number(e.number), e.message),
         }
     }
@@ -243,6 +249,8 @@ fn child(dir: &Path) -> i32 {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // Windows login: the whole ladder is allowed anyway.
+            allow_unencrypted: false,
         },
         _ => return EXIT_CONFIG,
     };

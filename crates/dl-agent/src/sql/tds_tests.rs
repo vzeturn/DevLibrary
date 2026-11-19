@@ -80,3 +80,72 @@ fn the_ladder_steps_from_tls12_to_tls10_to_unencrypted() {
     c.connect().unwrap();
     assert_eq!(srv.attempts().len(), 4);
 }
+
+/// A SQL login to another computer (simulated: the fake server listens on loopback) never
+/// reaches the unencrypted rung: the failure is `sql_tls_unavailable` and no clear-text
+/// login is ever sent.
+#[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+#[test]
+fn a_remote_sql_login_stops_at_tls10_with_sql_tls_unavailable() {
+    let srv = FakeServer::start(Script::default()).unwrap();
+    let mut c = TdsConnector::parse(&format!(
+        "Server=127.0.0.1,{};User Id=smile;Password=x;TrustServerCertificate=true",
+        srv.addr().port()
+    ))
+    .unwrap();
+    c.rungs = transport::ladder(&c.config, None, false);
+    c.guarded = true;
+    let e = c.connect().unwrap_err();
+    assert_eq!(
+        problem_code(&e, "sql_unreachable"),
+        "sql_tls_unavailable",
+        "{e}"
+    );
+    assert!(e.to_string().contains("--allow-unencrypted"), "{e}");
+    let seen = srv.attempts();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(seen.iter().all(|a| !a.logged_in), "{seen:?}");
+    assert_eq!(c.rung(), None);
+}
+
+#[test]
+fn only_a_guarded_ladder_turns_a_handshake_failure_into_sql_tls_unavailable() {
+    let handshake = dl_tds::Error::Tls(dl_tls::Error::Handshake {
+        code: 0x8009_0331,
+        message: "no common algorithm".into(),
+    });
+    let refused = dl_tds::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "refused",
+    ));
+    let remote = TdsConnector::parse("Server=fo-server;User Id=smile;Password=x").unwrap();
+    assert_eq!(
+        remote.rungs,
+        [transport::Rung::AsConfigured, transport::Rung::Tls10]
+    );
+    let m = remote.tls_refusal(&handshake).unwrap();
+    assert!(
+        m.starts_with("sql_tls_unavailable: ") && m.contains("fo-server"),
+        "{m}"
+    );
+    assert!(!m.contains("Password=x"), "{m}");
+    assert_eq!(remote.tls_refusal(&refused), None);
+    // The operator's explicit choices, Windows login and this computer keep the old ladder.
+    let pinned = TdsConnector::parse("Server=fo-server;User Id=smile;Password=x")
+        .unwrap()
+        .with_transport(Some(transport::Rung::Unencrypted));
+    assert_eq!(pinned.tls_refusal(&handshake), None);
+    let allowed = TdsConnector::parse("Server=fo-server;User Id=smile;Password=x")
+        .unwrap()
+        .allow_unencrypted();
+    assert_eq!(allowed.rungs.last(), Some(&transport::Rung::Unencrypted));
+    assert_eq!(allowed.tls_refusal(&handshake), None);
+    for cs in [
+        "Server=fo-server;Integrated Security=SSPI",
+        "Server=.\\SQLEXPRESS;User Id=smile;Password=x",
+    ] {
+        let c = TdsConnector::parse(cs).unwrap();
+        assert_eq!(c.rungs.last(), Some(&transport::Rung::Unencrypted), "{cs}");
+        assert_eq!(c.tls_refusal(&handshake), None, "{cs}");
+    }
+}

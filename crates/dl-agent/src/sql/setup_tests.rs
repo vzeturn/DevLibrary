@@ -8,7 +8,19 @@ struct Fake {
     present: Vec<&'static str>,
     deny: Vec<&'static str>,
     login_missing: bool,
+    /// The rung a test login reaches.
+    rung: Rung,
+    /// A server without TLS 1.2 on another computer: a SQL login fails as
+    /// `sql_tls_unavailable` unless `clear`, then works unencrypted.
+    old_remote: bool,
     seen: RefCell<Vec<String>>,
+}
+
+fn tls_unavailable() -> Failure {
+    Failure {
+        message: "sql_tls_unavailable: tls handshake failed".into(),
+        number: None,
+    }
 }
 
 fn fake(present: &[&'static str]) -> Fake {
@@ -16,6 +28,8 @@ fn fake(present: &[&'static str]) -> Fake {
         present: present.to_vec(),
         deny: Vec::new(),
         login_missing: false,
+        rung: Rung::AsConfigured,
+        old_remote: false,
         seen: RefCell::new(Vec::new()),
     }
 }
@@ -28,10 +42,18 @@ fn login_failed() -> Failure {
 }
 
 impl Sql for Fake {
-    fn present(&self, connection: &str, wanted: &[&str]) -> Result<Vec<String>, Failure> {
+    fn present(
+        &self,
+        connection: &str,
+        wanted: &[&str],
+        clear: bool,
+    ) -> Result<Vec<String>, Failure> {
         self.seen.borrow_mut().push(connection.to_string());
         if self.login_missing {
             return Err(login_failed());
+        }
+        if self.old_remote && !clear {
+            return Err(tls_unavailable());
         }
         Ok(wanted
             .iter()
@@ -40,8 +62,15 @@ impl Sql for Fake {
             .collect())
     }
 
-    fn test(&self, connection: &str) -> Result<(), Failure> {
+    fn test(&self, connection: &str, clear: bool) -> Result<Rung, Failure> {
         self.seen.borrow_mut().push(connection.to_string());
+        if self.old_remote {
+            return if clear {
+                Ok(Rung::Unencrypted)
+            } else {
+                Err(tls_unavailable())
+            };
+        }
         let c: dl_tds::Config = connection.parse().unwrap();
         if self.deny.contains(&c.database()) {
             return Err(Failure {
@@ -53,7 +82,7 @@ impl Sql for Fake {
                 number: Some(4063),
             });
         }
-        Ok(())
+        Ok(self.rung)
     }
 }
 
@@ -64,6 +93,7 @@ fn windows(server: &str) -> Request {
         user: String::new(),
         password: String::new(),
         databases: Vec::new(),
+        allow_unencrypted: false,
     }
 }
 
@@ -74,6 +104,7 @@ fn sql_login(password: &str) -> Request {
         user: "smile".into(),
         password: password.into(),
         databases: Vec::new(),
+        allow_unencrypted: false,
     }
 }
 
@@ -196,11 +227,14 @@ fn save_seals_the_password_keeps_limits_and_round_trips() {
     let d = TestDir::new("sql-setup-save");
     std::fs::write(
         d.0.join(SQL_FILE),
-        r#"{"databases": {"SMILE_FO": {"connection": "Server=.;Database=SMILE_FO;Integrated Security=SSPI", "max_connections": 9, "transport": "tls1.0"}}}"#,
+        r#"{"databases": {"SMILE_FO": {"connection": "Server=.;Database=SMILE_FO;Integrated Security=SSPI", "max_connections": 9, "transport": "unencrypted"}}}"#,
     )
     .unwrap();
     let req = sql_login("Pa;ss\"1");
-    let out = run(&req, &fake(&["SMILE_FO", "SMILE_POS"]));
+    let mut f = fake(&["SMILE_FO", "SMILE_POS"]);
+    f.rung = Rung::Tls10;
+    let out = run(&req, &f);
+    assert_eq!(out.databases[0].transport, Some(Rung::Tls10));
     save(&d.0, &req, &out).unwrap();
     let text = std::fs::read_to_string(d.0.join(SQL_FILE)).unwrap();
     assert!(!text.contains("Pa;ss"), "{text}");
@@ -208,7 +242,12 @@ fn save_seals_the_password_keeps_limits_and_round_trips() {
     let fo = &doc["databases"]["SMILE_FO"];
     assert_eq!(fo["auth"].as_str(), Some("sql"));
     assert_eq!(fo["max_connections"].as_u64(), Some(9));
+    // The rung setup proved replaces an older pin.
     assert_eq!(fo["transport"].as_str(), Some("tls1.0"));
+    assert_eq!(
+        doc["databases"]["SMILE_POS"]["transport"].as_str(),
+        Some("tls1.0")
+    );
     assert!(fo["password_sealed"].as_str().is_some());
     assert_eq!(
         doc["databases"]["SMILE_POS"]["max_connections"].as_u64(),
@@ -275,6 +314,37 @@ fn request_debug_hides_the_password() {
 fn outcome_survives_the_child_round_trip() {
     let mut f = fake(&["SMILE_FO", "SMILE_POS"]);
     f.deny = vec!["SMILE_POS"];
+    f.rung = Rung::Tls10;
     let out = run(&windows("."), &f);
+    assert_eq!(out.databases[0].transport, Some(Rung::Tls10));
+    assert_eq!(out.databases[1].transport, None);
     assert_eq!(Outcome::from_json(&out.to_json()).unwrap(), out);
+}
+
+#[test]
+fn an_old_remote_server_needs_the_explicit_opt_in_and_is_pinned_unencrypted() {
+    let d = TestDir::new("sql-setup-old-remote");
+    let mut req = sql_login("pw");
+    req.server = "fo-server\\SQLEXPRESS".into();
+    let mut f = fake(&["SMILE_FO"]);
+    f.old_remote = true;
+    let refused = run(&req, &f);
+    assert!(!refused.ok);
+    assert!(
+        refused
+            .error
+            .as_ref()
+            .is_some_and(|e| e.message.starts_with("sql_tls_unavailable:")),
+        "{refused:?}"
+    );
+    assert!(save(&d.0, &req, &refused).is_err());
+    req.allow_unencrypted = true;
+    let accepted = run(&req, &f);
+    assert!(accepted.ok, "{accepted:?}");
+    save(&d.0, &req, &accepted).unwrap();
+    let doc = dl_json::parse(&std::fs::read_to_string(d.0.join(SQL_FILE)).unwrap()).unwrap();
+    assert_eq!(
+        doc["databases"]["SMILE_FO"]["transport"].as_str(),
+        Some("unencrypted")
+    );
 }

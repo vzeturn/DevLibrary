@@ -544,5 +544,18 @@ mod tests {
             super::super::problem_code(&e, "sql_unreachable"),
             "sql_unreachable"
         );
+        // Through the pool: `<db>: connect failed: <tagged error>`.
+        let e = Error::Sql(
+            "SMILE_FO: connect failed: sql_tls_unavailable: tls handshake failed: …".into(),
+        );
+        assert_eq!(
+            super::super::problem_code(&e, "sql_unreachable"),
+            "sql_tls_unavailable"
+        );
+        let e = Error::Sql("SMILE_FO: connect failed: sql_access_denied: Login failed".into());
+        assert_eq!(
+            super::super::problem_code(&e, "sql_unreachable"),
+            "sql_access_denied"
+        );
     }
 }

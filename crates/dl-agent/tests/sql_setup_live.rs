@@ -67,6 +67,7 @@ fn request(server: &str, password: &str) -> Request {
         user: LOGIN.into(),
         password: password.into(),
         databases: Vec::new(),
+        allow_unencrypted: false,
     }
 }
 
@@ -134,6 +135,16 @@ fn sql_login_is_tested_on_every_smile_database_before_it_is_saved() {
         assert!(!conn.contains(PASSWORD), "{conn}");
         assert_eq!(entry["auth"].as_str(), Some("sql"));
         assert!(entry["password_sealed"].as_str().is_some());
+        // The rung setup proved is pinned (TLS 1.2 on SQL 2017/2022: as configured).
+        assert_eq!(
+            entry["transport"].as_str(),
+            all.databases
+                .iter()
+                .find(|d| d.name == db)
+                .and_then(|d| d.transport.map(|t| t.name())),
+            "{entry}"
+        );
+        assert!(entry["transport"].as_str().is_some(), "{entry}");
         // The saved entry opens the database it names.
         let (full, mode) = secret::resolve(entry).unwrap();
         assert_eq!(mode, AuthMode::Sql);
