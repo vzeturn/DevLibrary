@@ -49,6 +49,7 @@ dl-agent-pms = { path = "crates/dl-agent-pms" }
 dl-agent-pms-device = { path = "crates/dl-agent-pms-device" }
 dl-agent-backup = { path = "crates/dl-agent-backup" }
 dl-agent-hotellink = { path = "crates/dl-agent-hotellink" }
+dl-agent-arrival = { path = "crates/dl-agent-arrival" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

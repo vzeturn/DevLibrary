@@ -1,0 +1,294 @@
+//! The dl-agent module `arrival`: runs the Check-In site link under
+//! [`dl_agent::supervisor::Module`].
+//!
+//! The module is opt-in (`modules.arrival.enabled = true`) and reads the existing .NET
+//! install in place (see [`crate::agent::layout`]). While the site is not enrolled, or the
+//! settings cannot be used, it stays degraded with the reason and looks again every
+//! [`RECHECK`]; it does not fail and restart. Once the link runs, the module turns running
+//! after the first answered poll and degraded while the cloud or the PMS keeps failing.
+//!
+//! Config section:
+//!
+//! ```json
+//! "arrival": { "enabled": true, "install_dir": "C:\\Program Files\\MM-Arrival Agent", "utc_offset_minutes": 420 }
+//! ```
+//!
+//! `install_dir` defaults to the folder Install.ps1 uses; `utc_offset_minutes` is the hotel's
+//! offset for the `{today}` of the watches (default 420, Vietnam), the
+//! `HotelUtcOffsetMinutes` of the .NET agent.
+
+pub mod reporter;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use dl_agent::supervisor::{Factory, Module, ModuleContext};
+use dl_json::Value;
+use dl_time::Offset;
+
+use crate::agent::clock::SystemClock;
+use crate::agent::executor::Executor;
+use crate::agent::health::{self, Health};
+use crate::agent::installer;
+use crate::agent::layout::Layout;
+use crate::agent::runtime::{Installer, Parts, Wiring};
+use crate::agent::secrets::Identity;
+use crate::agent::settings::Settings;
+use crate::agent::tds::{TdsExecutor, TdsOptions};
+use crate::error::Error;
+use reporter::CtxSink;
+
+/// The module name: config section and report module.
+pub const NAME: &str = "arrival";
+/// How often a waiting module looks at the install again.
+pub const RECHECK: Duration = Duration::from_secs(60);
+/// The hotel offset when the config names none (UTC+7).
+pub const DEFAULT_UTC_OFFSET_MINUTES: i32 = 420;
+/// The state detail while no identity exists.
+pub const NOT_ENROLLED: &str = "not enrolled: run `dl-agent arrival-enroll` (or Install.ps1)";
+
+/// How often an idle module answers commands.
+const IDLE_TICK: Duration = Duration::from_millis(250);
+
+/// The module's config section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleConfig {
+    /// Where the .NET agent is installed (default: the platform default).
+    pub install_dir: Option<PathBuf>,
+    /// The hotel's UTC offset in minutes.
+    pub utc_offset_minutes: i32,
+}
+
+impl ModuleConfig {
+    /// Reads the section (`Null` gives the defaults).
+    ///
+    /// # Errors
+    /// [`Error::Config`] for a value of the wrong type or an offset beyond ±18 h.
+    pub fn from_value(v: &Value) -> Result<ModuleConfig, Error> {
+        let install_dir = match v.get("install_dir") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if s.trim().is_empty() => None,
+            Some(Value::String(s)) => Some(PathBuf::from(s.trim())),
+            Some(_) => return Err(Error::Config("install_dir must be a string".into())),
+        };
+        let utc_offset_minutes = match v.get("utc_offset_minutes") {
+            None | Some(Value::Null) => DEFAULT_UTC_OFFSET_MINUTES,
+            Some(n) => n
+                .as_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .filter(|n| n.abs() <= 18 * 60)
+                .ok_or_else(|| {
+                    Error::Config("utc_offset_minutes must be a whole number within ±1080".into())
+                })?,
+        };
+        Ok(ModuleConfig {
+            install_dir,
+            utc_offset_minutes,
+        })
+    }
+
+    /// The offset as a [`dl_time::Offset`].
+    ///
+    /// # Errors
+    /// [`Error::Config`] when out of range (checked by [`ModuleConfig::from_value`]).
+    pub fn offset(&self) -> Result<Offset, Error> {
+        Offset::from_seconds(self.utc_offset_minutes * 60)
+            .map_err(|_| Error::Config("utc_offset_minutes is out of range".into()))
+    }
+}
+
+impl Default for ModuleConfig {
+    fn default() -> ModuleConfig {
+        ModuleConfig {
+            install_dir: None,
+            utc_offset_minutes: DEFAULT_UTC_OFFSET_MINUTES,
+        }
+    }
+}
+
+/// Parts a test can replace; `None` takes the production default.
+#[derive(Clone, Default)]
+pub struct Hooks {
+    /// The PMS executor (default: SQL Server through dl-tds). With a replaced executor the
+    /// procedure bundle is not installed.
+    pub executor: Option<Arc<dyn Executor>>,
+    /// See [`RECHECK`].
+    pub recheck: Option<Duration>,
+}
+
+impl std::fmt::Debug for Hooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hooks")
+            .field("executor", &self.executor.is_some())
+            .field("recheck", &self.recheck)
+            .finish()
+    }
+}
+
+/// The Check-In site module.
+#[derive(Debug, Default)]
+pub struct ArrivalModule {
+    hooks: Hooks,
+}
+
+/// The factory to register with `App::module`.
+pub fn arrival_module() -> Factory {
+    arrival_module_with(Hooks::default())
+}
+
+/// [`arrival_module`] with replaced parts.
+pub fn arrival_module_with(hooks: Hooks) -> Factory {
+    Arc::new(move || {
+        Box::new(ArrivalModule {
+            hooks: hooks.clone(),
+        }) as Box<dyn Module>
+    })
+}
+
+impl Module for ArrivalModule {
+    fn name(&self) -> &str {
+        NAME
+    }
+
+    fn enabled_by_default(&self) -> bool {
+        false
+    }
+
+    fn run(&mut self, ctx: &ModuleContext) -> Result<(), dl_agent::Error> {
+        let config = match ModuleConfig::from_value(ctx.config()) {
+            Ok(c) => c,
+            Err(e) => {
+                // A config change restarts the module; until then there is nothing to try.
+                ctx.set_degraded(&format!("config invalid: {e}"));
+                idle(ctx, None);
+                return Ok(());
+            }
+        };
+        let health = Arc::new(Health::new(
+            Arc::new(CtxSink::new(ctx.clone())),
+            health::REPORT_INTERVAL,
+        ));
+        loop {
+            match self.prepare(&config, ctx, &health) {
+                Ok(parts) => {
+                    let on_tick = || answer_commands(ctx);
+                    return parts.run(ctx.stop(), &on_tick).map_err(Into::into);
+                }
+                Err(detail) => {
+                    ctx.set_degraded(&detail);
+                    if idle(ctx, Some(self.hooks.recheck.unwrap_or(RECHECK))) {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl ArrivalModule {
+    /// Opens the install; `Err` is the state detail to wait with.
+    fn prepare(
+        &self,
+        config: &ModuleConfig,
+        ctx: &ModuleContext,
+        health: &Arc<Health>,
+    ) -> Result<Parts, String> {
+        let cannot = |e: Error| {
+            dl_log::error!("the arrival link cannot start"; error = %e);
+            format!("cannot start: {e}")
+        };
+        let layout = Layout::detect(config.install_dir.as_deref(), ctx.data_dir());
+        let settings = Settings::load(layout.install_dir()).map_err(cannot)?;
+        let identity = Identity::load(&layout.resolve(&settings.identity_file))
+            .map_err(cannot)?
+            .ok_or_else(|| NOT_ENROLLED.to_string())?;
+        let (executor, installer): (Arc<dyn Executor>, Option<Installer>) = match &self
+            .hooks
+            .executor
+        {
+            Some(e) => (Arc::clone(e), None),
+            None => {
+                let tds = TdsExecutor::new(&settings.pms_connection_string, tds_options(&settings))
+                    .map_err(cannot)?;
+                let installer = settings.auto_install_procedures.then(|| {
+                    let connection = settings.pms_connection_string.clone();
+                    Box::new(move || installer::ensure_installed(&connection, false)) as Installer
+                });
+                (Arc::new(tds), installer)
+            }
+        };
+        let wiring = Wiring {
+            executor,
+            clock: Arc::new(SystemClock),
+            health: Arc::clone(health),
+            utc_offset: config.offset().map_err(cannot)?,
+            installer,
+        };
+        Parts::assemble(&settings, &layout, &identity, wiring).map_err(cannot)
+    }
+}
+
+/// Pool sizing: the request lane, one session per watch and one for the hello.
+fn tds_options(settings: &Settings) -> TdsOptions {
+    let secs = |n: i32| Duration::from_secs(u64::try_from(n).unwrap_or(0).max(1));
+    let lanes = usize::try_from(settings.max_concurrency)
+        .unwrap_or(1)
+        .max(1);
+    TdsOptions {
+        max_connections: lanes + settings.watches.len() + 1,
+        command_timeout: secs(settings.command_timeout_seconds),
+        lock_timeout: secs(settings.lock_timeout_seconds),
+    }
+}
+
+/// Every command gets one answer; this module takes none.
+fn answer_commands(ctx: &ModuleContext) {
+    while let Some(c) = ctx.next_command() {
+        ctx.complete(&c.id, false, &format!("{NAME}: unknown command {}", c.kind));
+    }
+}
+
+/// Waits `limit` (forever when `None`) answering commands; `true` when stopped.
+fn idle(ctx: &ModuleContext, limit: Option<Duration>) -> bool {
+    let end = limit.map(|d| Instant::now() + d);
+    loop {
+        answer_commands(ctx);
+        if ctx.stop().wait_timeout(IDLE_TICK) {
+            return true;
+        }
+        if end.is_some_and(|end| Instant::now() >= end) {
+            return false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_defaults_and_validation() {
+        assert_eq!(
+            ModuleConfig::from_value(&Value::Null).expect("null"),
+            ModuleConfig::default()
+        );
+        let v = dl_json::parse(
+            r#"{"enabled":true,"install_dir":" D:\\Agent ","utc_offset_minutes":-300}"#,
+        )
+        .expect("json");
+        let c = ModuleConfig::from_value(&v).expect("valid");
+        assert_eq!(c.install_dir, Some(PathBuf::from("D:\\Agent")));
+        assert_eq!(c.offset().expect("offset").whole_seconds(), -18_000);
+        for bad in [
+            r#"{"utc_offset_minutes":2000}"#,
+            r#"{"utc_offset_minutes":"420"}"#,
+            r#"{"install_dir":5}"#,
+        ] {
+            assert!(
+                ModuleConfig::from_value(&dl_json::parse(bad).expect("json")).is_err(),
+                "{bad}"
+            );
+        }
+    }
+}

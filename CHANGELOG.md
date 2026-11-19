@@ -26,6 +26,20 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `dl-agent-arrival`: the Azolo Check-In site agent (`MM.Arrival.Agent`) as an opt-in dl-agent
+  module (`modules.arrival.enabled = true`; optional `install_dir`, `utc_offset_minutes`). It reads
+  the .NET install in place (appsettings, DPAPI `agent-identity.bin` and `agent-tenant-key.bin`,
+  `vault/`, the 48 h `agent-idempotency.jsonl`), so a site switches without enrolling again. Sealed
+  poll / results link with the replay window, the `srCI_*` operation catalog (compiled in; a change
+  ships with a dl-agent release) through `dl-tds` with parameters only, snapshots and deltas,
+  idempotent `checkin.*` writes, the legal vault, the procedure-bundle installer and the watches,
+  byte-compatible with the .NET golden outputs. `degraded` while not enrolled, when the cloud is
+  unreachable for longer than one back-off, refuses the key or the clock, and while the PMS is down;
+  stop gives running requests 5 s and flushes the journal. Metrics (requests ok / failed / refused,
+  in flight, snapshots, last poll, PMS latency), rate-limited reports `arrival_cloud_failed`,
+  `arrival_auth_failed`, `arrival_clock_skew`, `arrival_pms_failed`, `arrival_op_refused`,
+  `arrival_proc_install_failed`; sub-command `dl-agent arrival-enroll` (token and PMS connection
+  string from the environment or stdin). The crate is left out of `cargo wasm`.
 - `dl-agent-membership` (M1, read side): the Azolo Membership agent (`MM.Membership.Agent`) as an
   opt-in dl-agent module (`modules.membership.enabled = true`). It reads the .NET installer's
   `config.dpapi`, sends the heartbeat with the SMILE identity, reads the hub's sync-config, and
