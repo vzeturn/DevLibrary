@@ -72,7 +72,29 @@ pub(crate) const BROWSER_PORT: u16 = 1434;
 
 /// Asks the SQL Server Browser on `host` for the TCP port of `instance`.
 pub(crate) fn resolve(host: &str, instance: &str, timeout: Duration) -> Result<u16, Error> {
+    #[cfg(test)]
+    if let Some(port) = test_port::get() {
+        return resolve_at(host, port, instance, timeout);
+    }
     resolve_at(host, BROWSER_PORT, instance, timeout)
+}
+
+/// Lets a test on this thread point [`resolve`] at a fake browser on another UDP port.
+#[cfg(test)]
+pub(crate) mod test_port {
+    use std::cell::Cell;
+
+    thread_local! {
+        static PORT: Cell<Option<u16>> = const { Cell::new(None) };
+    }
+
+    pub(crate) fn set(port: Option<u16>) {
+        PORT.with(|p| p.set(port));
+    }
+
+    pub(crate) fn get() -> Option<u16> {
+        PORT.with(Cell::get)
+    }
 }
 
 /// [`resolve`] against a browser listening on `port` (tests use a loopback fake).

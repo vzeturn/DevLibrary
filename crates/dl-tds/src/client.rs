@@ -208,15 +208,12 @@ impl Client {
     /// [`Error::Server`] (login failed, e.g. error 18456), [`Error::Browser`] (named
     /// instance not found), [`Error::Routing`], [`Error::Malformed`]. With
     /// [`Config::integrated_auth`]: [`Error::Sspi`] when Windows cannot authenticate, and
-    /// [`Error::Unsupported`] outside Windows.
+    /// [`Error::Unsupported`] outside Windows unless `User ID=DOMAIN\user` is given. With a
+    /// `DOMAIN\user` login (NTLM): [`Error::Ntlm`] for a CHALLENGE it cannot answer.
     pub fn connect(cfg: &Config) -> Result<Client, Error> {
-        // Integrated authentication: get the user's credentials before touching the
-        // network, so a platform without SSPI fails fast.
-        let mut negotiate = if cfg.integrated_auth() {
-            Some(Negotiate::acquire()?)
-        } else {
-            None
-        };
+        // Integrated authentication (SSPI) or a `DOMAIN\user` login (NTLM): get the
+        // credentials before touching the network, so a platform without SSPI fails fast.
+        let mut negotiate = Negotiate::for_config(cfg)?;
         let tcp = dial(cfg)?;
         let peer = tcp.peer_addr().ok();
         tcp.set_nodelay(true)?;
@@ -290,7 +287,12 @@ impl Client {
         };
         let sspi_token = match negotiate.as_mut() {
             Some(n) => {
-                let t = n.initialize(&sspi::target_name(cfg))?;
+                let target = if n.is_ntlm() {
+                    String::new()
+                } else {
+                    sspi::target_name(cfg)
+                };
+                let t = n.initialize(&target)?;
                 if t.is_empty() {
                     return Err(Error::Unsupported(
                         "the SSPI package produced no initial token",
@@ -743,3 +745,7 @@ fn write_packets<W: Write>(w: &mut W, framed: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_legacy_tests.rs"]
+mod legacy_tests;

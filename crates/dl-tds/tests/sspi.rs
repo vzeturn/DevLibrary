@@ -155,7 +155,10 @@ fn integrated_login_is_unsupported() {
     let cfg: Config = "Server=localhost;Integrated Security=SSPI".parse().unwrap();
     match Client::connect(&cfg) {
         Err(dl_tds::Error::Unsupported(m)) => {
-            assert_eq!(m, "integrated authentication needs Windows (SSPI)")
+            assert_eq!(
+                m,
+                "integrated authentication needs Windows (SSPI), or User ID=DOMAIN\\user with a password for NTLM"
+            )
         }
         Err(e) => panic!("{e}"),
         Ok(_) => panic!("integrated authentication outside Windows"),

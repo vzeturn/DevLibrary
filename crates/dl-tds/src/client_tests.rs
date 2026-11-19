@@ -43,6 +43,7 @@ fn sspi_token_flow_answers_each_challenge_until_loginack() {
     let srv = FakeServer::start(Script {
         never_encrypt: true,
         sspi_challenges: vec![b"CHALLENGE-1".to_vec(), b"CHALLENGE-2".to_vec()],
+        ..Script::default()
     })
     .unwrap();
     let port = srv.addr().port();
@@ -80,6 +81,7 @@ fn sspi_challenge_without_a_context_is_refused() {
     let srv = FakeServer::start(Script {
         never_encrypt: true,
         sspi_challenges: vec![b"X".to_vec()],
+        ..Script::default()
     })
     .unwrap();
     let cfg: Config = format!(
