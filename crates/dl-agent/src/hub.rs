@@ -485,10 +485,14 @@ pub fn enroll(
                         .ok_or_else(|| Error::Json(format!("enroll answer without {k}")))
                 };
                 // The hub's own list (PROTOCOL §2.1) when it sends one, else what was given.
-                let urls = v
+                let accepted = v
                     .get("hub_urls")
-                    .and_then(|o| crate::hub_urls::accept(o, base))
-                    .unwrap_or_else(|| hub_urls.to_vec());
+                    .map(|o| crate::hub_urls::accept(o, base))
+                    .unwrap_or_default();
+                if !accepted.ignored.is_empty() {
+                    dl_log::warn!("hub hosts outside the allowlist ignored"; hub_urls = %accepted.ignored.join(", "));
+                }
+                let urls = accepted.urls.unwrap_or_else(|| hub_urls.to_vec());
                 let identity =
                     Identity::new(&s("agent_id")?, &s("tenant")?, &s("site")?, urls, key);
                 let config = match v.get("config") {

@@ -60,3 +60,45 @@ fn an_unusable_list_changes_nothing() {
         ["https://hub"]
     );
 }
+
+#[test]
+fn hosts_off_the_allowlist_are_ignored_and_reported_once() {
+    let d = TestDir::new("agent-hub-list-allow");
+    let hub = FakeHub::default();
+    *hub.default.lock().unwrap() = Some((200, HB_OK.into()));
+    let list = r#"{"server_time": 0, "channel": "canary", "heartbeat_seconds": 60,
+        "commands": [], "update_check": false,
+        "hub_urls": ["https://hub", "https://evil.example", "https://fallback.test"]}"#;
+    hub.push(200, list);
+    hub.push(200, list);
+    let mut a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.step(1000), None);
+    assert_eq!(a.hub.hub_urls(), ["https://hub", "https://fallback.test"]);
+    assert_eq!(ignored_reports(&a, &hub), 1);
+    // The same list again: no second report.
+    assert_eq!(a.step(1061), None);
+    assert_eq!(ignored_reports(&a, &hub), 1);
+    let saved = Identity::load(&a.opts.data_dir).unwrap().hub_urls;
+    assert!(!saved.iter().any(|u| u.contains("evil")), "{saved:?}");
+}
+
+/// `hub_urls_ignored` reports sent to the hub or still spooled.
+fn ignored_reports(a: &super::super::Agent, hub: &FakeHub) -> usize {
+    let sent = hub
+        .seen()
+        .into_iter()
+        .filter(|s| s.url.ends_with("/v1/reports"))
+        .map(|s| {
+            String::from_utf8_lossy(&s.body)
+                .matches("hub_urls_ignored")
+                .count()
+        })
+        .sum::<usize>();
+    let spooled = a
+        .spool()
+        .peek(50)
+        .into_iter()
+        .filter(|r| r.code == "hub_urls_ignored")
+        .count();
+    sent + spooled
+}

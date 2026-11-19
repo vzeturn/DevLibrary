@@ -308,13 +308,18 @@ fn hub_reachable(dir: &Path) -> bool {
     })
 }
 
-/// Whether a module's own cloud answers at all: any HTTP status short of a server error
-/// (its origin need not serve a health page). A 5xx or no answer means a restart would not help.
+/// Whether a module's own cloud is up: its origin answers 2xx or 3xx. A 4xx (a proxy's
+/// block page, a gone route), a 5xx or no answer means a restart would not help.
 fn link_reachable(link: &Link) -> bool {
     matches!(
         HttpTransport::new().send("GET", &link.url, &[], b""),
-        Ok((200..=499, _))
+        Ok((code, _)) if origin_alive(code)
     )
+}
+
+/// HTTP statuses that count as a live origin for [`link_reachable`].
+pub(crate) fn origin_alive(code: u16) -> bool {
+    (200..=399).contains(&code)
 }
 
 /// The `watchdog` sub-command: one look, at most one action. Returns the exit code.
@@ -407,5 +412,15 @@ mod tests {
         );
         assert!(timer.contains("OnUnitActiveSec=5min") && timer.contains("timers.target"));
         assert_eq!(task_name(&app), "DevLibrary Agent Watchdog");
+    }
+
+    #[test]
+    fn only_2xx_and_3xx_count_as_a_live_origin() {
+        for code in [200, 204, 301, 302, 399] {
+            assert!(origin_alive(code), "{code}");
+        }
+        for code in [100, 199, 400, 403, 404, 407, 499, 500, 502, 503] {
+            assert!(!origin_alive(code), "{code}");
+        }
     }
 }

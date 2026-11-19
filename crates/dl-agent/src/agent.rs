@@ -141,6 +141,7 @@ pub struct Agent {
     survey_sent: Option<(String, u64)>,
     hub_ok_at: u64,
     beat_at: u64,
+    ignored_hub_urls: Vec<String>,
 }
 
 impl Agent {
@@ -193,6 +194,7 @@ impl Agent {
             survey_sent: None,
             hub_ok_at: 0,
             beat_at: 0,
+            ignored_hub_urls: Vec::new(),
             opts,
         })
         .inspect(|agent| {

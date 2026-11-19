@@ -49,8 +49,12 @@ The enrol answer and every heartbeat answer may carry `hub_urls`: the hub's host
 preference, at most 5, each `https://` (`http://` only for localhost). The agent keeps the
 list in `identity.json` (the host that answered is kept even if the list leaves it out) and
 sends each call to the host that last worked, moving down the list on a transport error or a
-5xx. A missing, empty or unusable list changes nothing; the agent warns once. The hub sets the
-list from `HUB_URLS`; a fallback host (not the first) serves only `/healthz`, `/install.ps1`,
+5xx. A missing, empty or unusable list changes nothing; the agent warns once. Only hosts on
+the build's allowlist (`hub_urls::ALLOWED_HOSTS`: `agent.pms.id.vn`, `*.pms.id.vn`,
+`agent-hub.vutq-sense.workers.dev`; loopback always) are kept; any other entry is ignored and
+reported once per change as `hub_urls_ignored` (warning), so a tampered or mistyped
+`HUB_URLS` can never steer agents to a foreign host. The hub sets the list from `HUB_URLS`
+(a `wrangler.jsonc` var: it goes live with the next deploy); a fallback host (not the first) serves only `/healthz`, `/install.ps1`,
 `/install/*` and `/v1/*` and answers 404 for everything else, so the admin API stays on the
 primary host. The installer passes the same list to `enroll`, so a new agent can enrol while
 the primary host is down. Self-test row `core/hub_urls`: pass with a fallback, warn with one host.
@@ -109,14 +113,17 @@ present), `modules/<module>/<file>` (the files a module named with
 `ModuleContext::add_diagnostic_file`, the last 512 KiB of each: e.g. `arrival`'s
 `agent-problems.json` and `dl-enroll.json`; only `.json`/`.jsonl`/`.log`/`.txt` names without
 `key`, `secret`, `identity`, `password` or `appsettings`) and `bundle.json` (what was taken
-from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed like the log (`Password=…`, `Bearer …`,
-fields named like password/secret/token/key/`*_sealed` → `[redacted]`); `identity.key` and
-`sql.json` are never included. Over 8 MB the log share is halved until it fits.
+from each file, what was skipped, whether the `no-update` file exists). Every text is scrubbed like the log (`Password=…` / `Pwd=…`
+with ADO.NET quoting, `Bearer …`, fields named like password/pwd/secret/token/authorization,
+`*_sealed` or ending in `key` (`tenant_key`, `hmac_key`, `key=`) → `[redacted]`; `r2_key`,
+`object_key`, `public_key`, `sort_key`, `cache_key`, `key_id` and `kid` stay readable);
+`identity.key` and `sql.json` are never included. Over 8 MB the log share is halved until it fits.
 
 The hub answers `{id, key, size, sha256}` (key `diag/<tenant>/<agent>/<unix ms>-<8 hex>.zip`),
 refuses more than 8 MB or a body without `Content-Length` (`413` / `411`, before the
 signature check) and anything that is not a zip (`400 not_a_zip`). The command result is
-`{ok:true, output:{uploaded:{id, key, size, sha256}, diagnostics:{…}}}`; when the bundle
+`{ok:true, output:{uploaded:{id, r2_key, size, sha256}, diagnostics:{…}}}` (the hub's `key`
+renamed so the scrub keeps it); when the bundle
 cannot be built or uploaded it is `{ok:false, output:{upload_error, diagnostics:{…, log_tail}}}`.
 Admins read bundles with `GET /admin/diagnostics?agent_id=` and
 `GET /admin/diagnostics/{id}/download`; agents can never fetch them.
@@ -278,7 +285,7 @@ Each run takes at most one action:
 | running | an update is on probation | none (the agent rolls back itself) |
 | running | loop beat ≥ 20 min old | restart |
 | running | hub beat ≥ 20 min old **and** the hub `/healthz` answers | restart |
-| running | a module's cloud link silent ≥ 20 min (since its last success, or since it was declared) **and** that origin answers below 500 | restart, even with the hub link up |
+| running | a module's cloud link silent ≥ 20 min (since its last success, or since it was declared) **and** that origin answers 2xx or 3xx | restart, even with the hub link up |
 
 Restarts back off 1 h, 2 h, 4 h … 12 h, reset by a healthy run. Every action leaves a report
 (`watchdog_started` warning, `watchdog_killed` / `watchdog_restarted` error,

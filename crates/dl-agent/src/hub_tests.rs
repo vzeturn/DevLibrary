@@ -320,14 +320,16 @@ fn enroll_keeps_the_hub_host_list() {
     hub.push(
         200,
         r#"{"agent_id": "agt_9", "tenant": "t", "site": "s", "channel": "stable",
-        "hub_urls": ["https://agent.pms.id.vn", "https://agent-hub.example.workers.dev"]}"#,
+        "hub_urls": ["https://agent.pms.id.vn", "https://agent-hub.vutq-sense.workers.dev",
+            "https://agent-hub.example.workers.dev"]}"#,
     );
     let e = enroll(&hub, &["https://given.test".to_string()], "CODE", &[]).unwrap();
+    // The host off the build's allowlist is left out.
     assert_eq!(
         e.identity.hub_urls,
         [
             "https://agent.pms.id.vn",
-            "https://agent-hub.example.workers.dev",
+            "https://agent-hub.vutq-sense.workers.dev",
             "https://given.test"
         ]
     );
