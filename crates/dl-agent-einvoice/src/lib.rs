@@ -25,6 +25,8 @@ pub mod money;
 pub mod outbox;
 pub mod platform;
 pub mod pos;
+pub mod pos_names;
+pub mod profile;
 pub mod relay;
 pub mod runner;
 pub mod sql;

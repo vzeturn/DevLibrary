@@ -14,6 +14,8 @@ use crate::fo::{FoDetailRow, FoHeaderRow, FoLineRow, FoRows};
 use crate::install::{INSTALL_TIMEOUT, install_writeback_into, is_default_writeback_sp};
 use crate::log::V;
 use crate::pos::{PosRawCheck, PosRawHeader, PosRawLine};
+use crate::pos_names;
+use crate::profile::PosItemName;
 
 /// SQL Server's "Could not find stored procedure".
 const MISSING_PROCEDURE: i32 = 2812;
@@ -144,6 +146,7 @@ pub struct Sql {
     fo: Conn,
     pos: Option<Conn>,
     sp: SpNames,
+    pos_item_name: PosItemName,
 }
 
 fn err(ctx: &str, e: dl_tds::Error) -> String {
@@ -162,7 +165,51 @@ impl Sql {
             fo: Conn::new(fo_dsn),
             pos: (!pos_dsn.is_empty()).then(|| Conn::new(pos_dsn)),
             sp,
+            pos_item_name: PosItemName::default(),
         }
+    }
+
+    /// The current POS line-name source (collect profile).
+    pub fn pos_item_name(&self) -> PosItemName {
+        self.pos_item_name
+    }
+
+    /// Set the POS line-name source (from the hub's collect profile).
+    pub fn set_pos_item_name(&mut self, v: PosItemName) {
+        self.pos_item_name = v;
+    }
+
+    /// `ItemDef.IName1` per trimmed ItemCode for one check (see [`pos_names`]).
+    fn lookup_pos_item_names(
+        &self,
+        check_no: &str,
+        timeout: Duration,
+    ) -> Result<std::collections::HashMap<String, String>, String> {
+        let Some(n) = pos_names::check_no_param(check_no) else {
+            return Ok(Default::default());
+        };
+        let rs = self
+            .conn("POS")
+            .with(timeout, |c| {
+                c.query(pos_names::ITEM_NAMES_QUERY, &[Param::new("CheckNo", n)])
+            })
+            .map_err(|e| {
+                err(
+                    &format!("agent: look up POS item names (check {check_no})"),
+                    e,
+                )
+            })?;
+        let mut rows = Vec::new();
+        for set in rs.sets() {
+            for r in set.rows() {
+                let row = (|| Ok::<_, dl_tds::Error>((r.get::<String>(0)?, r.get::<String>(1)?)))()
+                    .map_err(|e| {
+                        err(&format!("agent: scan POS item name (check {check_no})"), e)
+                    })?;
+                rows.push(row);
+            }
+        }
+        Ok(pos_names::collect_names(rows))
     }
 
     fn conn(&self, source: &str) -> &Conn {
@@ -295,6 +342,12 @@ impl Sql {
             })()
             .map_err(|e| err(&format!("agent: scan pos line ({})", key.source_ref()), e))?;
             raw.lines.push(l);
+        }
+        if self.pos_item_name == PosItemName::IName1 {
+            let names = self
+                .lookup_pos_item_names(id, timeout)
+                .map_err(|e| format!("agent: fetch pos raw ({}): {e}", key.source_ref()))?;
+            pos_names::apply_names(&mut raw.lines, &names);
         }
         Ok(raw)
     }

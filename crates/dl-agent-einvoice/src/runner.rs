@@ -603,6 +603,17 @@ impl Runner {
                     );
                     self.cfg.recalc_tax_into_sc = remote.recalc_tax_into_sc;
                 }
+                if self.sql.pos_item_name() != remote.collect_profile.pos_item_name {
+                    log::info(
+                        "collect-profile pos_item_name updated from Hub",
+                        &[(
+                            "new",
+                            V::S(&format!("{:?}", remote.collect_profile.pos_item_name)),
+                        )],
+                    );
+                    self.sql
+                        .set_pos_item_name(remote.collect_profile.pos_item_name);
+                }
             }
         }
     }
