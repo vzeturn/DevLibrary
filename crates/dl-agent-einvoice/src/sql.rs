@@ -11,7 +11,12 @@ use dl_tds::{Client, Config, Param, Row};
 use dl_time::{DateTime, OffsetDateTime};
 
 use crate::fo::{FoDetailRow, FoHeaderRow, FoLineRow, FoRows};
+use crate::install::{INSTALL_TIMEOUT, install_writeback_into, is_default_writeback_sp};
+use crate::log::V;
 use crate::pos::{PosRawCheck, PosRawHeader, PosRawLine};
+
+/// SQL Server's "Could not find stored procedure".
+const MISSING_PROCEDURE: i32 = 2812;
 
 /// One pending invoice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -442,12 +447,36 @@ impl Sql {
             .map_err(|e| err(&format!("agent: mark collected ({})", key.source_ref()), e))
     }
 
-    /// `ApplyWriteback`.
+    /// `ApplyWriteback`. A site enrolled before the procedure was embedded lacks it: on
+    /// SQL Server error 2812 the agent installs its own procedure and retries once (never
+    /// a configured, DBA-owned name).
     pub fn apply_writeback(&self, a: &WritebackApply, timeout: Duration) -> Result<(), String> {
         let sp = &self.sp.writeback;
         validate_sp_name(sp)?;
+        let ctx = || format!("agent: apply writeback for {} {}", a.bill_type, a.bill_id);
+        match self.exec_writeback(a, timeout) {
+            Err(e) if e.number() == Some(MISSING_PROCEDURE) && is_default_writeback_sp(sp) => {
+                crate::log::warn(
+                    "agent: write-back procedure missing; installing it",
+                    &[("procedure", V::S(sp)), ("bill_type", V::S(&a.bill_type))],
+                );
+                self.install_writeback(&a.bill_type).map_err(|ie| {
+                    format!("{}: procedure missing and install failed: {e}; {ie}", ctx())
+                })?;
+                crate::log::info(
+                    "agent: write-back procedure installed",
+                    &[("procedure", V::S(sp)), ("bill_type", V::S(&a.bill_type))],
+                );
+                self.exec_writeback(a, timeout).map_err(|e| err(&ctx(), e))
+            }
+            r => r.map_err(|e| err(&ctx(), e)),
+        }
+    }
+
+    fn exec_writeback(&self, a: &WritebackApply, timeout: Duration) -> Result<(), dl_tds::Error> {
         let q = format!(
-            "EXEC {sp} @BillID = @p1, @BillType = @p2, @InvoiceNumber = @p3, @KyHieu = @p4, @MaCQT = @p5, @IssuedAt = @p6"
+            "EXEC {} @BillID = @p1, @BillType = @p2, @InvoiceNumber = @p3, @KyHieu = @p4, @MaCQT = @p5, @IssuedAt = @p6",
+            self.sp.writeback
         );
         self.conn(&a.bill_type)
             .with(timeout, |c| {
@@ -464,12 +493,40 @@ impl Sql {
                 )
             })
             .map(|_| ())
+    }
+
+    fn install_writeback(&self, source: &str) -> Result<(), String> {
+        let mut installed = Ok(());
+        self.conn(source)
+            .with(INSTALL_TIMEOUT, |c| {
+                installed = install_writeback_into(c);
+                Ok(())
+            })
             .map_err(|e| {
                 err(
-                    &format!("agent: apply writeback for {} {}", a.bill_type, a.bill_id),
+                    &format!("agent: install write-back procedure ({source})"),
                     e,
                 )
-            })
+            })?;
+        installed
+    }
+
+    /// Installs the agent's own write-back procedure into the database of `source` when it
+    /// is missing, so a site enrolled before it was embedded heals before its first
+    /// write-back (and its self-test passes). A DBA-owned name is never created. Returns
+    /// whether it was installed.
+    pub fn ensure_writeback(&self, source: &str, timeout: Duration) -> Result<bool, String> {
+        if !is_default_writeback_sp(&self.sp.writeback) {
+            return Ok(false);
+        }
+        if self
+            .missing_procs(source, &[self.sp.writeback.as_str()], timeout)?
+            .is_empty()
+        {
+            return Ok(false);
+        }
+        self.install_writeback(source)?;
+        Ok(true)
     }
 
     /// `ListTrnTypes` (FO). An empty SP name disables it.

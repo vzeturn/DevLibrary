@@ -133,6 +133,9 @@ pub struct Runner {
     pub cfg: AgentConfig,
     device_name: String,
     config_stale_streak: u32,
+    /// Whether every collected database has the agent's write-back procedure (checked
+    /// until it succeeds once per run).
+    writeback_ensured: bool,
 }
 
 const CONFIG_STALE_ESCALATE_AFTER: u32 = 5;
@@ -147,6 +150,7 @@ impl Runner {
             cfg,
             device_name: device_name(),
             config_stale_streak: 0,
+            writeback_ensured: false,
         }
     }
 
@@ -254,10 +258,37 @@ impl Runner {
         (out, failed)
     }
 
+    /// Installs the write-back procedure where a site enrolled before it was embedded lacks
+    /// it. Returns whether every source was checked.
+    fn ensure_writeback(&self, sources: &[&str], timeout: Duration, res: &mut CycleResult) -> bool {
+        let mut all = true;
+        for source in sources {
+            match self.sql.ensure_writeback(source, timeout) {
+                Ok(true) => log::info(
+                    "read: installed the missing write-back procedure",
+                    &[("source", V::S(source))],
+                ),
+                Ok(false) => {}
+                Err(e) => {
+                    all = false;
+                    log::error(
+                        "read: write-back procedure check failed",
+                        &[("source", V::S(source)), ("error", V::S(&e))],
+                    );
+                    res.sql_errors.push(e);
+                }
+            }
+        }
+        all
+    }
+
     /// `ReadCycle`.
     pub fn read_cycle(&mut self, deadline: Instant, res: &mut CycleResult) {
         let sources = sources_for(&self.cfg.collect_sources);
         let timeout = deadline.saturating_duration_since(Instant::now());
+        if !self.writeback_ensured {
+            self.writeback_ensured = self.ensure_writeback(&sources, timeout, res);
+        }
         let mut fo_ok = sources.contains(&"FO");
         if fo_ok
             && let Err(e) = self
