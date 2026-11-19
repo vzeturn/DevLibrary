@@ -17,6 +17,9 @@ use dl_json::{Map, Value};
 use dl_winsvc::StopSignal;
 
 use crate::config::{AgentConfig, ConfigStore, Dpapi, Sealer};
+use crate::earn::pairs::{EarnSettings, PairSource};
+use crate::earn::{EarnEnv, ModuleEnv};
+use crate::hub::earn::EarnHub;
 use crate::hub::gate::TokenGate;
 use crate::hub::{HubApi, HubClient};
 use crate::identity::{IdentityProbe, Snapshot, Tracker};
@@ -27,7 +30,7 @@ use crate::settings::Settings;
 use crate::smile::{SmileError, SmileHealth, TdsSmile};
 use crate::sync::{SyncSettings, SyncWorker};
 use crate::writer::folio::{FolioWriter, WriteOptions};
-use crate::writer::smile_writer::SmileWriter;
+use crate::writer::smile_writer::{EarnPath, SmileWriter};
 use scan::{ScanDeps, ScanLoop};
 use state::{RateLimit, Shared};
 
@@ -172,7 +175,7 @@ type SmileHandles = (
 /// Runs the sync and scan threads until `ctx.stop()`.
 fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> Result<(), Error> {
     let gate = Arc::new(TokenGate::new(TOKEN_RETRY));
-    let hub: Arc<dyn HubApi> = Arc::new(
+    let hub_client = Arc::new(
         HubClient::new(
             &cfg.hub_base_url,
             &cfg.agent_token,
@@ -182,6 +185,7 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         )
         .map_err(|e| Error::Config(format!("membership hub address: {e}")))?,
     );
+    let hub: Arc<dyn HubApi> = hub_client.clone();
     let shared = Arc::new(Shared::default());
     let (health, probe, scan_src, write_smile): SmileHandles = match (
         TdsSmile::new(&cfg.smile_connection_string),
@@ -235,7 +239,19 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
         },
         agent_version(),
     );
-    if let Some(d) = dispatcher(settings, &cfg, write_smile, &hub, &tracker) {
+    let env: Arc<dyn EarnEnv> = Arc::new(ModuleEnv {
+        tracker: tracker.clone(),
+        shared: shared.clone(),
+    });
+    let earn_hub: Arc<dyn EarnHub> = hub_client.clone();
+    if let Some(d) = dispatcher(
+        settings,
+        &cfg,
+        write_smile,
+        &hub,
+        &tracker,
+        (&earn_hub, &env),
+    ) {
         sync = sync.with_dispatcher(d);
     }
     let s = stop.clone();
@@ -272,6 +288,7 @@ fn dispatcher(
     smile: Option<Arc<TdsSmile>>,
     hub: &Arc<dyn HubApi>,
     tracker: &Arc<Tracker>,
+    (earn_hub, env): (&Arc<dyn EarnHub>, &Arc<dyn EarnEnv>),
 ) -> Option<Arc<Dispatcher>> {
     if settings.read_only {
         return None;
@@ -297,7 +314,11 @@ fn dispatcher(
         &[("extra_bed_mode", V::S(&w.extra_bed_mode))],
     );
     Some(Arc::new(Dispatcher::new(
-        Arc::new(SmileWriter::new(smile, folio)),
+        Arc::new(SmileWriter::new(smile, folio).with_earn(EarnPath {
+            pairs: PairSource::new(earn_settings(settings)),
+            hub: earn_hub.clone(),
+            env: env.clone(),
+        })),
         Some(gate),
         DispatchSettings {
             origin_code: cfg.origin_code.clone(),
@@ -305,6 +326,15 @@ fn dispatcher(
             extra_bed_mode: w.extra_bed_mode.clone(),
         },
     )))
+}
+
+/// `EarnOptions` plus the configured extra-bed code, for every earn path.
+pub(crate) fn earn_settings(settings: &Settings) -> EarnSettings {
+    EarnSettings {
+        charge_codes: settings.smile.earn_charge_codes.clone(),
+        member_discount_code: settings.smile.member_discount_code.clone(),
+        extra_bed_special_code: settings.smile.extra_bed_special_code.clone(),
+    }
 }
 
 /// The module thread's loop: commands, reports, metrics, health and worker crashes.

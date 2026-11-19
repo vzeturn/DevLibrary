@@ -38,6 +38,8 @@ pub enum J {
     Arr(Vec<J>),
     /// An object, properties in declaration order.
     Obj(Vec<(&'static str, J)>),
+    /// A dictionary (`IReadOnlyDictionary<string, T>`): run-time keys in insertion order.
+    Map(Vec<(String, J)>),
 }
 
 impl J {
@@ -148,21 +150,24 @@ impl J {
                 }
                 out.push(']');
             }
-            J::Obj(props) => {
-                out.push('{');
-                for (i, (k, v)) in props.iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    out.push('"');
-                    escape_into(out, k);
-                    out.push_str("\":");
-                    v.write(out);
-                }
-                out.push('}');
-            }
+            J::Obj(props) => write_props(out, props.iter().map(|(k, v)| (*k, v))),
+            J::Map(props) => write_props(out, props.iter().map(|(k, v)| (k.as_str(), v))),
         }
     }
+}
+
+fn write_props<'a>(out: &mut String, props: impl Iterator<Item = (&'a str, &'a J)>) {
+    out.push('{');
+    for (i, (k, v)) in props.enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        escape_into(out, k);
+        out.push_str("\":");
+        v.write(out);
+    }
+    out.push('}');
 }
 
 /// Appends `s` escaped the way the default `JavaScriptEncoder` escapes it.

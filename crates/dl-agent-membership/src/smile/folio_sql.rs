@@ -20,7 +20,8 @@ use crate::folio::earn::{EarnPair, filter};
 /// `SqlServerInParamLimit`.
 pub(crate) const IN_LIMIT: usize = 500;
 
-const CATALOG_SQL: &str = "\
+/// `EarnPairReader.CatalogSql`.
+pub(crate) const CATALOG_SQL: &str = "\
 SELECT LTRIM(RTRIM(TransactionCode)) AS Code, LTRIM(RTRIM(TransactionSubCode)) AS Sub,
        ISNULL(AutoPost, 0) AS AutoPost
 FROM dbo.TransactionCode;
@@ -172,36 +173,42 @@ fn folio_row(r: &Row) -> Result<FolioRow, SmileError> {
     })
 }
 
+/// The `@ExtraBedCode` parameter of [`CATALOG_SQL`] (`DbString` ansi, length 10).
+pub(crate) fn catalog_params(extra_bed_code: &str) -> [Param; 1] {
+    [Param::new(
+        "ExtraBedCode",
+        ParamValue::VarChar(Some(extra_bed_code.to_owned())),
+    )]
+}
+
+/// The five result sets of [`CATALOG_SQL`].
+pub(crate) fn catalog_from_sets(sets: &[Vec<Row>]) -> Result<EarnCatalog, SmileError> {
+    let transaction_codes = sets
+        .first()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .map(|r| {
+            Ok((
+                CodeRow {
+                    code: rows::text(r, "Code")?,
+                    sub: rows::opt_str(r, "Sub")?,
+                },
+                rows::int(r, "AutoPost")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, SmileError>>()?;
+    Ok(EarnCatalog {
+        transaction_codes,
+        room_types: code_rows(sets.get(1))?,
+        packages: code_rows(sets.get(2))?,
+        globals: code_rows(sets.get(3))?,
+        specials: code_rows(sets.get(4))?,
+    })
+}
+
 impl FolioSource for TdsSmile {
     fn earn_catalog(&self, extra_bed_code: &str) -> Result<EarnCatalog, SmileError> {
-        let sets = self.sets(
-            CATALOG_SQL,
-            &[Param::new(
-                "ExtraBedCode",
-                ParamValue::VarChar(Some(extra_bed_code.to_owned())),
-            )],
-        )?;
-        let transaction_codes = sets
-            .first()
-            .map_or(&[][..], Vec::as_slice)
-            .iter()
-            .map(|r| {
-                Ok((
-                    CodeRow {
-                        code: rows::text(r, "Code")?,
-                        sub: rows::opt_str(r, "Sub")?,
-                    },
-                    rows::int(r, "AutoPost")?,
-                ))
-            })
-            .collect::<Result<Vec<_>, SmileError>>()?;
-        Ok(EarnCatalog {
-            transaction_codes,
-            room_types: code_rows(sets.get(1))?,
-            packages: code_rows(sets.get(2))?,
-            globals: code_rows(sets.get(3))?,
-            specials: code_rows(sets.get(4))?,
-        })
+        catalog_from_sets(&self.sets(CATALOG_SQL, &catalog_params(extra_bed_code))?)
     }
 
     fn room_charge_trn_since(&self, watermark: DateTime) -> Result<Vec<i64>, SmileError> {

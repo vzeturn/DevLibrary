@@ -17,6 +17,7 @@
 
 pub mod availability;
 pub mod config;
+pub mod earn;
 pub mod enroll;
 pub mod folio;
 pub mod hub;

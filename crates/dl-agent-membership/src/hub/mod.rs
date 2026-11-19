@@ -9,10 +9,10 @@
 //! "held" (the hub keeps the report because the source database is not confirmed yet), which
 //! counts as accepted and is never resent.
 //!
-//! `jobs/ack` is the M2 write side. Not ported yet: `earn`,
-//! `earn/walk-in`, `bookings/pending-checkout`, `bookings/pms-cancelled`, `folio-revenue`,
-//! `checkout-scan-summary`, `pms/extra-bed-terms`, `pms/special-services`, `update/*`.
+//! `jobs/ack` is the M2 write side; the earn routes are in [`earn`]. Not ported yet:
+//! `pms/extra-bed-terms`, `pms/special-services`, `update/*`.
 
+pub mod earn;
 pub mod gate;
 
 use std::fmt;
