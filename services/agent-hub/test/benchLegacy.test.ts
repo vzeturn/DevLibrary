@@ -255,6 +255,7 @@ describe.skipIf(!pwsh)('bench script: Remove-Legacy (pwsh, fakes for the Windows
       sql_names: [],
       sql_parts: true,
       remove_legacy: true,
+      sql_grant_service: true,
     });
     expect(script).not.toMatch(/`|\$\{/);
     const dir = mkdtempSync(join(tmpdir(), 'bench-ps-'));
@@ -286,6 +287,46 @@ describe.skipIf(!pwsh)('bench script: Remove-Legacy (pwsh, fakes for the Windows
         b: '.|||windows',
         c: 'it needs SQL Server for {{SQL_SERVER}} and none is connected',
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('bench: reruns and the service login (RT-0164 test PC)', () => {
+  it('grants NT AUTHORITY\\SYSTEM only when sql_grant_service is set', async () => {
+    const off = await scriptFor();
+    expect(off.script).toContain('$SqlGrantService = $false');
+    const on = await scriptFor({ sql_grant_service: true });
+    expect(on.script).toContain('$SqlGrantService = $true');
+    expect(on.script).toContain('if ($SqlGrantService) { Grant-ServiceLogin $c }');
+    expect(on.script).toContain("EXEC sp_addrolemember N'db_owner', N'NT AUTHORITY\\SYSTEM'");
+    expect((await admin(env, 'POST', '/admin/bench', body({ sql_grant_service: 'yes' }))).status).toBe(400);
+  });
+
+  it('a rerun keeps the dl-agent already enrolled for the tenant instead of installing again', () => {
+    const script = benchScript({
+      hub: BASE, label: 'bench', tenant_id: 'bench-demo', site_id: 'test-pc', expires_at: T0, code: 'ABCD-EFGH-JKLM-NPQR',
+      steps: [EINVOICE_STEP], sql_databases: [], sql_fixups: [], sql_names: [], sql_parts: false, remove_legacy: true, sql_grant_service: false,
+    });
+    expect(script.indexOf('$kept = Get-EnrolledAgent')).toBeLessThan(script.indexOf("/install.ps1')))"));
+    const fn = /^function Get-EnrolledAgent[\s\S]*?\n}\n/m.exec(script)?.[0] ?? '';
+    expect(fn).not.toBe('');
+    const dir = mkdtempSync(join(tmpdir(), 'bench-kept-'));
+    try {
+      const exe = join(dir, 'dl-agent.exe');
+      writeFileSync(exe, '');
+      const run = (tenant: string): string => {
+        writeFileSync(join(dir, 'identity.json'), JSON.stringify({ agent_id: 'a-1', tenant, site: 'test-pc' }));
+        const test = join(dir, 'kept.ps1');
+        writeFileSync(test, [
+          'function Warn($m) {}', 'function Get-Service { return @{ Name = \'dl-agent\' } }',
+          `$Data = '${dir}'`, `$Exe = '${exe}'`, "$Product = 'dl-agent'", "$Tenant = 'bench-demo'", fn, "'[' + (Get-EnrolledAgent) + ']'",
+        ].join('\n'));
+        return execFileSync('pwsh', ['-NoProfile', '-File', test]).toString().trim();
+      };
+      expect(run('bench-demo')).toBe('[a-1]');
+      expect(run('other-tenant')).toBe('[]');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -46,6 +46,7 @@ export async function createBench(env: Env, body: BenchBody, origin: string, now
     sql_databases: body.sql_databases,
     sql_fixups: body.sql_fixups,
     remove_legacy: body.remove_legacy,
+    sql_grant_service: body.sql_grant_service,
   };
   const expires_at = now + ttl;
   try {
@@ -110,5 +111,6 @@ export async function fetchBenchScript(env: Env, token: string, origin: string, 
     sql_names: sqlNamesOf(payload),
     sql_parts: usesSqlParts(payload.steps),
     remove_legacy: payload.remove_legacy ?? false,
+    sql_grant_service: payload.sql_grant_service ?? false,
   });
 }

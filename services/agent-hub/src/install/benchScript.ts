@@ -97,6 +97,7 @@ function Invoke-WithEnv([hashtable]$vars, [string[]]$argv, [string[]]$plain = @(
 }
 
 function Quote([string]$v) { return '"' + ($v -replace '"', '""') + '"' }
+function Bracket([string]$v) { return '[' + ($v -replace '\]', ']]') + ']' }
 function Ask([string]$label, [string]$default) {
   $a = Read-Host ($label + ' [' + $default + ']')
   if ($a) { return $a.Trim() } else { return $default }
@@ -107,6 +108,30 @@ function Read-Secret([string]$label) {
   try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 function Get-SqlConn([string]$db) { return $St.Sql + 'Database=' + (Quote $db) + ';' }
+
+# sql_grant_service (test copies only): the agent service runs as LocalSystem, so under Windows
+# authentication NT AUTHORITY\SYSTEM gets a login, a user and db_owner in each registered database.
+# sp_addrolemember keeps SQL Server 2008 working. Failures are reported, never fatal.
+function Grant-ServiceLogin($c) {
+  $acct = 'NT AUTHORITY\SYSTEM'
+  try {
+    $cmd = $c.CreateCommand()
+    $cmd.CommandText = "IF SUSER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE LOGIN [NT AUTHORITY\SYSTEM] FROM WINDOWS"
+    [void]$cmd.ExecuteNonQuery()
+  } catch { Warn ('Could not create the SQL login ' + $acct + ': ' + $_.Exception.Message); return }
+  foreach ($n in $SqlDatabases) {
+    try {
+      $cmd = $c.CreateCommand()
+      $cmd.CommandText = 'USE ' + (Bracket $n) + "; IF USER_ID(N'NT AUTHORITY\SYSTEM') IS NULL CREATE USER [NT AUTHORITY\SYSTEM] FOR LOGIN [NT AUTHORITY\SYSTEM]; EXEC sp_addrolemember N'db_owner', N'NT AUTHORITY\SYSTEM'; USE master;"
+      [void]$cmd.ExecuteNonQuery()
+      Good ('SQL ' + $n + ': ' + $acct + ' (the agent service) is db_owner.')
+      Add-Result ('sql-grant ' + $n) 'ok' $acct
+    } catch {
+      Warn ('SQL ' + $n + ': could not give ' + $acct + ' access: ' + $_.Exception.Message)
+      Add-Result ('sql-grant ' + $n) 'FAILED' $_.Exception.Message
+    }
+  }
+}
 
 # Connects to master with the server part of the connection, then looks up each database by name.
 function Use-Sql([string]$base) {
@@ -128,7 +153,8 @@ function Use-Sql([string]$base) {
       else { Say ('Database ' + $n + ' found.') }
     }
     if ($b.IntegratedSecurity) {
-      Warn 'Windows authentication: the agent service runs as LocalSystem, so NT AUTHORITY\SYSTEM needs a login on this SQL Server (or use a SQL login).'
+      if ($SqlGrantService) { Grant-ServiceLogin $c }
+      else { Warn 'Windows authentication: the agent service runs as LocalSystem, so NT AUTHORITY\SYSTEM needs a login and a user in each database on this SQL Server (or use a SQL login).' }
     }
     # The same connection, field by field, for tools that take them separately ({{SQL_SERVER}} ...).
     if ($b.IntegratedSecurity) { $St.Parts = @{ SQL_SERVER = $b.DataSource; SQL_USER = ''; SQL_PASSWORD = ''; SQL_AUTH = 'windows' } }
@@ -303,6 +329,15 @@ function Skip-Rest([string]$why) {
   Add-Result 'selftest' 'skipped' $why
 }
 
+# The agent id when dl-agent is installed, running as a service and enrolled for $Tenant; else ''.
+function Get-EnrolledAgent {
+  $idFile = Join-Path $Data 'identity.json'
+  if (-not ((Test-Path $Exe) -and (Test-Path $idFile) -and [bool](Get-Service -Name $Product -ErrorAction SilentlyContinue))) { return '' }
+  try { $id = Get-Content -Raw -Path $idFile | ConvertFrom-Json } catch { Warn ('identity.json unreadable (' + $_.Exception.Message + '): installing again.'); return '' }
+  if ([string]$id.tenant -ne $Tenant) { return '' }
+  return [string]$id.agent_id
+}
+
 # SQL Server, fixups, install, databases, steps, restart and self test.
 function Invoke-Bench {
   if ($SqlNames.Count -gt 0 -or $SqlParts) {
@@ -323,15 +358,22 @@ function Invoke-Bench {
   } else {
     # install.ps1 runs without its Replace option: the older agents were removed above, or (remove_legacy
     # off) stay installed and running next to dl-agent.
-    Say 'Running the hub installer (install.ps1 -Channel canary)...'
-    $wc = New-Object Net.WebClient
-    $wc.Headers.Add('Cache-Control', 'no-cache')
-    $wc.Encoding = [Text.Encoding]::UTF8
-    & ([scriptblock]::Create($wc.DownloadString($Hub + '/install.ps1'))) -Code $Code -Channel canary
+    # A run of the link again on a PC whose dl-agent is already enrolled for this tenant keeps
+    # that agent (and its identity) and only runs the steps, so a rerun never adds a second agent.
+    $kept = Get-EnrolledAgent
+    if ($kept) {
+      Good ('dl-agent is already installed and enrolled for tenant ' + $Tenant + ' (agent ' + $kept + '): keeping it; only the steps run again.')
+    } else {
+      Say 'Running the hub installer (install.ps1 -Channel canary)...'
+      $wc = New-Object Net.WebClient
+      $wc.Headers.Add('Cache-Control', 'no-cache')
+      $wc.Encoding = [Text.Encoding]::UTF8
+      & ([scriptblock]::Create($wc.DownloadString($Hub + '/install.ps1'))) -Code $Code -Channel canary
+    }
     $installed = (Test-Path $Exe) -and (Test-Path (Join-Path $Data 'identity.json')) -and [bool](Get-Service -Name $Product -ErrorAction SilentlyContinue)
 
     if ($installed) {
-      Add-Result 'install' 'ok' ''
+      Add-Result 'install' 'ok' $(if ($kept) { 'kept the enrolled agent' } else { '' })
       New-Item -ItemType Directory -Force -Path $BenchDir | Out-Null
       foreach ($n in $SqlDatabases) { Invoke-SqlAdd $n }
       foreach ($s in $Steps) { Invoke-Step $s }
@@ -425,6 +467,8 @@ export interface BenchScriptInput {
   sql_parts: boolean;
   /** Remove the older per-product agents before anything is installed (otherwise only list them). */
   remove_legacy: boolean;
+  /** Windows authentication: grant NT AUTHORITY\\SYSTEM db_owner in `sql_databases`. */
+  sql_grant_service: boolean;
 }
 
 export function benchScript(b: BenchScriptInput): string {
@@ -442,6 +486,7 @@ export function benchScript(b: BenchScriptInput): string {
     `$Fixups = @(\n${b.sql_fixups.map(psFixup).join(',\n')}\n)`,
     `$SqlParts = ${b.sql_parts ? '$true' : '$false'}`,
     `$RemoveLegacy = ${b.remove_legacy ? '$true' : '$false'}`,
+    `$SqlGrantService = ${b.sql_grant_service ? '$true' : '$false'}`,
     `$LegacyPattern = ${psQuote(LEGACY_SERVICE_PATTERN)}`,
     `$SqlServicePattern = ${psQuote(SQL_SERVICE_PATTERN)}`,
     `$SqlBinaryPattern = ${psQuote(SQL_BINARY_PATTERN)}`,
