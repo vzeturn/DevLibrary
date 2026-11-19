@@ -20,11 +20,12 @@ const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Adm
 #   & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('__HUB__/install.ps1'))) -Code 'XXXX-XXXX'
 # SQL login: asked when run interactively on a machine with SQL Server (or with -SqlPrompt):
 #   "SQL login: [1] Windows  [2] SQL login"; Enter keeps what this machine saved.
-#   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile] with the password
-#   in -SqlPassword or env DL_AGENT_SQL_PASSWORD (never echoed or logged; sealed with DPAPI).
+#   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile]; the password only
+#   from env DL_AGENT_SQL_PASSWORD or, run interactively, a hidden prompt (never a parameter,
+#   echoed or logged; sealed with DPAPI).
 #   A failed test prints the exact SQL error and exits 1; nothing is saved. With nothing saved
 #   the old Check-In agent's connection (Get-ArrivalLegacySql) is the default, its password included.
-#   With -Setup arrival-enroll the same -SqlAuth/-SqlUser/-SqlPassword reach it through env.
+#   With -Setup arrival-enroll the same -SqlAuth/-SqlUser and password reach it through env.
 # Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
 #          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
 #          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
@@ -41,7 +42,6 @@ param(
   [ValidateSet('', 'windows', 'sql')][string]$SqlAuth = '',
   [string]$SqlServer = '',
   [string]$SqlUser = '',
-  [string]$SqlPassword = $env:DL_AGENT_SQL_PASSWORD,
   [switch]$Reenroll,
   [switch]$NoDefender,
   [int]$LinkTimeout = 120,
@@ -215,8 +215,9 @@ function Read-SqlLogin {
 }
 
 # Unattended (-SqlAuth): unset values fall back to what this machine saved. Returns $false on a
-# failed test after printing the structured result (sql-setup.last.json).
-function Set-SqlLoginUnattended {
+# failed test after printing the structured result (sql-setup.last.json). $Password holds the
+# password from env DL_AGENT_SQL_PASSWORD; a password typed at the prompt is handed back in it.
+function Set-SqlLoginUnattended([ref]$Password) {
   $saved = Get-SavedSql
   $server = $SqlServer
   if (-not $server) { $server = $saved.server }
@@ -224,10 +225,13 @@ function Set-SqlLoginUnattended {
   if (-not $server) { $server = '.' }
   $user = $SqlUser
   if (-not $user) { $user = $saved.user }
-  $pw = $SqlPassword
+  $pw = $Password.Value
   if (-not $pw -and $SqlAuth -eq 'sql' -and $saved.password -and $user -eq $saved.user) {
-    Say 'No -SqlPassword: using the old Check-In agent''s password for this login.'
+    Say 'No DL_AGENT_SQL_PASSWORD: using the old Check-In agent''s password for this login.'
     $pw = $saved.password
+  } elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {
+    $pw = Read-Secret ('Password of SQL login ' + $user)
+    $Password.Value = $pw
   }
   $code = Invoke-SqlSetup $SqlAuth $server $user $pw
   $pw = $null
@@ -350,7 +354,10 @@ try {
   if ($SqlName -and $SqlConnection) {
     if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
   } elseif ($SqlAuth) {
-    $SqlFailed = -not (Set-SqlLoginUnattended)
+    # -- SQL password: env DL_AGENT_SQL_PASSWORD or the hidden prompt, never a parameter
+    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD
+    # -- end SQL password
+    $SqlFailed = -not (Set-SqlLoginUnattended ([ref]$SqlPassword))
     # arrival-enroll takes the same sign-in (below); otherwise the password is dropped now.
     if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }
     # Nothing was saved: a new machine stops before the code is spent; a reinstall comes back
@@ -380,7 +387,7 @@ try {
 
   if ($Setup) {
     Say ('Running setup: ' + $Setup)
-    # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser/-SqlPassword reach arrival-enroll through env
+    # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser and the password reach arrival-enroll through env
     #    only, never argv; the setup's secret env (token, PMS connection, tenant key, password) is
     #    removed right after it ran.
     $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')

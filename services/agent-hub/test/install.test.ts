@@ -60,7 +60,7 @@ describe('install script', () => {
     expect(loop).toContain('while ($true)');
     expect(loop).toContain('Choose again');
     // The SQL step runs before enrolment so a failure never spends the code.
-    const sql = text.indexOf('Set-SqlLoginUnattended)');
+    const sql = text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))');
     const enroll = text.indexOf("@('enroll', '--hub'");
     expect(sql).toBeGreaterThan(0);
     expect(enroll).toBeGreaterThan(sql);
@@ -71,7 +71,15 @@ describe('install script', () => {
     const text = await (await get('/install.ps1')).text();
     expect(text).toContain("[ValidateSet('', 'windows', 'sql')][string]$SqlAuth = ''");
     expect(text).toContain('[string]$SqlUser = ');
-    expect(text).toContain('[string]$SqlPassword = $env:DL_AGENT_SQL_PASSWORD');
+    // The password is never a parameter: env DL_AGENT_SQL_PASSWORD or the hidden prompt only.
+    const params = text.slice(text.indexOf('param('), text.indexOf('$ErrorActionPreference'));
+    expect(params).not.toMatch(/SqlPassword|Password/);
+    expect(text).not.toMatch(/-SqlPassword/);
+    expect(text).toContain('    $SqlPassword = $env:DL_AGENT_SQL_PASSWORD\n');
+    const unattended = text.slice(text.indexOf('function Set-SqlLoginUnattended([ref]$Password)'), text.indexOf('function Remove-OldCopies'));
+    expect(unattended).toContain("} elseif (-not $pw -and $SqlAuth -eq 'sql' -and [Environment]::UserInteractive) {");
+    expect(unattended).toContain("$pw = Read-Secret ('Password of SQL login ' + $user)");
+    expect(unattended).toContain('$Password.Value = $pw');
     // The password reaches the agent only through the environment, removed right after.
     expect(text).toContain('$env:DL_AGENT_SQL_PASSWORD = $pw');
     expect(text).toContain('Remove-Item Env:DL_AGENT_SQL_PASSWORD');
@@ -114,7 +122,7 @@ describe('install script', () => {
     const start = text.indexOf('# -- arrival sign-in');
     const end = text.indexOf('# -- end arrival sign-in');
     const block = text.slice(start, end);
-    expect(start).toBeGreaterThan(text.indexOf('Set-SqlLoginUnattended)'));
+    expect(start).toBeGreaterThan(text.indexOf('(Set-SqlLoginUnattended ([ref]$SqlPassword))'));
     expect(block).toContain("if ($Setup -eq 'arrival-enroll') {");
     expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth');
     expect(block).toContain('$env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser');
