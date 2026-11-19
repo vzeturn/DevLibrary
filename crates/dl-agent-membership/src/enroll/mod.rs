@@ -161,6 +161,7 @@ fn post_enroll(hub_url: &str, req: &EnrollRequest) -> Result<EnrollResponse, Str
     let http = dl_http::Client::with_options(ClientOptions {
         timeout: Some(ENROLL_TIMEOUT),
         user_agent: Some(agent_version().to_owned()),
+        proxy: crate::hub::proxy(),
         ..ClientOptions::default()
     });
     let resp = http

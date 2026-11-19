@@ -3,8 +3,8 @@
 //! Every request carries `Authorization: Bearer <token>` and `X-Hotel-Id: <uuid>`
 //! (`AgentAuthHandler`), a fresh `X-Correlation-Id` (`AgentCorrelationHandler`: 32 lower-case
 //! hex digits, so the hub's request log and error `traceId` name the call), and passes through
-//! the [`gate::TokenGate`]. Bodies are the [`crate::wire`] JSON, byte for byte what the .NET
-//! agent sends.
+//! the [`gate::TokenGate`]. Requests go through the proxy the dl-agent core chose
+//! ([`proxy`]). Bodies are the [`crate::wire`] JSON, byte for byte what the .NET agent sends.
 //!
 //! Older-hub fallbacks kept from .NET: `POST jobs/pull` answered 404/405 falls back to
 //! `GET jobs`; a `null` sync-config means both syncs on; a 202 on folio-observations means
@@ -175,6 +175,23 @@ impl fmt::Debug for HubClient {
     }
 }
 
+/// The proxy the hub is reached through: the dl-agent core's choice (environment, then
+/// WinHTTP, then the service account's Internet Options), as the .NET `HttpClient` used the
+/// machine's proxy settings rather than only the environment.
+pub fn proxy() -> dl_http::Proxy {
+    dl_agent::proxy::current().proxy.clone()
+}
+
+/// The HTTP options of the hub client (`HttpClient.Timeout` 100 s, the .NET default).
+fn client_options(user_agent: &str) -> ClientOptions {
+    ClientOptions {
+        timeout: Some(Duration::from_secs(100)),
+        user_agent: Some(user_agent.to_owned()),
+        proxy: proxy(),
+        ..ClientOptions::default()
+    }
+}
+
 impl HubClient {
     /// A client for `hub_base_url` acting as `hotel_id` with `token`.
     pub fn new(
@@ -184,11 +201,7 @@ impl HubClient {
         user_agent: &str,
         gate: Arc<TokenGate>,
     ) -> Result<HubClient, HubError> {
-        let http = dl_http::Client::with_options(ClientOptions {
-            timeout: Some(Duration::from_secs(100)),
-            user_agent: Some(user_agent.to_owned()),
-            ..ClientOptions::default()
-        });
+        let http = dl_http::Client::with_options(client_options(user_agent));
         Ok(HubClient {
             base: base_address(hub_base_url)?,
             token: token.to_owned(),
@@ -433,6 +446,14 @@ mod tests {
         ] {
             assert_eq!(base_address(input).unwrap().to_string(), want, "{input}");
         }
+    }
+
+    #[test]
+    fn the_hub_client_uses_the_core_proxy_choice() {
+        let o = client_options("dl-agent/test");
+        assert_eq!(o.proxy, dl_agent::proxy::current().proxy);
+        assert_ne!(o.proxy, dl_http::Proxy::FromEnv);
+        assert_eq!(o.timeout, Some(Duration::from_secs(100)));
     }
 
     #[test]
