@@ -39,9 +39,14 @@ Notes:
   Defender, checks size + SHA-256, removes older copies (other services running the same exe, leftover
   processes, a service pointing elsewhere), optionally declares and tests SQL Server first (`-SqlPrompt`
   for a server on another machine, or `-SqlName`/`-SqlConnection`) so the code is not spent on a site that
-  cannot reach its database, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
+  cannot reach its database, chooses the SQL login (`[1] Windows [2] SQL login`, or unattended
+  `-SqlAuth windows|sql -SqlServer -SqlUser` with the password in `-SqlPassword` or env
+  `DL_AGENT_SQL_PASSWORD`; Enter keeps what this machine saved, else what the old Check-In agent used,
+  through the `Get-ArrivalLegacySql` hook of `installScript`), tested on every SMILE database before it is
+  saved, enrolls unless `identity.json` exists (re-runs keep the identity; `-Reenroll`
   replaces it), runs an optional product setup sub-command (`-Setup`, secrets through env
-  `DL_AGENT_SETUP_ARGS`, removed afterwards), only then removes a product's previous agent (`-Replace
+  `DL_AGENT_SETUP_ARGS`; for `arrival-enroll` the SQL login too, as env `DL_AGENT_ARRIVAL_SQL_AUTH`,
+  `DL_AGENT_ARRIVAL_SQL_USER`, `DL_AGENT_SQL_PASSWORD`, never argv; all removed afterwards), only then removes a product's previous agent (`-Replace
   '<service pattern>'`: services stopped and deleted, their processes ended, files kept, so any failure
   earlier leaves the old agent running), installs the service + watchdog, prints Kaspersky allow-list guidance with the exe hash, and
   waits for `heartbeat.json` to show a hub contact (`Connected`, or the last log lines and `status`).

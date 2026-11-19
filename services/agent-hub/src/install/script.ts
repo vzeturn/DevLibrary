@@ -8,8 +8,10 @@
  * the hub → Defender exclusion → download + size + SHA-256 → stop and remove older copies
  * (the old exe uninstalls itself, other services are deleted) → SQL login (PROTOCOL.md §9.8:
  * Windows or SQL login, defaulting to what this machine saved, tested on every SMILE database as
- * the service account before anything is saved, and before the code is spent) → enroll unless already enrolled (re-run keeps the identity)
- * → optional product setup sub-command (`-Setup`) → remove the product's previous agent
+ * the service account before anything is saved, and before the code is spent; with nothing saved, the
+ * old Check-In agent's connection from `Get-ArrivalLegacySql`) → enroll unless already enrolled (re-run
+ * keeps the identity) → optional product setup sub-command (`-Setup`; `arrival-enroll` also gets the SQL
+ * login through env) → remove the product's previous agent
  * (`-Replace`) only now, so a failure before this point leaves the old agent running → install
  * the service + watchdog → wait until the agent's heartbeat file shows a hub contact.
  */
@@ -20,7 +22,9 @@ const SCRIPT = String.raw`# DevLibrary Agent installer. Usage (PowerShell as Adm
 #   "SQL login: [1] Windows  [2] SQL login"; Enter keeps what this machine saved.
 #   Unattended: -SqlAuth windows|sql [-SqlServer .\SQLEXPRESS] [-SqlUser smile] with the password
 #   in -SqlPassword or env DL_AGENT_SQL_PASSWORD (never echoed or logged; sealed with DPAPI).
-#   A failed test prints the exact SQL error and exits 1; nothing is saved.
+#   A failed test prints the exact SQL error and exits 1; nothing is saved. With nothing saved
+#   the old Check-In agent's connection (Get-ArrivalLegacySql) is the default, its password included.
+#   With -Setup arrival-enroll the same -SqlAuth/-SqlUser/-SqlPassword reach it through env.
 # Options: -Channel canary, -SqlPrompt (SQL Server on another machine), -SqlName/-SqlConnection,
 #          -Reenroll (replace the identity), -NoDefender, -LinkTimeout <seconds>,
 #          -Setup <sub-command> (run after enroll; secrets reach it through env DL_AGENT_SETUP_ARGS,
@@ -129,13 +133,33 @@ function Read-Secret([string]$label) {
   try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
-# What this machine saved (sql-setup --show: auth, server, user, databases; never the password).
+# -- arrival legacy SQL (RT-0164): the old Check-In agent's SQL Server connection is the saved
+#    answer when this machine saved none. Get-ArrivalLegacySql (the arrival slice's body from
+#    src/install/arrival.ts, else a stub that finds nothing) is spliced below; it needs $St,
+#    Add-Secret and Warn. This script prints no transcript, so Add-Secret only keeps the list.
+$St = @{ SqlFrom = ''; Secrets = @() }
+function Add-Secret([string]$s) { if ($s) { $St.Secrets += $s } }
+__ARRIVAL_SQL__
+# Fills $s from the old agent's connection: mode, server, login and, in memory only, its password.
+function Add-LegacySql($s) {
+  $conn = [string](Get-ArrivalLegacySql)
+  if (-not $conn) { return }
+  try { $b = New-Object Data.SqlClient.SqlConnectionStringBuilder $conn } catch { Warn ('The old Check-In agent''s SQL connection was not understood: ' + $_.Exception.Message); return }
+  $s.server = $b.DataSource
+  $s.from = $St.SqlFrom
+  if ($b.IntegratedSecurity) { $s.auth = 'windows' } else { $s.auth = 'sql'; $s.user = $b.UserID; $s.password = $b.Password }
+}
+# -- end arrival legacy SQL
+
+# What this machine saved (sql-setup --show: auth, server, user, databases; never the password),
+# else what the old Check-In agent used (from and password set only then).
 function Get-SavedSql {
-  $s = @{ auth = ''; server = ''; user = ''; databases = '' }
+  $s = @{ auth = ''; server = ''; user = ''; databases = ''; from = ''; password = '' }
   foreach ($l in @(& $Exe sql-setup --show --data $Data 2>$null)) {
     $i = ([string]$l).IndexOf('=')
     if ($i -gt 0) { $s[([string]$l).Substring(0, $i)] = ([string]$l).Substring($i + 1) }
   }
+  if (-not $s.auth) { Add-LegacySql $s }
   return $s
 }
 
@@ -165,7 +189,11 @@ function Read-SqlLogin {
   if (-not $server) { $server = '.' }
   $user = $saved.user
   if (-not $user) { $user = 'sa' }
-  if ($saved.auth) { Say ('Saved SQL login: ' + $saved.auth + ' on ' + $saved.server + ' (' + $saved.databases + '). Enter keeps it.') }
+  if ($saved.from) {
+    Say ($saved.from + ': ' + $saved.auth + ' login on ' + $saved.server + '. Enter keeps it.')
+  } elseif ($saved.auth) {
+    Say ('Saved SQL login: ' + $saved.auth + ' on ' + $saved.server + ' (' + $saved.databases + '). Enter keeps it.')
+  }
   while ($true) {
     $mode = Ask 'SQL login: [1] Windows  [2] SQL login  [0] skip' $mode
     if ($mode -eq '0') { Warn 'SQL login not changed.'; return }
@@ -177,6 +205,7 @@ function Read-SqlLogin {
       $auth = 'sql'
       $user = Ask 'SQL login name' $user
       if ($saved.auth -eq 'sql' -and $user -eq $saved.user) { $pw = Read-Secret 'Password (Enter keeps the saved one)' } else { $pw = Read-Secret 'Password' }
+      if (-not $pw -and $saved.password -and $user -eq $saved.user) { $pw = $saved.password }
     }
     $code = Invoke-SqlSetup $auth $server $user $pw
     $pw = $null
@@ -195,7 +224,13 @@ function Set-SqlLoginUnattended {
   if (-not $server) { $server = '.' }
   $user = $SqlUser
   if (-not $user) { $user = $saved.user }
-  $code = Invoke-SqlSetup $SqlAuth $server $user $SqlPassword
+  $pw = $SqlPassword
+  if (-not $pw -and $SqlAuth -eq 'sql' -and $saved.password -and $user -eq $saved.user) {
+    Say 'No -SqlPassword: using the old Check-In agent''s password for this login.'
+    $pw = $saved.password
+  }
+  $code = Invoke-SqlSetup $SqlAuth $server $user $pw
+  $pw = $null
   if ($code -eq 0) { Say ('SQL login ' + $SqlAuth + ' tested and saved.'); return $true }
   if (Test-Path $SqlResult) { Write-Host ('[dl-agent] SQL_SETUP_RESULT ' + [IO.File]::ReadAllText($SqlResult).Trim()) }
   return $false
@@ -316,7 +351,8 @@ try {
     if (-not (Add-Sql $SqlName $SqlConnection)) { throw ('SQL ' + $SqlName + ' did not connect; nothing was enrolled.') }
   } elseif ($SqlAuth) {
     $SqlFailed = -not (Set-SqlLoginUnattended)
-    $SqlPassword = $null
+    # arrival-enroll takes the same sign-in (below); otherwise the password is dropped now.
+    if ($Setup -ne 'arrival-enroll') { $SqlPassword = $null }
     # Nothing was saved: a new machine stops before the code is spent; a reinstall comes back
     # with its previous SQL settings and reports sql_setup_failed to the hub.
     if ($SqlFailed -and -not $enrolled) { throw 'The SQL login test failed (see above); nothing was saved or enrolled.' }
@@ -344,7 +380,21 @@ try {
 
   if ($Setup) {
     Say ('Running setup: ' + $Setup)
-    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally { Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue }
+    # -- arrival sign-in (RT-0164): -SqlAuth/-SqlUser/-SqlPassword reach arrival-enroll through env
+    #    only, never argv; the setup's secret env (token, PMS connection, tenant key, password) is
+    #    removed right after it ran.
+    $SetupSecrets = @('DL_AGENT_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_TENANT_KEY', 'DL_AGENT_ARRIVAL_SQL_AUTH', 'DL_AGENT_ARRIVAL_SQL_USER', 'DL_AGENT_SQL_PASSWORD')
+    if ($Setup -eq 'arrival-enroll') {
+      if ($SqlAuth) { $env:DL_AGENT_ARRIVAL_SQL_AUTH = $SqlAuth }
+      if ($SqlUser) { $env:DL_AGENT_ARRIVAL_SQL_USER = $SqlUser }
+      if ($SqlPassword) { $env:DL_AGENT_SQL_PASSWORD = $SqlPassword }
+    }
+    $SqlPassword = $null
+    # -- end arrival sign-in
+    try { $ok = Invoke-Agent @($Setup, '--data', $Data) } finally {
+      Remove-Item Env:DL_AGENT_SETUP_ARGS -ErrorAction SilentlyContinue
+      foreach ($n in $SetupSecrets) { Remove-Item ('Env:' + $n) -ErrorAction SilentlyContinue }
+    }
     if (-not $ok) { throw ('Setup ' + $Setup + ' failed (see above). The previous agent, if any, is still running.') }
   }
   Remove-Replaced
@@ -374,9 +424,20 @@ try {
 }
 `;
 
-/** The installer with this hub's origin as its default hub and `hubs` (HUB_URLS) as the enrolment fallbacks. */
-export function installScript(origin: string, hubs: readonly string[] = []): string {
-  return SCRIPT.split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
+/**
+ * Arrival hook (RT-0164 SMILE100): `Get-ArrivalLegacySql` returns the old Check-In agent's SQL
+ * Server connection (server part, its authentication, '' when none) for `Get-SavedSql` to offer.
+ * The arrival slice ships it as `ARRIVAL_LEGACY_SQL_BODY` in `./arrival`; until that is the
+ * default of `installScript` below, this stub finds nothing and nothing changes.
+ */
+export const ARRIVAL_SQL_STUB = String.raw`function Get-ArrivalLegacySql { return '' }`;
+
+/**
+ * The installer with this hub's origin as its default hub, `hubs` (HUB_URLS) as the enrolment
+ * fallbacks and `arrivalSql` as the `Get-ArrivalLegacySql` body.
+ */
+export function installScript(origin: string, hubs: readonly string[] = [], arrivalSql: string = ARRIVAL_SQL_STUB): string {
+  return SCRIPT.split('__ARRIVAL_SQL__').join(arrivalSql).split('__HUBS__').join(hubs.join(',')).split('__HUB__').join(origin);
 }
 
 /** The one-liner an admin pastes (PowerShell 2.0 safe; the code stays out of the URL). */
