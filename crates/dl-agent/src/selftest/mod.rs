@@ -10,7 +10,7 @@
 //! Nothing secret goes into a check: details pass [`sanitize`] (connection-string passwords,
 //! tokens, bearer values, URL credentials and long key-like blobs are masked).
 
-mod checks_core;
+pub(crate) mod checks_core;
 mod checks_hub;
 pub mod cli;
 mod execute;

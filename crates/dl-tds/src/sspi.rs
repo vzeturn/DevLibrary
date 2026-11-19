@@ -50,7 +50,14 @@ mod sys {
 }
 
 /// An SSPI Negotiate client context with the current user's credentials.
-pub(crate) struct Negotiate(sys::Context);
+pub(crate) struct Negotiate(Inner);
+
+enum Inner {
+    Os(sys::Context),
+    /// A scripted package for the token-flow tests (any platform).
+    #[cfg(test)]
+    Fake(fake::Package),
+}
 
 impl Negotiate {
     /// Acquires the current user's outbound credentials.
@@ -58,22 +65,78 @@ impl Negotiate {
     /// # Errors
     /// [`Error::Unsupported`] outside Windows, [`Error::Sspi`] if SSPI refuses.
     pub(crate) fn acquire() -> Result<Negotiate, Error> {
-        sys::Context::acquire().map(Negotiate)
+        #[cfg(test)]
+        if let Some(p) = fake::take() {
+            return Ok(Negotiate(Inner::Fake(p)));
+        }
+        sys::Context::acquire().map(|c| Negotiate(Inner::Os(c)))
     }
 
     /// The first token, for the service principal name `target`.
     pub(crate) fn initialize(&mut self, target: &str) -> Result<Vec<u8>, Error> {
-        self.0.initialize(target)
+        match &mut self.0 {
+            Inner::Os(c) => c.initialize(target),
+            #[cfg(test)]
+            Inner::Fake(p) => p.initialize(target),
+        }
     }
 
     /// The answer to a server token.
     pub(crate) fn next(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
-        self.0.next(input)
+        match &mut self.0 {
+            Inner::Os(c) => c.next(input),
+            #[cfg(test)]
+            Inner::Fake(p) => Ok(p.next(input)),
+        }
     }
 
     /// `true` once SSPI reported the context complete.
     pub(crate) fn is_done(&self) -> bool {
-        self.0.is_done()
+        match &self.0 {
+            Inner::Os(c) => c.is_done(),
+            #[cfg(test)]
+            Inner::Fake(p) => p.is_done(),
+        }
+    }
+}
+
+/// The scripted SSPI package of the token-flow tests: `NEGOTIATE` first, then
+/// `AUTH:<server token>` for each server token until `rounds` answers were given.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::cell::RefCell;
+
+    pub(crate) struct Package {
+        pub(crate) rounds: usize,
+        pub(crate) answered: usize,
+        pub(crate) targets: std::rc::Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Package {
+        pub(crate) fn initialize(&mut self, target: &str) -> Result<Vec<u8>, crate::Error> {
+            self.targets.borrow_mut().push(target.to_string());
+            Ok(b"NEGOTIATE".to_vec())
+        }
+        pub(crate) fn next(&mut self, input: &[u8]) -> Vec<u8> {
+            self.answered += 1;
+            [b"AUTH:".as_slice(), input].concat()
+        }
+        pub(crate) fn is_done(&self) -> bool {
+            self.answered >= self.rounds
+        }
+    }
+
+    thread_local! {
+        static NEXT: RefCell<Option<Package>> = const { RefCell::new(None) };
+    }
+
+    /// The next `Negotiate::acquire` on this thread returns `p`.
+    pub(crate) fn install(p: Package) {
+        NEXT.with(|n| *n.borrow_mut() = Some(p));
+    }
+
+    pub(crate) fn take() -> Option<Package> {
+        NEXT.with(|n| n.borrow_mut().take())
     }
 }
 

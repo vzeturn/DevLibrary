@@ -300,6 +300,28 @@ fn rung(stats: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// How the session got in, for the hub: `windows auth as NT AUTHORITY\SYSTEM to
+/// .\SQLEXPRESS (port 49172)`. `login` is the server's `SUSER_SNAME()` when the survey ran;
+/// never a password.
+pub(crate) fn reach(transport: &Value, login: Option<&str>) -> String {
+    let get = |k: &str| transport.get(k).and_then(Value::as_str);
+    let auth = get("auth").unwrap_or("sql");
+    let login = login.or_else(|| get("login")).unwrap_or("?");
+    let mut server = get("server").unwrap_or("?").to_string();
+    if let Some(i) = get("instance") {
+        server.push('\\');
+        server.push_str(i);
+    }
+    let port = transport
+        .get("resolved_port")
+        .and_then(Value::as_u64)
+        .or_else(|| transport.get("port").and_then(Value::as_u64));
+    match port {
+        Some(p) => format!("{auth} auth as {login} to {server} (port {p})"),
+        None => format!("{auth} auth as {login} to {server}"),
+    }
+}
+
 /// One database: connects, reads the survey warnings (C3) and, when the hub sent one with
 /// the command, probes the schema requirement (C4).
 fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Outcome {
@@ -312,14 +334,21 @@ fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Out
             ));
         }
     };
-    let transport = rung(&pool.stats());
+    let stats = pool.stats();
+    let transport = rung(&stats);
     let surveyed = pool
         .get()
         .and_then(|mut conn| survey::survey(&mut *conn, transport.as_deref()));
+    let login = surveyed
+        .as_ref()
+        .ok()
+        .and_then(|s| s.get("login"))
+        .and_then(Value::as_str);
     let mut detail = format!(
-        "connected in {} ms over {}",
+        "connected in {} ms over {}; {}",
         took.as_millis(),
-        transport.as_deref().unwrap_or("-")
+        transport.as_deref().unwrap_or("-"),
+        reach(&stats["transport"], login)
     );
     let (info, actionable): (Vec<String>, Vec<String>) = match &surveyed {
         Ok(s) => s

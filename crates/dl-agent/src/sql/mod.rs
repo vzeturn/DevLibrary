@@ -27,7 +27,7 @@ pub mod transport;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -50,6 +50,8 @@ pub struct TdsConnector {
     at: AtomicUsize,
     settled: AtomicBool,
     lock_timeout: Option<Duration>,
+    /// TCP port of the last session (0 = none yet): where a named instance resolved to.
+    port: AtomicU32,
 }
 
 impl TdsConnector {
@@ -70,6 +72,7 @@ impl TdsConnector {
             at: AtomicUsize::new(0),
             settled: AtomicBool::new(false),
             lock_timeout: Some(DEFAULT_LOCK_TIMEOUT),
+            port: AtomicU32::new(0),
         })
     }
 
@@ -97,7 +100,23 @@ impl TdsConnector {
             .then(|| self.rungs[self.at.load(Ordering::Acquire)])
     }
 
+    /// The TCP port the last session reached (a named instance's port comes from SQL
+    /// Browser), once one has connected.
+    pub fn resolved_port(&self) -> Option<u16> {
+        u16::try_from(self.port.load(Ordering::Acquire))
+            .ok()
+            .filter(|&p| p != 0)
+    }
+
     fn open(&self) -> Result<dl_tds::Client, dl_tds::Error> {
+        let c = self.open_rung()?;
+        if let Some(a) = c.peer_addr() {
+            self.port.store(u32::from(a.port()), Ordering::Release);
+        }
+        Ok(c)
+    }
+
+    fn open_rung(&self) -> Result<dl_tds::Client, dl_tds::Error> {
         let start = self.at.load(Ordering::Acquire);
         if self.settled.load(Ordering::Acquire) {
             // Once a rung worked, a later drop is an outage, not a reason to lower security.
@@ -163,6 +182,7 @@ impl Connector for TdsConnector {
             "server": self.config.host(),
             "instance": self.config.instance(),
             "port": self.config.port().map(u64::from),
+            "resolved_port": self.resolved_port().map(u64::from),
         })
     }
 }
@@ -534,5 +554,7 @@ pub fn options_from(entry: &Value) -> Result<PoolOptions, Error> {
     })
 }
 
+#[cfg(test)]
+mod tds_tests;
 #[cfg(test)]
 mod tests;

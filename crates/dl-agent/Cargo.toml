@@ -25,5 +25,8 @@ dl-tls.workspace = true
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 dl-cli.workspace = true
 
+[dev-dependencies]
+dl-tds = { workspace = true, features = ["fake-server"] }
+
 [lints]
 workspace = true

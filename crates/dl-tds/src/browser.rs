@@ -67,9 +67,22 @@ pub(crate) fn parse_response(msg: &[u8], instance: &str) -> Result<u16, Error> {
     )))
 }
 
+/// UDP port of the SQL Server Browser.
+pub(crate) const BROWSER_PORT: u16 = 1434;
+
 /// Asks the SQL Server Browser on `host` for the TCP port of `instance`.
 pub(crate) fn resolve(host: &str, instance: &str, timeout: Duration) -> Result<u16, Error> {
-    let addrs: Vec<_> = (host, 1434u16).to_socket_addrs()?.collect();
+    resolve_at(host, BROWSER_PORT, instance, timeout)
+}
+
+/// [`resolve`] against a browser listening on `port` (tests use a loopback fake).
+pub(crate) fn resolve_at(
+    host: &str,
+    port: u16,
+    instance: &str,
+    timeout: Duration,
+) -> Result<u16, Error> {
+    let addrs: Vec<_> = (host, port).to_socket_addrs()?.collect();
     let mut last = Error::Browser(format!("cannot resolve host '{host}'"));
     for addr in addrs {
         let bind = if addr.is_ipv4() {
@@ -101,6 +114,43 @@ mod tests {
         b.extend_from_slice(&(s.len() as u16).to_le_bytes());
         b.extend_from_slice(s.as_bytes());
         b
+    }
+
+    /// A one-shot browser on loopback: checks the request, answers with `answer`.
+    fn fake_browser(answer: Option<Vec<u8>>) -> (u16, std::thread::JoinHandle<Vec<u8>>) {
+        let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = sock.local_addr().unwrap().port();
+        let t = std::thread::spawn(move || {
+            let mut buf = [0u8; 256];
+            let (n, from) = sock.recv_from(&mut buf).unwrap();
+            if let Some(a) = answer {
+                sock.send_to(&a, from).unwrap();
+            }
+            buf[..n].to_vec()
+        });
+        (port, t)
+    }
+
+    #[test]
+    fn named_instance_resolves_over_udp() {
+        let (port, t) = fake_browser(Some(resp(
+            "ServerName;POS01;InstanceName;SQLEXPRESS;IsClustered;No;Version;10.50.1600.1;tcp;49172;;",
+        )));
+        let got = resolve_at("127.0.0.1", port, "sqlexpress", Duration::from_secs(2)).unwrap();
+        assert_eq!(got, 49172);
+        assert_eq!(t.join().unwrap(), b"\x04sqlexpress\x00");
+    }
+
+    #[test]
+    fn silent_or_unknown_browser_is_a_browser_error() {
+        let (port, t) = fake_browser(None);
+        let e = resolve_at("127.0.0.1", port, "SMILE", Duration::from_millis(300)).unwrap_err();
+        assert!(matches!(e, Error::Browser(_)), "{e:?}");
+        t.join().unwrap();
+        let (port, t) = fake_browser(Some(resp("ServerName;H;InstanceName;OTHER;tcp;1500;;")));
+        let e = resolve_at("127.0.0.1", port, "SMILE", Duration::from_secs(2)).unwrap_err();
+        assert!(e.to_string().contains("SMILE"), "{e}");
+        t.join().unwrap();
     }
 
     #[test]

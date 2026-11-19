@@ -7,6 +7,8 @@ mod codepages;
 mod collation;
 mod config;
 mod error;
+#[cfg(any(test, feature = "fake-server"))]
+pub mod fake;
 mod login;
 mod packet;
 mod params;
