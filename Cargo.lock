@@ -44,6 +44,7 @@ dependencies = [
  "dl-agent",
  "dl-agent-backup",
  "dl-agent-einvoice",
+ "dl-agent-hotellink",
  "dl-agent-pms",
  "dl-agent-pms-device",
 ]
@@ -62,6 +63,23 @@ dependencies = [
  "dl-tds",
  "dl-time",
  "dl-uuid",
+ "dl-winos",
+ "dl-winsvc",
+]
+
+[[package]]
+name = "dl-agent-hotellink"
+version = "0.2.1"
+dependencies = [
+ "dl-agent",
+ "dl-cli",
+ "dl-encoding",
+ "dl-hash",
+ "dl-http",
+ "dl-json",
+ "dl-log",
+ "dl-tds",
+ "dl-time",
  "dl-winos",
  "dl-winsvc",
 ]
