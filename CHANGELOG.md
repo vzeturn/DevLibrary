@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-pda-sync: the PDAOrder SQL sync agent as the opt-in `pda-sync` module of dl-agent (SMILE_POS capture, outbox and blob upload, heartbeat, command channel with exactly-once site commands, staff sync, order grants monitor, print relay), with the `pda-enroll` and `pda-grants` tools, selftest rows and the hub commands `status`, `selftest` and `capture_dry_run`. Sites uninstall the old PdaSyncAgent and enrol fresh (docs/plans/2026-11-19-pda-sync-plan.md, RT-0164).
 - dl-agent-einvoice: run-time SQL transport ladder from core (step-downs reported as `einvoice_sql_transport`); `sql_source = site` reads the machine's sql.json; hub check commands `status`, `selftest`, `collect_dry_run` and `writeback_probe` (both read-only) (RT-0164).
 - dl-agent-einvoice: `einvoice-enroll --switch` replaces the Go agent by a fresh enrolment; data continuity via SQL marks and idempotent write-back (RT-0164).
 - agent-hub: E-Invoice pilot script and bench helpers; install.ps1 (thin and legacy) clears `DL_AGENT_EINVOICE_TOKEN` after the setup (RT-0164).
