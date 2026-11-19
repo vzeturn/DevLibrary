@@ -13,6 +13,12 @@ and diagnostics; this crate brings everything that reads or writes `SMILE_POS`.
 - **Commands** (`commands`): the cloud's site commands (KDS, reservations, order verbs,
   covers, combo, table moves) in one SQL transaction each, journalled in
   `Pda_SyncCommandLog` so a redelivered command is never applied twice (ADR 0029/0100).
+- **Verify** (`commands::verify`, `capture::{shadow_manifest, key_repair}`): the cloud's
+  `sync.verify` compares the shadow with `GET /sync/v1/manifest` per bucket, narrows a
+  mismatch to row keys (`/sync/v1/manifest/keys`) queued in `outbox.db`'s `key_repair`, and
+  the capture's `key-repair` job resends or tombstones them (ADR 0126/0128). This heals
+  rows deleted while no agent ran (fresh enrol). Open-check tables and tables that tolerate
+  duplicate rows (`CashierRVC`) are not repaired by key, as in C#.
 - **Bootstrap** (`bootstrap`): the `pda_sync` login, the `Pda_Sync*` tables and the
   grants `010`–`090`, run by `dl-agent pda-enroll` under the operator's Windows login or a
   SQL admin (`PDA_SQL_ADMIN_PASSWORD`).

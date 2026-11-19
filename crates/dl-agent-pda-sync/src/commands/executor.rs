@@ -123,6 +123,7 @@ pub struct SiteCommandExecutor {
     clock: SharedClock,
     log: Logger,
     resnapshot: Option<Arc<ResnapshotCommandHandler>>,
+    verify: Option<Arc<super::verify::VerifyCommandHandler>>,
     nudge: Option<Arc<dyn CaptureNudge>>,
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
@@ -146,6 +147,7 @@ impl SiteCommandExecutor {
             clock,
             log,
             resnapshot: None,
+            verify: None,
             nudge: None,
             grants: None,
             schema,
@@ -155,6 +157,12 @@ impl SiteCommandExecutor {
     /// Runs `sync.resnapshot` with `handler` (without one the type is unknown).
     pub fn with_resnapshot(mut self, handler: Arc<ResnapshotCommandHandler>) -> Self {
         self.resnapshot = Some(handler);
+        self
+    }
+
+    /// Runs `sync.verify` with `handler` (without one the type is unknown).
+    pub fn with_verify(mut self, handler: Arc<super::verify::VerifyCommandHandler>) -> Self {
+        self.verify = Some(handler);
         self
     }
 
@@ -234,6 +242,10 @@ impl SiteCommandExecutor {
             s::RESERVATION_CANCEL => self.reservation_cancel(c, ctx),
             s::SYNC_RESNAPSHOT => match &self.resnapshot {
                 Some(h) => h.execute(c),
+                None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
+            },
+            s::SYNC_VERIFY => match &self.verify {
+                Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
             o::CHECK_OPEN => self.check_open(c, ctx),

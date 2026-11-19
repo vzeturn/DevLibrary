@@ -72,6 +72,8 @@ Dropped from the port:
 | SQL Server 2022 RTM-CU27 (16.0.4295.3) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 | SQL Server 2017 RTM-CU31-GDR (14.0.3570.2) | 1/1 (22 batches, 18 streams) | 1/1 | 3/3 | 4/4 | 1/1 |
 
+Slice B1 (2026-11-19) adds `verify_live` to the script: 1/1 on SQL Server 2022 (16) and 2017 (14), with the other live tests still green on both.
+
 The tests run in a Linux container of the repo's build image (`scripts/xbuild/Dockerfile`), not on the macOS host. The agent connects with `Encrypt=Required`, and `dl-tls` has no macOS backend, so on macOS every agent-login connection fails with "error 0". Tests that only use the `encrypt=disable` admin URL pass on macOS too. Windows uses SChannel; it is covered only by the cross-target clippy (B6).
 
 `bootstrap_sql_live` used to assert `major >= 16`. It now asserts the preflight minimum (`MIN_MAJOR`, 11), so that it runs on the 2017 container as well.
@@ -104,7 +106,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 14 | TCVN3 text normalisation | ✅ | Port unit and golden tests |
 | 15 | Contracts byte-identical to C# | ✅ | Port golden tests (`contracts/tests/dotnet.rs`) |
 | 16 | Capture engine | ✅ | Live capture as `pda_sync` on 2017 and 2022 |
-| 17 | Snapshot, resnapshot, 424 parent wait | 🟡 | Snapshot live; key repair belongs to B1 |
+| 17 | Snapshot, resnapshot, 424 parent wait | ✅ | Snapshot live; key repair live (B1, `verify_live`) |
 | 18 | Outbox, uploader | ✅ | Port tests; live capture fills a SQLite outbox |
 | 19 | Blob queue | ✅ | Port tests (`outbox_uploaders`) |
 | 20 | Heartbeat, runtime config | ✅ | Port tests |
@@ -112,7 +114,7 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 | 22 | Exactly-once `kds.line_state`, reservations | ✅ | Live redelivery test on 2017 and 2022 |
 | 23 | Order verbs `open/post/send/void` | 🟡 | SQL text pinned byte for byte to C#; not yet executed live (B9) |
 | 24 | Combo, table change/transfer/merge | 🟡 | Same as 23 (B9) |
-| 25 | `sync.verify` and key repair | ❌ | B1 |
+| 25 | `sync.verify` and key repair | ✅ | B1: `commands/verify*.rs`, `capture/{shadow_manifest,key_repair}.rs`, `outbox/key_repairs.rs`; C# tests ported (`verify_handler`, `verify_contract`, `verify_repair`); wire JSON checked against .NET 10; `verify_live` on 2017 and 2022 |
 | 26 | Staff sync from `CashierDef` | ✅ | Live `staff_sql` on 2017 and 2022 |
 | 27 | Print relay engine | 🟡 | Wired and unit-tested; no real printer yet (B7) |
 | 28 | Print queue discovery | 🟡 | Windows-only; bench (B6, B7) |
@@ -126,6 +128,8 @@ Status: ✅ ready (code, unit tests and, where it touches SQL, a live test), �
 
 **Coverage:** 17 ✅ + 10 🟡 = 22/31 = **71.0%** (strict ✅ only: 17/31 = 54.8%). The audit baseline was 15.4%.
 
+After slice B1 (rows 17 and 25 ✅): 19 ✅ + 9 🟡 = 23.5/31 = **75.8%** (strict 19/31 = 61.3%).
+
 ## 2. Fresh-enrol analysis
 
 The owner asked whether a fresh enrol of a live site is safe, and what it costs. These are the findings from the PDA cloud code and ADRs 0029, 0100, 0102, 0109, 0126 and 0128, plus the agent code.
@@ -136,7 +140,7 @@ The owner asked whether a fresh enrol of a live site is safe, and what it costs.
 | Duplicate rows in the cloud | `sync.row_state` upserts per tenant by natural key, guarded by `src_ver`. A resnapshot rewrites the same keys with the same content. | **Yes** |
 | Cursors | Upload cursors and stream sequences are per `agent_id`. A new agent starts with no cursors and an empty `capture.db`, so it sends a **full snapshot of every stream**, including the closed-ledger history window (`historyMonths`, 24 by default). | Costly |
 | Cost | The catalog's sample site has about 1.05M rows in captured tables: about 0.97M closed ledger (`Trn` 172k, `CheckActivities` 140k, `KitchenOrderDetail` 135k, ...), 48k masters and 30k open-check rows. The upload rate is 8 batches per cycle. Expect hours of upload, during which the PDA reads lag. `capture_dry_run` gives the exact count per site before the cutover. | Plan it |
-| Deletions while no agent runs | The new `capture.db` has no shadow hashes. A row deleted or closed in SMILE_POS between the old agent's last cycle and the new agent's snapshot gets **no tombstone**. For example, a check closed in the gap would still look open in the cloud. The C# fix for this is `sync.verify` per bucket plus repair by key (ADR 0126/0128). The Rust port does **not** have it yet (phase B, slice B1). | Gap |
+| Deletions while no agent runs | The new `capture.db` has no shadow hashes. A row deleted or closed in SMILE_POS between the old agent's last cycle and the new agent's snapshot gets **no tombstone** from the snapshot. Since slice B1, one `sync.verify` heals it: the manifest mismatch is narrowed to keys and the capture's key-repair job tombstones them (`verify_repair`, `verify_live`). Two C# limits remain: open-check tables are never compared, so the open-check row of a check closed in the gap stays in the cloud's open set; and tables that tolerate duplicate rows (`CashierRVC`) are dropped by the key repair, so their deleted rows stay and are queued again by every verify. | Healed by B1, except open checks and `CashierRVC` |
 | Two agents at once | Both would capture, relay prints and lease commands. The journal keeps commands exactly-once, but prints could double. | Uninstall first |
 
 **Verdict.** A fresh enrol is safe for money and orders. It costs one full resnapshot, and it has a stale-row gap for anything deleted between the uninstall and the new snapshot.
@@ -146,7 +150,7 @@ Minimum procedure that makes it safe without carrying any state:
 2. Run `capture_dry_run` first, to size the upload.
 3. Uninstall the old agent, then run `dl-agent pda-enroll` in the same session, so the gap is minutes with no POS writes.
 4. Revoke the old agent in the PDA cloud.
-5. Before a wide rollout, port `sync.verify` (B1), so that any stale row heals by itself.
+5. Send `sync.verify` once after the first snapshot (cloud request 5); stale ledger and master rows heal by themselves. Doing the cutover with all checks closed (step 1) keeps the open-check limit out of the way.
 
 The alternative, only if the owner wants no resnapshot, is to carry over `capture.db` alone (shadow hashes and cursors, slice B8). It is the minimum state. It is not built, because cloud cursors are per `agent_id` and reusing them under a new agent needs a PDA cloud change. Do not build it without an owner decision.
 
@@ -179,7 +183,7 @@ Each slice can run in parallel with the others. The owned files are disjoint.
 
 | Slice | Work | Owned files | Size |
 |---|---|---|---|
-| B1 `sync.verify` + key repair | Port C# `VerifyCommandHandler` (bucket manifests vs shadow) and `SqliteOutbox.KeyRepairs` (ADR 0126/0128), with tests from the C# suite. This closes the fresh-enrol deletion gap. | `src/commands/verify*.rs`, `src/outbox/key_repairs*.rs`, `tests/verify_*.rs` | M |
+| B1 `sync.verify` + key repair (**done**, RT-0257) | Port C# `VerifyCommandHandler` (bucket manifests vs shadow) and `SqliteOutbox.KeyRepairs` (ADR 0126/0128), with tests from the C# suite. This closes the fresh-enrol deletion gap, except the two C# limits in §2. | `src/commands/verify*.rs`, `src/outbox/key_repairs*.rs`, `src/capture/{shadow_manifest,key_repair}.rs`, `tests/verify_*.rs` | M |
 | B2 file splits | 15 files are over 800 lines: `util/stj.rs` 1517, `commands/batches.rs` 1168, `hosting/host.rs` 1066, `contracts/time.rs` 1027, `reporting/format.rs` 976, `commands/executor.rs` 898, `config/providers.rs` 863, `capture/runner.rs` 839, `contracts/legacy/sql_store.rs` 823, plus the tests `commands_executor.rs` 1516, `outbox_uploaders.rs` 1117, `capture/strategy_tests.rs` 1040, `site_events.rs` 996, `contracts/tests/dotnet.rs` 810, `commands/tests/sql.rs` 806. Split them by responsibility and keep the public paths. Run the split after B1 for `commands/`. | the files listed | M |
 | B3 hub: uninstall the old agent + product gate | `install/pdaLegacy.ts`: stop and delete the `PdaSyncAgent` service and any `PdaSyncAgent*` scheduled task. Rename `%ProgramData%\MM\SyncAgent` to `SyncAgent.retired-<date>` for rollback; never delete it. Then run `dl-agent pda-enroll`. Also a `pda-sync` product requirement: SMILE_POS tables, the `pda_sync` login, `Pda_Sync*` tables, order grants. | `services/agent-hub/src/install/pda*.ts`, its tests | M |
 | B4 `pda-legacy-export --from-sql` | Port `legacy/export` as a Tool. It is IN only for the `--from-sql` path, which reads `dbo.Pda_*` in SMILE_POS (ADR 0094). | `src/legacy/export/**`, `src/module/tool.rs` (one tool), one `dl-agent-bin` line | M |

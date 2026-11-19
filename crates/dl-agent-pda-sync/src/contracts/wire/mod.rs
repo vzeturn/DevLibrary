@@ -11,6 +11,7 @@ mod site_commands;
 mod site_events;
 mod staff_sync;
 mod streams;
+mod sync_verify;
 mod table_commands;
 
 pub use blobs::{SyncBlobRef, SyncBlobRefBatch, SyncBlobRefsAck, blob_contract};
@@ -46,6 +47,10 @@ pub use staff_sync::{
     staff_sync_limits, staff_sync_routes,
 };
 pub use streams::sync_streams;
+pub use sync_verify::{
+    SyncVerifyCommandResult, SyncVerifyPayload, SyncVerifySkippedTable, SyncVerifyTableResult,
+    sync_verify_repair,
+};
 pub use table_commands::{
     OrderCheckExpectation, OrderCheckMergePayload, OrderItemsMovePayload, OrderMultiCheckResult,
     OrderTableChangePayload, OrderTableTransferPayload, multi_check_aggregate,

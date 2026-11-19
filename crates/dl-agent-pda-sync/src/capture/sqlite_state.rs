@@ -176,6 +176,33 @@ impl CaptureState for SqliteCaptureState {
         })
     }
 
+    fn count_shadow(&self, table: &str, ctx: &Ctx) -> Result<usize> {
+        self.with(ctx, |db| {
+            let rows = db.query(
+                "SELECT COUNT(*) FROM shadow WHERE tbl = $t",
+                &[&table],
+                |r| r.get::<i64>(0),
+            )?;
+            Ok(rows.first().map_or(0, |&n| usize::try_from(n).unwrap_or(0)))
+        })
+    }
+
+    fn scan_shadow(&self, table: &str, visit: &mut dyn FnMut(&str, &str), ctx: &Ctx) -> Result<()> {
+        self.with(ctx, |db| {
+            // One statement: SQLite reads it from a single WAL snapshot, so a concurrent
+            // capture commit is either wholly in or out.
+            db.query(
+                "SELECT key, hash FROM shadow WHERE tbl = $t",
+                &[&table],
+                |r| {
+                    visit(&r.get::<String>(0)?, &r.get::<String>(1)?);
+                    Ok(())
+                },
+            )?;
+            Ok(())
+        })
+    }
+
     fn commit(&self, commit: &StateCommit, ctx: &Ctx) -> Result<()> {
         self.with(ctx, |db| {
             let tx = db.transaction_with(TransactionBehavior::Immediate)?;

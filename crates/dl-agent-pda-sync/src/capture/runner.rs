@@ -433,16 +433,19 @@ impl Shared {
         let state = (self.deps.state)()?;
         // NoEchoSuppressor (ADR 0029): the effects of replayed site commands must reach the
         // cloud mirror through normal capture.
-        let engine = Arc::new(CaptureEngine::new(
-            options.clone(),
-            &catalog,
-            (self.deps.source)()?,
-            state,
-            Arc::new(OutboxBatchSink::new(queue.clone())),
-            Some(Arc::new(QueueBlobSink::new(self.deps.blobs.clone()))),
-            Some(Arc::new(NoEchoSuppressor)),
-            Some(self.clock.clone()),
-        )?);
+        let engine = Arc::new(
+            CaptureEngine::new(
+                options.clone(),
+                &catalog,
+                (self.deps.source)()?,
+                state,
+                Arc::new(OutboxBatchSink::new(queue.clone())),
+                Some(Arc::new(QueueBlobSink::new(self.deps.blobs.clone()))),
+                Some(Arc::new(NoEchoSuppressor)),
+                Some(self.clock.clone()),
+            )?
+            .with_key_repairs(queue.key_repairs()),
+        );
         let plan = engine.plan();
         self.status.use_plan(plan);
         self.log.info(
