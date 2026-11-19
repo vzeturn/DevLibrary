@@ -1,0 +1,55 @@
+// Golden generator for dl-agent-backup's Go agent adoption tests. Build it in a module named
+// github.com/srbackup/agent holding verbatim copies of the agent's internal/secret and
+// internal/config packages plus a stub internal/hwid whose Get() returns $FAKE_MACHINE_ID;
+// then `FAKE_MACHINE_ID=<id> go run ./cmd/gen <dir>` writes <dir>/sealed.json (written by the
+// real config.Save) and <dir>/plaintext.json (an older agent's unsealed api_key).
+// Test-only values; kept as .txt so no Go tooling sees it inside the Rust workspace.
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+
+	"github.com/srbackup/agent/internal/config"
+	"github.com/srbackup/agent/internal/secret"
+)
+
+func main() {
+	dir := os.Args[1]
+	cfg := &config.Config{
+		ServerURL: "https://backupapi.example.test",
+		AgentID:   "0b9f5a52-6a4e-4c47-9a0e-3f1d2c7b8e61",
+		APIKey:    "go-agent-token-7f3a91c2",
+		MasterKey: secret.Sealed("go-master-key-5d2e84b0"),
+		LogLevel:  "info",
+	}
+	cfg.SetFilePath(filepath.Join(dir, "sealed.json"))
+	if err := cfg.Save(); err != nil {
+		panic(err)
+	}
+	// An agent from before at-rest sealing: api_key in the clear, no master_key yet.
+	old := map[string]any{
+		"server_url": "https://backupapi.example.test",
+		"agent_id":   "5c1e7d40-2b8a-4f39-b6d2-9e0a4c3f7b18",
+		"api_key":    "go-agent-plain-token-1e6b",
+	}
+	data, _ := json.MarshalIndent(old, "", "  ")
+	if err := os.WriteFile(filepath.Join(dir, "plaintext.json"), data, 0o600); err != nil {
+		panic(err)
+	}
+	// Prove the round trip through the real Load.
+	back, _, err := config.Load(config.LoadOptions{ConfigFile: cfg.DataDir() + "/sealed.json"})
+	if err != nil || back.APIKey != cfg.APIKey || back.MasterKey != cfg.MasterKey {
+		panic("round trip failed")
+	}
+}
+
+// --- internal/hwid/hwid.go (stub) ---
+// // Test stub of the real hwid package: the machine id comes from FAKE_MACHINE_ID.
+// package hwid
+// 
+// import "os"
+// 
+// func Get() string { return os.Getenv("FAKE_MACHINE_ID") }
+// Fixture machine id: FAKE_MACHINE_ID=3f6c1a2e-9b4d-4e8f-a7c5-12d0e9b64f3a

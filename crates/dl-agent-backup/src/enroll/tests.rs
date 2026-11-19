@@ -4,7 +4,8 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use super::tool::{KEY_ENV, NAME, backup_enroll_tool, run_args};
+use super::goagent::GoSource;
+use super::tool::{KEY_ENV, Machine, NAME, backup_enroll_tool, run_args};
 use super::*;
 use crate::testhub::{FakeHub, TOKEN, default_config};
 use crate::testutil::temp_dir;
@@ -26,8 +27,24 @@ fn tool(
     };
     let mut input = Cursor::new(stdin.as_bytes().to_vec());
     let mut out = Vec::new();
-    run_args(dir, hub, force, &env, &mut input, &mut out, "SQL-HOST")?;
+    run_args(
+        dir,
+        hub,
+        force,
+        &env,
+        &mut input,
+        &mut out,
+        &Machine {
+            name: "SQL-HOST",
+            go: &no_go(),
+        },
+    )?;
     Ok(String::from_utf8(out).unwrap())
+}
+
+/// A machine without the Go agent.
+pub(super) fn no_go() -> GoSource {
+    GoSource::none()
 }
 
 #[test]
@@ -134,9 +151,12 @@ fn bad_origins_and_empty_keys_are_refused_before_the_hub_is_called() {
         "https://backup.example.com/api",
         "not a url",
     ] {
-        assert!(enroll(&dir, url, "k", "m", false).is_err(), "{url}");
+        assert!(
+            enroll(&dir, url, "k", "m", false, &no_go()).is_err(),
+            "{url}"
+        );
     }
-    let err = enroll(&dir, &hub.url(), " ", "m", false).unwrap_err();
+    let err = enroll(&dir, &hub.url(), " ", "m", false, &no_go()).unwrap_err();
     assert!(matches!(err, Error::Auth(_)), "{err}");
     assert_eq!(hub.count("/self-register"), 0);
     assert!(Enrollment::load(&dir).unwrap().is_none());
@@ -145,6 +165,16 @@ fn bad_origins_and_empty_keys_are_refused_before_the_hub_is_called() {
 #[test]
 fn an_unreachable_hub_stores_nothing() {
     let dir = temp_dir("enroll-unreachable");
-    assert!(enroll(&dir, &crate::testutil::dead_url(), "k", "m", false).is_err());
+    assert!(
+        enroll(
+            &dir,
+            &crate::testutil::dead_url(),
+            "k",
+            "m",
+            false,
+            &no_go()
+        )
+        .is_err()
+    );
     assert!(Enrollment::load(&dir).unwrap().is_none());
 }

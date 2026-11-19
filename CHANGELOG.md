@@ -9,6 +9,7 @@ All notable changes are listed here. The format follows
 ### Added
 
 - `dl-agent-backup`: Google Drive and OneDrive uploaders (OAuth refresh token, resumable and session uploads with resume after an interrupted chunk, parallel parts with manifest on OneDrive, bounded `Retry-After` handling). Only unknown providers still report `backup_destination_unsupported`.
+- `dl-agent-backup`: `backup-enroll` adopts the Go SRBackup agent's identity (agent id and API key from its sealed `agent.json`, verified on `GET /api/agent/config`) instead of registering a new agent, so the hub's servers, schedules and history stay attached; a rejected key, another machine's file or another hub origin falls back to self-registration. The Go `agent.json` is never written.
 
 ### Fixed
 

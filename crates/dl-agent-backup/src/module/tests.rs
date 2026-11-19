@@ -79,7 +79,15 @@ fn not_enrolled_is_degraded_and_stops_promptly() {
 fn an_enrolled_module_runs_after_the_first_poll_and_publishes_metrics() {
     let hub = FakeHub::start(default_config());
     let (ctx, dir) = context("mod-run", json!({"poll_interval_seconds": 1}));
-    enroll(&dir, &hub.url(), "tenant-enroll-key", "SQL-HOST", false).unwrap();
+    enroll(
+        &dir,
+        &hub.url(),
+        "tenant-enroll-key",
+        "SQL-HOST",
+        false,
+        &crate::enroll::goagent::GoSource::none(),
+    )
+    .unwrap();
     let h = start(module(SqlState::default()).0, &ctx);
     eventually("running", || ctx.status().state == ModuleState::Running);
     eventually("the backup report", || {
@@ -107,7 +115,15 @@ fn a_rejected_agent_is_degraded() {
     let hub = FakeHub::start(default_config());
     hub.set(|s| s.status = 401);
     let (ctx, dir) = context("mod-auth", json!({}));
-    enroll(&dir, &hub.url(), "tenant-enroll-key", "SQL-HOST", false).unwrap();
+    enroll(
+        &dir,
+        &hub.url(),
+        "tenant-enroll-key",
+        "SQL-HOST",
+        false,
+        &crate::enroll::goagent::GoSource::none(),
+    )
+    .unwrap();
     let h = start(module(SqlState::default()).0, &ctx);
     eventually("degraded", || {
         let s = ctx.status();
@@ -120,7 +136,15 @@ fn a_rejected_agent_is_degraded() {
 fn stop_cancels_a_running_backup_and_keeps_it_queued() {
     let hub = FakeHub::start(default_config());
     let (ctx, dir) = context("mod-stop", json!({"stop_grace_seconds": 0}));
-    enroll(&dir, &hub.url(), "tenant-enroll-key", "SQL-HOST", false).unwrap();
+    enroll(
+        &dir,
+        &hub.url(),
+        "tenant-enroll-key",
+        "SQL-HOST",
+        false,
+        &crate::enroll::goagent::GoSource::none(),
+    )
+    .unwrap();
     let (m, sql) = module(SqlState {
         hang: true,
         ..SqlState::default()
