@@ -5,6 +5,7 @@ import { HttpError, logError } from './lib/http';
 import { NONCE_TTL_SECONDS } from './middleware/signature';
 import { pruneNonces } from './repo/agents';
 import { adminRoutes } from './routes/admin';
+import { mcpRoutes } from './routes/mcp';
 import { agentRoutes } from './routes/agent';
 import { benchRoutes } from './routes/bench';
 import { installRoutes, installScriptResponse, uninstallScriptResponse } from './routes/install';
@@ -28,6 +29,11 @@ app.route('/products', productRoutes);
 app.route('/v1', agentRoutes);
 app.route('/admin', adminRoutes);
 app.route('/bench', benchRoutes);
+// The ops console reads the admin API in-process with the admin token, GET only.
+app.route(
+  '/mcp',
+  mcpRoutes((origin, env) => (path) => Promise.resolve(app.request(`${origin}${path}`, { headers: { Authorization: `Bearer ${env.ADMIN_TOKEN}` } }, env))),
+);
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => {

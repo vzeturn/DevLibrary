@@ -26,6 +26,7 @@ import { allowRelease, disallowRelease } from '../services/lanes';
 import { holdsView, holdTenant, pauseRelease, releaseHold, resumeRelease } from '../services/holds';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
+import { MAX_TEST_RUN_BYTES, storeTestRun, suiteName, testRunBody, testRunsView } from '../services/testRuns';
 import { renderStatusPage } from './statusPage';
 
 const id = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'letters, digits, . _ - only');
@@ -260,6 +261,17 @@ adminRoutes.get('/diagnostics/:id/download', async (c) => {
 });
 
 /** Every admin change (method, path, scrubbed body, who, outcome), newest first. */
+/** `pnpm test` summaries a session publishes (RT-0300), read back by the ops MCP console. */
+adminRoutes.put('/test-runs/:suite', async (c) => {
+  const suite = validate(suiteName, c.req.param('suite'));
+  const text = await c.req.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_TEST_RUN_BYTES) throw new HttpError(413, 'test_run_too_large');
+  return c.json(await storeTestRun(c.env, suite, validate(testRunBody, parseJson(text)), nowSeconds()), 201);
+});
+adminRoutes.get('/test-runs/:suite', async (c) => {
+  const limit = Number(c.req.query('limit') ?? '5');
+  return c.json({ runs: await testRunsView(c.env, validate(suiteName, c.req.param('suite')), Number.isFinite(limit) ? limit : 5) });
+});
 adminRoutes.get('/audit', async (c) => {
   const q = validate(auditQuery, c.req.query());
   return c.json({ audit: await listAudit(c.env.DB, q) });
