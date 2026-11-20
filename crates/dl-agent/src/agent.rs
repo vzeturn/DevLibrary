@@ -74,6 +74,9 @@ pub struct Options {
     pub probation_seconds: u64,
     /// Answers the `selftest` command (set by the CLI; `None` answers "no self-test").
     pub selftest: Option<crate::sys_module::SelfTestHook>,
+    /// Answers the `attach` command, a product's enrol tool run from the hub (set by the CLI;
+    /// `None` answers "cannot attach").
+    pub attach: Option<crate::sys_module::SelfTestHook>,
     /// How long each module gets to finish in-flight work before an update swaps the binary.
     pub drain_wait: Duration,
     /// A fault compiled in for the rollback smoke test ([`crate::fault`]); `None` normally.
@@ -91,6 +94,7 @@ impl Options {
             trusted: release_keys(),
             probation_seconds: PROBATION_SECONDS,
             selftest: None,
+            attach: None,
             drain_wait: DRAIN_WAIT,
             fault: crate::fault::COMPILED,
         }
@@ -156,7 +160,10 @@ impl Agent {
         let spool = Spool::open(opts.data_dir.join("reports.json"));
         let outbox = Outbox::default();
         let mut supervisor = Supervisor::new(opts.data_dir.clone(), outbox.clone(), spool.clone());
-        supervisor.add(crate::sys_module::factory_with(opts.selftest.clone()));
+        supervisor.add(crate::sys_module::factory_with_hooks(
+            opts.selftest.clone(),
+            opts.attach.clone(),
+        ));
         let sql = Site::load(&opts.data_dir);
         supervisor.set_sql(sql.pools.clone());
         if !sql.pools.is_empty() {

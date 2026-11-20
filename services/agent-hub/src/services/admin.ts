@@ -3,7 +3,7 @@ import { resolveChannel } from '../domain/channel';
 import { randomCode, sha256Hex, uuidv7 } from '../lib/crypto';
 import { HttpError } from '../lib/http';
 import { getAgent, listAgents, revokeAgent, setChannelOverride } from '../repo/agents';
-import { insertCommand, listCommands, type CommandRow } from '../repo/commands';
+import { clearExpiredSecrets, insertCommand, listCommands, type CommandRow } from '../repo/commands';
 import { insertCode } from '../repo/enrollCodes';
 import { listProductLinks } from '../repo/productLinks';
 import { ensureSite, getTenant } from '../repo/tenants';
@@ -138,13 +138,17 @@ export async function enqueueCommand(
 
 export type CommandStatus = 'pending' | 'delivered' | 'done' | 'failed' | 'expired';
 
-export async function commandsView(env: Env, agentId: string | undefined, now: number): Promise<(CommandRow & { status: CommandStatus })[]> {
+/** A command as admins see it: never its secret, only whether it still holds one. */
+export type CommandView = Omit<CommandRow, 'secret'> & { status: CommandStatus; has_secret: boolean };
+
+export async function commandsView(env: Env, agentId: string | undefined, now: number): Promise<CommandView[]> {
+  await clearExpiredSecrets(env.DB, now);
   const rows = await listCommands(env.DB, agentId);
-  return rows.map((c) => {
+  return rows.map(({ secret, ...c }) => {
     let status: CommandStatus = 'pending';
     if (c.result_at !== null) status = c.result_ok === 1 ? 'done' : 'failed';
     else if (c.delivered_at !== null) status = 'delivered';
     else if (c.expires_at <= now) status = 'expired';
-    return { ...c, status };
+    return { ...c, status, has_secret: secret !== null };
   });
 }

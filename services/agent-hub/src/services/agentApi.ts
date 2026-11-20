@@ -13,6 +13,7 @@ import type { ConfigView } from './config';
 import { withHubUrls } from './enroll';
 import { agentHeld } from './holds';
 import { heartbeatSeconds, stableOffered } from './lanes';
+import { afterAttach } from './remoteAttach';
 
 export interface WireCommand {
   id: string;
@@ -45,7 +46,7 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
     id: c.id,
     kind: c.kind,
     ...(c.module ? { module: c.module } : {}),
-    args: JSON.parse(c.args) as unknown,
+    args: c.secret === null ? (JSON.parse(c.args) as unknown) : withSecret(c.args, c.secret),
     expires_at: c.expires_at,
   }));
   const config = await getConfig(env.DB, agent.id);
@@ -68,6 +69,11 @@ export async function heartbeat(env: Env, agent: AgentRow, hb: HeartbeatBody, ra
   };
 }
 
+/** The command's args with its secret variables under `env` (remote attach, PROTOCOL §4.2). */
+function withSecret(args: string, secret: string): unknown {
+  return { ...(JSON.parse(args) as Record<string, unknown>), env: JSON.parse(secret) as unknown };
+}
+
 export async function reports(env: Env, agent: AgentRow, items: ProblemReport[], now: number): Promise<{ accepted: number }> {
   await upsertReports(env.DB, agent.id, agent.tenant_id, items, now);
   return { accepted: items.length };
@@ -83,5 +89,6 @@ export async function commandResult(
   const outcome = await saveResult(env.DB, agent.id, id, r, now);
   if (outcome === 'not_found') throw new HttpError(404, 'command_not_found');
   if (outcome === 'duplicate') throw new HttpError(409, 'result_already_recorded');
+  if (r.ok) await afterAttach(env, agent, id, now);
   return {};
 }

@@ -166,6 +166,32 @@ cannot be built or uploaded it is `{ok:false, output:{upload_error, diagnostics:
 Admins read bundles with `GET /admin/diagnostics?agent_id=` and
 `GET /admin/diagnostics/{id}/download`; agents can never fetch them.
 
+### 4.2 Remote attach: switch a product on from the hub (RT-0261)
+
+An agent installed once takes every further product from the hub; nobody goes to the site.
+`POST /admin/agents/{id}/attach {module, secret?, options?, external_id?, ttl_seconds?}`
+(admin token) does three things:
+
+1. enables `modules.<module>` in the agent's config (new version; other modules and keys stay),
+   and records `product_links(module, external_id)` when `external_id` is given;
+2. for a module with an enrol tool (the demo bench table, `services/agent-hub/src/domain/demo.ts`:
+   `einvoice-enroll`, `pms-enroll`, `arrival-enroll`, `membership-enroll`, `hl-enroll`,
+   `backup-enroll`, `pda-enroll`), queues one command
+   `{kind:"attach", args:{module, tool, argv:[flag, value, …], env:{DL_AGENT_…: code}}}`.
+   `secret` must name only the variables the tool reads and `options` only its flags; the
+   required ones must be there. The secret is stored apart from `args`, never shown by
+   `GET /admin/commands` (only `has_secret`) or the audit trail, added to `args.env` when the
+   agent takes the command and cleared from the hub in the same step (or at expiry);
+3. when the agent answers the `attach` command `ok`, queues `restart_module` for the module.
+
+The agent's `sys` module runs `attach` on its own thread: `<exe> <tool> --data <dir> <argv…>`
+as a child process with `env` added, no console input (a tool that would prompt fails), at
+most 10 minutes. It refuses a tool this build does not register, `--data` in `argv`, a line
+break in an argument and any variable not named `DL_AGENT_*`. The answer is
+`"<module> <tool>: exit <n>\n<output>"` with every secret value replaced by `***`.
+Modules with no enrol step (`pms-device`, `speaker`) are only enabled in the config. Agents
+older than 1.3.17 answer `sys: unknown command attach` (update them first: `update_now`).
+
 ## 5. Releases, channels and the canary gate
 
 Channels: `canary` and `stable`. The hub decides an agent's channel:
