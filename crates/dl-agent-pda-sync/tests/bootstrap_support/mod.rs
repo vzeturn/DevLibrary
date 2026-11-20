@@ -28,6 +28,10 @@ pub struct SqlState {
     pub created: HashSet<String>,
     pub executed: Vec<String>,
     pub deny_access: bool,
+    /// The password SQL Server holds for `pda_sync`, set by the login script.
+    pub login_password: Option<String>,
+    /// The setup identity lacks ALTER ANY LOGIN: the login script fails (error 15247).
+    pub deny_login_step: bool,
     /// SQL Server 2022, mixed-mode authentication by default.
     pub server: SqlServerInfo,
 }
@@ -55,6 +59,8 @@ impl FakeSqlAdmin {
             created: HashSet::new(),
             executed: Vec::new(),
             deny_access: false,
+            login_password: None,
+            deny_login_step: false,
             server: SqlServerInfo::new("16.0.4135.4", "Developer Edition (64-bit)", "RTM", false),
         })))
     }
@@ -150,6 +156,15 @@ impl SqlAdmin for FakeSqlAdmin {
             .collect();
         assert_eq!(steps.len(), 1, "one step per script: {script}");
         let mut st = self.st();
+        if steps[0].kind == StepKind::Login {
+            if st.deny_login_step {
+                return Err(Error::Agent(AgentError::new(
+                    codes::SQL_NO_ACCESS,
+                    "SQL setup failed (error 15247).",
+                )));
+            }
+            st.login_password = login_password(script);
+        }
         st.created.insert(FakeSqlAdmin::key(database, steps[0]));
         st.executed.push(format!("{}:{script}", steps[0].id));
         Ok(())
@@ -159,6 +174,17 @@ impl SqlAdmin for FakeSqlAdmin {
         self.check()?;
         Ok(self.st().server.clone())
     }
+
+    fn signs_in(&self, _i: &SqlInstance, password: &str, _ctx: &Ctx) -> Result<bool> {
+        Ok(self.st().login_password.as_deref() == Some(password))
+    }
+}
+
+/// The password the (last statement of the) login script sets.
+fn login_password(script: &str) -> Option<String> {
+    let start = script.rfind("PASSWORD = N'")? + "PASSWORD = N'".len();
+    let len = script[start..].find('\'')?;
+    Some(script[start..start + len].to_owned())
 }
 
 /// Records each `pda_sync` login check; fails with `failure` when set.

@@ -84,6 +84,73 @@ fn existing_login_without_stored_password_gets_a_reset_instead_of_being_skipped(
     assert!(env.secrets.load(names::SQL_PASSWORD).unwrap().is_some());
 }
 
+fn held_password(env: &TestEnv) -> Option<String> {
+    env.secrets
+        .load(names::SQL_PASSWORD)
+        .unwrap()
+        .map(|b| String::from_utf8(b).unwrap())
+}
+
+#[test]
+fn a_failed_login_step_keeps_the_held_password_and_an_admin_rerun_resets_it() {
+    // RT-0353: pda_sync exists with a password the agent never held (old SyncAgent).
+    let env = TestEnv::new();
+    let sql = FakeSqlAdmin::new();
+    let b = new_bootstrapper(&sql, &env.secrets);
+    let login = STEPS.iter().find(|s| s.kind == StepKind::Login).unwrap();
+    {
+        let mut st = sql.st();
+        st.created.insert(FakeSqlAdmin::key("master", login));
+        st.login_password = Some("old-password".to_owned());
+        st.deny_login_step = true;
+    }
+
+    // Not an administrator: ALTER LOGIN fails and nothing new is left in the store.
+    let err = b.run(false, None, None, &ctx()).unwrap_err();
+    assert_eq!(err.code(), Some(codes::SQL_NO_ACCESS));
+    assert_eq!(held_password(&env), None);
+
+    // A stale held password (saved by a build before the fix) is detected and reset.
+    env.secrets
+        .save(names::SQL_PASSWORD, b"stale-password")
+        .unwrap();
+    let dry = b.run(true, None, None, &ctx()).unwrap();
+    assert!(!dry.steps.iter().find(|s| s.id == "login").unwrap().skipped);
+    sql.st().deny_login_step = false;
+
+    let report = b.run(false, None, None, &ctx()).unwrap();
+
+    assert!(
+        report
+            .steps
+            .iter()
+            .find(|s| s.id == "login")
+            .unwrap()
+            .executed
+    );
+    let held = held_password(&env).unwrap();
+    assert_ne!(held, "stale-password");
+    assert_eq!(sql.st().login_password.as_deref(), Some(held.as_str()));
+}
+
+#[test]
+fn a_failed_reset_puts_the_previous_password_back() {
+    let env = TestEnv::new();
+    let sql = FakeSqlAdmin::new();
+    let b = new_bootstrapper(&sql, &env.secrets);
+    b.run(false, None, None, &ctx()).unwrap();
+    let good = held_password(&env).unwrap();
+    {
+        let mut st = sql.st();
+        st.login_password = Some("changed-by-someone".to_owned());
+        st.deny_login_step = true;
+    }
+
+    b.run(false, None, None, &ctx()).unwrap_err();
+
+    assert_eq!(held_password(&env).as_deref(), Some(good.as_str()));
+}
+
 #[test]
 fn dry_run_changes_nothing() {
     let env = TestEnv::new();

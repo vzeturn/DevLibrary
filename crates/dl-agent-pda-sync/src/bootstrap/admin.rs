@@ -5,7 +5,7 @@ use super::error::{Error, Result, tds_failure};
 use super::models::{BootstrapStep, SqlInstance, TableSet};
 use super::preflight::SqlServerInfo;
 use crate::capture::failure::code_for;
-use crate::config::sql::data_source;
+use crate::config::sql::{agent_connection, data_source};
 use crate::config::{AgentError, codes};
 use crate::util::ctx::Ctx;
 use dl_tds::{Client, Param};
@@ -37,7 +37,13 @@ pub trait SqlAdmin: Send + Sync {
     ) -> Result<()>;
     /// Version, edition and authentication mode (`SERVERPROPERTY`, read-only).
     fn server_info(&self, instance: &SqlInstance, ctx: &Ctx) -> Result<SqlServerInfo>;
+    /// Whether the runtime login `pda_sync` signs in to `master` with `password`. A
+    /// rejected sign-in (error 18456) is `false`; any other failure is an error.
+    fn signs_in(&self, instance: &SqlInstance, password: &str, ctx: &Ctx) -> Result<bool>;
 }
+
+/// SQL Server's "Login failed for user" error.
+pub const LOGIN_FAILED_ERROR: i32 = 18456;
 
 /// The identity `enroll` sets SQL Server up with: the Windows account by default, or a
 /// SQL Server administrator login (ADR 0093). Never stored (`SqlAdminCredential`).
@@ -387,6 +393,15 @@ impl SqlAdmin for SqlServerAdmin {
         c.set_timeout(Some(COMMAND_TIMEOUT))
             .map_err(|e| Error::unexpected("System.InvalidOperationException", e.to_string()))?;
         SqlServerInfo::read(&mut c)
+    }
+
+    fn signs_in(&self, instance: &SqlInstance, password: &str, ctx: &Ctx) -> Result<bool> {
+        let cfg = agent_connection(&instance.server_name, "master", password);
+        match super::probes::connect(&cfg, ctx) {
+            Ok(_) => Ok(true),
+            Err(e) if e.sql().is_some_and(|f| f.number() == LOGIN_FAILED_ERROR) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 }
 

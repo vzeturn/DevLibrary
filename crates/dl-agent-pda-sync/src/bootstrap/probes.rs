@@ -65,7 +65,8 @@ pub fn login_failure(number: i32, database: &str, table: Option<&str>) -> AgentE
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SqlAgentLoginProbe;
 
-fn connect(cfg: &dl_tds::Config, ctx: &Ctx) -> std::result::Result<Client, Error> {
+/// Opens `cfg`; a failure is cancellation or an escaped `SqlException`.
+pub(crate) fn connect(cfg: &dl_tds::Config, ctx: &Ctx) -> std::result::Result<Client, Error> {
     if ctx.is_done() {
         return Err(Error::cancelled());
     }

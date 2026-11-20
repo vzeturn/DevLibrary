@@ -265,11 +265,71 @@ impl SqlBootstrapper {
         })
     }
 
-    fn have_secret(&self) -> Result<bool> {
+    fn stored_password(&self) -> Result<Option<Vec<u8>>> {
         self.secrets
             .load(names::SQL_PASSWORD)
-            .map(|v| v.is_some())
             .map_err(|e| Error::from_secret(&e))
+    }
+
+    /// Whether `step` is already in place and reusable. An existing login is only
+    /// reusable while the password we hold still signs in: a held password SQL Server
+    /// rejects (an earlier run saved it and then failed to set it, RT-0353) gets a reset.
+    fn in_place(
+        &self,
+        instance: &SqlInstance,
+        db: &str,
+        step: &BootstrapStep,
+        ctx: &Ctx,
+    ) -> Result<bool> {
+        if !self.admin.exists(instance, db, step, ctx)? {
+            return Ok(false);
+        }
+        if step.kind != StepKind::Login {
+            return Ok(true);
+        }
+        let Some(password) = self.stored_password()? else {
+            return Ok(false);
+        };
+        let password = String::from_utf8_lossy(&password).into_owned();
+        crate::reporting::scrubber::register(Some(&password));
+        let signs_in = self.admin.signs_in(instance, &password, ctx)?;
+        if !signs_in {
+            self.log.warn(
+                "The stored {Login} password is rejected by {Instance}; resetting it",
+                &[
+                    Value::from(LOGIN_NAME),
+                    Value::from(instance.server_name.as_str()),
+                ],
+            );
+        }
+        Ok(signs_in)
+    }
+
+    /// Runs the login step; a failed run puts the previously held password back, so a
+    /// failure never leaves the store with a password SQL Server does not have.
+    fn execute_login(
+        &self,
+        instance: &SqlInstance,
+        db: &str,
+        step: &BootstrapStep,
+        ctx: &Ctx,
+    ) -> Result<()> {
+        let previous = self.stored_password()?;
+        let script = self.render(step)?;
+        let Err(e) = self.admin.execute(instance, db, &script, ctx) else {
+            return Ok(());
+        };
+        let restored = match &previous {
+            Some(p) => self.secrets.save(names::SQL_PASSWORD, p),
+            None => self.secrets.delete(names::SQL_PASSWORD),
+        };
+        if let Err(r) = restored {
+            self.log.error(
+                "Could not restore the stored {Login} password after a failed login step: {Error}",
+                &[Value::from(LOGIN_NAME), Value::from(r.to_string().as_str())],
+            );
+        }
+        Err(e)
     }
 
     /// The idempotent steps on a preflighted target; `dry_run` only reports what would
@@ -300,10 +360,7 @@ impl SqlBootstrapper {
             } else {
                 database
             };
-            let have_secret = self.have_secret()?;
-            let exists = self.admin.exists(instance, db, step, ctx)?;
-            // An existing login is only reusable while we still hold its password.
-            let skip = exists && (step.kind != StepKind::Login || have_secret);
+            let skip = self.in_place(instance, db, step, ctx)?;
             if skip || dry_run {
                 outcomes.push(StepOutcome {
                     id: step.id.to_owned(),
@@ -312,8 +369,12 @@ impl SqlBootstrapper {
                 });
                 continue;
             }
-            let script = self.render(step)?;
-            self.admin.execute(instance, db, &script, ctx)?;
+            if step.kind == StepKind::Login {
+                self.execute_login(instance, db, step, ctx)?;
+            } else {
+                let script = self.render(step)?;
+                self.admin.execute(instance, db, &script, ctx)?;
+            }
             outcomes.push(StepOutcome {
                 id: step.id.to_owned(),
                 skipped: false,
