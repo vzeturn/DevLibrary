@@ -95,3 +95,18 @@ export async function writeAttach(db: D1Database, w: AttachWrite): Promise<Attac
   if (w.claim) return { ok: (results[0]?.meta.changes ?? 0) === 1, version };
   return { ok: w.body === null || version !== null, version };
 }
+
+/** Records (or moves) the link of a product tenant to an agent, outside an attach code (remote attach). */
+export async function upsertProductLink(db: D1Database, l: Omit<ProductLinkRow, 'created_at'>, now: number): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO product_links (product, external_id, tenant_id, agent_id, site_id, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT (product, external_id) DO UPDATE SET tenant_id = excluded.tenant_id,
+         site_id = excluded.site_id, agent_id = excluded.agent_id,
+         created_at = CASE WHEN product_links.agent_id = excluded.agent_id
+                           THEN product_links.created_at ELSE excluded.created_at END`,
+    )
+    .bind(l.product, l.external_id, l.tenant_id, l.agent_id, l.site_id, now)
+    .run();
+}

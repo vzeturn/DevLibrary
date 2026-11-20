@@ -16,6 +16,7 @@ import { listProductKeys, revokeProductKey } from '../repo/productKeys';
 import { listReleases, listPromotions } from '../repo/releases';
 import { listReports } from '../repo/reports';
 import { listTenants, upsertTenant } from '../repo/tenants';
+import { remoteAttach, remoteAttachBody } from '../services/remoteAttach';
 import { agentsView, agentView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
 import { benchView, createBench, revokeBenchBundle } from '../services/bench';
@@ -129,6 +130,11 @@ adminRoutes.put('/agents/:id/channel', async (c) => {
 adminRoutes.post('/agents/:id/revoke', async (c) => {
   await revoke(c.env, c.req.param('id'), nowSeconds());
   return c.json({});
+});
+/** Remote attach (RT-0261): switch a product's module on for an installed agent, from the hub. */
+adminRoutes.post('/agents/:id/attach', async (c) => {
+  const body = validate(remoteAttachBody, await jsonBody(c.req));
+  return c.json(await remoteAttach(c.env, c.req.param('id'), body, nowSeconds()), 202);
 });
 adminRoutes.get('/agents/:id/survey', async (c) => c.json(await surveyOf(c.env, c.req.param('id'))));
 adminRoutes.get('/agents/:id/selftest', async (c) => c.json(await selftestView(c.env, c.req.param('id'))));
