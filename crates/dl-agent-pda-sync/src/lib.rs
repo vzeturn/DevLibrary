@@ -20,6 +20,9 @@ pub mod diagnostics;
 /// Composition root, background loops, `enroll` and `grants` (`Hosting/`); the Windows
 /// service, self-update and diagnostics bundle are dl-agent's.
 pub mod hosting;
+
+/// The old SyncAgent's SQL login, for the installer (RT-0303).
+pub mod legacy_sql;
 /// The dl-agent module, its tools, self-test and hub commands.
 pub mod module;
 /// SQLite outboxes and uploaders: batches, blobs, heartbeat (`Outbox/`).

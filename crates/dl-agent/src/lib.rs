@@ -10,6 +10,7 @@ pub mod cli_attach;
 pub mod cli_install;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install_sql;
+pub mod cli_install_sql_auto;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install_win;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -24,6 +25,7 @@ pub mod host;
 pub mod hub;
 pub mod hub_urls;
 pub mod identity;
+pub mod legacy_sql;
 pub mod manifest;
 pub mod optout;
 pub mod proxy;

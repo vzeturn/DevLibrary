@@ -21,6 +21,7 @@ pub mod fo;
 pub mod gojson;
 pub mod install;
 pub mod legacy;
+pub mod legacy_sql;
 pub mod log;
 pub mod module;
 pub mod money;

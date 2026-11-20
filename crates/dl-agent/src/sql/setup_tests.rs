@@ -348,3 +348,17 @@ fn an_old_remote_server_needs_the_explicit_opt_in_and_is_pinned_unencrypted() {
         Some("unencrypted")
     );
 }
+
+#[test]
+fn the_login_source_is_saved_shown_and_cleared() {
+    let d = crate::store::testdir::TestDir::new("sql-login-source");
+    set_source(&d.0, Some("the old PMS site agent (x)")).unwrap();
+    assert_eq!(source(&d.0), None, "no sql.json: nothing to mark");
+    std::fs::write(d.0.join(SQL_FILE), r#"{"databases":{}}"#).unwrap();
+    set_source(&d.0, Some("the old PMS site agent (x)")).unwrap();
+    assert_eq!(source(&d.0).as_deref(), Some("the old PMS site agent (x)"));
+    let survey = with_source(dl_json::json!({"host": {}}), &d.0);
+    assert_eq!(survey[SOURCE_KEY], "the old PMS site agent (x)");
+    set_source(&d.0, None).unwrap();
+    assert_eq!(source(&d.0), None);
+}

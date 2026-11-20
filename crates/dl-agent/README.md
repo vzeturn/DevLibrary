@@ -124,8 +124,18 @@ on the site, in PowerShell as Administrator:
 irm https://agent.pms.id.vn/install.ps1 | iex
 ```
 
-PowerShell 5.1+ (Windows 10 / Server 2016 and later). It asks for what is missing: the
-enrolment code, then the SQL login ([1] Windows, [2] SQL; server, user and a hidden password).
+PowerShell 5.1+ (Windows 10 / Server 2016 and later). It asks for the enrolment code when none
+is given. The SQL login is not asked for when the machine already has one that works (RT-0303):
+the installer tries, best first, the login this agent saved, then each old agent's login (PMS
+site `state\databases.json`, E-Invoice `config.enc`, Check-In `appsettings.Production.json`,
+Membership `config.dpapi`, HotelLink `config.json`, PDAOrder SyncAgent `agent.json` + sealed
+password; in place, renamed `.bench-old-*` by the bench, or where a bench record moved them;
+DPAPI LocalMachine), then Windows sign-in to the local SQL Server. The first that signs in to
+every SMILE database is saved with `login_source` (shown by `selftest` and sent in the survey).
+Only when none works does it show the menu ([1] Windows, [2] SQL; server, user and a hidden
+password); an unattended run then installs and enrols without SQL, files one
+`sql_login_not_found` report listing each login tried and why it failed, and exits 1. SRBackup
+keeps no SQL login on the machine (the hub hands it one), so it has nothing to reuse.
 Options go through the scriptblock form:
 
 ```text

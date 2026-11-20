@@ -57,6 +57,21 @@ fn selftest_reach_names_mode_login_server_and_port() {
     );
 }
 
+#[test]
+fn selftest_names_the_server_side_sign_in_and_tds() {
+    use crate::selftest::checks_core::signed_in;
+    assert_eq!(
+        signed_in(&json!({"auth_scheme": "NTLM", "tds": "7.3B"})),
+        "; sign-in NTLM, TDS 7.3B"
+    );
+    assert_eq!(signed_in(&json!({"tds": "7.4"})), "; TDS 7.4");
+    assert_eq!(signed_in(&serde_free_null()), "");
+}
+
+fn serde_free_null() -> dl_json::Value {
+    dl_json::Value::Null
+}
+
 /// The ladder against a server that offers TLS and cannot finish the handshake: TLS 1.2,
 /// then TLS 1.0, then unencrypted (PROTOCOL.md §9.4). Needs a TLS backend (not macOS).
 #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]

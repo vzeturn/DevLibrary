@@ -39,6 +39,8 @@ pub fn grammar(data: Arg) -> Command {
         .arg(Arg::flag("json").help("Print the result as one JSON line"))
         .arg(Arg::option("result").help("Also write the result JSON to this file"))
         .arg(Arg::flag("system-child").hidden())
+        .arg(Arg::option("source").hidden().help("Where this login came from (an older agent's settings), saved as login_source"))
+        .arg(Arg::flag("no-report").hidden().help("A failed test sends no problem report (the installer reports once after trying every candidate)"))
         .arg(data)
 }
 
@@ -75,13 +77,16 @@ pub fn main(service: &str, dir: &Path, m: &Matches) -> i32 {
         eprintln!("sql-setup: cannot write {path}: {e}");
     }
     if !outcome.ok {
-        spool_failure(dir, &outcome);
+        if !m.flag("no-report") {
+            spool_failure(dir, &outcome);
+        }
         return 1;
     }
     if m.flag("test-only") {
         return 0;
     }
-    match setup::save(dir, &req, &outcome) {
+    match setup::save(dir, &req, &outcome).and_then(|()| setup::set_source(dir, m.value("source")))
+    {
         Ok(()) => {
             if !m.flag("json") {
                 println!(

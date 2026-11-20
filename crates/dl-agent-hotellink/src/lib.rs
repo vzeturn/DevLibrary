@@ -11,6 +11,7 @@ mod gojson;
 pub mod hubclient;
 pub mod jobmodel;
 pub mod jobqueue;
+pub mod legacy_sql;
 pub mod liveness;
 mod log;
 pub mod module;

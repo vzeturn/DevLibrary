@@ -506,7 +506,10 @@ describes its host and every declared database. Facts only, no data and no secre
   compatibility_level, collation, code_page, read_only}`, `server_collation`, `login`,
   `user`, `grants {sysadmin, db_owner, create_procedure, create_function, create_table,
   alter_dbo, execute, view_definition, backup_database}`, `syntax_2012` (engine ≥ 11 and
-  compat ≥ 110: `THROW`, `OFFSET`, `IIF`, … accepted), `transport` (rung) and `warnings`:
+  compat ≥ 110: `THROW`, `OFFSET`, `IIF`, … accepted), `transport` (rung), `session`
+  (engine ≥ 10: `auth_scheme` `SQL`/`NTLM`/`KERBEROS`, `net_transport`, `server_port` from
+  `CONNECTIONPROPERTY`, plus `tds` (`7.3B`, `7.4`, …); `error` instead when the query fails)
+  and `warnings`:
 
   | warning | meaning |
   |---------|---------|
@@ -521,6 +524,10 @@ describes its host and every declared database. Facts only, no data and no secre
   | `unencrypted_transport` | reached on the unencrypted rung |
 
   A failed survey files `sql_survey_failed` (warning) and is retried the next day.
+
+- **`login_source`** (top level, only when set): where the saved SQL login came from when the
+  installer reused an older agent's (`the old PMS site agent (C:\ProgramData\…\databases.json)`).
+  A product name and a path, never a secret; `sql-setup` without `--source` clears it.
 
 - **Site requirements** (hub, per product): `{"host": {"min_nt_version": "6.1", "families":
   ["windows"]}, "databases": {"SMILE_FO": {"min_engine_major": 10, "min_compatibility": 100,

@@ -441,6 +441,57 @@ pub fn save(data_dir: &Path, req: &Request, outcome: &Outcome) -> Result<(), Err
     crate::identity::restrict_file(&path)
 }
 
+/// Root key of `sql.json` naming where the saved login came from when the installer reused an
+/// older agent's connection (`the old PMS site agent (C:\ProgramData\...)`); `selftest` and the
+/// hub show it. Never a secret: only a product name and a file path.
+pub const SOURCE_KEY: &str = "login_source";
+
+/// Records (`Some`) or clears (`None`) where the saved login came from.
+///
+/// # Errors
+/// I/O, a bad file or ACL failures.
+pub fn set_source(data_dir: &Path, source: Option<&str>) -> Result<(), Error> {
+    let path = data_dir.join(SQL_FILE);
+    let Some(mut doc) = crate::store::read_json(&path)? else {
+        return Ok(());
+    };
+    let Some(root) = doc.as_object_mut() else {
+        return Err(Error::Config(format!("{SQL_FILE} is not an object")));
+    };
+    match source.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => {
+            root.insert(SOURCE_KEY, Value::String(s.into()));
+        }
+        None if root.contains_key(SOURCE_KEY) => {
+            root.remove(SOURCE_KEY);
+        }
+        None => return Ok(()),
+    }
+    crate::store::write_json(&path, &doc)?;
+    crate::identity::restrict_file(&path)
+}
+
+/// Where the saved login came from, when the installer reused an older agent's connection.
+pub fn source(data_dir: &Path) -> Option<String> {
+    crate::store::read_json(&data_dir.join(SQL_FILE))
+        .ok()
+        .flatten()
+        .and_then(|d| {
+            d.get(SOURCE_KEY)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+/// `survey` with `login_source` added when the installer reused an older agent's login
+/// (PROTOCOL §9.5), so the hub sees where the site's SQL sign-in came from.
+pub fn with_source(mut survey: Value, data_dir: &Path) -> Value {
+    if let (Some(src), Some(map)) = (source(data_dir), survey.as_object_mut()) {
+        map.insert(SOURCE_KEY, Value::String(src));
+    }
+    survey
+}
+
 /// The saved login choice: the installer's default on a reinstall. Never the password.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Saved {

@@ -115,6 +115,11 @@ impl Connection for Fake {
             }
             return Ok(rows);
         }
+        if sql == super::survey::SESSION_SQL {
+            return Ok(vec![
+                json!({"auth_scheme": "SQL", "net_transport": "TCP", "server_port": "1433"}),
+            ]);
+        }
         if sql.contains("FROM [dbo].[Config]") {
             assert!(
                 !sql.contains("EINV"),
