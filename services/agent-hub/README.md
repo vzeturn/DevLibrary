@@ -227,6 +227,14 @@ tab). The page (Vietnamese, light/dark, phone width) does the rest:
    (or attached, RT-0298), each module's state, then the install self-test (pass / warn / fail) and a
    done banner. Unknown, expired and revoked codes say to mint a new one from the console.
 
+A product whose console already serves its own install script (it carries the product's one-time
+token and setup, e.g. E-Invoice `/agent/bootstrap/{token}/dl/{code}`) links
+`<hub>/deploy#code=<dl code>&boot=<script url>[&alt=<variant for SQL Server on another machine>]`
+(`productDeployUrl` builds it). The page then shows the line that runs that script and still tracks
+the dl code. `boot`/`alt` must be `https://` on a host under `pms.id.vn` or `mmsolutions.vn`
+(`BOOT_HOST_SUFFIXES`), without query, port or quotes; any other link shows "Liên kết cài đặt không hợp
+lệ" and no command, so a crafted link cannot put a foreign script on the hub's page.
+
 The code stays in the URL fragment (never sent in a request line or logged) and in POST bodies; the
 status answers only for the machine that used that code (host, version, modules, self-test counts:
 no tenant config, no other agent). The page runs one nonce'd inline script under a strict CSP, cannot

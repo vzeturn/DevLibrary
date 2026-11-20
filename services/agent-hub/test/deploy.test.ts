@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
-import { CODE_SLOT, PRODUCT_LABELS } from '../src/install/deployPage';
+import { BOOT_HOST_SUFFIXES, bootCommand, CODE_SLOT, PRODUCT_LABELS, productDeployUrl, safeBootUrl } from '../src/install/deployPage';
 import { admin, createTenant, enrollRequest, heartbeatBody, newKeys, setNow, signed, T0, testEnv, type TestEnv } from './helpers';
 
 let env: TestEnv;
@@ -109,5 +109,43 @@ describe('/deploy guided install', () => {
     env = testEnv({ HUB_URLS: 'https://hub.test,https://fallback.test' });
     expect((await app.request('https://fallback.test/deploy', {}, env)).status).toBe(404);
     expect((await app.request('https://hub.test/deploy', {}, env)).status).toBe(200);
+  });
+
+  it('runs a product console\'s own install script only from Azolo product hosts', () => {
+    const ok = 'https://einvoice.mmsolutions.vn/agent/bootstrap/tok_1-a/dl/ABCD-EFGH';
+    expect(safeBootUrl(ok, BOOT_HOST_SUFFIXES)).toBe(ok);
+    expect(safeBootUrl('https://arrival.pms.id.vn/agent/install.ps1', BOOT_HOST_SUFFIXES)).not.toBe('');
+    for (const bad of [
+      'http://einvoice.mmsolutions.vn/x', // not https
+      'https://evil.example/x',
+      'https://pms.id.vn.evil.example/x',
+      'https://evilpms.id.vn/x', // suffix without the dot
+      "https://a.pms.id.vn/x');Remove-Item C:\\ -Recurse;('", // quote breaks out of the PowerShell string
+      'https://a.pms.id.vn/x?token=1', // no query
+      'https://a.pms.id.vn:8443/x',
+      'https://a..pms.id.vn/x',
+      'https://a.pms.id.vn',
+      '',
+      null,
+    ])
+      expect(safeBootUrl(bad, BOOT_HOST_SUFFIXES), String(bad)).toBe('');
+    expect(bootCommand(ok)).toContain(`DownloadString('${ok}')`);
+    // The page embeds the function verbatim: it must not depend on anything outside itself.
+    const embedded = new Function(`return (${safeBootUrl.toString()})`)() as typeof safeBootUrl;
+    expect(embedded(ok, BOOT_HOST_SUFFIXES)).toBe(ok);
+    expect(embedded('https://evil.example/x', BOOT_HOST_SUFFIXES)).toBe('');
+  });
+
+  it('builds a product link with code, script and the remote-SQL variant in the fragment only', async () => {
+    const url = productDeployUrl('https://hub.test', { code: 'ABCD-EFGH', boot: 'https://e.mmsolutions.vn/b/t/dl/ABCD-EFGH', alt: 'https://e.mmsolutions.vn/b/t/dl/ABCD-EFGH/remote' });
+    const u = new URL(url);
+    expect(u.pathname).toBe('/deploy');
+    expect(u.search).toBe('');
+    const h = new URLSearchParams(u.hash.slice(1));
+    expect([h.get('code'), h.get('boot'), h.get('alt')]).toEqual(['ABCD-EFGH', 'https://e.mmsolutions.vn/b/t/dl/ABCD-EFGH', 'https://e.mmsolutions.vn/b/t/dl/ABCD-EFGH/remote']);
+    const html = await (await app.request('https://hub.test/deploy', {}, env)).text();
+    expect(html).toContain('var safeBootUrl=function safeBootUrl(');
+    expect(html).toContain(`var SUFFIXES=${JSON.stringify(BOOT_HOST_SUFFIXES)}`);
+    expect(html).toContain('SQL Server nằm trên máy khác');
   });
 });
