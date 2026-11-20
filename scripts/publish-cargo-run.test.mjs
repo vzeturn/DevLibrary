@@ -1,7 +1,7 @@
 // node --test scripts/publish-cargo-run.test.mjs
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseCargoTest, scrubbedEnv } from './publish-cargo-run.mjs';
+import { offline, parseCargoTest, scrubbedEnv } from './publish-cargo-run.mjs';
 
 test('cargo children never see a secret', () => {
   const env = scrubbedEnv(
@@ -32,4 +32,9 @@ test('counts binaries and tests, names each failure with its message', () => {
   assert.deepEqual(r.files, { passed: 1, failed: 1, skipped: 0 });
   assert.deepEqual(r.tests, { passed: 4, failed: 1, skipped: 2 });
   assert.deepEqual(r.failures, [{ file: 'unittests src/lib.rs', name: 'a::c', message: "thread 'a::c' panicked: boom" }]);
+});
+
+test('--offline goes to cargo, never after --', () => {
+  assert.deepEqual(offline(['clippy', '--workspace', '--', '-D', 'warnings']), ['clippy', '--offline', '--workspace', '--', '-D', 'warnings']);
+  assert.deepEqual(offline(['test', '--workspace']), ['test', '--offline', '--workspace']);
 });

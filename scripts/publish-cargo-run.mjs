@@ -62,8 +62,14 @@ function run(cmd, args, opts = {}) {
 
 /** `cargo <args>` with the scrubbed environment, offline and without network when isolated. */
 function cargo(cwd, env, args, isolated) {
-  if (!isolated) return run('cargo', [...args, '--offline'], { cwd, env });
-  return run('unshare', ['-rn', 'sh', '-c', `python3 -c "${LO_UP}" && exec cargo "$@"`, 'sh', ...args, '--offline'], { cwd, env });
+  const full = offline(args);
+  if (!isolated) return run('cargo', full, { cwd, env });
+  return run('unshare', ['-rn', 'sh', '-c', `python3 -c "${LO_UP}" && exec cargo "$@"`, 'sh', ...full], { cwd, env });
+}
+
+/** `--offline` right after the subcommand: after `--` it would reach clippy-driver or the test binary. */
+export function offline(args) {
+  return [args[0], '--offline', ...args.slice(1)];
 }
 
 function canIsolate() {
