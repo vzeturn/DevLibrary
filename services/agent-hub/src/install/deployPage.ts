@@ -49,6 +49,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 details{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 summary{cursor:pointer;font-weight:600} details ul{margin:8px 0 0;padding-left:20px;color:var(--muted)}
 form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px} input{flex:1 1 200px;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-height:44px}
+@media (max-width:560px){pre{max-height:none}.cmd button{flex:1 1 100%}}
 [hidden]{display:none!important} .muted{color:var(--muted)} kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}`;
 
 const BODY = `
