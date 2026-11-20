@@ -40,6 +40,14 @@ fn main() {
         .tool(dl_agent_pda_sync::pda_grants_tool())
         .selftest(dl_agent_pda_sync::pda_sync_selftest());
     let app = app.module(dl_agent_speaker::speaker_module());
+    // The old agents' SQL logins, best first: the ones that reached every SMILE database.
+    let app = app
+        .sql_source(dl_agent_pms::legacy_sql::pms_legacy_sql)
+        .sql_source(dl_agent_einvoice::legacy_sql::einvoice_legacy_sql)
+        .sql_source(dl_agent_arrival::legacy_sql::arrival_legacy_sql)
+        .sql_source(dl_agent_membership::legacy_sql::membership_legacy_sql)
+        .sql_source(dl_agent_hotellink::legacy_sql::hotellink_legacy_sql)
+        .sql_source(dl_agent_pda_sync::legacy_sql::pda_legacy_sql);
     std::process::exit(dl_agent::cli::main(app));
 }
 

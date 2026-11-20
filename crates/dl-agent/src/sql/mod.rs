@@ -253,6 +253,9 @@ impl Connection for dl_tds::Client {
     fn in_transaction(&self) -> bool {
         dl_tds::Client::in_transaction(self)
     }
+    fn tds_version(&self) -> Option<u32> {
+        Some(dl_tds::Client::tds_version(self))
+    }
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
         self.set_timeout(timeout).map_err(tds)
     }

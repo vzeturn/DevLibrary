@@ -13,6 +13,7 @@ pub mod agent;
 pub mod contracts;
 pub mod crypto;
 pub mod legacy;
+pub mod legacy_sql;
 pub mod module;
 pub mod netdec;
 pub mod stj;

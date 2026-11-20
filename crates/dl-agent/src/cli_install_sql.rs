@@ -88,6 +88,10 @@ pub struct SqlDone {
     pub failed: bool,
     /// The SQL password, kept for `arrival-enroll` (it takes the same sign-in).
     pub password: Secret,
+    /// The login kind reused from an old agent (`windows`/`sql`), for `arrival-enroll`.
+    pub auth: Option<String>,
+    /// The SQL login name reused from an old agent, for `arrival-enroll`.
+    pub user: Option<String>,
 }
 
 /// What this machine saved, else what the old Check-In agent used.
@@ -174,7 +178,7 @@ pub fn local_server(services: &[String]) -> Option<String> {
     })
 }
 
-fn local_sql_server() -> Option<String> {
+pub(crate) fn local_sql_server() -> Option<String> {
     let names: Vec<String> = dl_winsvc::scm::Manager::connect_read_only()
         .and_then(|m| m.list_services())
         .map(|l| l.into_iter().map(|e| e.name).collect())
@@ -238,13 +242,15 @@ fn read_hidden(_label: &str) -> Result<Secret, String> {
 }
 
 /// Runs the SQL step; `exe` is the installed binary (its `sql-setup --as-service` tests as
-/// LocalSystem through a scheduled task that runs `exe`).
+/// LocalSystem through a scheduled task that runs `exe`). With no answer given, the logins
+/// this machine already uses (`sources`, see [`crate::cli_install_sql_auto`]) are tried first.
 pub fn run(
     exe: &Path,
     dir: &Path,
     o: &SqlOpts,
     interactive: bool,
     enrolled: bool,
+    sources: &[crate::legacy_sql::Source],
 ) -> Result<SqlDone, Failure> {
     if o.skip {
         return Ok(SqlDone::default());
@@ -268,8 +274,19 @@ pub fn run(
         }
         return Ok(done);
     }
-    if o.prompt || (interactive && (local_sql_server().is_some() || dir.join("sql.json").exists()))
-    {
+    if o.prompt {
+        menu(exe, dir)?;
+        return Ok(SqlDone::default());
+    }
+    if let Some(done) = crate::cli_install_sql_auto::reuse(exe, dir, sources, interactive)? {
+        if done.failed {
+            eprintln!(
+                "Warning: no SQL login found on this machine works (see above); the agent is installed without a new SQL login and reports it to the hub"
+            );
+        }
+        return Ok(done);
+    }
+    if interactive && dir.join("sql.json").exists() {
         menu(exe, dir)?;
     }
     Ok(SqlDone::default())
@@ -320,14 +337,16 @@ fn add_one(exe: &Path, dir: &Path, name: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `sql-setup` for the login; the password only in the child's environment.
-fn sql_setup(
+/// `sql-setup` for the login, plus `extra` arguments; the password only in the child's
+/// environment.
+pub(crate) fn sql_setup(
     exe: &Path,
     dir: &Path,
     auth: &str,
     server: &str,
     user: &str,
     password: &Secret,
+    extra: &[&str],
 ) -> Result<bool, Failure> {
     let data = dir.display().to_string();
     let result = dir.join("sql-setup.last.json").display().to_string();
@@ -348,6 +367,7 @@ fn sql_setup(
     } else {
         c.arg("--as-service");
     }
+    c.args(extra);
     if !password.is_empty() {
         c.env(PASSWORD_ENV, password.expose());
     }
@@ -385,7 +405,7 @@ fn unattended(
             password = read_secret(&format!("Password of SQL login {user}"))?;
         }
     }
-    let ok = sql_setup(exe, dir, auth, &server, &user, &password)?;
+    let ok = sql_setup(exe, dir, auth, &server, &user, &password, &[])?;
     if ok {
         println!("SQL login {auth} tested and saved.");
     } else {
@@ -397,12 +417,13 @@ fn unattended(
     Ok(SqlDone {
         failed: !ok,
         password,
+        ..SqlDone::default()
     })
 }
 
 /// The interactive SQL login menu: `[1] Windows  [2] SQL login  [0] skip`, Enter keeps the
 /// previous answer; it asks again until the test passes or the operator skips.
-fn menu(exe: &Path, dir: &Path) -> Result<(), Failure> {
+pub(crate) fn menu(exe: &Path, dir: &Path) -> Result<(), Failure> {
     let s = saved(dir);
     let mut mode = if s.auth == "sql" { "2" } else { "1" }.to_string();
     let mut server = if s.server.is_empty() {
@@ -463,7 +484,7 @@ fn menu(exe: &Path, dir: &Path) -> Result<(), Failure> {
         } else {
             ("windows", Secret::default())
         };
-        let ok = sql_setup(exe, dir, auth, &server, &user, &password)?;
+        let ok = sql_setup(exe, dir, auth, &server, &user, &password, &[])?;
         drop(password);
         if ok {
             println!("SQL login tested and saved.");
@@ -534,7 +555,7 @@ mod tests {
             auth: Some("kerberos".into()),
             ..SqlOpts::default()
         };
-        let e = run(Path::new("missing.exe"), &d.0, &o, false, true).unwrap_err();
+        let e = run(Path::new("missing.exe"), &d.0, &o, false, true, &[]).unwrap_err();
         assert_eq!(e.code, crate::cli::EXIT_CONFIG);
     }
 }

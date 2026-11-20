@@ -24,6 +24,7 @@ pub mod exec;
 pub mod journal;
 pub mod json;
 pub mod keystore;
+pub mod legacy_sql;
 pub mod log;
 pub mod minire;
 pub mod module;

@@ -43,6 +43,9 @@ pub struct App {
     pub product: String,
     /// Version of this binary on that line (default: the `dl-agent` crate version).
     pub version: Version,
+    /// Where the modules' old agents kept their SQL login, in the order the installer tries
+    /// them (RT-0303).
+    pub sql_sources: Vec<crate::legacy_sql::Source>,
 }
 
 impl App {
@@ -56,6 +59,7 @@ impl App {
             selftests: Vec::new(),
             product: crate::agent::PRODUCT.into(),
             version: agent_version(),
+            sql_sources: Vec::new(),
         }
     }
 
@@ -82,6 +86,13 @@ impl App {
     /// Adds a module's self-test (run by `selftest` and the `selftest` command).
     pub fn selftest(mut self, test: crate::selftest::SelfTest) -> App {
         self.selftests.push(test);
+        self
+    }
+
+    /// Adds a finder of an old agent's SQL login; the installer reuses the first that signs
+    /// in to every SMILE database instead of asking (RT-0303).
+    pub fn sql_source(mut self, source: crate::legacy_sql::Source) -> App {
+        self.sql_sources.push(source);
         self
     }
 

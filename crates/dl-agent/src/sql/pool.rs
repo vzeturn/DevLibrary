@@ -57,6 +57,10 @@ pub trait Connection: Send + 'static {
             "this connection cannot run introspection queries".into(),
         ))
     }
+    /// The TDS version the server accepted at login, when the session knows it.
+    fn tds_version(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// Pool limits and timeouts.

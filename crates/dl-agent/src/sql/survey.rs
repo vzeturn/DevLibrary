@@ -46,17 +46,75 @@ const GRANTS: [&str; 9] = [
     "backup_database",
 ];
 
+/// How this session signed in, server side (`CONNECTIONPROPERTY`, SQL Server 2008 and later,
+/// no extra permission): `auth_scheme` is `SQL`, `NTLM` or `KERBEROS`.
+pub const SESSION_SQL: &str = "SELECT \
+CAST(CONNECTIONPROPERTY('auth_scheme') AS nvarchar(40)) AS auth_scheme, \
+CAST(CONNECTIONPROPERTY('net_transport') AS nvarchar(40)) AS net_transport, \
+CAST(CONNECTIONPROPERTY('local_tcp_port') AS nvarchar(16)) AS server_port";
+
 /// Surveys the database behind `conn`; `rung` is the transport rung it was reached on.
+/// On SQL Server 2008 and later the session facts ([`SESSION_SQL`]) and the TDS version the
+/// server accepted are added under `session`, so a site's first install proves its sign-in
+/// (NTLM / Kerberos / SQL), transport and protocol without anyone at a test bench.
 ///
 /// # Errors
-/// The SQL error when the query fails.
+/// The SQL error when the main query fails; a failed session query only leaves
+/// `session.error`.
 pub fn survey(conn: &mut impl Connection, rung: Option<&str>) -> Result<Value, Error> {
     let rows = conn.query_json(SURVEY_SQL, &[])?;
     let raw = rows
         .into_iter()
         .next()
         .ok_or_else(|| Error::Sql("survey returned no row".into()))?;
-    Ok(assess(&raw, rung))
+    let mut s = assess(&raw, rung);
+    let major = s["engine"]["major"].as_u64().unwrap_or(0);
+    let facts = if major >= 10 {
+        conn.query_json(SESSION_SQL, &[])
+            .map(|r| r.into_iter().next().unwrap_or(Value::Null))
+    } else {
+        Ok(Value::Null)
+    };
+    if let Some(o) = s.as_object_mut() {
+        o.insert("session", session(facts, conn.tds_version()));
+    }
+    Ok(s)
+}
+
+/// `0x73_0B_00_03` → `7.3B`; `0x74_00_00_04` → `7.4`; others as hex.
+pub fn tds_name(v: u32) -> String {
+    match v {
+        0x7000_0000 => "7.0".into(),
+        0x7100_0001 => "7.1".into(),
+        0x7209_0002 => "7.2".into(),
+        0x730A_0003 => "7.3A".into(),
+        0x730B_0003 => "7.3B".into(),
+        0x7400_0004 => "7.4".into(),
+        0x0800_0000 => "8.0".into(),
+        other => format!("0x{other:08X}"),
+    }
+}
+
+/// The `session` block: server-side sign-in facts (or the error that stopped them) and the
+/// negotiated TDS version. Never a password: none of these hold one.
+pub fn session(facts: Result<Value, Error>, tds: Option<u32>) -> Value {
+    let mut m = Map::new();
+    match facts {
+        Ok(row) => {
+            for k in ["auth_scheme", "net_transport"] {
+                m.insert(k, text(&row, k).map_or(Value::Null, Value::from));
+            }
+            m.insert(
+                "server_port",
+                number(&row, "server_port").map_or(Value::Null, Value::from),
+            );
+        }
+        Err(e) => {
+            m.insert("error", Value::from(e.to_string()));
+        }
+    }
+    m.insert("tds", tds.map_or(Value::Null, |v| Value::from(tds_name(v))));
+    Value::Object(m)
 }
 
 /// The marketing name of an engine version (`10.50.1600.1` → `SQL Server 2008 R2`).
@@ -185,6 +243,21 @@ mod tests {
             "create_procedure": "1", "create_function": "1", "create_table": "1",
             "alter_dbo": "1", "execute": "1", "view_definition": "1", "backup_database": "1"
         })
+    }
+
+    #[test]
+    fn the_session_block_names_the_sign_in_and_the_protocol() {
+        let row = json!({"auth_scheme": "NTLM", "net_transport": "TCP", "server_port": "1433"});
+        let s = session(Ok(row), Some(0x730B_0003));
+        assert_eq!(s["auth_scheme"].as_str(), Some("NTLM"));
+        assert_eq!(s["net_transport"].as_str(), Some("TCP"));
+        assert_eq!(s["server_port"].as_u64(), Some(1433));
+        assert_eq!(s["tds"].as_str(), Some("7.3B"));
+        let e = session(Err(Error::Sql("denied".into())), None);
+        assert!(e["error"].as_str().unwrap().contains("denied"));
+        assert!(e["tds"].is_null());
+        assert_eq!(tds_name(0x7400_0004), "7.4");
+        assert_eq!(tds_name(0x1234), "0x00001234");
     }
 
     #[test]

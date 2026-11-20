@@ -298,6 +298,24 @@ fn rung(stats: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// `; sign-in NTLM, TDS 7.3B, SQL Server 2008 R2` from the survey's `session` and engine;
+/// empty when the server did not say (SQL Server 2005, or the session query failed).
+pub(crate) fn signed_in(session: &Value) -> String {
+    let get = |k: &str| session.get(k).and_then(Value::as_str);
+    let mut parts = Vec::new();
+    if let Some(a) = get("auth_scheme") {
+        parts.push(format!("sign-in {a}"));
+    }
+    if let Some(t) = get("tds") {
+        parts.push(format!("TDS {t}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("; {}", parts.join(", "))
+    }
+}
+
 /// How the session got in, for the hub: `windows auth as NT AUTHORITY\SYSTEM to
 /// .\SQLEXPRESS (port 49172)`. `login` is the server's `SUSER_SNAME()` when the survey ran;
 /// never a password.
@@ -322,7 +340,11 @@ pub(crate) fn reach(transport: &Value, login: Option<&str>) -> String {
 
 /// One database: connects, reads the survey warnings (C3) and, when the hub sent one with
 /// the command, probes the schema requirement (C4).
-fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Outcome {
+fn database(
+    pool: &crate::sql::SqlPool,
+    req: Option<&probe::Requirement>,
+    source: Option<&str>,
+) -> Outcome {
     let took = match pool.check() {
         Ok(d) => d,
         Err(e) => {
@@ -348,6 +370,13 @@ fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Out
         transport.as_deref().unwrap_or("-"),
         reach(&stats["transport"], login)
     );
+    if let Ok(s) = &surveyed {
+        detail.push_str(&signed_in(&s["session"]));
+    }
+    if let Some(s) = source {
+        detail.push_str("; login reused from ");
+        detail.push_str(s);
+    }
     let (info, actionable): (Vec<String>, Vec<String>) = match &surveyed {
         Ok(s) => s
             .get("warnings")
@@ -425,6 +454,7 @@ pub(crate) fn databases(dir: &Path, site: &Site, args: &Value) -> Vec<Check> {
             return vec![Check::new(CORE, "sql", title, o, Duration::ZERO)];
         }
     };
+    let source = crate::sql::setup::source(dir);
     let only = args
         .get("database")
         .and_then(Value::as_str)
@@ -438,8 +468,9 @@ pub(crate) fn databases(dir: &Path, site: &Site, args: &Value) -> Vec<Check> {
                 .clone()
                 .filter(|_| only.as_deref().is_none_or(|o| o == pool.name()));
             let started = Instant::now();
+            let source = source.clone();
             let outcome = bounded(&id, PROBE_TIMEOUT * 2, move || {
-                database(&pool, req.as_ref())
+                database(&pool, req.as_ref(), source.as_deref())
             })
             .unwrap_or_else(|e| Outcome::fail(format!("the database check {e}")));
             Check::new(CORE, &id, title, outcome, started.elapsed())

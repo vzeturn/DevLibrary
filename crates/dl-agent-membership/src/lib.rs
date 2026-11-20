@@ -24,6 +24,7 @@ pub mod folio;
 pub mod hub;
 pub mod identity;
 pub mod jobs;
+pub mod legacy_sql;
 pub mod log;
 pub mod module;
 pub mod rooms;
