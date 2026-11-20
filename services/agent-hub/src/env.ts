@@ -23,6 +23,8 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   /** Audience tag of the Access application in front of /admin. */
   ACCESS_AUD?: string;
+  /** Bearer token of the read-only ops MCP console at /mcp (secret, RT-0300); /mcp is locked without it. */
+  MCP_TOKEN?: string;
 }
 
 export interface AgentRow {

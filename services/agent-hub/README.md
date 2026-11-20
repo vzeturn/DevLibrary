@@ -8,7 +8,8 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 | Area | Endpoints |
 |---|---|
 | Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/attach` (another product's code on the same agent, PROTOCOL §2.3), `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/agent/diagnostics?command_id=` (zip), `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`, never `diag/…`) |
-| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `GET /admin/agents/:id` (each with its `products` links), `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `POST /admin/demo-bench`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit` |
+| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `GET /admin/agents/:id` (each with its `products` links), `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`; `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `POST /admin/demo-bench`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit`; `PUT/GET /admin/test-runs/:suite?limit` |
+| Ops console (`Authorization: Bearer $MCP_TOKEN`) | `POST /mcp` (MCP, JSON-RPC): read-only tools for the Request Tracking assistant, see below |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
 | Bench (public, `no-store`) | `GET /bench/:token` — the bench script of a bundle (see "Bench (test PC)") |
@@ -211,3 +212,20 @@ Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0
   Rotating it makes every existing bundle unreadable (`500 bench_unreadable`); revoke them first.
 - Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,
   served to agents at `/v1/artifacts/<key>`.
+
+## Ops console (MCP, read-only, RT-0300)
+
+`POST /mcp` speaks MCP over HTTP (JSON-RPC answered as JSON) for the Request Tracking hub's ops
+assistant. Its own bearer `MCP_TOKEN` (`wrangler secret put MCP_TOKEN`; without it `/mcp` answers 401)
+is not the admin token, and every tool only reads:
+
+| Tool | Reads |
+|---|---|
+| `hub_test_results {suite?, limit?}` | last published `pnpm test` runs (commit, typecheck, counts, failures) |
+| `repo_file {path, ref?}`, `repo_list {path?, ref?}`, `repo_commits {ref?, limit?}` | the public repository `vzeturn/DevLibrary`, default `main` |
+| `admin_get {path}` | any `GET /admin/...` route, run in-process with the admin token (never handed out); `/admin/diagnostics/:id/download` and the HTML page are refused |
+| `list_agents`, `get_agent`, `agent_selftest`, `list_releases`, `release_gate`, `list_reports` | the same admin reads by name |
+
+Publish a run after testing: `AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…
+TEST_RUNNER=cloud pnpm test:publish` (typecheck + vitest, then `PUT /admin/test-runs/agent-hub`; the hub
+keeps 20 per suite; `--dry-run` only prints). Exit 1 when a check failed, 2 when publishing failed.
