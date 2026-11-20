@@ -97,6 +97,14 @@ impl F {
         )
     }
 
+    fn dry_args(&self) -> EnrollArgs {
+        EnrollArgs {
+            url: Some(self.server.base.clone()),
+            dry_run: true,
+            ..EnrollArgs::default()
+        }
+    }
+
     fn args(&self) -> EnrollArgs {
         EnrollArgs {
             code: Some(self.server.with(|s| s.valid_code.clone())),
@@ -106,6 +114,14 @@ impl F {
     }
 
     fn run(&self, attempts: Vec<dl_agent_pda_sync::hosting::enroll_attempts::Attempt>) -> i32 {
+        self.run_with_args(attempts, self.args())
+    }
+
+    fn run_with_args(
+        &self,
+        attempts: Vec<dl_agent_pda_sync::hosting::enroll_attempts::Attempt>,
+        args: EnrollArgs,
+    ) -> i32 {
         let mut o = ToolRunOptions::new(site_event_sources::ENROLL, "enroll", codes::ENROLL_FAILED);
         o.data_dir = Some(self.env.dir.to_string_lossy().into_owned());
         o.temp_dir = self.env.dir.join("tmp");
@@ -129,7 +145,6 @@ impl F {
                 Arc::new(FakeCloudProbe::default()),
             ))
         };
-        let args = self.args();
         ToolRun::execute(o, None, |run| {
             run_attempts(
                 attempts,
@@ -189,7 +204,18 @@ fn a_working_windows_identity_never_touches_the_default_login() {
     assert!(f.enrolled());
     assert_eq!(f.builds.load(Ordering::SeqCst), 1);
     assert!(f.smile.executed().is_empty());
-    assert!(f.attempt_events().is_empty());
+    let events = f.attempt_events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].level, site_event_levels::INFO);
+    let detail = events[0].detail.as_ref().unwrap();
+    assert_eq!(
+        detail.get("identity").and_then(dl_json::Value::as_str),
+        Some("windows")
+    );
+    assert_eq!(
+        detail.get("code").and_then(dl_json::Value::as_str),
+        Some("used")
+    );
     assert!(!f.everything().contains(&f.password));
 }
 
@@ -325,4 +351,43 @@ fn the_default_login_comes_from_the_environment_before_the_build_default() {
     assert!(from(Some("other"), Some("x-env"), "built").contains("sql:other"));
     assert!(from(Some(""), Some(""), "").contains("Skipped"));
     assert!(!from(None, None, "built").contains("Skipped"));
+}
+
+#[test]
+fn a_dry_run_uses_the_preflight_of_the_identity_that_is_not_refused() {
+    let f = F::new();
+    f.windows.st().deny_access = true;
+    assert_eq!(
+        f.run_with_args(default_attempts(&f.login(true)), f.dry_args()),
+        EXIT_OK,
+        "{}",
+        f.err.text()
+    );
+    assert!(f.out.text().contains("PREFLIGHT OK"), "{}", f.out.text());
+    assert_eq!(f.builds.load(Ordering::SeqCst), 2);
+    assert!(!f.enrolled());
+    assert!(!f.everything().contains(&f.password));
+}
+
+#[test]
+fn a_dry_run_refused_everywhere_lists_the_attempts_above_the_failed_verdict() {
+    let f = F::new();
+    f.windows.st().deny_access = true;
+    f.smile.st().deny_access = true;
+    assert_ne!(
+        f.run_with_args(default_attempts(&f.login(true)), f.dry_args()),
+        EXIT_OK
+    );
+    let text = f.out.text();
+    let summary = text.find("No SQL Server administrator identity worked");
+    let verdict = text.find("PREFLIGHT FAILED");
+    let (Some(summary), Some(verdict)) = (summary, verdict) else {
+        panic!("missing summary or verdict: {text} / {}", f.err.text());
+    };
+    assert!(summary < verdict, "{text}");
+    assert!(
+        text.contains("sql:smile") && text.contains("--sql-admin-user"),
+        "{text}"
+    );
+    assert!(!f.everything().contains(&f.password));
 }

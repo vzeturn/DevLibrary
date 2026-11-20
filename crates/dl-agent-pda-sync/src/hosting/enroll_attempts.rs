@@ -222,13 +222,17 @@ pub fn run_attempts(
                 last = Some(result);
             }
             None => {
-                if n > 1 {
-                    let text = format!(
+                let text = if n > 1 {
+                    format!(
                         "SQL administrator identity used: {label} (attempt {n}/{of}, after a refusal)"
-                    );
+                    )
+                } else {
+                    format!("SQL administrator identity used: {label} (attempt {n}/{of})")
+                };
+                if n > 1 {
                     run.line(&text);
-                    event(run, INFO, n, of, &label, "USED", &text);
                 }
+                event(run, INFO, n, of, &label, "used", &text);
                 return finish(result, paths, args, run, stdout, stderr);
             }
         }
@@ -271,4 +275,42 @@ fn exhausted_message(records: &[Record]) -> String {
         "No SQL Server administrator identity worked. Tried: {list}. Pass --sql-admin-user <login> with its \
          password in {ADMIN_PASSWORD_ENV} (or PDA_SQL_ADMIN_PASSWORD, or a prompt)."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bootstrap::preflight::PreflightFinding;
+
+    fn dry_ok_with(code: &str) -> Result<EnrollResult, Error> {
+        Ok(EnrollResult {
+            sql: None,
+            identity: None,
+            findings: vec![PreflightFinding::error(code, "blocked")],
+            cloud: None,
+        })
+    }
+
+    #[test]
+    fn only_access_refusals_move_to_the_next_identity() {
+        let table = [
+            (codes::SQL_NO_ACCESS, true),
+            (codes::SQL_LOGIN_FAILED, true),
+            (codes::SQL_DATABASE_NOT_FOUND, true),
+            (codes::SQL_UNREACHABLE, false),
+            (codes::BAD_ARGUMENTS, false),
+        ];
+        for (code, expected) in table {
+            assert_eq!(is_access_refusal(code), expected, "{code}");
+            let err = Err(Error::Agent(AgentError::new(code, "m")));
+            assert_eq!(refusal(&err, false).is_some(), expected, "Err {code}");
+            assert_eq!(
+                refusal(&dry_ok_with(code), true).is_some(),
+                expected,
+                "dry {code}"
+            );
+            // A real run's findings are warnings, never a refusal.
+            assert!(refusal(&dry_ok_with(code), false).is_none(), "real {code}");
+        }
+    }
 }
