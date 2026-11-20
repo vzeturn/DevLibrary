@@ -86,7 +86,7 @@ How the installer step handles each case:
 
 ## Gaps and concerns
 
-1. **The hub is not deployed** (out of scope). Until migration 0008 and the route are live, an attach from the new binary answers 404. The installer then ends with exit 1 and the next step "the hub does not know attach yet". Before this change the same run exited 0 and silently left the module off. So: **deploy the hub before releasing this agent build** to the Mũi Né Bay machine.
+1. **The hub is not deployed** (out of scope). Until migration 0008 and the route are live, an attach from the new binary answers 404. The installer then ends with exit 1 and the next step "the hub does not know attach yet". Before this change the same run exited 0 and silently left the module off. So: **deploy the hub before releasing this agent build** to the Muine Bay Resort machine.
 2. **Behaviour change in the installer.** Re-running an install line on an enrolled machine with a code that is expired, revoked, or used by another machine now ends with exit 1 after the service is back (it used to exit 0, "Already enrolled"). This is intended: the code no longer gets silently ignored. A plain admin code without modules still exits 0, and a code this agent already used gets 200.
 3. **The Windows 7 / PowerShell 2.0 legacy installer is unchanged** (`src/install/legacyScript.ts`, around line 379). It still only says "Already enrolled". On such a machine, run `dl-agent attach --code ...` by hand. This is listed as later work in decision 0002; I did not widen the slice.
 4. **No admin page in the hub UI shows the links.** They are in the JSON API (`products` on agents) only.

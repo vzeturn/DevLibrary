@@ -4,7 +4,7 @@
 - Date: 2026-11-20
 - Scope: `services/agent-hub` (`POST /v1/attach`, `product_links`, admin agent view),
   `crates/dl-agent` (`HubClient::attach`, `dl-agent attach`, installer enrol step)
-- Request: RT-0298 (first customer: Mũi Né Bay, Check-In RT-0252 + PDAOrder RT-0225)
+- Request: RT-0298 (first customer: Muine Bay Resort, RT customer `muine-bay-resort`; Check-In RT-0252 + PDAOrder RT-0225)
 
 ## Context
 

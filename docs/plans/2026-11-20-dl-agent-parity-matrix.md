@@ -15,7 +15,7 @@ Membership 64, HotelLink 53, SRBackup 58).
 
 | # | Gap | Risk | Work | Depends on |
 |---|---|---|---|---|
-| 1 | Membership: REDEEM jobs ignored the `vouchers` array (.NET `58a4524`: one discount line per voucher, exactly the hub's `appliedAmount`) | **cao (tiền)** | **fixed in PR #69** (golden + live SQL 2022 with replay). Victory / Mũi Né stay `read_only: true` until a release with it is on stable | — |
+| 1 | Membership: REDEEM jobs ignored the `vouchers` array (.NET `58a4524`: one discount line per voucher, exactly the hub's `appliedAmount`) | **cao (tiền)** | **fixed in PR #69** (golden + live SQL 2022 with replay). Victory / Muine Bay Resort stay `read_only: true` until a release with it is on stable | — |
 | 2 | Membership: `SmileDiagnostics` (periodic, after failed jobs, on hub request) not ported | trung | port, 4–6 h | — |
 | 3 | Membership: heartbeat shares the job-pull loop (a failed pull skips it; a slow batch delays it → hub may mark the agent offline) | trung | own heartbeat thread, ~2 h | — |
 | 4 | Check-In: no `export-key` to print the tenant master key for offline storage (only cloud escrow + fingerprint) | trung | owner decision, then port | owner |
@@ -325,7 +325,7 @@ retention and the schema gate on purpose; those rows are "khác (ADR)", not gaps
 | Strict frames, 8 MiB cap before/after gunzip, bad frame → 4400 | SMILE-PMS/apps/site-agent/internal/wire/codec.go:194 | DevLibrary/crates/dl-agent-pms/src/wire/decode.rs:337 | có | thấp | none |
 | Op `target_db` routing (old: FO→SMILE_FO, POS→SMILE_POS, PMS/BO→MM_PMS) | SMILE-PMS/apps/site-agent/internal/exec/executor.go:45 | DevLibrary/crates/dl-agent-pms/src/exec/mod.rs:368 (frame `target_db` must equal manifest; FO/POS/BO → SMILE_FO/POS/BO) | khác (ADR §1): SMILE_BO direct, MM_PMS ignored | thấp | none |
 | Databases: `databases.json` pools (≤ 9 conns), MM_PMS required | SMILE-PMS/apps/site-agent/internal/exec/schema.go:31 | DevLibrary/crates/dl-agent-pms/src/db.rs:41,457 (`sql.json` first, `databases.json` fallback, MM_PMS ignored) | khác: better (sealed sql.json, TLS rung) | thấp | none |
-| SQL 2008 TLS 1.0 (`tlsmin=1.0` DSN) | SMILE-PMS/apps/site-agent/rust (DevLibrary PR #4) / go-mssqldb DSN | dl-tds ladder via core `sql.json` (DevLibrary/crates/dl-agent-pms/src/db.rs:374 `rung`) | có (core ladder) | trung: untested at a real SQL 2008 site | Mũi Né SQL 2008 bench (RT-0252) |
+| SQL 2008 TLS 1.0 (`tlsmin=1.0` DSN) | SMILE-PMS/apps/site-agent/rust (DevLibrary PR #4) / go-mssqldb DSN | dl-tds ladder via core `sql.json` (DevLibrary/crates/dl-agent-pms/src/db.rs:374 `rung`) | có (core ladder) | trung: untested at a real SQL 2008 site | Muine Bay Resort SQL 2008 bench (RT-0252) |
 | Manifest allow-list, excluded patterns, agent floor (`xp_*`, `sp_executesql`, …) | SMILE-PMS/apps/site-agent/internal/ops/manifest.go:100,143,155 | DevLibrary/crates/dl-agent-pms/src/ops.rs:45,254,334 | có | thấp | none |
 | Unknown op / in-process-only / contract checks | SMILE-PMS/apps/site-agent/internal/exec/executor.go:81 | DevLibrary/crates/dl-agent-pms/src/exec/mod.rs:342 | có | thấp | none |
 | Bind types (bit…varbinary, ranges, nullable) | SMILE-PMS/apps/site-agent/internal/exec/binds.go:44,97 | DevLibrary/crates/dl-agent-pms/src/exec/bind.rs:79,157 | có | thấp: only op today is a read | re-check `varchar` code page when the first write op lands |
@@ -348,7 +348,7 @@ retention and the schema gate on purpose; those rows are "khác (ADR)", not gaps
 1. **Live bench end to end** (trung): fake cloud + SQL 2017/2022 only; never against the real SMILE-PMS cloud nor
    Windows SCM/DPAPI/ACL. Work: SR bench run with a demo tenant (switch steps in crate README). ~0.5 day; needs
    SMILE-PMS cloud tenant + Windows VM.
-2. **SQL Server 2008 (TLS 1.0) site** (trung): core ladder covers it on paper; Mũi Né bench pending (RT-0252).
+2. **SQL Server 2008 (TLS 1.0) site** (trung): core ladder covers it on paper; Muine Bay Resort bench pending (RT-0252).
    ~2 h on site; needs the site.
 3. **Write ops** (thấp today): the only op is the read `fo.hotelDate.get@1`; `varchar` code-page binding and the
    journal-after-commit window get their first real use with the first write op. Work: add a write-op fixture +
@@ -485,7 +485,7 @@ Old agent read: `SmileCheckin/src/MM.Arrival.Agent` (.NET 10) + `MM.Arrival.Sync
 
 ## 7. Membership (MM-MEMBERSHIP `src/MM.Membership.Agent` → `dl-agent-membership`)
 
-Old agent read: `MM-MEMBERSHIP/src/MM.Membership.Agent` (.NET 10, 19 k lines, HEAD with `58a4524`). New: `DevLibrary/crates/dl-agent-membership` + core. Customers: Victory (VIC-SGN, VICVT), Mũi Né Bay.
+Old agent read: `MM-MEMBERSHIP/src/MM.Membership.Agent` (.NET 10, 19 k lines, HEAD with `58a4524`). New: `DevLibrary/crates/dl-agent-membership` + core. Customers: Victory (VIC-SGN, VICVT), Muine Bay Resort (RT customer `muine-bay-resort`).
 
 | function | old agent (path:line) | dl-agent (path:line) | status | rủi ro tiền-dữ liệu | việc cần làm |
 |---|---|---|---|---|---|
@@ -556,7 +556,7 @@ Old agent read: `MM-MEMBERSHIP/src/MM.Membership.Agent` (.NET 10, 19 k lines, HE
 
 ### Lỗ hổng (Membership)
 
-1. **Stacked `vouchers` in REDEEM jobs** — cao (money at the counter). .NET `58a4524` (2026-11-19) posts each voucher at the hub's `AppliedAmount` (whole stay), one line per voucher, all-or-manual when an amount is missing. The Rust module reads only the legacy `voucher`: for one PercentOff voucher it posts `percent × live folios' first-night RateAmount` (the old .NET bug the change fixed); with several vouchers the hub sends `voucher = null` and the job goes manual (safe). Work: port `ParseVouchers` (sequence order, non-object entry = format error) and `HandleStackedRedeemAsync` (per-voucher `HasPostedRef` skip, `MemberDiscountCode` checks) with golden SQL and a fake-hub test; ≈ 3 h; DevLibrary only, but it changes posted amounts → not fixed in this stream (brief). Must land before Victory/Mũi Né Bay run with `read_only: false`.
+1. **Stacked `vouchers` in REDEEM jobs** — cao (money at the counter). .NET `58a4524` (2026-11-19) posts each voucher at the hub's `AppliedAmount` (whole stay), one line per voucher, all-or-manual when an amount is missing. The Rust module reads only the legacy `voucher`: for one PercentOff voucher it posts `percent × live folios' first-night RateAmount` (the old .NET bug the change fixed); with several vouchers the hub sends `voucher = null` and the job goes manual (safe). Work: port `ParseVouchers` (sequence order, non-object entry = format error) and `HandleStackedRedeemAsync` (per-voucher `HasPostedRef` skip, `MemberDiscountCode` checks) with golden SQL and a fake-hub test; ≈ 3 h; DevLibrary only, but it changes posted amounts → not fixed in this stream (brief). Must land before Victory/Muine Bay Resort run with `read_only: false`.
 2. **SmileDiagnostics** — trung (ops, no money). Port `SmileDiagnosticsProbe` (read-only catalog queries, 10 s per query, 30 s per run) + the coordinator (startup, periodic, after a failed job, hub request) and send the result in the heartbeat `Diagnostics` field; also the earn-pair drift check and `check-smile --diagnose` as a command. ≈ 4–6 h; heartbeat body shape must match the hub (golden from .NET).
 3. **Heartbeat tied to the pump** — trung. A failed pull returns before the heartbeat, a slow batch delays it; .NET runs an independent heartbeat loop. Work: heartbeat thread with its own SMILE probe connection; ≈ 2 h; DevLibrary only.
 4. Verification: real DPAPI `config.dpapi`, `--switch` SCM calls, Victory SMILE shapes (INVENTORY §4b).
