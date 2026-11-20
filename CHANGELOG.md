@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent: `pda-enroll` repairs the `pda_sync` login after an earlier failed run instead of failing with 18456 for good (RT-0353). The login step is skipped only when the password the agent holds still signs in; a held password SQL Server rejects (saved by a run whose `ALTER LOGIN` then failed with 15247) gets the login reset with a new one when enroll runs as a SQL administrator. A failed login step now puts the previously held password back, so it never leaves the store out of step with SQL Server.
+
 - agent-hub, dl-agent: remote attach covers a machine already enrolled elsewhere and a service account that is not a SQL administrator (RT-0261, follow-ups of RT-0324/0327/0328). `POST /admin/agents/:id/attach` takes `reenroll: true` (adds the tool's `--force`, moving einvoice, pms-site, arrival, membership, hotellink or backup to the new product tenant) and `flags` (value-less flags from the module's list, else `400 unknown_flag`). `pda-enroll`/`pda-grants` gain `--sql-admin-saved` (the SQL login dl-agent keeps in `sql.json` becomes the SQL administrator, its server the `--sql-instance`) and read the administrator password from `DL_AGENT_PDA_SQL_ADMIN_PASSWORD` too, so `SQL_NO_ACCESS` (error 15247 as LocalSystem) is fixed from the hub; the pda-sync row accepts `--sql-admin-user` with that secret.
 
 - dl-agent: a probation rollback now names the module(s) that stayed unhealthy and their last error (`update_rolled_back`: `a module stayed unhealthy through probation: pms-device (…)`), so the canary gate's `no_rollback` failure can be traced without a site visit (RT-0261).
