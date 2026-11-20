@@ -35,6 +35,7 @@ does not verify.
 | Method & path | Body → Answer |
 |---|---|
 | `POST /v1/enroll` (unsigned; the one-time code authenticates) | `{code, public_key (b64), hostname, os, arch, version, modules:[name]}` → `{agent_id, tenant, site, channel, heartbeat_seconds, config:{version, body}}` |
+| `POST /v1/attach` (RT-0298) | `{code}` (another product's one-time code for this enrolled agent) → `{agent_id, tenant, site, product, product_tenant, modules:[name], config:{version, body}}`; the code's modules are merged into the config (delivered on the next heartbeat), the identity stays; `403 enroll_code_invalid`, `409 tenant_mismatch` (admin code of another tenant) |
 | `POST /v1/heartbeat` | Heartbeat (§3) → `{server_time, channel, heartbeat_seconds, config?:{version, body}, commands:[Command], update_check:bool}` |
 | `POST /v1/reports` | `{reports:[ProblemReport]}` → `{accepted:N}` |
 | `POST /v1/commands/{id}/result` | `{ok:bool, output:string, finished_at}` → `{}` |

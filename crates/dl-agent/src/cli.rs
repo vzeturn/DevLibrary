@@ -127,6 +127,17 @@ pub fn command(app: &App) -> Command {
                 .arg(data()),
         )
         .subcommand(
+            Command::new("attach")
+                .about("Adds one more product to this enrolled machine with its one-time code (identity kept)")
+                .arg(
+                    Arg::option("code")
+                        .required()
+                        .env("DL_AGENT_ENROLL_CODE")
+                        .help("One-time enrolment code of the product to add"),
+                )
+                .arg(data()),
+        )
+        .subcommand(
             Command::new("run")
                 .about("Runs the agent (console, or as the service)")
                 .arg(data()),
@@ -197,6 +208,12 @@ pub fn main(app: App) -> i32 {
     let dir = data_dir(&app.service, sub);
     let result = match name {
         "enroll" => enroll(&app, &dir, sub),
+        "attach" => attach_with(
+            &dir,
+            sub.value("code").unwrap_or(""),
+            Box::new(HttpTransport::new()),
+        )
+        .map(|_| ()),
         "run" => return run(&app, &dir),
         "install" => return crate::cli_install::main_install(&app, &dir, sub),
         "update" => return crate::cli_install::main_update(&app, &dir, sub),
@@ -374,6 +391,37 @@ pub(crate) fn enroll_with(
         dir.display()
     );
     Ok(())
+}
+
+/// Attaches one more product to the agent enrolled in `dir` with `code` (`POST /v1/attach`):
+/// the identity stays, the hub turns the product's module on and the next heartbeat brings it.
+pub(crate) fn attach_with(
+    dir: &Path,
+    code: &str,
+    transport: Box<dyn hub::Transport>,
+) -> Result<hub::Attached, Error> {
+    if !Identity::exists(dir) {
+        return Err(Error::NotEnrolled);
+    }
+    let identity = Identity::load(dir)?;
+    let (agent, tenant, site) = (
+        identity.agent_id.clone(),
+        identity.tenant.clone(),
+        identity.site.clone(),
+    );
+    let attached = hub::HubClient::new(transport, identity).attach(code.trim())?;
+    let modules = if attached.modules.is_empty() {
+        "no new module".to_string()
+    } else {
+        attached.modules.join(", ")
+    };
+    println!(
+        "attached {} ({}) to {agent} ({tenant}/{site}): {modules} on with config v{}, applied at the next heartbeat",
+        attached.product.as_deref().unwrap_or("admin code"),
+        attached.product_tenant,
+        attached.config_version,
+    );
+    Ok(attached)
 }
 
 fn init_logging(app: &App, dir: &Path, console: bool, file: &str) {

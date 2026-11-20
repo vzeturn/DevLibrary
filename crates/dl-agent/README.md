@@ -147,7 +147,7 @@ The script only downloads, checks and hands off: size and SHA-256 against `/inst
 `verify-self` checks the Ed25519 release signature of `/install/manifest/...` (the installed
 agent does it when it knows the verb, else the download itself), then `<download> install --hub
 ...` does the machine setup: Defender exclusion, older copies and `-Replace` services removed,
-program placed in `%ProgramFiles%\DevLibrary\<product>`, enrol unless already enrolled, SQL login,
+program placed in `%ProgramFiles%\DevLibrary\<product>`, enrol (or attach the code's product when already enrolled), SQL login,
 `-Setup`, service + watchdog task, wait for the first heartbeat. Re-running the line repairs or
 updates the install and keeps the identity. A build older than `dl-agent install` is installed by
 the previous script (`/install/legacy.ps1`) with the same options.
@@ -156,6 +156,19 @@ The first argument picks what the machine follows: `stable` / `canary` (a local 
 over the hub's assignment), `auto` (the hub's channel again) or a version `x.y.z` (held there).
 `-Channel canary` only picks the build installed now. `-SqlPrompt` asks for the SQL login when SQL
 Server is on another machine. See `services/agent-hub/README.md` for the hub side.
+
+### One agent per customer: adding a product (RT-0298)
+
+A customer may use several products (PMS, E-Invoice, Check-In, Membership, PDAOrder, Hotel Link,
+SRBackup) on one machine, and dl-agent serves them all. Every product hands out the same one-line
+installer with its own code. On a machine that is not enrolled the line enrols; on one already
+enrolled it **attaches**: the hub spends the code on the agent there (`POST /v1/attach`), turns the
+product's module on next to the ones already running (their settings stay) and records the link
+product ↔ customer. The identity, tenant and channel stay; the module starts at the next heartbeat
+(about a minute). By hand, as Administrator: `dl-agent attach --code XXXX-XXXX` (or env
+`DL_AGENT_ENROLL_CODE`). Re-running an old line whose code is already spent only updates the agent
+(`Already enrolled … nothing attached`); `--reenroll` still replaces the identity and is not needed
+to add a product.
 
 ### Demo bench: one command, every module (RT-0261)
 
@@ -225,6 +238,7 @@ folder (identity, spool, logs) stays unless `-Purge` (`--purge`).
 |---------|---------|
 | `--version` | print the version |
 | `enroll --hub URL[,URL] --code CODE [--force]` | register with the hub |
+| `attach --code CODE` | add another product to this enrolled machine (identity kept, its module turned on) |
 | `run` | run in the console, or as the service when the SCM started it |
 | `install --hub URL[,URL] [stable\|canary\|auto\|x.y.z] [...]` | machine setup (what the one-line installer runs); prompts mask the password |
 | `install stable\|canary\|auto` | follow that channel (`auto`: the hub's) and update now; removes a pin |

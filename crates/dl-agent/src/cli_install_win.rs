@@ -257,7 +257,10 @@ fn av_failure(path: &Path, why: &str) -> Failure {
 
 fn enroll_step(app: &App, dir: &Path, o: &MachineOpts, enrolled: bool) -> Result<(), Failure> {
     if enrolled && !o.reenroll {
-        println!("Already enrolled: keeping this machine's identity");
+        match o.code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+            Some(code) => attach_step(dir, code, Box::new(crate::hub::HttpTransport::new())),
+            None => println!("Already enrolled: keeping this machine's identity"),
+        }
         return Ok(());
     }
     let code = match &o.code {
@@ -292,6 +295,26 @@ fn enroll_step(app: &App, dir: &Path, o: &MachineOpts, enrolled: bool) -> Result
             EXIT_FAILED,
         )
     })
+}
+
+/// A code given to an enrolled machine adds that product to it (RT-0298). Never fatal: re-running
+/// an old install line with its spent code must still update the agent, so a refusal is told and
+/// the install goes on.
+pub(crate) fn attach_step(dir: &Path, code: &str, transport: Box<dyn crate::hub::Transport>) {
+    let Err(e) = crate::cli::attach_with(dir, code, transport) else {
+        return;
+    };
+    match crate::hub::error_code(&e).as_deref() {
+        Some("enroll_code_invalid") => println!(
+            "Already enrolled: keeping this machine's identity (the code is used, expired or revoked, nothing attached)"
+        ),
+        _ => {
+            println!("WARNING: adding the product with the code failed: {e}");
+            println!(
+                "Next: ask for a new code if it was refused, then run: dl-agent attach --code <code>"
+            );
+        }
+    }
 }
 
 /// Runs the module setup (`--setup`); `arrival-enroll` takes the same SQL sign-in through env.
@@ -532,6 +555,41 @@ fn last_lines(path: &Path, n: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_code_on_an_enrolled_machine_attaches_and_a_spent_one_does_not_fail_the_install() {
+        use crate::hub::tests_support::{FakeHub, identity};
+        let d = crate::store::testdir::TestDir::new("install-attach");
+        let id = identity(&["https://hub.example"]);
+        id.save(&d.0).unwrap();
+        let hub = FakeHub::default();
+        hub.push(
+            200,
+            r#"{"product": "pda-sync", "product_tenant": "pda-sync-mnb", "modules": ["pda-sync"], "config": {"version": 2}}"#,
+        );
+        hub.push(403, r#"{"error": "enroll_code_invalid"}"#);
+        hub.push(500, r#"{"error": "internal"}"#);
+        attach_step(&d.0, "NEW-CODE", Box::new(hub.clone()));
+        attach_step(&d.0, "OLD-CODE", Box::new(hub.clone()));
+        attach_step(&d.0, "ANY-CODE", Box::new(hub.clone()));
+        let seen = hub.seen();
+        assert_eq!(seen.len(), 3);
+        assert!(
+            seen.iter()
+                .all(|s| s.url == "https://hub.example/v1/attach")
+        );
+        // The identity is never replaced.
+        assert_eq!(Identity::load(&d.0).unwrap().agent_id, id.agent_id);
+    }
+
+    #[test]
+    fn attach_needs_an_enrolled_machine() {
+        let d = crate::store::testdir::TestDir::new("attach-none");
+        let hub = crate::hub::tests_support::FakeHub::default();
+        let e = crate::cli::attach_with(&d.0, "CODE", Box::new(hub.clone())).unwrap_err();
+        assert!(matches!(e, Error::NotEnrolled));
+        assert!(hub.seen().is_empty());
+    }
 
     #[test]
     fn like_matches_powershell_wildcards_without_case() {

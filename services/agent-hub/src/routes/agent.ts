@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { nowSeconds, type AppEnv } from '../env';
-import { commandResultBody, enrollBody, heartbeatBody, MAX_SELFTEST_BYTES, reportsBody, selftestBody } from '../domain/schemas';
+import { attachBody, commandResultBody, enrollBody, heartbeatBody, MAX_SELFTEST_BYTES, reportsBody, selftestBody } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { requireSignedAgent } from '../middleware/signature';
 import { commandResult, heartbeat, reports } from '../services/agentApi';
+import { attach } from '../services/attach';
 import { DIAGNOSTICS_PREFIX, MAX_DIAGNOSTICS_BYTES, storeDiagnostics } from '../services/diagnostics';
 import { enroll } from '../services/enroll';
 import { manifestText } from '../services/releases';
@@ -33,6 +34,12 @@ agentRoutes.post('/heartbeat', async (c) => {
   const raw = c.get('rawBody');
   const hb = validate(heartbeatBody, parseJson(raw));
   return c.json(await heartbeat(c.env, c.get('agent'), hb, raw, nowSeconds()));
+});
+
+/** Attaches one more product to this agent with its one-time code (RT-0298, PROTOCOL §2). */
+agentRoutes.post('/attach', async (c) => {
+  const body = validate(attachBody, parseJson(c.get('rawBody')));
+  return c.json(await attach(c.env, c.get('agent'), body, nowSeconds()));
 });
 
 agentRoutes.post('/reports', async (c) => {

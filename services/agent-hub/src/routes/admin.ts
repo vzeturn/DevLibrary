@@ -26,6 +26,7 @@ import { allowRelease, disallowRelease } from '../services/lanes';
 import { holdsView, holdTenant, pauseRelease, releaseHold, resumeRelease } from '../services/holds';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
+import { listLinks } from '../repo/productLinks';
 import { renderStatusPage } from './statusPage';
 
 const id = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'letters, digits, . _ - only');
@@ -117,6 +118,10 @@ adminRoutes.delete('/product-keys/:id', async (c) => {
 });
 
 adminRoutes.get('/agents', async (c) => c.json({ agents: await agentsView(c.env, c.req.query('tenant_id'), nowSeconds()) }));
+/** Which products reach which agent, for which of their tenants (RT-0298). */
+adminRoutes.get('/product-links', async (c) =>
+  c.json({ links: await listLinks(c.env.DB, { agent_id: c.req.query('agent_id'), product: c.req.query('product'), tenant_id: c.req.query('tenant_id') }) }),
+);
 adminRoutes.put('/agents/:id/channel', async (c) => {
   const body = validate(channelBody, await jsonBody(c.req));
   await setChannel(c.env, c.req.param('id'), body.channel);

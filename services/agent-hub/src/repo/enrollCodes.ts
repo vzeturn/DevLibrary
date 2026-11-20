@@ -1,3 +1,5 @@
+import { linkFromClaimedCode } from './productLinks';
+
 export interface EnrollCodeRow {
   id: string;
   code_hash: string;
@@ -76,6 +78,33 @@ export async function claimCodeAndCreateAgent(db: D1Database, codeId: string, ag
          SELECT ?1, 1, config, ?2 FROM enroll_codes WHERE id = ?3 AND used_by_agent = ?1 AND config IS NOT NULL`,
       )
       .bind(agent.id, now, codeId),
+    linkFromClaimedCode(db, codeId, agent.id, now),
+  ]);
+  return (claim?.meta.changes ?? 0) === 1;
+}
+
+/**
+ * Claims the code for an agent already enrolled and, in the same transaction, merges `patch`
+ * (RFC 7396, SQLite `json_patch`) into its config with the version bumped, and records the
+ * product link. False when the code was taken meanwhile (nothing changed then).
+ */
+export async function claimCodeForAttach(db: D1Database, codeId: string, agentId: string, patch: string, defaultBody: string, now: number): Promise<boolean> {
+  const [claim] = await db.batch([
+    db
+      .prepare(
+        `UPDATE enroll_codes SET used_at = ?1, used_by_agent = ?2
+         WHERE id = ?3 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?1`,
+      )
+      .bind(now, agentId, codeId),
+    db
+      .prepare(
+        `INSERT INTO configs (agent_id, version, body, updated_at)
+         SELECT ?1, 1, json_patch(?2, ?3), ?4 FROM enroll_codes WHERE id = ?5 AND used_by_agent = ?1 AND used_at = ?4
+         ON CONFLICT (agent_id) DO UPDATE SET version = configs.version + 1,
+           body = json_patch(configs.body, ?3), updated_at = excluded.updated_at`,
+      )
+      .bind(agentId, defaultBody, patch, now, codeId),
+    linkFromClaimedCode(db, codeId, agentId, now),
   ]);
   return (claim?.meta.changes ?? 0) === 1;
 }

@@ -132,6 +132,47 @@ pub struct Enrolled {
     pub config: Option<RemoteConfig>,
 }
 
+/// What the hub answered to an attach (`POST /v1/attach`, PROTOCOL.md §2, RT-0298).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Attached {
+    /// Product whose key minted the code; `None` for an admin code.
+    pub product: Option<String>,
+    /// The product's tenant this agent now also serves.
+    pub product_tenant: String,
+    /// Modules the code switched on.
+    pub modules: Vec<String>,
+    /// The agent's config version after the merge (delivered on the next heartbeat).
+    pub config_version: u64,
+}
+
+impl Attached {
+    fn from_json(v: &Value) -> Result<Attached, Error> {
+        let product_tenant = v
+            .get("product_tenant")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Json("attach answer without product_tenant".into()))?;
+        Ok(Attached {
+            product: v.get("product").and_then(Value::as_str).map(str::to_string),
+            product_tenant: product_tenant.to_string(),
+            modules: v
+                .get("modules")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            config_version: v
+                .get("config")
+                .and_then(|c| c.get("version"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        })
+    }
+}
+
 /// Shortest heartbeat interval the agent accepts: the hub asks for 5 s from a canary agent on
 /// probation (PROTOCOL.md §5.1); agents up to 1.3.x floor it at 10 s.
 pub const MIN_HEARTBEAT_SECONDS: u64 = 5;
@@ -369,6 +410,12 @@ impl HubClient {
         let a = HeartbeatAnswer::from_json(&self.post("/v1/heartbeat", body)?)?;
         self.observe_server_time(a.server_time);
         Ok(a)
+    }
+
+    /// `POST /v1/attach`: spends one more product's one-time code on this agent, which keeps
+    /// its identity; the hub merges the code's modules into the config (RT-0298).
+    pub fn attach(&self, code: &str) -> Result<Attached, Error> {
+        Attached::from_json(&self.post("/v1/attach", &json!({"code": code}))?)
     }
 
     /// `POST /v1/reports`; returns how many the hub accepted.

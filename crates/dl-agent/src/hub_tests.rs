@@ -334,3 +334,50 @@ fn enroll_keeps_the_hub_host_list() {
         ]
     );
 }
+
+#[test]
+fn attach_is_signed_and_parsed() {
+    let id = identity(&["https://hub.example"]);
+    let hub = FakeHub::default();
+    hub.push(
+        200,
+        r#"{"agent_id": "agt_1", "tenant": "arrival-mnb", "site": "main", "product": "pda-sync",
+        "product_tenant": "pda-sync-mnb", "modules": ["pda-sync"],
+        "config": {"version": 4, "body": {"modules": {}}}}"#,
+    );
+    let c = HubClient::new(Box::new(hub.clone()), id.clone());
+    let a = c.attach("ABCD-EFGH").unwrap();
+    assert_eq!(
+        a,
+        Attached {
+            product: Some("pda-sync".into()),
+            product_tenant: "pda-sync-mnb".into(),
+            modules: vec!["pda-sync".into()],
+            config_version: 4,
+        }
+    );
+    let seen = hub.seen();
+    assert_eq!(seen[0].url, "https://hub.example/v1/attach");
+    assert!(verify(&id, &seen[0]));
+    let body = dl_json::parse_slice(&seen[0].body).unwrap();
+    assert_eq!(body.get("code").and_then(Value::as_str), Some("ABCD-EFGH"));
+}
+
+#[test]
+fn attach_refusal_exposes_the_hub_code() {
+    let hub = FakeHub::default();
+    hub.push(403, r#"{"error": "enroll_code_invalid"}"#);
+    hub.push(409, r#"{"error": "tenant_mismatch"}"#);
+    let c = HubClient::new(Box::new(hub), identity(&["https://hub.example"]));
+    let used = c.attach("x").unwrap_err();
+    assert_eq!(error_code(&used).as_deref(), Some("enroll_code_invalid"));
+    let admin = Attached::from_json(
+        &dl_json::parse(r#"{"product": null, "product_tenant": "t", "modules": []}"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(admin.product, None);
+    assert_eq!(
+        error_code(&c.attach("y").unwrap_err()).as_deref(),
+        Some("tenant_mismatch")
+    );
+}

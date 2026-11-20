@@ -20,6 +20,10 @@ export const enrollBody = z.object({
 });
 export type EnrollBody = z.infer<typeof enrollBody>;
 
+/** `POST /v1/attach` (RT-0298): one more product's one-time code for an enrolled agent. */
+export const attachBody = z.object({ code: z.string().min(4).max(64) });
+export type AttachBody = z.infer<typeof attachBody>;
+
 export const moduleState = z.enum(['running', 'starting', 'degraded', 'stopped', 'disabled']);
 
 export const heartbeatBody = z.object({
