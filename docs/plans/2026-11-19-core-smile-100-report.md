@@ -47,7 +47,7 @@ it. Each item below first audits what already existed, then lists what was added
    - `SELECT SUSER_SNAME(), auth_scheme FROM sys.dm_exec_connections WHERE session_id=@@SPID` must return
      `DOMAIN\user` and `NTLM`.
    - Extended Protection = Allowed must work; Required is expected to refuse.
-3. Mũi Né pilot (RT-0252, SQL 2008 through the relay host SERVER_SMILE_MN):
+3. Muine Bay Resort pilot (RT-0252, SQL 2008 through the relay host SERVER_SMILE_MN):
    - **Build:** `SELECT @@VERSION, SERVERPROPERTY('ProductVersion')`. Check whether the TLS 1.2 update is installed,
      and that `tds_version` reports 0x730A0003 or 0x730B0003.
    - **Browser:** check that UDP 1434 reaches the server through the relay. If it does not, use `HOST\INST,port`
@@ -181,7 +181,7 @@ Tests:
    TrustServerCertificate=true`, then `SELECT SUSER_SNAME(), auth_scheme FROM sys.dm_exec_connections WHERE
    session_id=@@SPID` must return `DOMAIN\user`, `NTLM`. Run from Linux/macOS and Windows. Also check a server with
    Extended Protection = Allowed (works) vs Required (expected refusal: no channel bindings).
-3. Mũi Né pilot (RT-0252, SQL 2008 via relay host SERVER_SMILE_MN) — bench must check:
+3. Muine Bay Resort pilot (RT-0252, SQL 2008 via relay host SERVER_SMILE_MN) — bench must check:
    - exact build: `SELECT @@VERSION, SERVERPROPERTY('ProductVersion')` (10.0.x = 2008, 10.50.x = 2008 R2; SP/TLS 1.2
      update present?), and `Client::tds_version()` / agent describe reports 0x730A0003 or 0x730B0003;
    - named instance: is SQL Browser (UDP 1434) reachable from the agent host to SERVER_SMILE_MN through the relay?
@@ -261,7 +261,7 @@ Crates touched: `dl-agent`, `dl-log` (`scrub` lives in `dl-log/src/redact.rs`, s
 ## Only on real Windows / bench (precise list)
 1. Rollback trial on a canary Windows machine (PROTOCOL §6.6 steps 1–4): `scripts/build-dl-agent.sh --fault probation X`, publish to canary, check: the SCM restarts the service on exit code 75 after install and after rollback (recovery actions), renaming the running `dl-agent.exe` to `previous\` works, `GET /admin/reports?severity=critical&version=X` shows `update_rolled_back`, heartbeat `update.state=rolled_back`, selftest row `core/update_state` lists X; then publish X+1 and see it commit.
 2. Failover against the real hosts: block `agent.pms.id.vn` on the bench (hosts file / firewall) and check the heartbeat moves to `agent-hub.vutq-sense.workers.dev` through the site proxy (WinHTTP/IE proxy path is Windows-only), and comes back after the fallback is blocked instead.
-3. `collect_diagnostics` from the hub on a SMILE site: download the zip from R2 and grep for the SQL password, enrol token and pda-sync token; check `survey.json` from SQL 2008 (Mũi Né relay SERVER_SMILE_MN) and that `selftest.last.json` appears after one `selftest` command (needs the service account to write the data dir — a write failure is only logged).
+3. `collect_diagnostics` from the hub on a SMILE site: download the zip from R2 and grep for the SQL password, enrol token and pda-sync token; check `survey.json` from SQL 2008 (Muine Bay Resort relay SERVER_SMILE_MN) and that `selftest.last.json` appears after one `selftest` command (needs the service account to write the data dir — a write failure is only logged).
 4. pda-sync B5: call `ctx.add_diagnostic_folder(<pda log dir>)` in the module (not done here: module crate out of this stream's scope) and confirm the folder lands under `modules/pda-sync/logs/`.
 
 ## Notes / behaviour changes to be aware of

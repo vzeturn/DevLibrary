@@ -3,7 +3,7 @@
 ## Goal
 One customer = one dl-agent. A machine first enrolled for one product (e.g. Check-In / `arrival`)
 must be able to take a second product (e.g. PDAOrder / `pda-sync`) WITHOUT losing its identity,
-its config, or the first product's module. First customer: Mũi Né Bay (Check-In RT-0252 + PDAOrder RT-0225).
+its config, or the first product's module. First customer: Muine Bay Resort (Check-In RT-0252 + PDAOrder RT-0225).
 
 Today: `cli_install_win.rs` enroll_step prints "Already enrolled: keeping this machine's identity"
 and ignores the new code, so the new module stays disabled; `-ReEnroll` wipes the identity.

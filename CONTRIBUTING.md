@@ -44,6 +44,14 @@ These are enforced in review and, where possible, by CI and the workspace lints.
 - Python or Node.js packages may be used by scripts that *generate* test vectors. The
   generated data is committed; building and testing never needs them.
 
+### Customers in docs
+
+- The customers that run `dl-agent` are recorded in the Request Tracking (RT) customer book,
+  not here. Take a customer's name, sites and products from RT's `get_customer` (MCP) and
+  write the canonical name with its RT id, e.g. Muine Bay Resort (`muine-bay-resort`).
+- Do not invent short or local spellings of a customer's name; quote an old spelling only
+  when citing history.
+
 ### Crate layout
 
 - Each crate lives in `crates/dl-<name>/` and inherits `version`, `edition`,

@@ -114,7 +114,7 @@ shared by every module on the site.
 
 | Module | Crate | Ported | Verified on Linux (unit + live SQL) | Still open |
 |---|---|---|---|---|
-| core | `dl-agent`, `dl-tds`, `dl-http` | service, enrol, signed update + rollback, reports, remote config, canary gate, SQL ladder, survey, diagnostics, NTLMv2, named instance, TDS 7.3 (RT-0258) | yes; Windows build by cross clippy | Windows SSPI/SCM bench, SQL 2008 at Mũi Né (RT-0252) |
+| core | `dl-agent`, `dl-tds`, `dl-http` | service, enrol, signed update + rollback, reports, remote config, canary gate, SQL ladder, survey, diagnostics, NTLMv2, named instance, TDS 7.3 (RT-0258) | yes; Windows build by cross clippy | Windows SSPI/SCM bench, SQL 2008 at Muine Bay Resort (RT-0252) |
 | einvoice | `dl-agent-einvoice` | full | yes (SQL 2017/2022) | SR bench Windows checks |
 | pms-site / pms-device | `dl-agent-pms`, `dl-agent-pms-device` | full | yes | device hardware (locks, printers) on bench |
 | hotellink | `dl-agent-hotellink` | full | yes (RT-0259 e2e) | real kill -9, site UI |
