@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
-import { BOOT_HOST_SUFFIXES, bootCommand, CODE_SLOT, PRODUCT_LABELS, productDeployUrl, safeBootUrl } from '../src/install/deployPage';
+import { BOOT_HOST_SUFFIXES, bootCommand, CODE_SLOT, PRODUCT_LABELS, productDeployUrl, renderDeployPage, safeBootUrl } from '../src/install/deployPage';
 import { admin, createTenant, enrollRequest, heartbeatBody, newKeys, setNow, signed, T0, testEnv, type TestEnv } from './helpers';
 
 let env: TestEnv;
@@ -137,6 +137,15 @@ describe('/deploy guided install', () => {
     const embedded = new Function(`return (${safeBootUrl.toString()})`)() as typeof safeBootUrl;
     expect(embedded(ok, BOOT_HOST_SUFFIXES)).toBe(ok);
     expect(embedded('https://evil.example/x', BOOT_HOST_SUFFIXES)).toBe('');
+  });
+
+  it('takes a product install link without a code (the product mints it during the install)', () => {
+    const url = productDeployUrl('https://hub.test', { boot: 'https://checkin.mmsolutions.vn/agent/bootstrap/tok', product: 'arrival' });
+    expect(url).toBe('https://hub.test/deploy#boot=https%3A%2F%2Fcheckin.mmsolutions.vn%2Fagent%2Fbootstrap%2Ftok&p=arrival');
+    const html = renderDeployPage('https://hub.test', 'n0nce');
+    expect(html).toContain("else if(!code&&hp.get('boot')){start('')}");
+    expect(html).toContain('quay lại console sản phẩm');
+    expect(html).toContain('LABELS.hasOwnProperty(prod)');
   });
 
   it('builds a product link with code, script and the remote-SQL variant in the fragment only', async () => {
