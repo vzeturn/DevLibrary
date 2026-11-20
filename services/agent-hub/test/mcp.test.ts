@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { READ_TOOLS } from '../src/services/mcpTools';
-import { admin, enrollAgent, setNow, T0, testEnv, type TestEnv } from './helpers';
+import { admin, enrollAgent, heartbeatBody, setNow, signed, T0, testEnv, type TestEnv } from './helpers';
 
 const MCP = 'test-mcp-token';
 let env: TestEnv;
@@ -206,5 +206,35 @@ describe('/mcp ops console', () => {
     expect(await (await call('repo_commit', { sha: 'f241daf' })).json()).toMatchObject({ source: 'patch', sha: 'a'.repeat(40), files: [{ path: 'crates/dl-log/README.md' }, { path: 'docs/plans/report.md' }] });
     expect((await call('repo_pull', { number: 9 })).isError).toBe(true);
     expect(seen.every((u) => !u.includes('token'))).toBe(true);
+  });
+
+  it('agent_survey shows where the SQL login came from and how each database signed in', async () => {
+    const agent = await enrollAgent(env, 'mnb');
+    expect((await call('agent_survey', { agent_id: agent.id })).json()).toMatchObject({ status: 404 });
+    const survey = {
+      host: { version: 'Windows Server 2008 R2', nt_version: '6.1.7601' },
+      login_source: 'the old Check-In agent (C:/Program Files/MM-Arrival Agent/appsettings.Production.json)',
+      databases: {
+        SMILE_FO: {
+          engine: { name: 'SQL Server 2008 R2', major: 10 },
+          login: 'smile',
+          transport: 'tls1.0',
+          session: { auth_scheme: 'SQL', tds: '7.3B', server_port: 1433, instance: 'SMILE', encryption: 'login_only', tls: 'tls1.0' },
+          warnings: ['engine_pre_2012'],
+        },
+      },
+    };
+    const beat = await signed(env, agent, 'POST', '/v1/heartbeat', heartbeatBody(agent, '1.0.0', { survey }));
+    expect(beat.status).toBe(200);
+    const got = (await (await call('agent_survey', { agent_id: agent.id })).json()) as { summary: unknown; survey: unknown };
+    expect(got.summary).toEqual({
+      login_source: survey.login_source,
+      host: 'Windows Server 2008 R2',
+      databases: [
+        { name: 'SMILE_FO', engine: 'SQL Server 2008 R2', login: 'smile', auth_scheme: 'SQL', tds: '7.3B', server_port: 1433, instance: 'SMILE', encryption: 'login_only', tls: 'tls1.0', warnings: ['engine_pre_2012'] },
+      ],
+    });
+    expect(got.survey).toEqual(survey);
+    expect((await call('agent_survey', { agent_id: '../x' })).isError).toBe(true);
   });
 });

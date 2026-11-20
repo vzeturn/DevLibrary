@@ -157,6 +157,28 @@ async function commitFromPatch(ctx: ToolContext, sha: string): Promise<unknown> 
   return { sha: commits[0]?.sha ?? sha, source: 'patch', message: commits[0]?.subject ?? '', files: files.map((path) => ({ path })), patch: capped(text) };
 }
 
+/** The sign-in facts of a survey, one entry per database (what an acceptance check reads first). */
+export function surveySummary(survey: Record<string, unknown>): unknown {
+  const o = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
+  const databases = Object.entries(o(survey.databases)).map(([name, raw]) => {
+    const d = o(raw);
+    const session = o(d.session);
+    return {
+      name,
+      engine: o(d.engine).name ?? null,
+      login: d.login ?? null,
+      auth_scheme: session.auth_scheme ?? null,
+      tds: session.tds ?? null,
+      server_port: session.server_port ?? null,
+      instance: session.instance ?? null,
+      encryption: session.encryption ?? null,
+      tls: session.tls ?? d.transport ?? null,
+      warnings: Array.isArray(d.warnings) ? d.warnings : [],
+    };
+  });
+  return { login_source: survey.login_source ?? survey.sql_source ?? null, host: o(survey.host).version ?? null, databases };
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'hub_test_results',
@@ -279,6 +301,18 @@ const TOOLS: ToolDef[] = [
     description: 'Last self-test runs an agent uploaded (pass/warn/fail per check).',
     inputSchema: obj({ agent_id: str('Agent id.') }, ['agent_id']),
     run: (ctx, a) => adminJson(ctx, `/admin/agents/${arg(a, 'agent_id', ID)}/selftest`),
+  },
+  {
+    name: 'agent_survey',
+    description:
+      'Last site survey an agent sent (PROTOCOL §9.5; facts, never a secret), with a summary first: where its SQL login came from (login_source / sql_source) and, per database, how it signed in (session.auth_scheme, tds, server_port, instance, encryption, tls), engine and warnings.',
+    inputSchema: obj({ agent_id: str('Agent id.') }, ['agent_id']),
+    run: async (ctx, a) => {
+      const res = (await adminJson(ctx, `/admin/agents/${arg(a, 'agent_id', ID)}/survey`)) as { status: number; body: unknown };
+      if (res.status !== 200) return res;
+      const body = res.body as { received_at?: number; survey?: Record<string, unknown> };
+      return { received_at: body.received_at ?? null, summary: surveySummary(body.survey ?? {}), survey: body.survey ?? null };
+    },
   },
   {
     name: 'list_releases',

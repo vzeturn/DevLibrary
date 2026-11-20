@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- agent-hub: ops console tool `agent_survey {agent_id}` (RT-0307): an agent's last site survey with a summary of where its SQL login came from (`login_source`) and how each database signed in (`auth_scheme`, `tds`, `server_port`, `instance`, `encryption`, `tls`), engine and warnings; read-only, facts only.
+
 - agent-hub: the ops console's GitHub reads survive the API's rate limit (RT-0289). On a 403/429 from the unauthenticated API (shared Worker IPs), `repo_commits` falls back to github.com's commit Atom feed and `repo_pull` / `repo_commit` to the pull request's or commit's `.patch` (commits, changed files, patch; merged from main's feed), marked with `source`. Still read-only and token-free.
 
 - agent-hub: the ops console can check a pull request on its own (RT-0287). New read-only MCP tools `repo_pull {number}` (title, state, merged, head/base sha, description, changed files with a 4000-character patch excerpt each) and `repo_commit {sha}` (message, parents, changed files) on the public repository. `scripts/publish-cargo-run.mjs [--ref <sha>] [--windows]` runs `cargo clippy -D warnings` and `cargo test --workspace` on any commit in a temporary worktree, isolated (scrubbed environment without secrets, `--offline` in a loopback-only network namespace), and publishes the counts and failures as suite `cargo`, read with `hub_test_results {suite: "cargo"}`.
