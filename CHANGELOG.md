@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- dl-agent: a probation rollback now names the module(s) that stayed unhealthy and their last error (`update_rolled_back`: `a module stayed unhealthy through probation: pms-device (…)`), so the canary gate's `no_rollback` failure can be traced without a site visit (RT-0261).
+
 ### Added
 
 - agent-hub, dl-agent: remote attach (RT-0261). `POST /admin/agents/:id/attach {module, secret, options, external_id}` switches a product on for an agent that is already installed: the hub enables `modules.<module>`, queues one `attach` command that runs the module's enrol tool on the machine with the product's one-time code in its variable (migration `0010`: the code lives in `commands.secret`, never shown, cleared when the agent takes it or at expiry), then `restart_module` once the tool succeeds. The agent's `sys` module runs the tool as a child process (registered tools only, `DL_AGENT_*` variables only, no input, 10 minute limit, secrets masked in the answer). One install per customer; further products need no site visit.

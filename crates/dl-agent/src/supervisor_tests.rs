@@ -117,6 +117,10 @@ fn failing_module_counts_as_unhealthy() {
     assert!(!sup.all_running());
     assert!(sup.any_unhealthy_for(60, since + 60));
     assert!(!sup.any_unhealthy_for(60, since + 59));
+    let why = sup.stuck_reason(60, since + 60, &[]).expect("a reason");
+    assert!(why.contains("flaky ("), "names the module: {why}");
+    assert_eq!(sup.stuck_reason(60, since + 59, &[]), None);
+    assert_eq!(sup.stuck_reason(60, since + 60, &["flaky".into()]), None);
     sup.stop_all(Duration::from_secs(1));
 }
 

@@ -597,11 +597,39 @@ impl Supervisor {
 
     /// [`Self::any_unhealthy_for`], ignoring the modules named in `skip`.
     pub fn any_unhealthy_for_except(&self, secs: u64, now: u64, skip: &[String]) -> bool {
-        self.statuses().iter().any(|s| {
-            s.state != ModuleState::Disabled
-                && !skip.contains(&s.name)
-                && s.degraded_since > 0
-                && now.saturating_sub(s.degraded_since) >= secs
+        !self.unhealthy_for_except(secs, now, skip).is_empty()
+    }
+
+    /// The modules (outside `skip`) degraded for at least `secs`, as `name (last error or
+    /// detail)`, so a probation rollback can say which module failed.
+    pub fn unhealthy_for_except(&self, secs: u64, now: u64, skip: &[String]) -> Vec<String> {
+        self.statuses()
+            .into_iter()
+            .filter(|s| {
+                s.state != ModuleState::Disabled
+                    && !skip.contains(&s.name)
+                    && s.degraded_since > 0
+                    && now.saturating_sub(s.degraded_since) >= secs
+            })
+            .map(|s| {
+                let why = if s.last_error.is_empty() {
+                    &s.detail
+                } else {
+                    &s.last_error
+                };
+                format!("{} ({})", s.name, why.chars().take(160).collect::<String>())
+            })
+            .collect()
+    }
+
+    /// Why probation fails, when any module stayed degraded for `secs`: names each one.
+    pub fn stuck_reason(&self, secs: u64, now: u64, skip: &[String]) -> Option<String> {
+        let stuck = self.unhealthy_for_except(secs, now, skip);
+        (!stuck.is_empty()).then(|| {
+            format!(
+                "a module stayed unhealthy through probation: {}",
+                stuck.join("; ")
+            )
         })
     }
 
