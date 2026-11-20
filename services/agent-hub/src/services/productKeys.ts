@@ -47,7 +47,10 @@ export interface ProductCodeRequest {
 
 /**
  * Mints a dl-agent enroll code for the product's tenant `external_id` (created on first use). The
- * agent enrolled with it starts with the product's module enabled.
+ * agent enrolled with it starts with the product's module enabled; an agent already enrolled (for
+ * this or another product) attaches it instead (`POST /v1/attach`, RT-0298) and keeps its
+ * identity. A code is minted the same way whether or not `product_links` already names an agent
+ * for this tenant: attaching again just refreshes the link.
  */
 export async function mintProductCode(env: Env, product: string, req: ProductCodeRequest, now: number) {
   const tenantId = productTenantId(product, req.external_id);

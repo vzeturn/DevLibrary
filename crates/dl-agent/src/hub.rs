@@ -17,6 +17,9 @@ pub const SELFTEST_PATH: &str = "/v1/agent/selftest";
 /// Where `collect_diagnostics` uploads its zip (agent-hub `routes/agent.ts`).
 pub const DIAGNOSTICS_PATH: &str = "/v1/agent/diagnostics";
 
+/// Where an enrolled agent takes another product's code (PROTOCOL.md §2, RT-0298).
+pub const ATTACH_PATH: &str = "/v1/attach";
+
 const JSON: &str = "application/json";
 
 /// Sends one HTTP request. The runtime uses [`HttpTransport`]; tests use a fake.
@@ -130,6 +133,15 @@ pub struct Enrolled {
     pub channel: String,
     /// First configuration.
     pub config: Option<RemoteConfig>,
+}
+
+/// What the hub answered to an attach ([`HubClient::attach`]).
+#[derive(Debug)]
+pub struct Attached {
+    /// The agent's config after the merge (`None` when the hub sent none).
+    pub config: Option<RemoteConfig>,
+    /// The module sections the code carried, e.g. `["pda-sync"]`.
+    pub attached: Vec<String>,
 }
 
 /// Shortest heartbeat interval the agent accepts: the hub asks for 5 s from a canary agent on
@@ -369,6 +381,30 @@ impl HubClient {
         let a = HeartbeatAnswer::from_json(&self.post("/v1/heartbeat", body)?)?;
         self.observe_server_time(a.server_time);
         Ok(a)
+    }
+
+    /// `POST /v1/attach`: takes another product's one-time code on this identity; the hub
+    /// merges the code's modules into the config and answers it. A 404 `not_found` is a hub
+    /// older than the route.
+    pub fn attach(&self, code: &str) -> Result<Attached, Error> {
+        let v = self.post(ATTACH_PATH, &json!({"code": code}))?;
+        let config = match v.get("config") {
+            Some(c) if c.get("version").and_then(Value::as_u64).unwrap_or(0) > 0 => {
+                Some(RemoteConfig::from_json(c)?)
+            }
+            _ => None,
+        };
+        let attached = v
+            .get("attached")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Attached { config, attached })
     }
 
     /// `POST /v1/reports`; returns how many the hub accepted.

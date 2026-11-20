@@ -35,6 +35,7 @@ does not verify.
 | Method & path | Body → Answer |
 |---|---|
 | `POST /v1/enroll` (unsigned; the one-time code authenticates) | `{code, public_key (b64), hostname, os, arch, version, modules:[name]}` → `{agent_id, tenant, site, channel, heartbeat_seconds, config:{version, body}}` |
+| `POST /v1/attach` | `{code}` (another product's one-time code, §2.3) → `{config:{version, body}, attached:[module]}` |
 | `POST /v1/heartbeat` | Heartbeat (§3) → `{server_time, channel, heartbeat_seconds, config?:{version, body}, commands:[Command], update_check:bool}` |
 | `POST /v1/reports` | `{reports:[ProblemReport]}` → `{accepted:N}` |
 | `POST /v1/commands/{id}/result` | `{ok:bool, output:string, finished_at}` → `{}` |
@@ -69,6 +70,30 @@ service account (`ProxyEnable`, `ProxyServer` as `host:port` or `http=…;https=
 `CONNECT`. Credentials come from the proxy URL or from `DL_AGENT_PROXY_USER` /
 `DL_AGENT_PROXY_PASSWORD` (Basic). Self-test row `core/proxy` names the source and the proxy
 and says `credentials yes/no`, never the password; a setting that cannot be used is a warning.
+
+### 2.3 Attach: one agent, many products
+
+One customer runs one agent (docs/decisions/0002-one-agent-many-products.md). A machine
+already enrolled for one product takes another product's one-time code with a signed
+`POST /v1/attach {code}` instead of a second enrolment: the agent keeps its identity, tenant
+and site. The hub checks the code like an enrolment (exists, unused, not expired, not
+revoked; else `403 {"error":"enroll_code_invalid"}`), deep-merges the code's `modules` into
+the agent's config (each `modules.<x>` section of the code wins for the keys it sets; other
+modules and other top-level keys stay), bumps the config version like an admin change, marks
+the code used by this agent and, for a product-minted code (tenant `<product>-<external_id>`),
+records the product link `(product, external_id) → agent` under the agent's own tenant; all in
+one transaction, so two attaches with one code have one winner. A code this agent already used
+(its enrolment code, or an earlier attach) re-merges and answers `200` again without a new
+version when nothing changed. A code without `modules` is refused with
+`400 {"error":"code_has_no_modules"}` and stays unused. The agent applies the answered config
+like an enrolment's first config (persisted, the previous one kept as last-known-good); the
+next heartbeat would bring it anyway. A hub older than the route answers `404`.
+
+`dl-agent attach --code CODE` (or env `DL_AGENT_ENROLL_CODE`) runs it by hand and needs an
+identity. The one-line installer on an enrolled machine given a code (without `-Reenroll`)
+attaches instead of ignoring the code and prints `Attached <modules> to this agent`; a plain
+code without modules keeps the identity as before, and any other failure is reported at the
+end (exit 1) after the service is back with the products it had.
 
 ## 3. Heartbeat
 

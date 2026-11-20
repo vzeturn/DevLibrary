@@ -138,6 +138,12 @@ PowerShell 2.0 (Windows 7 / Server 2008 R2):
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; & ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('https://agent.pms.id.vn/install.ps1'))) -Code 'XXXX-XXXX'
 ```
 
+The same install line works for a second product: on a machine already enrolled (for example
+for Check-In), running the install line of another product (for example PDAOrder) keeps the
+agent's identity and its modules and attaches the new product's code to the same agent
+(`Attached pda-sync to this agent`). By hand: `dl-agent attach --code XXXX-XXXX`. Only
+`-Reenroll` replaces the identity. See PROTOCOL.md §2.3.
+
 Unattended (RMM, SYSTEM): environment only, never a password on the command line:
 `DL_AGENT_ENROLL_CODE`, `DL_AGENT_CHANNEL`, `DL_AGENT_SQL_AUTH` (`windows`|`sql`),
 `DL_AGENT_SQL_SERVER`, `DL_AGENT_SQL_USER`, `DL_AGENT_SQL_PASSWORD`. Exit codes: 0 ok, 1 failed,

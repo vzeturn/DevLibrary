@@ -334,3 +334,42 @@ fn enroll_keeps_the_hub_host_list() {
         ]
     );
 }
+
+#[test]
+fn attach_is_signed_and_parsed() {
+    let id = identity(&["https://hub.example"]);
+    let hub = FakeHub::default();
+    hub.push(
+        200,
+        r#"{"config": {"version": 4, "body": {"modules": {"arrival": {"enabled": true}, "pda-sync": {"enabled": true}}}},
+        "attached": ["pda-sync"]}"#,
+    );
+    let c = HubClient::new(Box::new(hub.clone()), id.clone());
+    let a = c.attach("ABCD-EFGH").unwrap();
+    assert_eq!(a.attached, vec!["pda-sync".to_string()]);
+    assert_eq!(a.config.unwrap().version, 4);
+    let seen = hub.seen();
+    assert_eq!(seen[0].method, "POST");
+    assert_eq!(seen[0].url, "https://hub.example/v1/attach");
+    assert_eq!(
+        dl_json::parse_slice(&seen[0].body).unwrap(),
+        json!({"code": "ABCD-EFGH"})
+    );
+    assert!(verify(&id, &seen[0]));
+}
+
+#[test]
+fn attach_errors_keep_the_hub_code() {
+    let hub = FakeHub::default();
+    hub.push(403, r#"{"error": "enroll_code_invalid"}"#).push(
+        200,
+        r#"{"config": {"version": 0, "body": {}}, "attached": []}"#,
+    );
+    let c = HubClient::new(Box::new(hub.clone()), identity(&["https://a", "https://b"]));
+    let e = c.attach("USED-CODE").unwrap_err();
+    assert_eq!(error_code(&e).as_deref(), Some("enroll_code_invalid"));
+    assert_eq!(hub.seen().len(), 1, "4xx does not fall back");
+    let a = c.attach("ABCD-EFGH").unwrap();
+    assert!(a.config.is_none(), "version 0 is no config");
+    assert!(a.attached.is_empty());
+}
