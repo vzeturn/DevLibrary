@@ -153,6 +153,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     secrets: [
       s('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_PDA_CODE', 'one-time enrol code (PDA admin, demo tenant)'),
       s('DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD', 'SQL administrator password, with DL_AGENT_DEMO_PDA_SQL_ADMIN_USER', false),
+      s('DL_AGENT_DEMO_PDA_SQL_DEFAULT_PASSWORD', 'DL_AGENT_PDA_SQL_DEFAULT_PASSWORD', 'SMILE default SQL login password (default: the one built into dl-agent)', false),
     ],
     options: [
       o('DL_AGENT_DEMO_PDA_URL', '--url', 'the demo tenant PDA cloud address'),

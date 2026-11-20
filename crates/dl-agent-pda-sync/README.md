@@ -36,9 +36,15 @@ dl-agent pda-enroll --code <code> --url <https cloud url> [--dry-run]
                     [--sql-admin-user <login> | --sql-admin-saved]
 ```
 
-The SQL administrator is the Windows account running the tool by default. As a service
-(remote attach) that is LocalSystem, often not a SQL Server administrator (`SQL_NO_ACCESS`,
-error 15247): pass `--sql-admin-user <login>` with the password in
+Without an explicit administrator the tool tries, in order (RT-0365): (1) the Windows account
+running it (LocalSystem as a service); (2) the SMILE default SQL login `smile`
+(`DL_AGENT_PDA_SQL_DEFAULT_USER` renames it; its password is `DL_AGENT_PDA_SQL_DEFAULT_PASSWORD`,
+else the default built into the release; with neither, that attempt is recorded as skipped).
+Only an access refusal (`SQL_NO_ACCESS`, `SQL_LOGIN_FAILED`, `SQL_DATABASE_NOT_FOUND`) moves on
+to the next identity; the default login only creates `pda_sync` and is never altered. Each
+attempt is a console line and an `ENROLL_SQL_ADMIN_ATTEMPT` site event (never the password);
+when both are refused the error lists them. To name the administrator yourself (no fallback):
+pass `--sql-admin-user <login>` with the password in
 `DL_AGENT_PDA_SQL_ADMIN_PASSWORD` (or `PDA_SQL_ADMIN_PASSWORD`), or `--sql-admin-saved` to
 use the SQL login dl-agent keeps in `sql.json` (the POS database's, else the first SQL login;
 its server becomes `--sql-instance` unless one is given).

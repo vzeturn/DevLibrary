@@ -4,6 +4,7 @@
 //! the machine has an identity, which a successful enroll creates.
 
 use super::cli::{EXIT_FAILED, EXIT_OK, EXIT_USAGE, Options, unhandled};
+use super::enroll_attempts::{DefaultLogin, attempts_for, run_attempts};
 use super::secret_prompt::{ConsoleSecretPrompt, SecretPrompt};
 use super::verbs::{HostContext, VerbContext};
 use crate::bootstrap::SqlBootstrapper;
@@ -14,7 +15,9 @@ use crate::bootstrap::error::Error;
 use crate::bootstrap::fingerprint::{DEFAULT_MINIMUM_SCORE, SchemaFingerprint};
 use crate::bootstrap::models::StepOutcome;
 use crate::bootstrap::probes::SqlAgentLoginProbe;
-use crate::bootstrap::workflow::{EnrollArgs, EnrollParts, EnrollWorkflow, HttpFactory};
+use crate::bootstrap::workflow::{
+    EnrollArgs, EnrollParts, EnrollResult, EnrollWorkflow, HttpFactory,
+};
 use crate::config::time::SystemClock;
 use crate::config::{AgentError, AgentPaths, AgentStatus, codes};
 use crate::contracts::catalog::SyncCatalog;
@@ -54,7 +57,8 @@ pub fn tool_options(paths: &AgentPaths, verb: &str, failure_code: &str) -> ToolR
     o
 }
 
-/// `"sql"` with `--sql-admin-user`, else `"windows"`.
+/// `"sql"` with `--sql-admin-user`, else `"windows"` (the first identity tried; the SMILE
+/// default login follows when Windows is refused, see [`super::enroll_attempts`]).
 pub fn sql_auth(opts: &Options) -> &'static str {
     if opts.contains(SQL_ADMIN_USER_OPTION) {
         "sql"
@@ -79,8 +83,8 @@ pub fn run_with(
         tool_options(&paths, "enroll", codes::ENROLL_FAILED),
         Some(detail),
         |tool| {
-            let credential = match admin_credential(opts, passwords) {
-                Ok(c) => c,
+            let attempts = match attempts_for(opts, passwords, &DefaultLogin::from_process()) {
+                Ok(a) => a,
                 Err(e) => {
                     tool.fail(e.code(), e.message(), WARN);
                     stderr.write_line(&format!("[{}] {}", e.code(), e.message()));
@@ -88,10 +92,13 @@ pub fn run_with(
                 }
             };
             let secrets = crate::security::create(&paths);
-            let workflow = real_workflow(&paths, secrets, credential, tool.logger())
-                .map_err(|e| Box::new(e.to_exception()))?;
-            run_workflow(
-                &workflow,
+            let build = |credential: &SqlAdminCredential| {
+                real_workflow(&paths, secrets.clone(), credential.clone(), tool.logger())
+                    .map_err(|e| Box::new(e.to_exception()))
+            };
+            run_attempts(
+                attempts,
+                &build,
                 &paths,
                 &args,
                 tool,
@@ -170,7 +177,20 @@ pub fn run_workflow(
     ctx: &Ctx,
 ) -> Result<i32, Box<Exception>> {
     let machine = crate::diagnostics::machine_name();
-    match workflow.run(args, &machine, &super::agent_version(), run, ctx) {
+    let result = workflow.run(args, &machine, &super::agent_version(), run, ctx);
+    finish(result, paths, args, run, stdout, stderr)
+}
+
+/// The outcome of the workflow run that counts: status file, console lines, exit code.
+pub fn finish(
+    result: Result<EnrollResult, Error>,
+    paths: &AgentPaths,
+    args: &EnrollArgs,
+    run: &ToolRun,
+    stdout: &dyn LineWriter,
+    stderr: &dyn LineWriter,
+) -> Result<i32, Box<Exception>> {
+    match result {
         Ok(result) => {
             for step in result.sql.iter().flat_map(|s| s.steps.iter()) {
                 stdout.write_line(&format!("  sql step {}: {}", step.id, describe(step)));

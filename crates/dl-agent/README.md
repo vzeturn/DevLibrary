@@ -270,7 +270,9 @@ not a SQL Server administrator (agent 1.3.19 or newer for `--sql-admin-saved`):
 - `"flags": [...]` passes value-less flags from the module's list. `pda-sync` takes
   `--sql-admin-saved`: `pda-enroll` signs in as the SQL login dl-agent keeps in `sql.json`
   (the POS database's, else the first SQL login) instead of LocalSystem, which fixes
-  `SQL_NO_ACCESS ... error 15247` with no site visit. Or give the administrator explicitly:
+  `SQL_NO_ACCESS ... error 15247` with no site visit. With no administrator given at all,
+  `pda-enroll` tries Windows first, then the SMILE default login `smile` (password from
+  `"secret": {"DL_AGENT_PDA_SQL_DEFAULT_PASSWORD": "…"}`, else the one built into the release). Or give the administrator explicitly:
   `"options": {"--sql-admin-user": "sa"}` with
   `"secret": {"DL_AGENT_PDA_SQL_ADMIN_PASSWORD": "…"}`.
 
