@@ -1,10 +1,11 @@
 //! The machine setup of `install --hub` (Windows): the steps the one-line installer used to run
 //! in PowerShell, now in the signed binary so the script only downloads, verifies and hands off.
 //!
-//! Order: Administrator check, folders, Defender exclusion, older copies removed, binary
+//! Order: Administrator check, folders, antivirus check + Defender exclusion, older copies removed, binary
 //! placed in Program Files, SQL login, enrolment (kept when enrolled; a code then attaches its
 //! product to this agent), module setup, replaced agents, channel/pin, service + recovery +
-//! watchdog, Kaspersky hint, first heartbeat.
+//! watchdog, antivirus hint, first heartbeat. Defender is touched only when it is the
+//! antivirus in charge (RT-0361).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -71,7 +72,16 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
             )
         })?;
     }
-    if o.defender {
+    let av = crate::av::Antivirus::from_services(&manager.list_services().unwrap_or_else(|e| {
+        eprintln!("Warning: services not listed (antivirus not detected): {e}");
+        Vec::new()
+    }));
+    for line in crate::av::trust_hint(&av.others, &exe, dir, None) {
+        println!("{line}");
+    }
+    // Only when Defender is the antivirus in charge: with another one it is passive, and a hidden
+    // PowerShell editing Defender is what behaviour engines flag as a trojan (RT-0361).
+    if o.defender && av.defender_in_charge() {
         defender_exclusion(&[&install_dir, dir]);
     }
     let enrolled = Identity::exists(dir);
@@ -93,7 +103,9 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
     register_service(app, &exe_s, &data_s)
         .map_err(|e| config(e, "close the Services console and run again"))?;
     println!("Service {} started; watchdog task registered", app.service);
-    kaspersky_hint(&manager, &exe, &sha, dir);
+    for line in crate::av::trust_hint(&av.others, &exe, dir, Some(&sha)) {
+        eprintln!("Warning: {line}");
+    }
     wait_link(&app.service, dir, since, o.link_timeout);
     if sql.failed {
         return Err(Failure::new(
@@ -500,24 +512,6 @@ pub(crate) fn register_service(app: &App, exe: &str, data: &str) -> Result<(), E
         Err(e) => return Err(svc(e)),
     }
     crate::service_watch::register(app, exe, data)
-}
-
-/// Kaspersky deletes unknown binaries quietly: name what to allow.
-fn kaspersky_hint(manager: &Manager, exe: &Path, sha: &str, dir: &Path) {
-    let found = manager.list_services().is_ok_and(|l| {
-        l.iter().any(|e| {
-            e.name.to_ascii_lowercase().starts_with("avp")
-                || e.name.eq_ignore_ascii_case("klnagent")
-                || e.display_name.to_ascii_lowercase().contains("kaspersky")
-        })
-    });
-    if found {
-        eprintln!(
-            "Warning: Kaspersky is installed. Add {} as a Trusted application (SHA-256 {sha}) and exclude {} from scanning.",
-            exe.display(),
-            dir.display()
-        );
-    }
 }
 
 /// Waits for a heartbeat answered by the hub after `since`; prints the last log lines if none.

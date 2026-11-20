@@ -108,7 +108,7 @@ describe('install script', () => {
 
   it('checks size, SHA-256 and the release signature before the build runs, then removes the download', async () => {
     const text = await (await get('/install.ps1')).text();
-    const tmp = text.indexOf('$tmp = Join-Path ([IO.Path]::GetTempPath())');
+    const tmp = text.indexOf('$tmp = Join-Path $InstallDir');
     const size = text.indexOf("if ($size -ne [long]$info['size'])");
     const sha = text.indexOf("if ($sha -ne $info['sha256'].ToLower())");
     const modern = text.indexOf('if (-not (Test-Modern $tmp))');
@@ -139,6 +139,33 @@ describe('install script', () => {
     expect(argv).not.toContain('$Channel');
     expect(text).toContain('elseif (-not $lane) { $lane = Get-InstalledChannel $Data }');
     expect(text).toContain("if ($rc -ne 0) { Stop-Install $rc");
+  });
+
+  it('leaves Defender alone with another antivirus and never has the binary edit it (RT-0361)', async () => {
+    const text = await (await get('/install.ps1')).text();
+    // No download to %TEMP%: the build lands in the install folder.
+    expect(text).not.toContain('GetTempPath');
+    const trust = text.indexOf('    Set-AvTrust $InstallDir $Data');
+    expect(trust).toBeGreaterThan(0);
+    expect(trust).toBeLessThan(text.indexOf('$tmp = Join-Path $InstallDir'));
+    const fn = text.slice(text.indexOf('function Set-AvTrust'), text.indexOf('function Get-Sha256'));
+    // Another antivirus: warn with what to trust, return before any Defender cmdlet.
+    const others = fn.indexOf('if ($others.Count -gt 0)');
+    expect(others).toBeGreaterThan(0);
+    expect(fn.slice(others, fn.indexOf('return', others))).toContain('Trusted application');
+    expect(fn.indexOf('return', others)).toBeLessThan(fn.indexOf('Add-MpPreference'));
+    expect(fn).toContain('Do not monitor application activity');
+    // Defender only when it is active, in this console.
+    expect(fn.indexOf('$mp.AntivirusEnabled')).toBeLessThan(fn.indexOf('Add-MpPreference -ExclusionPath'));
+    const detect = text.slice(text.indexOf('$AvServices ='), text.indexOf('function Set-AvTrust'));
+    expect(detect).toContain('avp|klnagent');
+    expect(detect).toContain('Kaspersky');
+    // The binary is always told not to touch Defender; so is the previous installer.
+    const argv = text.slice(text.indexOf("$argv = @('install')"), text.indexOf('& $tmp @argv'));
+    expect(argv).toContain("$argv += '--no-defender'");
+    expect(argv).not.toContain('if ($NoDefender)');
+    const legacy = text.slice(text.indexOf('function Invoke-Legacy'), text.indexOf('function Install-Agent'));
+    expect(legacy).toContain('$p.NoDefender = $true');
   });
 
   it('hands a build without the installer verbs to the previous installer with the same options', async () => {

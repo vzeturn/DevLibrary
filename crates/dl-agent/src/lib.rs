@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 
 pub mod agent;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod av;
 pub mod channel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli;
