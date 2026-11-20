@@ -246,6 +246,7 @@ is not the admin token, and every tool only reads:
 | `repo_pull {number}`, `repo_commit {sha}` | one pull request (title, state, merged, head/base sha, description) or one commit (message, parents), each with its changed files and a patch excerpt (4000 characters per file; read a whole file with `repo_file` at that sha). When the unauthenticated API is rate-limited (403/429, Worker IPs are shared), `repo_commits` reads github.com's commit Atom feed (last 20) and `repo_pull` / `repo_commit` the `.patch` (commits, files, patch; a pull request counts as merged when main's feed has its `Merge pull request #n`); each answer then says `source` |
 | `admin_get {path}` | any `GET /admin/...` route, run in-process with the admin token (never handed out); `/admin/diagnostics/:id/download` and the HTML page are refused |
 | `list_agents`, `get_agent`, `agent_selftest`, `list_releases`, `release_gate`, `list_reports` | the same admin reads by name |
+| `agent_survey {agent_id}` | the agent's last site survey (`GET /admin/agents/:id/survey`) with a summary first: `login_source`, and per database `auth_scheme`, `tds`, `server_port`, `instance`, `encryption`, `tls`, engine, warnings (RT-0307) |
 
 Publish a run after testing: `AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…
 TEST_RUNNER=cloud pnpm test:publish` (typecheck + vitest, then `PUT /admin/test-runs/agent-hub`; the hub
