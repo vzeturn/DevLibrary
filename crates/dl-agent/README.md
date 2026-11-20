@@ -308,7 +308,7 @@ Demo tenants (canary) take it first; `GET /admin/releases/dl-agent/1.2.0/gate` m
 session included — with no Docker daemon and no machine-specific path:
 
 ```text
-export FLY_API_TOKEN=…           # deploy token of the Fly app dl-agent-xbuild (FLY_BUILD_APP)
+export FLY_API_TOKEN=…           # deploy token of the Fly app dl-xbuild (FLY_BUILD_APP)
 export CLOUDFLARE_API_TOKEN=…    # R2 edit on the hub's account
 export DL_AGENT_RELEASE_SEED=…   # release seed (base64), or DL_AGENT_RELEASE_SEED_FILE
 export AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…

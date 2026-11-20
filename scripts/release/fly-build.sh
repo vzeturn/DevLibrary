@@ -13,7 +13,7 @@
 #
 # Environment (values never printed):
 #   FLY_API_TOKEN         deploy token of FLY_BUILD_APP (create/delete machines)
-#   FLY_BUILD_APP         Fly app that hosts build machines, default dl-agent-xbuild
+#   FLY_BUILD_APP         Fly app that hosts build machines, default dl-xbuild
 #   FLY_BUILD_REGION      default sin;  FLY_BUILD_SIZE  default performance-8x (cpus) / 16384 MB
 #   FLY_BUILD_IMAGE       default rust:1-bookworm (toolchain installed on start, ~3 min)
 #   FLY_BUILD_TIMEOUT     seconds, default 5400
@@ -29,7 +29,7 @@ v=${1:?usage: fly-build.sh <version> [targets...]}
 shift
 [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must be x.y.z"
 [ $# -gt 0 ] && TARGETS=("$@")
-app=${FLY_BUILD_APP:-dl-agent-xbuild}
+app=${FLY_BUILD_APP:-dl-xbuild}
 api=https://api.machines.dev/v1/apps/$app/machines
 ref=${DL_BUILD_REF:-$(git -C "$root" rev-parse HEAD)}
 [[ $ref =~ ^[0-9a-f]{40}$ ]] || die "DL_BUILD_REF must be a full commit sha"
