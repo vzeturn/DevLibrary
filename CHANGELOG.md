@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent: `pda-enroll` no longer fails where the service runs as LocalSystem and SQL Server takes Windows authentication only (Muine Bay, RT-0365). With no `--sql-admin-user` or `--sql-admin-saved` it tries the Windows identity first and, when SQL Server refuses it (`SQL_NO_ACCESS`, `SQL_LOGIN_FAILED`, `SQL_DATABASE_NOT_FOUND`), the SMILE default login `smile` to create `pda_sync` (never altered). Its password is `DL_AGENT_PDA_SQL_DEFAULT_PASSWORD` or the default built into the release; the user can be set with `DL_AGENT_PDA_SQL_DEFAULT_USER`. Each attempt is a console line and an `ENROLL_SQL_ADMIN_ATTEMPT` site event without the password, and when both fail the error lists them and suggests `--sql-admin-user`. The hub's pda-sync attach accepts the new password variable.
+
 - agent-hub, dl-agent: remote attach of einvoice, arrival and membership enrols into the directory the agent config names for the module (`config_dir`, `install_dir`, `program_data_dir`) instead of the tool's default, so the restarted module reads the new identity (RT-0261). A module without that key is enrolled where it was before.
 
 - dl-agent: `arrival-enroll` uses the SQL connection `dl-agent sql-setup` saved (`SMILE_FO` in `sql.json`) when none is given, saved or left by the old agent, instead of exiting 78 "no PMS connection string" (RT-0261).

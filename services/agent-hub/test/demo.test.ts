@@ -183,7 +183,7 @@ describe('demo module table', () => {
     expect(ps.startsWith('$DemoTable = @(\n')).toBe(true);
     expect(ps.match(/^ {2}@\{ Module = /gm)?.length).toBe(DEMO_MODULES.length);
     expect(ps).toContain(
-      "@{ Module = 'pda-sync'; Setup = 'pda-enroll'; SecretFrom = @('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD'); SecretTo = @('DL_AGENT_PDA_CODE', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD'); SecretNeed = @('DL_AGENT_DEMO_PDA_CODE'); OptionFrom = @('DL_AGENT_DEMO_PDA_URL', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_USER'); OptionFlag = @('--url', '--sql-admin-user'); OptionNeed = @('DL_AGENT_DEMO_PDA_URL');",
+      "@{ Module = 'pda-sync'; Setup = 'pda-enroll'; SecretFrom = @('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_DEMO_PDA_SQL_DEFAULT_PASSWORD'); SecretTo = @('DL_AGENT_PDA_CODE', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_PDA_SQL_DEFAULT_PASSWORD'); SecretNeed = @('DL_AGENT_DEMO_PDA_CODE'); OptionFrom = @('DL_AGENT_DEMO_PDA_URL', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_USER'); OptionFlag = @('--url', '--sql-admin-user'); OptionNeed = @('DL_AGENT_DEMO_PDA_URL');",
     );
     expect(ps).toContain("@{ Module = 'speaker'; Setup = ''; SecretFrom = @(); SecretTo = @(); SecretNeed = @()");
   });

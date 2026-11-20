@@ -9,8 +9,9 @@
 //!                     [--sql-admin-user <login> | --sql-admin-saved]
 //! ```
 //!
-//! Without `--sql-admin-user` the SQL administrator is the Windows login running the
-//! command; with it, the password comes from `DL_AGENT_PDA_SQL_ADMIN_PASSWORD`,
+//! Without `--sql-admin-user` (or `--sql-admin-saved`) `pda-enroll` tries the Windows login
+//! running the command, then the SMILE default SQL login `smile` when SQL Server refuses
+//! the first ([`crate::hosting::enroll_attempts`]); with `--sql-admin-user`, the password comes from `DL_AGENT_PDA_SQL_ADMIN_PASSWORD`,
 //! `PDA_SQL_ADMIN_PASSWORD` or a hidden prompt, never from argv. `--sql-admin-saved` uses
 //! the SQL login dl-agent keeps in `sql.json` ([`super::admin_login`]), so a remote attach
 //! works where the service account is not a SQL Server administrator. The run's log goes to `logs/tools-.log` and its site events are sent
@@ -64,8 +65,8 @@ fn sql_args(cmd: Command) -> Command {
         .arg(Arg::option("database").help("The POS database (default: SMILE_POS)"))
         .arg(Arg::option("sql-admin-user").help(
             "A SQL administrator login (password from DL_AGENT_PDA_SQL_ADMIN_PASSWORD, \
-             PDA_SQL_ADMIN_PASSWORD or a hidden prompt); default: the Windows login running \
-             this command",
+             PDA_SQL_ADMIN_PASSWORD or a hidden prompt); default (pda-enroll): the Windows login \
+             running this command, then the SMILE default login smile if it is refused",
         ))
         .arg(Arg::flag("sql-admin-saved").help(
             "Use the SQL login dl-agent saved in sql.json as the administrator (the POS \
