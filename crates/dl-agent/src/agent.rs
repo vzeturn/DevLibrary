@@ -440,14 +440,12 @@ impl Agent {
             self.update_status = ("idle", self.opts.version.to_string());
             return None;
         }
-        if now >= until
-            && (fault.is_some()
-                || self
-                    .supervisor
-                    .any_unhealthy_for_except(self.probation_seconds(), now, &skip))
-        {
-            let why = fault.unwrap_or("a module stayed unhealthy through probation");
-            if let Err(e) = self.roll_back(why) {
+        let stuck = self
+            .supervisor
+            .stuck_reason(self.probation_seconds(), now, &skip);
+        if now >= until && (fault.is_some() || stuck.is_some()) {
+            let why = fault.map(str::to_string).or(stuck).unwrap_or_default();
+            if let Err(e) = self.roll_back(&why) {
                 self.report(Severity::Critical, "rollback_failed", &e.to_string());
             }
             return Some(Exit::Restart);
