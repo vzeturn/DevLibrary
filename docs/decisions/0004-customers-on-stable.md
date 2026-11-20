@@ -56,7 +56,7 @@ Gate results run on 2026-11-20 for dl-agent 1.3.16 to 1.3.21 (all patch bumps ag
 - Revoked agents disappear from the default list; tools that audit revoked machines must ask
   for them.
 
-## Alternatives
+## Alternatives considered
 
 - Keep `demo=1` for pilots: ties a customer machine to the tenant flag and to every demo
   tenant default; rejected, the per-agent override says why a machine is on canary.
