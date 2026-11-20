@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::*;
-use crate::fake::{FakeServer, Script, TDS_73A, TDS_73B, TlsPeer};
+use crate::fake::{FakeServer, Script, TDS_73A, TDS_73B};
+// The TLS 1.0 fakes need a client TLS stack that still offers TLS 1.0 (not Apple's).
+#[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
+use crate::fake::TlsPeer;
 use crate::ntlm::tests::{challenge, verify};
 use crate::token::tests::B;
 use crate::token::{DONE, ROW};
