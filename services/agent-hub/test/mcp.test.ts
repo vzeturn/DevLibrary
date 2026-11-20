@@ -162,4 +162,49 @@ describe('/mcp ops console', () => {
     expect((await call('repo_pull', { number: 'x' })).isError).toBe(true);
     expect((await call('repo_commit', { sha: 'main; rm' })).isError).toBe(true);
   });
+
+  it('falls back to the commit feed and .patch files when the GitHub API is rate-limited', async () => {
+    const atom = (n: number, sha: string, subject: string) =>
+      `<entry><id>tag:github.com,2008:Grit::Commit/${sha}</id><title>\n  ${subject}\n</title><updated>2026-11-20T0${n}:00:00Z</updated></entry>`;
+    const feed = `<feed>${atom(2, 'e'.repeat(40), 'Merge pull request #65 from vzeturn/cloud/rt-0258')}${atom(1, 'f'.repeat(40), 'fix: a &amp; b')}</feed>`;
+    const patch = [
+      `From ${'a'.repeat(40)} Mon Sep 17 00:00:00 2001`,
+      'Subject: [PATCH 1/2] feat(dl-log): scrub URL credentials, JWTs and more secret',
+      ' field names',
+      '---',
+      'diff --git a/crates/dl-log/README.md b/crates/dl-log/README.md',
+      `From ${'b'.repeat(40)} Mon Sep 17 00:00:00 2001`,
+      'Subject: [PATCH 2/2] docs: report',
+      'diff --git a/docs/plans/report.md b/docs/plans/report.md',
+    ].join('\n');
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
+      if (url === 'https://github.com/vzeturn/DevLibrary/commits/main.atom') return new Response(feed);
+      if (url === 'https://patch-diff.githubusercontent.com/raw/vzeturn/DevLibrary/pull/65.patch') return new Response(patch);
+      if (url === 'https://github.com/vzeturn/DevLibrary/commit/f241daf.patch') return new Response(patch);
+      return new Response('nope', { status: 404 });
+    });
+    expect(await (await call('repo_commits', { limit: 2 })).json()).toEqual([
+      { sha: 'e'.repeat(40), date: '2026-11-20T02:00:00Z', subject: 'Merge pull request #65 from vzeturn/cloud/rt-0258', source: 'atom' },
+      { sha: 'f'.repeat(40), date: '2026-11-20T01:00:00Z', subject: 'fix: a & b', source: 'atom' },
+    ]);
+    expect(await (await call('repo_pull', { number: 65 })).json()).toMatchObject({
+      number: 65,
+      source: 'patch',
+      merged: true,
+      merge_commit: 'e'.repeat(40),
+      head: { sha: 'b'.repeat(40) },
+      commits: [
+        { sha: 'a'.repeat(40), subject: 'feat(dl-log): scrub URL credentials, JWTs and more secret field names' },
+        { sha: 'b'.repeat(40), subject: 'docs: report' },
+      ],
+      files: [{ path: 'crates/dl-log/README.md' }, { path: 'docs/plans/report.md' }],
+    });
+    expect(await (await call('repo_commit', { sha: 'f241daf' })).json()).toMatchObject({ source: 'patch', sha: 'a'.repeat(40), files: [{ path: 'crates/dl-log/README.md' }, { path: 'docs/plans/report.md' }] });
+    expect((await call('repo_pull', { number: 9 })).isError).toBe(true);
+    expect(seen.every((u) => !u.includes('token'))).toBe(true);
+  });
 });
