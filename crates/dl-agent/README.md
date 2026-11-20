@@ -254,7 +254,12 @@ The hub enables the module, sends the agent one `attach` command that runs the m
 tool with the code (in a variable, never on the command line; the hub forgets it once the
 agent has it), then restarts the module. `GET /admin/commands?agent_id=<id>` shows the tool's
 exit and output (secrets masked). Variables and flags per module are the demo bench table
-above; `pms-device` and `speaker` take only `{"module": …}`. Needs dl-agent 1.3.17 or newer.
+above; `pms-device` and `speaker` take only `{"module": …}`. For einvoice, arrival and
+membership the hub also passes the directory the agent config names for the module
+(`modules.einvoice.config_dir`, `modules.arrival.install_dir`, `modules.membership.program_data_dir`),
+so the tool writes where the module reads; with no such key the tool's own default applies.
+`arrival-enroll` with no connection string given, saved or left by the old agent uses the
+`SMILE_FO` entry of `sql.json` that `dl-agent sql-setup` saved. Needs dl-agent 1.3.17 or newer.
 
 Two more fields cover a machine that is already enrolled elsewhere or whose service account is
 not a SQL Server administrator (agent 1.3.19 or newer for `--sql-admin-saved`):

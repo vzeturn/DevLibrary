@@ -8,6 +8,10 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- agent-hub, dl-agent: remote attach of einvoice, arrival and membership enrols into the directory the agent config names for the module (`config_dir`, `install_dir`, `program_data_dir`) instead of the tool's default, so the restarted module reads the new identity (RT-0261). A module without that key is enrolled where it was before.
+
+- dl-agent: `arrival-enroll` uses the SQL connection `dl-agent sql-setup` saved (`SMILE_FO` in `sql.json`) when none is given, saved or left by the old agent, instead of exiting 78 "no PMS connection string" (RT-0261).
+
 - agent-hub, dl-agent: the one-line installer no longer looks like a trojan to behaviour-based antivirus (RT-0361; Kaspersky flagged `dl-agent-setup-*.exe` as `PDM:Trojan.Win32.Generic` and stopped the install). With another antivirus running (Kaspersky, ESET, Bitdefender, Bkav, ...), Windows Defender is left alone and the installer prints what to add as a Trusted application (program path, SHA-256, folders to exclude; the Kaspersky menu path). With Defender in charge, `install.ps1` adds its exclusion itself in the visible console; the binary is always called with `--no-defender`, so it never starts a hidden PowerShell to edit Defender, and on its own (`dl-agent install --hub` run by hand) it only does so when Defender is the active antivirus. The build is downloaded into `%ProgramFiles%\DevLibrary\<product>` instead of `%TEMP%`.
 
 - dl-agent: `pda-enroll` repairs the `pda_sync` login after an earlier failed run instead of failing with 18456 for good (RT-0353). The login step is skipped only when the password the agent holds still signs in; a held password SQL Server rejects (saved by a run whose `ALTER LOGIN` then failed with 15247) gets the login reset with a new one when enroll runs as a SQL administrator. A failed login step now puts the previously held password back, so it never leaves the store out of step with SQL Server.

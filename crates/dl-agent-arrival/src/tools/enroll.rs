@@ -4,7 +4,9 @@
 //! The enrollment token (shown once by the platform console) comes from
 //! `DL_AGENT_ARRIVAL_TOKEN`, else the first line of stdin; the PMS connection string from
 //! `DL_AGENT_ARRIVAL_PMS`, else the next line of stdin, else the one already saved, else the
-//! one the removed .NET agent saved (its sign-in mode preselected; `DL_AGENT_ARRIVAL_SQL_AUTH`
+//! one the removed .NET agent saved, else the core's `databases.SMILE_FO` in `<agent data dir>/sql.json`
+//! (what `dl-agent sql-setup` keeps, unsealed the way the module does at run time; its sign-in
+//! mode preselected; `DL_AGENT_ARRIVAL_SQL_AUTH`
 //! = `windows` | `sql` with `DL_AGENT_ARRIVAL_SQL_USER` and `DL_AGENT_SQL_PASSWORD` chooses
 //! another). None of them is ever taken from the command line (it would show in the process
 //! list) or printed.
@@ -25,12 +27,14 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use dl_agent::Error;
+use dl_agent::sql::SQL_FILE;
 use dl_agent::tool::{Tool, ToolContext};
 use dl_cli::{Arg, Command, Matches};
 use dl_json::{Map, Value};
 use dl_time::OffsetDateTime;
 
 use crate::agent::cloud;
+use crate::agent::core_sql;
 use crate::agent::layout::{IDENTITY_IN_INSTALL, Layout};
 use crate::agent::secrets::{Identity, TenantKeyStore};
 use crate::agent::settings::{BASE_FILE, PRODUCTION_FILE, Settings};
@@ -73,7 +77,7 @@ pub fn arrival_enroll_tool() -> Tool {
 
 fn grammar(cmd: Command) -> Command {
     cmd.about(
-        "Enrolls this site with Azolo Check-In for the arrival module (token from DL_AGENT_ARRIVAL_TOKEN or stdin, PMS connection string from DL_AGENT_ARRIVAL_PMS or stdin)",
+        "Enrolls this site with Azolo Check-In for the arrival module (token from DL_AGENT_ARRIVAL_TOKEN or stdin, PMS connection string from DL_AGENT_ARRIVAL_PMS or stdin, else the saved one, the old agent's, or the core's sql.json SMILE_FO)",
     )
     .arg(
         Arg::option("cloud-url")
@@ -193,7 +197,7 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
         )));
     }
     let identity = Identity::from_token(&token).map_err(|e| fail(&e))?;
-    let mut pms = connection(io, &saved, &legacy)?;
+    let mut pms = connection(io, &saved, &legacy, fallback)?;
     if !args.no_probe {
         pms = probe(io, pms)?;
     }
@@ -351,11 +355,13 @@ fn legacy_installs(args: &Args, io: &mut Io<'_>) -> Result<Vec<(LegacyInstall, S
 }
 
 /// The PMS connection string: the environment, stdin, the install's own settings, else the
-/// newest old install's; then the sign-in mode the operator chose (`DL_AGENT_ARRIVAL_SQL_AUTH`).
+/// newest old install's, else the core's `sql.json` `SMILE_FO` (`module_dir` is the module's
+/// directory under the agent data dir, as for the module at run time); then the sign-in mode the operator chose (`DL_AGENT_ARRIVAL_SQL_AUTH`).
 fn connection(
     io: &mut Io<'_>,
     saved: &Settings,
     legacy: &[(LegacyInstall, Settings)],
+    module_dir: &Path,
 ) -> Result<String, String> {
     let usable = |s: &str| !s.trim().is_empty() && !s.trim().starts_with(PLACEHOLDER);
     let mut pms = secret(io, PMS_ENV, "PMS connection string")?;
@@ -371,6 +377,23 @@ fn connection(
     {
         pms = s.pms_connection_string.trim().to_string();
         from = format!("old agent {}", install.dir.display());
+    }
+    if pms.is_empty()
+        && let Some(data_dir) = core_sql::agent_data_dir(module_dir)
+    {
+        let file = data_dir.join(SQL_FILE);
+        let doc =
+            dl_agent::store::read_json(&file).map_err(|e| format!("{NAME}: {SQL_FILE}: {e}"))?;
+        if let Some((connection, _)) = doc
+            .as_ref()
+            .map(core_sql::entry)
+            .transpose()
+            .map_err(|e| format!("{NAME}: {e}"))?
+            .flatten()
+        {
+            pms = connection.trim().to_string();
+            from = "core sql.json".into();
+        }
     }
     if pms.is_empty() {
         return Err(format!(

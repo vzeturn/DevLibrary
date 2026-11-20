@@ -46,6 +46,16 @@ fn args(install: &Path) -> Args {
 
 /// Runs the tool with `env` and `stdin`; `(result, printed text)`.
 fn run(args: &Args, env: &[(&str, &str)], stdin: &str) -> (Result<(), String>, String) {
+    run_in(args, &std::env::temp_dir(), env, stdin)
+}
+
+/// [`run`] with the module directory (`<agent data>/modules/arrival`) the tool is given.
+fn run_in(
+    args: &Args,
+    fallback: &Path,
+    env: &[(&str, &str)],
+    stdin: &str,
+) -> (Result<(), String>, String) {
     let env: HashMap<String, String> = env
         .iter()
         .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
@@ -53,10 +63,9 @@ fn run(args: &Args, env: &[(&str, &str)], stdin: &str) -> (Result<(), String>, S
     let getenv = move |k: &str| env.get(k).cloned().unwrap_or_default();
     let mut out = Vec::new();
     let mut input = Cursor::new(stdin.as_bytes().to_vec());
-    let fallback = std::env::temp_dir();
     let result = run_args(
         args,
-        &fallback,
+        fallback,
         &mut Io {
             out: &mut out,
             input: &mut input,
@@ -266,4 +275,77 @@ fn a_fresh_key_is_never_made_over_a_vault_with_files() {
         !layout.resolve(&settings.identity_file).exists(),
         "the site is not enrolled"
     );
+}
+
+const CORE_PMS: &str = "Server=\"core-pms\";Database=\"SMILE_FO\";Integrated Security=SSPI;TrustServerCertificate=true";
+
+/// An agent data dir whose `sql.json` holds `databases.SMILE_FO`; returns the module dir.
+fn core_data(dir: &TempDir) -> std::path::PathBuf {
+    let doc = format!(
+        r#"{{"databases":{{"SMILE_FO":{{"connection":"{}","auth":"windows"}}}}}}"#,
+        CORE_PMS.replace('"', "\\\"")
+    );
+    std::fs::write(dir.path().join("sql.json"), doc).expect("sql.json");
+    dir.path().join("modules").join("arrival")
+}
+
+#[test]
+fn the_core_sql_json_supplies_the_connection_when_nothing_else_does() {
+    let data = TempDir::new("enroll-core-data");
+    let module = core_data(&data);
+    let install = TempDir::new("enroll-core-install");
+    let id = identity("agt-core");
+    let (result, out) = run_in(
+        &args(install.path()),
+        &module,
+        &[(TOKEN_ENV, &token(&id))],
+        "",
+    );
+    result.expect("enroll");
+    assert!(out.contains("PMS connection from core sql.json"), "{out}");
+    assert!(
+        !out.contains("core-pms"),
+        "the connection was printed: {out}"
+    );
+    assert_eq!(
+        Settings::load(install.path())
+            .expect("settings")
+            .pms_connection_string,
+        CORE_PMS
+    );
+}
+
+#[test]
+fn a_given_connection_wins_over_the_core_sql_json() {
+    let data = TempDir::new("enroll-core-env-data");
+    let module = core_data(&data);
+    let install = TempDir::new("enroll-core-env-install");
+    let id = identity("agt-env");
+    let env = [(TOKEN_ENV, token(&id)), (PMS_ENV, PMS.to_string())];
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (result, out) = run_in(&args(install.path()), &module, &env, "");
+    result.expect("enroll");
+    assert!(out.contains("PMS connection from given"), "{out}");
+    assert_eq!(
+        Settings::load(install.path())
+            .expect("settings")
+            .pms_connection_string,
+        PMS
+    );
+}
+
+#[test]
+fn without_any_source_the_error_is_the_same() {
+    let data = TempDir::new("enroll-core-none-data");
+    let module = data.path().join("modules").join("arrival");
+    let install = TempDir::new("enroll-core-none-install");
+    let id = identity("agt-none");
+    let (result, _) = run_in(
+        &args(install.path()),
+        &module,
+        &[(TOKEN_ENV, &token(&id))],
+        "",
+    );
+    let err = result.expect_err("no connection");
+    assert!(err.contains("no PMS connection string"), "{err}");
 }
