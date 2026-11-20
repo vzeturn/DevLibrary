@@ -330,7 +330,14 @@ fn a_refusal_that_is_not_about_access_does_not_fall_back() {
     assert_eq!(f.run(default_attempts(&f.login(true))), EXIT_FAILED);
     assert_eq!(f.builds.load(Ordering::SeqCst), 1);
     assert!(f.err.text().contains(codes::SQL_WINDOWS_AUTH_ONLY));
-    assert!(f.attempt_events().is_empty());
+    let events = f.attempt_events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    let code = events[0]
+        .detail
+        .as_ref()
+        .and_then(|d| d.get("code"))
+        .and_then(dl_json::Value::as_str);
+    assert_eq!(code, Some("accepted_then_failed"));
 }
 
 #[test]

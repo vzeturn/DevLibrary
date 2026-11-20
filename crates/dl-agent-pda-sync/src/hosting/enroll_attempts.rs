@@ -222,6 +222,12 @@ pub fn run_attempts(
                 last = Some(result);
             }
             None => {
+                // Accepted by SQL Server; the run may still fail for another reason.
+                let (outcome, level) = if result.is_ok() {
+                    ("used", INFO)
+                } else {
+                    ("accepted_then_failed", WARN)
+                };
                 let text = if n > 1 {
                     format!(
                         "SQL administrator identity used: {label} (attempt {n}/{of}, after a refusal)"
@@ -232,7 +238,7 @@ pub fn run_attempts(
                 if n > 1 {
                     run.line(&text);
                 }
-                event(run, INFO, n, of, &label, "used", &text);
+                event(run, level, n, of, &label, outcome, &text);
                 return finish(result, paths, args, run, stdout, stderr);
             }
         }
