@@ -241,11 +241,20 @@ is not the admin token, and every tool only reads:
 
 | Tool | Reads |
 |---|---|
-| `hub_test_results {suite?, limit?}` | last published `pnpm test` runs (commit, typecheck, counts, failures) |
+| `hub_test_results {suite?, limit?}` | last published runs (commit, typecheck, counts, failures): suite `agent-hub` (`pnpm test`, default) or `cargo` (clippy as `typecheck`, `cargo test --workspace` counts per test binary) |
 | `repo_file {path, ref?}`, `repo_list {path?, ref?}`, `repo_commits {ref?, limit?}` | the public repository `vzeturn/DevLibrary`, default `main` |
+| `repo_pull {number}`, `repo_commit {sha}` | one pull request (title, state, merged, head/base sha, description) or one commit (message, parents), each with its changed files and a patch excerpt (4000 characters per file; read a whole file with `repo_file` at that sha) |
 | `admin_get {path}` | any `GET /admin/...` route, run in-process with the admin token (never handed out); `/admin/diagnostics/:id/download` and the HTML page are refused |
 | `list_agents`, `get_agent`, `agent_selftest`, `list_releases`, `release_gate`, `list_reports` | the same admin reads by name |
 
 Publish a run after testing: `AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…
 TEST_RUNNER=cloud pnpm test:publish` (typecheck + vitest, then `PUT /admin/test-runs/agent-hub`; the hub
 keeps 20 per suite; `--dry-run` only prints). Exit 1 when a check failed, 2 when publishing failed.
+
+Rust results (RT-0287): `node scripts/publish-cargo-run.mjs [--ref <sha|branch>] [--windows]` from the
+repository root, with the same variables, publishes suite `cargo`. `--ref` tests any commit (a pull
+request's head, for example) in a temporary worktree. Running a pull request's tests runs its code, so
+the cargo processes get a scrubbed environment (PATH, HOME and the toolchain folders only: no token,
+key or SQL password) and, after `cargo fetch --locked`, run `--offline` in a network namespace with
+only loopback (`unshare -rn`); without namespaces the script refuses unless `--no-isolation`, and the
+run records `isolated: no`. The admin token is used only for the final `PUT`.
