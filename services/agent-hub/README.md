@@ -12,6 +12,7 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 | Ops console (`Authorization: Bearer $MCP_TOKEN`) | `POST /mcp` (MCP, JSON-RPC): read-only tools for the Request Tracking assistant, see below |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
+| Guided install (public, `no-store`) | `GET /deploy#code=…` (the page), `POST /deploy/status {code}` (that code's progress), see "Guided install page" |
 | Bench (public, `no-store`) | `GET /bench/:token` — the bench script of a bundle (see "Bench (test PC)") |
 | Status | `GET /admin` — read-only HTML (Vietnamese) of agents, canary releases with gate status, site readiness per product, and the latest self test per agent ("Tự kiểm tra") |
 
@@ -212,6 +213,25 @@ Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0
   Rotating it makes every existing bundle unreadable (`500 bench_unreadable`); revoke them first.
 - Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,
   served to agents at `/v1/artifacts/<key>`.
+
+## Guided install page (RT-0292)
+
+Product consoles (Azolo E-Invoice, Check-In, Membership, PMS, PDAOrder, Hotel Link, SRBackup) should not
+show the install line, codes and options to the person installing. Every new code comes with `deploy_url`
+(`<hub>/deploy#code=XXXX-XXXX`): a console shows **one button, "Triển khai agent", that opens it** (new
+tab). The page (Vietnamese, light/dark, phone width) does the rest:
+
+1. open PowerShell as Administrator on the hotel's server;
+2. copy the line (one click) and press Enter;
+3. wait: the page polls `POST /deploy/status {code}` and shows the host and version once it enrolled
+   (or attached, RT-0298), each module's state, then the install self-test (pass / warn / fail) and a
+   done banner. Unknown, expired and revoked codes say to mint a new one from the console.
+
+The code stays in the URL fragment (never sent in a request line or logged) and in POST bodies; the
+status answers only for the machine that used that code (host, version, modules, self-test counts:
+no tenant config, no other agent). The page runs one nonce'd inline script under a strict CSP, cannot
+be framed and is served on the primary host only. "Gặp lỗi khi cài?" lists the usual fixes (rights,
+proxy, antivirus, re-run is safe, adding a product to an existing agent).
 
 ## Ops console (MCP, read-only, RT-0300)
 

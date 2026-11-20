@@ -6,6 +6,7 @@ import { demoBenchBody } from '../domain/demo';
 import { productName, severity } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
+import { deployUrl } from '../install/deployPage';
 import { auditAdmin } from '../middleware/adminAudit';
 import { requireAdmin } from '../middleware/adminAuth';
 import { listAudit } from '../repo/audit';
@@ -99,7 +100,8 @@ adminRoutes.put('/tenants/:id', async (c) => {
 adminRoutes.post('/enroll-codes', async (c) => {
   const body = validate(codeBody, await jsonBody(c.req));
   const created = await createEnrollCode(c.env, body, nowSeconds());
-  return c.json({ ...created, install_command: installCommand(new URL(c.req.url).origin, created.code) }, 201);
+  const origin = new URL(c.req.url).origin;
+  return c.json({ ...created, install_command: installCommand(origin, created.code), deploy_url: deployUrl(origin, created.code) }, 201);
 });
 adminRoutes.get('/enroll-codes', async (c) => c.json({ codes: await listCodes(c.env.DB, c.req.query('tenant_id')) }));
 adminRoutes.delete('/enroll-codes/:id', async (c) => {

@@ -4,6 +4,7 @@ import { nowSeconds, type AppEnv } from '../env';
 import { productName } from '../domain/schemas';
 import { parseJson, validate } from '../lib/http';
 import { installCommand } from '../install/script';
+import { deployUrl } from '../install/deployPage';
 import { requireProductKey } from '../middleware/productAuth';
 import { mintProductCode } from '../services/productKeys';
 
@@ -25,5 +26,6 @@ productRoutes.post('/:product/enroll-codes', async (c) => {
   const product = validate(productName, c.req.param('product'));
   const body = validate(codeBody, parseJson(await c.req.text()));
   const created = await mintProductCode(c.env, product, body, nowSeconds());
-  return c.json({ ...created, install_command: installCommand(new URL(c.req.url).origin, created.code) }, 201);
+  const origin = new URL(c.req.url).origin;
+  return c.json({ ...created, install_command: installCommand(origin, created.code), deploy_url: deployUrl(origin, created.code) }, 201);
 });
