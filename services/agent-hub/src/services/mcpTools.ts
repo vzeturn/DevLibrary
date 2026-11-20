@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { limited, parseCommitFeed, parsePatch } from './githubFallback';
 import { testRunsView } from './testRuns';
 
 /** The repository the console reads (public on GitHub; no token involved). */
@@ -111,6 +112,51 @@ function changed(files: GhFile[]): unknown[] {
   }));
 }
 
+/** The last 20 commits of `ref` from github.com's Atom feed. */
+async function feed(ctx: ToolContext, ref: string): Promise<unknown[]> {
+  const res = await ctx.fetch(`https://github.com/${REPO}/commits/${encodeURI(ref)}.atom`);
+  if (!res.ok) throw new ToolError(`github API rate-limited and the commit feed answered ${res.status}`);
+  return parseCommitFeed(await res.text()).map((c) => ({ ...c, source: 'atom' }));
+}
+
+function capped(text: string): string {
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…[truncated]` : text;
+}
+
+/** A pull request from its `.patch` and main's feed (merged = a "Merge pull request #n" commit there). */
+async function pullFromPatch(ctx: ToolContext, n: number): Promise<unknown> {
+  const res = await ctx.fetch(`https://patch-diff.githubusercontent.com/raw/${REPO}/pull/${n}.patch`);
+  if (res.status === 404) throw new ToolError(`no pull request #${n}`);
+  if (!res.ok) throw new ToolError(`github API rate-limited and the patch answered ${res.status}`);
+  const text = await res.text();
+  const { commits, files } = parsePatch(text);
+  const merge = (await feed(ctx, 'main').catch(() => [] as unknown[])).find((c) =>
+    String((c as { subject: string }).subject).startsWith(`Merge pull request #${n} `),
+  ) as { sha: string; date: string } | undefined;
+  return {
+    number: n,
+    source: 'patch',
+    merged: merge ? true : null,
+    merged_at: merge?.date ?? null,
+    merge_commit: merge?.sha ?? null,
+    note: merge ? undefined : 'merge state unknown from the patch: not among the last 20 commits of main',
+    head: { sha: commits[commits.length - 1]?.sha ?? null },
+    commits,
+    files: files.map((path) => ({ path })),
+    patch: capped(text),
+  };
+}
+
+/** A commit from its `.patch`. */
+async function commitFromPatch(ctx: ToolContext, sha: string): Promise<unknown> {
+  const res = await ctx.fetch(`https://github.com/${REPO}/commit/${sha}.patch`);
+  if (res.status === 404) throw new ToolError(`no commit ${sha}`);
+  if (!res.ok) throw new ToolError(`github API rate-limited and the patch answered ${res.status}`);
+  const text = await res.text();
+  const { commits, files } = parsePatch(text);
+  return { sha: commits[0]?.sha ?? sha, source: 'patch', message: commits[0]?.subject ?? '', files: files.map((path) => ({ path })), patch: capped(text) };
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'hub_test_results',
@@ -162,6 +208,7 @@ const TOOLS: ToolDef[] = [
       const ref = optArg(a, 'ref', REF) ?? 'main';
       const limit = typeof a.limit === 'number' ? Math.min(Math.max(Math.trunc(a.limit), 1), 30) : 10;
       const res = await github(ctx, `https://api.github.com/repos/${REPO}/commits?sha=${encodeURIComponent(ref)}&per_page=${limit}`);
+      if (limited(res.status)) return (await feed(ctx, ref)).slice(0, limit);
       if (!res.ok) throw new ToolError(`github answered ${res.status}`);
       const list = (await res.json()) as { sha: string; commit: { message: string; author: { date: string } } }[];
       return list.map((c) => ({ sha: c.sha, date: c.commit.author.date, subject: c.commit.message.split('\n')[0] }));
@@ -175,6 +222,7 @@ const TOOLS: ToolDef[] = [
       const n = typeof a.number === 'number' && Number.isInteger(a.number) && a.number > 0 && a.number < 1e7 ? a.number : 0;
       if (!n) throw new ToolError('invalid number');
       const res = await github(ctx, `https://api.github.com/repos/${REPO}/pulls/${n}`);
+      if (limited(res.status)) return pullFromPatch(ctx, n);
       if (res.status === 404) throw new ToolError(`no pull request #${n}`);
       if (!res.ok) throw new ToolError(`github answered ${res.status}`);
       const pr = (await res.json()) as GhPull;
@@ -200,6 +248,7 @@ const TOOLS: ToolDef[] = [
     run: async (ctx, a) => {
       const sha = arg(a, 'sha', /^[0-9a-f]{7,40}$/);
       const res = await github(ctx, `https://api.github.com/repos/${REPO}/commits/${sha}`);
+      if (limited(res.status)) return commitFromPatch(ctx, sha);
       if (res.status === 404 || res.status === 422) throw new ToolError(`no commit ${sha}`);
       if (!res.ok) throw new ToolError(`github answered ${res.status}`);
       const c = (await res.json()) as { sha: string; commit: { message: string; author: { date: string } }; parents?: { sha: string }[]; files?: GhFile[] };

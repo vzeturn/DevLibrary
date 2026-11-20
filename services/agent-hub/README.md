@@ -243,7 +243,7 @@ is not the admin token, and every tool only reads:
 |---|---|
 | `hub_test_results {suite?, limit?}` | last published runs (commit, typecheck, counts, failures): suite `agent-hub` (`pnpm test`, default) or `cargo` (clippy as `typecheck`, `cargo test --workspace` counts per test binary) |
 | `repo_file {path, ref?}`, `repo_list {path?, ref?}`, `repo_commits {ref?, limit?}` | the public repository `vzeturn/DevLibrary`, default `main` |
-| `repo_pull {number}`, `repo_commit {sha}` | one pull request (title, state, merged, head/base sha, description) or one commit (message, parents), each with its changed files and a patch excerpt (4000 characters per file; read a whole file with `repo_file` at that sha) |
+| `repo_pull {number}`, `repo_commit {sha}` | one pull request (title, state, merged, head/base sha, description) or one commit (message, parents), each with its changed files and a patch excerpt (4000 characters per file; read a whole file with `repo_file` at that sha). When the unauthenticated API is rate-limited (403/429, Worker IPs are shared), `repo_commits` reads github.com's commit Atom feed (last 20) and `repo_pull` / `repo_commit` the `.patch` (commits, files, patch; a pull request counts as merged when main's feed has its `Merge pull request #n`); each answer then says `source` |
 | `admin_get {path}` | any `GET /admin/...` route, run in-process with the admin token (never handed out); `/admin/diagnostics/:id/download` and the HTML page are refused |
 | `list_agents`, `get_agent`, `agent_selftest`, `list_releases`, `release_gate`, `list_reports` | the same admin reads by name |
 
