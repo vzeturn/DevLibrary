@@ -284,5 +284,37 @@ target `windows7-<arch>`, so the hub hands it only Win7 artifacts. Publish one a
 Demo tenants (canary) take it first; `GET /admin/releases/dl-agent/1.2.0/gate` must pass before
 `POST …/promote` with the same build signed for `stable`. Keep the seed off every server.
 
+### Release without the iMac: one command, one-shot Fly build machine (RT-0311)
+
+`scripts/release/` releases from any machine with the repo, `curl` and `cargo` — a cloud
+session included — with no Docker daemon and no machine-specific path:
+
+```text
+export FLY_API_TOKEN=…           # deploy token of the Fly app dl-agent-xbuild (FLY_BUILD_APP)
+export CLOUDFLARE_API_TOKEN=…    # R2 edit on the hub's account
+export DL_AGENT_RELEASE_SEED=…   # release seed (base64), or DL_AGENT_RELEASE_SEED_FILE
+export AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…
+export MMEI_BUILD_DEFAULT_SQL_PASSWORD=…   # optional, compiled into einvoice-enroll
+scripts/release/canary.sh 1.3.17           # build + sign + upload + publish canary
+scripts/release/rel.sh gate 1.3.17         # later: the canary gate
+scripts/release/rel.sh promote 1.3.17      # once the gate passes (stable manifest signed already)
+```
+
+`canary.sh` runs, in order: `fly-build.sh` creates a Fly Machine (`auto_destroy`, restart
+`no`, `performance-8x`, image `rust:1-bookworm` or `FLY_BUILD_IMAGE`) through the Machines API;
+the machine downloads the pushed commit (`DL_BUILD_REF`, default `HEAD`; push first), installs
+the toolchain with `scripts/xbuild/setup.sh` (the same script the Dockerfile runs), runs
+`DL_XBUILD_NATIVE=1 scripts/build-dl-agent.sh` (same DLL, glibc and wine checks), stages the
+unsigned binaries, log and exit status in R2 `dl-agent-builds/<version>/` and exits, and Fly
+removes it. `fly-build.sh` waits (default 90 min), prints the log tail and destroys the machine
+itself on timeout, error or Ctrl-C, so none is left running. Then `rel.sh fetch` downloads the
+staged binaries, `rel.sh sign` signs canary and stable manifests here (the seed is written to a
+mode-600 temp file only for the signer and removed; it never reaches the build machine),
+`rel.sh upload` puts the artifacts at `dl-agent/<version>/<target>/` and `rel.sh canary`
+publishes. Every credential is read from the environment and handed to `curl` through a
+process-substitution config, never argv; the machine sees the Cloudflare token for staging
+only while it lives. `FLY_BUILD_DRY_RUN=1 scripts/release/fly-build.sh <version>` prints the
+machine config with secrets masked.
+
 `--data DIR` (or `DL_AGENT_DATA`) picks the state directory; the default is
 `%ProgramData%\dl-agent` or `/var/lib/dl-agent`.
