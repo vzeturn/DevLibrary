@@ -4,14 +4,16 @@
 //! ```text
 //! dl-agent pda-enroll --code <one-time code> --url https://<tenant>.<pda cloud> [--dry-run]
 //!                     [--sql-instance <data source>] [--database SMILE_POS]
-//!                     [--sql-admin-user <login>]
+//!                     [--sql-admin-user <login> | --sql-admin-saved]
 //! dl-agent pda-grants [--dry-run] [--sql-instance <data source>] [--database SMILE_POS]
-//!                     [--sql-admin-user <login>]
+//!                     [--sql-admin-user <login> | --sql-admin-saved]
 //! ```
 //!
 //! Without `--sql-admin-user` the SQL administrator is the Windows login running the
-//! command; with it, the password comes from `PDA_SQL_ADMIN_PASSWORD` or a hidden prompt,
-//! never from argv. The run's log goes to `logs/tools-.log` and its site events are sent
+//! command; with it, the password comes from `DL_AGENT_PDA_SQL_ADMIN_PASSWORD`,
+//! `PDA_SQL_ADMIN_PASSWORD` or a hidden prompt, never from argv. `--sql-admin-saved` uses
+//! the SQL login dl-agent keeps in `sql.json` ([`super::admin_login`]), so a remote attach
+//! works where the service account is not a SQL Server administrator. The run's log goes to `logs/tools-.log` and its site events are sent
 //! once the machine has an identity.
 
 use std::path::{Path, PathBuf};
@@ -21,10 +23,10 @@ use dl_agent::tool::{Tool, ToolContext};
 use dl_cli::{Arg, Command, Matches};
 use dl_json::Value;
 
+use super::admin_login::{AdminPassword, DEFAULT_DATABASE, SQL_ADMIN_SAVED_FLAG, saved_login};
 use super::{NAME as MODULE, settings};
 use crate::hosting::cli::Options;
 use crate::hosting::enroll::SQL_ADMIN_USER_OPTION;
-use crate::hosting::secret_prompt::ConsoleSecretPrompt;
 use crate::util::console::{Stderr, Stdout};
 
 /// The enrol sub-command name.
@@ -60,9 +62,14 @@ fn sql_args(cmd: Command) -> Command {
                 .help("SQL Server data source (default: discovered on this machine)"),
         )
         .arg(Arg::option("database").help("The POS database (default: SMILE_POS)"))
-        .arg(Arg::option(SQL_ADMIN_USER_OPTION).help(
-            "A SQL administrator login (password from PDA_SQL_ADMIN_PASSWORD or a hidden \
-             prompt); default: the Windows login running this command",
+        .arg(Arg::option("sql-admin-user").help(
+            "A SQL administrator login (password from DL_AGENT_PDA_SQL_ADMIN_PASSWORD, \
+             PDA_SQL_ADMIN_PASSWORD or a hidden prompt); default: the Windows login running \
+             this command",
+        ))
+        .arg(Arg::flag("sql-admin-saved").help(
+            "Use the SQL login dl-agent saved in sql.json as the administrator (the POS \
+             database's, else the first SQL login there)",
         ))
 }
 
@@ -125,29 +132,43 @@ fn exit(verb: &str, code: i32) -> Result<(), Error> {
     }
 }
 
+/// The options and password source after `--sql-admin-saved`: the saved login becomes
+/// `--sql-admin-user` (and `--sql-instance` when none is given) with its password fixed.
+pub fn admin_from(
+    data_dir: &Path,
+    m: &Matches,
+    mut o: Options,
+) -> Result<(Options, AdminPassword), Error> {
+    if !m.flag(SQL_ADMIN_SAVED_FLAG) {
+        return Ok((o, AdminPassword::from_environment()));
+    }
+    if o.get(SQL_ADMIN_USER_OPTION).is_some() {
+        return Err(Error::Config(format!(
+            "--{SQL_ADMIN_SAVED_FLAG} and --{SQL_ADMIN_USER_OPTION} exclude each other"
+        )));
+    }
+    let database = o.get("database").unwrap_or(DEFAULT_DATABASE).to_string();
+    let login = saved_login(data_dir, &database)?;
+    if o.get("sql-instance").is_none() {
+        o.insert("sql-instance", &login.data_source);
+    }
+    o.insert(SQL_ADMIN_USER_OPTION, &login.user);
+    Ok((o, AdminPassword::fixed(login.password)))
+}
+
 fn run_enroll(ctx: &ToolContext<'_>, m: &Matches) -> Result<(), Error> {
     let host =
         settings::host_context(&Value::Null, &module_dir(ctx.data_dir)).map_err(Error::Config)?;
-    let code = crate::hosting::enroll::run_with(
-        &host,
-        &options_from(m, true),
-        &ConsoleSecretPrompt,
-        &Stdout,
-        &Stderr,
-    );
+    let (opts, passwords) = admin_from(ctx.data_dir, m, options_from(m, true))?;
+    let code = crate::hosting::enroll::run_with(&host, &opts, &passwords, &Stdout, &Stderr);
     exit(ENROLL, code)
 }
 
 fn run_grants(ctx: &ToolContext<'_>, m: &Matches) -> Result<(), Error> {
     let host =
         settings::host_context(&Value::Null, &module_dir(ctx.data_dir)).map_err(Error::Config)?;
-    let code = crate::hosting::grants::run_with(
-        &host,
-        &options_from(m, false),
-        &ConsoleSecretPrompt,
-        &Stdout,
-        &Stderr,
-    );
+    let (opts, passwords) = admin_from(ctx.data_dir, m, options_from(m, false))?;
+    let code = crate::hosting::grants::run_with(&host, &opts, &passwords, &Stdout, &Stderr);
     exit(GRANTS, code)
 }
 
@@ -213,6 +234,39 @@ mod tests {
         let o = options_from(&m, false);
         assert_eq!(crate::hosting::enroll::sql_auth(&o), "sql");
         assert!(!crate::hosting::grants::args_from(&o).dry_run);
+    }
+
+    #[test]
+    fn the_saved_login_becomes_the_sql_administrator() {
+        let dir = std::env::temp_dir().join(format!("pda-tool-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(
+            dir.join(dl_agent::sql::SQL_FILE),
+            r#"{"databases":{"SMILE_POS":{"connection":"Server=SRV\\POS;Database=SMILE_POS;User Id=sa;Password=pw-1"}}}"#,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let m = parse(pda_grants_tool(), &["--sql-admin-saved"]);
+        let (o, p) =
+            admin_from(&dir, &m, options_from(&m, false)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(o.get(SQL_ADMIN_USER_OPTION), Some("sa"));
+        assert_eq!(o.get("sql-instance"), Some(r"SRV\POS"));
+        use crate::hosting::secret_prompt::SecretPrompt;
+        let pw = p.read(crate::bootstrap::admin::PASSWORD_ENV_VAR, "");
+        assert_eq!(pw.as_deref(), Some("pw-1"));
+        // An explicit instance stays; an explicit admin user conflicts.
+        let m = parse(
+            pda_grants_tool(),
+            &["--sql-admin-saved", "--sql-instance", "OTHER"],
+        );
+        let (o, _) =
+            admin_from(&dir, &m, options_from(&m, false)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(o.get("sql-instance"), Some("OTHER"));
+        let m = parse(
+            pda_grants_tool(),
+            &["--sql-admin-saved", "--sql-admin-user", "x"],
+        );
+        assert!(admin_from(&dir, &m, options_from(&m, false)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

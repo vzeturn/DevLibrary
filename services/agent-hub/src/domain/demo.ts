@@ -28,6 +28,12 @@ export interface DemoOption {
   what: string;
 }
 
+/** A flag without a value the tool takes (remote attach `flags`). */
+export interface DemoFlag {
+  flag: string;
+  what: string;
+}
+
 export interface DemoModule {
   /** The module name in the agent config (`modules.<module>.enabled`). */
   module: string;
@@ -36,11 +42,16 @@ export interface DemoModule {
   setup: string | null;
   secrets: DemoSecret[];
   options: DemoOption[];
+  /** Value-less flags remote attach may pass (`--force`, `--sql-admin-saved`). */
+  flags: DemoFlag[];
+  /** The flag that enrols again over an existing enrolment (another tenant), null when none. */
+  reenroll: string | null;
   note: string;
 }
 
 const s = (from: string, to: string, what: string, required = true): DemoSecret => ({ from, to, required, what });
 const o = (from: string, flag: string, what: string, required = true): DemoOption => ({ from, flag, required, what });
+const FORCE: DemoFlag = { flag: '--force', what: 'enrol again although the module is enrolled (moves it to the new tenant)' };
 
 /** In the order the script enrols them (`speaker` needs `pda-sync` first). */
 export const DEMO_MODULES: readonly DemoModule[] = [
@@ -50,6 +61,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: 'einvoice-enroll',
     secrets: [s('DL_AGENT_DEMO_EINVOICE_TOKEN', 'DL_AGENT_EINVOICE_TOKEN', 'one-time agent token (platform console, demo tenant, Agent tab)')],
     options: [o('DL_AGENT_DEMO_EINVOICE_URL', '--platform-url', 'E-Invoice platform origin')],
+    flags: [FORCE],
+    reenroll: '--force',
     note: 'SQL login from MMEI_SQL_HOST/USER/PASSWORD/AUTH when set, else the tool defaults',
   },
   {
@@ -58,6 +71,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: 'pms-enroll',
     secrets: [s('DL_AGENT_DEMO_PMS_CODE', 'DL_AGENT_PMS_CODE', 'one-time site enrolment code (PMS cloud, demo hotel)')],
     options: [o('DL_AGENT_DEMO_PMS_URL', '--cloud-url', 'PMS cloud origin')],
+    flags: [FORCE],
+    reenroll: '--force',
     note: 'the module redeems the code within 30 s',
   },
   {
@@ -69,6 +84,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
       s('DL_AGENT_DEMO_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_PMS', 'PMS connection string (else the saved one, else asked)', false),
     ],
     options: [o('DL_AGENT_DEMO_ARRIVAL_URL', '--cloud-url', 'Check-In cloud origin')],
+    flags: [FORCE],
+    reenroll: '--force',
     note: '',
   },
   {
@@ -80,6 +97,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
       s('DL_AGENT_DEMO_MEMBERSHIP_SMILE', 'DL_AGENT_MEMBERSHIP_SMILE', 'SMILE connection string (else the saved one)', false),
     ],
     options: [o('DL_AGENT_DEMO_MEMBERSHIP_URL', '--hub-url', 'Membership hub origin')],
+    flags: [FORCE],
+    reenroll: '--force',
     note: '',
   },
   {
@@ -96,6 +115,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
       o('DL_AGENT_DEMO_HL_INSTANCE_ID', '--instance-id', 'instance id of this install'),
       o('DL_AGENT_DEMO_HL_SQL_USER', '--sql-user', 'SQL login (default: Windows authentication)', false),
     ],
+    flags: [FORCE],
+    reenroll: '--force',
     note: '',
   },
   {
@@ -104,14 +125,24 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: 'backup-enroll',
     secrets: [s('DL_AGENT_DEMO_BACKUP_KEY', 'DL_AGENT_BACKUP_KEY', 'enroll key (SRBackup hub, demo tenant)')],
     options: [o('DL_AGENT_DEMO_BACKUP_URL', '--hub-url', 'SRBackup hub origin')],
+    flags: [FORCE],
+    reenroll: '--force',
     note: '',
   },
   {
     module: 'pda-sync',
     product: 'PDAOrder',
     setup: 'pda-enroll',
-    secrets: [s('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_PDA_CODE', 'one-time enrol code (PDA admin, demo tenant)')],
-    options: [o('DL_AGENT_DEMO_PDA_URL', '--url', 'the demo tenant PDA cloud address')],
+    secrets: [
+      s('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_PDA_CODE', 'one-time enrol code (PDA admin, demo tenant)'),
+      s('DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD', 'SQL administrator password, with DL_AGENT_DEMO_PDA_SQL_ADMIN_USER', false),
+    ],
+    options: [
+      o('DL_AGENT_DEMO_PDA_URL', '--url', 'the demo tenant PDA cloud address'),
+      o('DL_AGENT_DEMO_PDA_SQL_ADMIN_USER', '--sql-admin-user', 'SQL administrator login (default: the Windows account)', false),
+    ],
+    flags: [{ flag: '--sql-admin-saved', what: 'use the SQL login dl-agent saved in sql.json as the SQL administrator' }],
+    reenroll: null,
     note: 'needs a dl-agent build that reads DL_AGENT_PDA_CODE (RT-0261)',
   },
   {
@@ -120,6 +151,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: null,
     secrets: [],
     options: [],
+    flags: [],
+    reenroll: null,
     note: 'no enrol step: reads the DeviceAgent appsettings and token file already on the PC',
   },
   {
@@ -128,6 +161,8 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: null,
     secrets: [],
     options: [],
+    flags: [],
+    reenroll: null,
     note: 'no enrol step: uses the pda-sync identity',
   },
 ];

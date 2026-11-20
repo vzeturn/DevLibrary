@@ -32,8 +32,16 @@ and copies of the C# sources (`testdata/cs`).
 
 ```text
 dl-agent pda-enroll --code <code> --url <https cloud url> [--dry-run]
-                    [--sql-instance <instance>] [--database SMILE_POS] [--sql-admin-user <login>]
+                    [--sql-instance <instance>] [--database SMILE_POS]
+                    [--sql-admin-user <login> | --sql-admin-saved]
 ```
+
+The SQL administrator is the Windows account running the tool by default. As a service
+(remote attach) that is LocalSystem, often not a SQL Server administrator (`SQL_NO_ACCESS`,
+error 15247): pass `--sql-admin-user <login>` with the password in
+`DL_AGENT_PDA_SQL_ADMIN_PASSWORD` (or `PDA_SQL_ADMIN_PASSWORD`), or `--sql-admin-saved` to
+use the SQL login dl-agent keeps in `sql.json` (the POS database's, else the first SQL login;
+its server becomes `--sql-instance` unless one is given).
 
 The code may come from the environment variable `DL_AGENT_PDA_CODE` instead of `--code`
 (the argument wins), so an installer such as `install.ps1 -Demo` keeps it out of the

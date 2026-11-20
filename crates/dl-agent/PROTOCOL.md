@@ -169,7 +169,7 @@ Admins read bundles with `GET /admin/diagnostics?agent_id=` and
 ### 4.2 Remote attach: switch a product on from the hub (RT-0261)
 
 An agent installed once takes every further product from the hub; nobody goes to the site.
-`POST /admin/agents/{id}/attach {module, secret?, options?, external_id?, ttl_seconds?}`
+`POST /admin/agents/{id}/attach {module, secret?, options?, flags?, reenroll?, external_id?, ttl_seconds?}`
 (admin token) does three things:
 
 1. enables `modules.<module>` in the agent's config (new version; other modules and keys stay),
@@ -179,7 +179,10 @@ An agent installed once takes every further product from the hub; nobody goes to
    `backup-enroll`, `pda-enroll`), queues one command
    `{kind:"attach", args:{module, tool, argv:[flag, value, …], env:{DL_AGENT_…: code}}}`.
    `secret` must name only the variables the tool reads and `options` only its flags; the
-   required ones must be there. The secret is stored apart from `args`, never shown by
+   required ones must be there. `flags` lists value-less flags from the module's row
+   (`--force`, pda-sync `--sql-admin-saved`), appended after the options; `reenroll: true`
+   adds the row's re-enrol flag (`--force`) and is refused (`reenroll_not_supported`) for a
+   module without one. The secret is stored apart from `args`, never shown by
    `GET /admin/commands` (only `has_secret`) or the audit trail, added to `args.env` when the
    agent takes the command and cleared from the hub in the same step (or at expiry);
 3. when the agent answers the `attach` command `ok`, queues `restart_module` for the module.

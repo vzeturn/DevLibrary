@@ -33,6 +33,10 @@ export const remoteAttachBody = z.object({
   secret: z.record(z.string(), value).default({}),
   /** The tool's plain options by flag (e.g. `--cloud-url`). */
   options: z.record(z.string(), option).default({}),
+  /** Value-less flags from the module's list (e.g. `--sql-admin-saved` for pda-sync). */
+  flags: z.array(z.string().min(1).max(64)).max(8).default([]),
+  /** Enrol again over an existing enrolment (moves the module to this product tenant). */
+  reenroll: z.boolean().default(false),
   /** The product's tenant id, recorded in `product_links` so the product finds its agent. */
   external_id: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/).optional(),
   ttl_seconds: z.number().int().min(60).max(86400).default(3600),
@@ -54,14 +58,23 @@ function recipe(module: string): DemoModule {
   return m;
 }
 
-/** The tool's argv from the options, checked against the module's table row. */
-export function attachArgv(m: DemoModule, options: Record<string, string>): string[] {
+/** The tool's argv from the options and flags, checked against the module's table row. */
+export function attachArgv(m: DemoModule, options: Record<string, string>, flags: readonly string[] = [], reenroll = false): string[] {
   const known = new Set(m.options.map((o) => o.flag));
   const extra = Object.keys(options).filter((f) => !known.has(f));
   if (extra.length > 0) throw new HttpError(400, 'unknown_option', { options: extra, allowed: [...known] });
   const missing = m.options.filter((o) => o.required && !options[o.flag]).map((o) => o.flag);
   if (missing.length > 0) throw new HttpError(400, 'missing_option', { options: missing });
-  return m.options.flatMap((o) => (options[o.flag] ? [o.flag, options[o.flag] as string] : []));
+  const allowed = new Set(m.flags.map((f) => f.flag));
+  const badFlags = flags.filter((f) => !allowed.has(f));
+  if (badFlags.length > 0) throw new HttpError(400, 'unknown_flag', { flags: badFlags, allowed: [...allowed] });
+  if (reenroll && !m.reenroll) throw new HttpError(400, 'reenroll_not_supported', { module: m.module });
+  const wanted = new Set(flags);
+  if (reenroll && m.reenroll) wanted.add(m.reenroll);
+  return [
+    ...m.options.flatMap((o) => (options[o.flag] ? [o.flag, options[o.flag] as string] : [])),
+    ...m.flags.filter((f) => wanted.has(f.flag)).map((f) => f.flag),
+  ];
 }
 
 /** The secret variables, checked against the module's table row. */
@@ -83,11 +96,11 @@ async function liveAgent(env: Env, agentId: string): Promise<AgentRow> {
 
 export async function remoteAttach(env: Env, agentId: string, body: RemoteAttachBody, now: number): Promise<RemoteAttachAnswer> {
   const m = recipe(body.module);
-  const argv = m.setup ? attachArgv(m, body.options) : [];
-  const secret = m.setup ? attachSecret(m, body.secret) : {};
-  if (!m.setup && (Object.keys(body.secret).length > 0 || Object.keys(body.options).length > 0)) {
+  if (!m.setup && (Object.keys(body.secret).length > 0 || Object.keys(body.options).length > 0 || body.flags.length > 0 || body.reenroll)) {
     throw new HttpError(400, 'module_has_no_enrol_step');
   }
+  const argv = m.setup ? attachArgv(m, body.options, body.flags, body.reenroll) : [];
+  const secret = m.setup ? attachSecret(m, body.secret) : {};
   const agent = await liveAgent(env, agentId);
   await clearExpiredSecrets(env.DB, now);
 

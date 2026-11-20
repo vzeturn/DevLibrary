@@ -254,6 +254,30 @@ agent has it), then restarts the module. `GET /admin/commands?agent_id=<id>` sho
 exit and output (secrets masked). Variables and flags per module are the demo bench table
 above; `pms-device` and `speaker` take only `{"module": …}`. Needs dl-agent 1.3.17 or newer.
 
+Two more fields cover a machine that is already enrolled elsewhere or whose service account is
+not a SQL Server administrator (agent 1.3.19 or newer for `--sql-admin-saved`):
+
+- `"reenroll": true` enrols again over an existing enrolment, moving the module to the new
+  product tenant (the hub adds the tool's `--force`; einvoice, pms-site, arrival, membership,
+  hotellink, backup). The SQL connection the module already has is kept.
+- `"flags": [...]` passes value-less flags from the module's list. `pda-sync` takes
+  `--sql-admin-saved`: `pda-enroll` signs in as the SQL login dl-agent keeps in `sql.json`
+  (the POS database's, else the first SQL login) instead of LocalSystem, which fixes
+  `SQL_NO_ACCESS ... error 15247` with no site visit. Or give the administrator explicitly:
+  `"options": {"--sql-admin-user": "sa"}` with
+  `"secret": {"DL_AGENT_PDA_SQL_ADMIN_PASSWORD": "…"}`.
+
+```sh
+# Move einvoice to the azolo-demo tenant; enrol pda-sync with the saved SQL login.
+-d '{"module":"einvoice","secret":{"DL_AGENT_EINVOICE_TOKEN":"<token>"},
+     "options":{"--platform-url":"https://mm-einvoice.fly.dev"},"reenroll":true}'
+-d '{"module":"pda-sync","secret":{"DL_AGENT_PDA_CODE":"<code>"},
+     "options":{"--url":"https://azolo-demo-pos.pms.id.vn"},"flags":["--sql-admin-saved"]}'
+```
+
+Refusals: `unknown_flag` (not in the module's list), `reenroll_not_supported` (pda-sync has no
+re-enrol flag), `module_has_no_enrol_step` (pms-device, speaker).
+
 ### Machines that already run an agent: no install line again (RT-0261)
 
 **dl-agent already installed.** Nothing to run on site. The agent updates itself from the hub
