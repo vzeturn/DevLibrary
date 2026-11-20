@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- release: dl-agent builds, signs and publishes without the iMac (RT-0311). `scripts/release/canary.sh <version>` builds in a one-shot Fly Machine (`fly-build.sh`: Machines API over curl, `auto_destroy`, destroyed on timeout or error; `machine-build.sh` stages the unsigned binaries in R2 `dl-agent-builds/`), then signs canary and stable manifests locally, uploads and publishes canary; `rel.sh` (fetch, sign, upload, canary, gate, promote) uses repo-relative paths and reads the seed and admin credentials from the environment. `scripts/build-dl-agent.sh` gains `DL_XBUILD_NATIVE=1` (no Docker), and the toolchain moves to `scripts/xbuild/setup.sh`, shared by the Dockerfile and the build machine.
+
 - agent-hub: ops console tool `agent_survey {agent_id}` (RT-0307): an agent's last site survey with a summary of where its SQL login came from (`login_source`) and how each database signed in (`auth_scheme`, `tds`, `server_port`, `instance`, `encryption`, `tls`), engine and warnings; read-only, facts only.
 
 - agent-hub: the ops console's GitHub reads survive the API's rate limit (RT-0289). On a 403/429 from the unauthenticated API (shared Worker IPs), `repo_commits` falls back to github.com's commit Atom feed and `repo_pull` / `repo_commit` to the pull request's or commit's `.patch` (commits, changed files, patch; merged from main's feed), marked with `source`. Still read-only and token-free.
