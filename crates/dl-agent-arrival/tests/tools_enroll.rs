@@ -311,8 +311,34 @@ fn the_core_sql_json_supplies_the_connection_when_nothing_else_does() {
         Settings::load(install.path())
             .expect("settings")
             .pms_connection_string,
-        CORE_PMS
+        "REPLACE_VIA_ENV",
+        "the core connection is not copied into the settings"
     );
+}
+
+#[test]
+fn a_core_sql_password_is_never_written_to_the_settings() {
+    let data = TempDir::new("enroll-core-sql-data");
+    let sealed = dl_agent::sql::secret::seal("Core-Pa55-secret").expect("seal");
+    let doc = format!(
+        r#"{{"databases":{{"SMILE_FO":{{"connection":"Server=core-pms;Database=SMILE_FO;User Id=arrival","auth":"sql","password_sealed":"{sealed}"}}}}}}"#
+    );
+    std::fs::write(data.path().join("sql.json"), doc).expect("sql.json");
+    let module = data.path().join("modules").join("arrival");
+    let install = TempDir::new("enroll-core-sql-install");
+    let id = identity("agt-coresql");
+    let (result, out) = run_in(
+        &args(install.path()),
+        &module,
+        &[(TOKEN_ENV, &token(&id))],
+        "",
+    );
+    result.expect("enroll");
+    assert!(!out.contains("Core-Pa55-secret"), "{out}");
+    for f in ["appsettings.json", "appsettings.Production.json"] {
+        let text = std::fs::read_to_string(install.path().join(f)).unwrap_or_default();
+        assert!(!text.contains("Core-Pa55-secret"), "{f} holds the password");
+    }
 }
 
 #[test]

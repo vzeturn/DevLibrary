@@ -186,7 +186,7 @@ An agent installed once takes every further product from the hub; nobody goes to
    `--install-dir`) and membership (`program_data_dir` → `--config-dir`) the hub reads that key
    from the agent's `modules.<module>` config and, when it is a non-empty one-line string,
    appends the flag so the tool writes to the directory the module reads (key unset: the tool's
-   default); The secret is stored apart from `args`, never shown by
+   default). The secret is stored apart from `args`, never shown by
    `GET /admin/commands` (only `has_secret`) or the audit trail, added to `args.env` when the
    agent takes the command and cleared from the hub in the same step (or at expiry);
 3. when the agent answers the `attach` command `ok`, queues `restart_module` for the module.

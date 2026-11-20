@@ -91,16 +91,25 @@ pub fn agent_data_dir(module_dir: &Path) -> Option<&Path> {
 /// `sql.json` cannot be read or its `SMILE_FO` entry is unusable; `settings` then keep the
 /// appsettings connection and the caller reports the message (never a secret).
 pub fn apply(settings: &mut Settings, module_dir: &Path) -> Result<PmsSource, String> {
-    let Some(data_dir) = agent_data_dir(module_dir) else {
-        return Ok(settings.pms_source);
-    };
-    let doc = dl_agent::store::read_json(&data_dir.join(SQL_FILE))
-        .map_err(|e| format!("{SQL_FILE}: {e}"))?;
-    if let Some((connection, pin)) = doc.as_ref().map(entry).transpose()?.flatten() {
+    if let Some((connection, pin)) = core_entry(module_dir)? {
         settings.pms_connection_string = connection;
         settings.pms_source = PmsSource::Core { pin };
     }
     Ok(settings.pms_source)
+}
+
+/// The `SMILE_FO` entry of the agent's `sql.json` for a module directory: `None` when the
+/// directory is not `<data>/modules/<name>`, the file is missing or has no such entry.
+///
+/// # Errors
+/// `sql.json` cannot be read or the entry is unusable (the message never echoes a secret).
+pub fn core_entry(module_dir: &Path) -> Result<Option<(String, Option<Rung>)>, String> {
+    let Some(data_dir) = agent_data_dir(module_dir) else {
+        return Ok(None);
+    };
+    let doc = dl_agent::store::read_json(&data_dir.join(SQL_FILE))
+        .map_err(|e| format!("{SQL_FILE}: {e}"))?;
+    Ok(doc.as_ref().map(entry).transpose()?.flatten())
 }
 
 #[cfg(test)]
