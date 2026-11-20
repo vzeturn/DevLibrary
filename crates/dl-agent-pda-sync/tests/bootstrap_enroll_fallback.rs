@@ -214,7 +214,7 @@ fn a_working_windows_identity_never_touches_the_default_login() {
     );
     assert_eq!(
         detail.get("code").and_then(dl_json::Value::as_str),
-        Some("used")
+        Some("USED")
     );
     assert!(!f.everything().contains(&f.password));
 }
@@ -337,7 +337,7 @@ fn a_refusal_that_is_not_about_access_does_not_fall_back() {
         .as_ref()
         .and_then(|d| d.get("code"))
         .and_then(dl_json::Value::as_str);
-    assert_eq!(code, Some("accepted_then_failed"));
+    assert_eq!(code, Some("ACCEPTED_THEN_FAILED"));
 }
 
 #[test]

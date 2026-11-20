@@ -224,16 +224,17 @@ pub fn run_attempts(
             None => {
                 // Accepted by SQL Server; the run may still fail for another reason.
                 let (outcome, level) = if result.is_ok() {
-                    ("used", INFO)
+                    ("USED", INFO)
                 } else {
-                    ("accepted_then_failed", WARN)
+                    ("ACCEPTED_THEN_FAILED", WARN)
                 };
-                let text = if n > 1 {
-                    format!(
-                        "SQL administrator identity used: {label} (attempt {n}/{of}, after a refusal)"
-                    )
+                let after = if n > 1 { ", after a refusal" } else { "" };
+                let text = if result.is_ok() {
+                    format!("SQL administrator identity used: {label} (attempt {n}/{of}{after})")
                 } else {
-                    format!("SQL administrator identity used: {label} (attempt {n}/{of})")
+                    format!(
+                        "SQL administrator {label} accepted (attempt {n}/{of}{after}); the run failed for another reason"
+                    )
                 };
                 if n > 1 {
                     run.line(&text);
