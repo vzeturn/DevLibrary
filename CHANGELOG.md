@@ -134,6 +134,7 @@ All notable changes are listed here. The format follows
   processes through `dl_winsvc::process` instead of `tasklist`.
 
 ### Fixed
+- dl-tds: `cargo clippy --all-targets -D warnings` is clean on macOS again: the TLS 1.0 fake-server tests (no TLS backend on Apple) no longer leave `TlsPeer` imported but unused there (RT-0258).
 - dl-agent-arrival, dl-agent-membership: the Check-In cloud and the Membership hub are reached through the dl-agent core's proxy choice (environment, WinHTTP, Internet Options) instead of the environment only, as the .NET agents used the machine's proxy; Membership hub calls carry a fresh `X-Correlation-Id` like the .NET `AgentCorrelationHandler` (RT-0260).
 - dl-agent-arrival: the SCM "terminated unexpectedly" event logged with an update restart (exit 75, same instant) is information, no longer a problem that turns selftest `last_problem` to warn.
 - dl-agent-pms-device: the PMS device API is reached through dl-agent's proxy choice (environment, then WinHTTP, then Internet Options) like the .NET agent's system proxy, not the environment only (RT-0260).
