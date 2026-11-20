@@ -522,6 +522,17 @@ describes its host and every declared database. Facts only, no data and no secre
 
   A failed survey files `sql_survey_failed` (warning) and is retried the next day.
 
+  Each database survey also carries **`connection`**, how the agent's session got in (RT-0303):
+  `auth_scheme` (`SQL`, `NTLM` or `KERBEROS`, from `CONNECTIONPROPERTY`), `net_transport`,
+  `instance` (`SERVERPROPERTY('InstanceName')`, `null` for the default instance), `port` (the
+  server's `local_tcp_port`, else the port the client reached), `tds_version` (`7.3B` for SQL
+  Server 2008 R2, `7.4` from 2012), `server_version` (LOGINACK), `encryption` (`full`,
+  `login_only` or `none`) and `tls` (the transport rung, §9.4). SQL Server 2005 has no
+  `CONNECTIONPROPERTY`: its server-side fields are `null`, the client-side ones stay. The
+  survey body also carries **`sql_source`**, where the saved SQL login came from (§9.8.1). None
+  of it is ever a password; the self-test's `sql.<db>` detail repeats it in one line
+  (`auth NTLM, TDS 7.3B, encryption login_only, instance SMILE, port 49172`).
+
 - **Site requirements** (hub, per product): `{"host": {"min_nt_version": "6.1", "families":
   ["windows"]}, "databases": {"SMILE_FO": {"min_engine_major": 10, "min_compatibility": 100,
   "grants": ["execute", "create_procedure"], "forbid_warnings": ["database_read_only"],
@@ -564,6 +575,50 @@ SQL errors from a session carry a code prefix the agent and modules act on:
 | `sql_deadlock` | 1205 | deadlock victim; retry |
 | `sql_access_denied` | 18456, 4060, 229, 230 | login, database or permission refused |
 | `sql_timeout` | (client) | request timed out and was cancelled |
+
+### 9.8 SQL login at install
+
+`sql-setup` tests a login on every SMILE database (`SMILE_FO`, `SMILE_POS`, `SMILE_BO`
+present on the server) before it writes `sql.json`; a Windows login is tested as the service
+account (LocalSystem) through a one-shot scheduled task. `--source <json>` records where the
+login came from as `sql.json` `source` (no secret); `--no-report` leaves the problem report to
+the caller.
+
+#### 9.8.1 Automatic choice (RT-0303)
+
+`install` with no `--sql-auth`, `--sql-name`, `--sql-prompt` or `--skip-sql`, on a machine that
+has no `sql.json` yet, chooses the SQL login itself:
+
+1. **Gather.** The connections the older per-product agents used, read from their own
+   configuration by the signed binary (`sql::legacy`):
+
+   | product | where | field |
+   |---------|-------|-------|
+   | Check-In (MM-Arrival) | `%ProgramFiles%\MM-Arrival Agent\appsettings.Production.json`, `appsettings.json` | `Agent:PmsConnectionString` |
+   | Membership | `%ProgramData%\MM.Membership.Agent\config.dpapi` (DPAPI LocalMachine, entropy `MM.Membership.Agent.v1`); `%ProgramFiles%\MM.Membership.Agent\appsettings*.json` | `SmileConnectionString`, `ConnectionStrings:SmileFo` |
+   | PDA SyncAgent | `%ProgramData%\MM\SyncAgent\agent.json` + `secrets\pda-sync-sql-password.bin` (DPAPI LocalMachine, entropy `MM.PdaOrder.SyncAgent.v1`) | `sqlInstance`, `sqlDatabase`, login `pda_sync` |
+   | SMILE-PMS site agent | `%ProgramData%\SmilePMS\Agent\state\databases.json` (or `config.json` `state_dir`) | `SMILE_*` |
+   | HotelLink | `%ProgramData%\SMILE-HL-Agent\config.json` (`enc:` = DPAPI LocalMachine) | `sql.{server,user,password,trustedConnection,connectionStringOverride}` |
+   | E-Invoice | `%ProgramData%\MM-EInvoice\config.enc` (DPAPI LocalMachine of `BE32 len ‖ JSON`) | `sql_dsn`, `pos_sql_dsn` |
+   | SRBackup | `%ProgramData%\srbackup\agent.json` | none today: its SQL servers come from the SRBackup hub (noted, nothing to reuse) |
+
+   Each folder is searched in place, as listed in a bench record (`<data>/bench-removed-*.json`,
+   `dirs[].from → to`) and as a `<folder>.bench-old-<stamp>` sibling. A DPAPI blob sealed for
+   one user (CurrentUser) is skipped with a note: the service could never open it. Then the old
+   Check-In connection the installer script hands over (`DL_AGENT_SQL_LEGACY`), then the
+   Windows service login on this machine's SQL Server (`MSSQLSERVER` → `.`, `MSSQL$NAME` →
+   `.\NAME`) when there is one.
+2. **Deduplicate** on mode, server (`.`, `(local)`, `localhost`, this computer's name are one),
+   login and password. Order: in place, bench record, bench-old; products in the table order;
+   the service login last.
+3. **Try** each with `sql-setup --source … --no-report` and keep the first that logs in on
+   every SMILE database (it is saved; `arrival-enroll` gets the same login). Nobody is asked.
+4. **None works.** At a console the operator gets the menu (`[1] Windows [2] SQL [0] skip`).
+   Unattended, the run reports `sql_auto_failed` (error, context `tried`: mode, server, login,
+   source and the first SQL error of each; never a password), enrols and starts the service so
+   the report reaches the hub, then exits 1 with the reason.
+
+A machine that already has `sql.json` keeps it; `--sql-prompt` opens the menu to change it.
 
 ### 9.7 Signed SQL bundles
 

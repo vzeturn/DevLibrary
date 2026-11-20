@@ -34,6 +34,14 @@ CAST(HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') AS nvarchar(2))
 CAST(HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'BACKUP DATABASE') AS nvarchar(2)) AS backup_database \
 FROM sys.databases d WHERE d.database_id = DB_ID()";
 
+/// How this session reached the server, from the server's side. `CONNECTIONPROPERTY` exists from
+/// SQL Server 2008 on; on 2005 the query fails and the survey keeps the client-side facts only.
+pub const CONNECTION_SQL: &str = "SELECT \
+CAST(CONNECTIONPROPERTY('auth_scheme') AS nvarchar(40)) AS auth_scheme, \
+CAST(CONNECTIONPROPERTY('net_transport') AS nvarchar(40)) AS net_transport, \
+CAST(CONNECTIONPROPERTY('local_tcp_port') AS nvarchar(16)) AS local_tcp_port, \
+CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128)) AS instance_name";
+
 const GRANTS: [&str; 9] = [
     "sysadmin",
     "db_owner",
@@ -56,7 +64,57 @@ pub fn survey(conn: &mut impl Connection, rung: Option<&str>) -> Result<Value, E
         .into_iter()
         .next()
         .ok_or_else(|| Error::Sql("survey returned no row".into()))?;
-    Ok(assess(&raw, rung))
+    let server_side = conn
+        .query_json(CONNECTION_SQL, &[])
+        .ok()
+        .and_then(|r| r.into_iter().next());
+    let mut out = assess(&raw, rung);
+    if let Some(o) = out.as_object_mut() {
+        o.insert(
+            "connection",
+            connection(server_side.as_ref(), &conn.session(), rung),
+        );
+    }
+    Ok(out)
+}
+
+/// The TDS version a LOGINACK carries, by its protocol name (`0x730B0003` → `7.3B`).
+pub fn tds_name(v: u32) -> String {
+    match v {
+        0x7000_0000 => "7.0".into(),
+        0x7100_0000 | 0x7100_0001 => "7.1".into(),
+        0x7209_0002 => "7.2".into(),
+        0x730A_0003 => "7.3A".into(),
+        0x730B_0003 => "7.3B".into(),
+        0x7400_0004 => "7.4".into(),
+        0x0800_0000 => "8.0".into(),
+        other => format!("0x{other:08X}"),
+    }
+}
+
+/// How the session got in (PROTOCOL.md §9.5 `connection`): the server's `auth_scheme`
+/// (`SQL`, `NTLM`, `KERBEROS`), transport, instance and port, plus the client's TDS version,
+/// encryption and transport rung. Facts only: never a login secret.
+pub fn connection(server: Option<&Value>, session: &Value, rung: Option<&str>) -> Value {
+    let s = |k: &str| server.and_then(|v| text(v, k)).filter(|t| !t.is_empty());
+    let port = s("local_tcp_port")
+        .and_then(|p| p.parse::<u64>().ok())
+        .or_else(|| session.get("peer_port").and_then(Value::as_u64));
+    let encryption = if rung == Some("unencrypted") {
+        Some("none")
+    } else {
+        session.get("encryption").and_then(Value::as_str)
+    };
+    json!({
+        "auth_scheme": s("auth_scheme").map(str::to_ascii_uppercase),
+        "net_transport": s("net_transport"),
+        "instance": s("instance_name"),
+        "port": port,
+        "tds_version": session.get("tds_version").and_then(Value::as_str),
+        "server_version": session.get("server_version").and_then(Value::as_str),
+        "encryption": encryption,
+        "tls": rung,
+    })
 }
 
 /// The marketing name of an engine version (`10.50.1600.1` → `SQL Server 2008 R2`).
@@ -185,6 +243,28 @@ mod tests {
             "create_procedure": "1", "create_function": "1", "create_table": "1",
             "alter_dbo": "1", "execute": "1", "view_definition": "1", "backup_database": "1"
         })
+    }
+
+    #[test]
+    fn the_connection_facts_name_the_auth_scheme_tds_and_tls_level() {
+        let server = json!({"auth_scheme": "ntlm", "net_transport": "TCP",
+                            "local_tcp_port": "49172", "instance_name": "SMILE"});
+        let session = json!({"tds_version": tds_name(0x730B_0003), "encryption": "login_only",
+                             "server_version": "10.50.1600", "peer_port": 1433});
+        let c = connection(Some(&server), &session, Some("tls1.0"));
+        assert_eq!(c["auth_scheme"].as_str(), Some("NTLM"));
+        assert_eq!(c["instance"].as_str(), Some("SMILE"));
+        assert_eq!(c["port"].as_u64(), Some(49172));
+        assert_eq!(c["tds_version"].as_str(), Some("7.3B"));
+        assert_eq!(c["encryption"].as_str(), Some("login_only"));
+        assert_eq!(c["tls"].as_str(), Some("tls1.0"));
+        // SQL Server 2005: no CONNECTIONPROPERTY, the client side still answers.
+        let old = connection(None, &session, Some("unencrypted"));
+        assert!(old["auth_scheme"].is_null());
+        assert_eq!(old["port"].as_u64(), Some(1433));
+        assert_eq!(old["encryption"].as_str(), Some("none"));
+        assert_eq!(tds_name(0x7400_0004), "7.4");
+        assert_eq!(tds_name(0x1234), "0x00001234");
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub mod cli_attach;
 pub mod cli_install;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install_sql;
+pub mod cli_install_sql_auto;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install_win;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

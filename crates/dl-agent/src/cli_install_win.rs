@@ -16,7 +16,7 @@ use crate::cli::{App, EXIT_CONFIG, svc};
 use crate::cli_install::{
     EXIT_FAILED, EXIT_NOT_ADMIN, Failure, MachineOpts, Target, install_exe, running_from,
 };
-use crate::cli_install_sql::{self as sqlstep, Secret};
+use crate::cli_install_sql as sqlstep;
 use crate::identity::Identity;
 use crate::{Error, now, optout};
 
@@ -85,7 +85,7 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
     );
     let mut sql = sqlstep::run(&exe, dir, &o.sql, o.interactive, enrolled)?;
     let attach_failed = enroll_step(app, dir, o, enrolled)?;
-    setup_step(&exe, dir, o, std::mem::take(&mut sql.password))?;
+    setup_step(&exe, dir, o, &mut sql)?;
     replace_step(app, &manager, &o.replace, &exe)?;
     apply_target(app, dir, o.target.as_ref())?;
     let since = now().saturating_sub(5);
@@ -97,7 +97,7 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
     wait_link(&app.service, dir, since, o.link_timeout);
     if sql.failed {
         return Err(Failure::new(
-            "SQL login test (see above); the agent runs with the previous SQL settings",
+            "SQL login test failed (see above); no new SQL login was saved and the hub has a problem report",
             format!(
                 "{} sql-setup --auth sql --user <login> (or run the installer again)",
                 app.service
@@ -314,7 +314,13 @@ fn enroll_step(
 }
 
 /// Runs the module setup (`--setup`); `arrival-enroll` takes the same SQL sign-in through env.
-fn setup_step(exe: &Path, dir: &Path, o: &MachineOpts, password: Secret) -> Result<(), Failure> {
+fn setup_step(
+    exe: &Path,
+    dir: &Path,
+    o: &MachineOpts,
+    sql: &mut sqlstep::SqlDone,
+) -> Result<(), Failure> {
+    let password = std::mem::take(&mut sql.password);
     let Some(setup) = &o.setup else {
         return Ok(());
     };
@@ -323,10 +329,10 @@ fn setup_step(exe: &Path, dir: &Path, o: &MachineOpts, password: Secret) -> Resu
     let mut c = sqlstep::agent(exe);
     c.args([setup.as_str(), "--data", &data]);
     if setup == "arrival-enroll" {
-        if let Some(a) = &o.sql.auth {
+        if let Some(a) = o.sql.auth.as_ref().or(sql.auth.as_ref()) {
             c.env("DL_AGENT_ARRIVAL_SQL_AUTH", a);
         }
-        if let Some(u) = &o.sql.user {
+        if let Some(u) = o.sql.user.as_ref().or(sql.user.as_ref()) {
             c.env("DL_AGENT_ARRIVAL_SQL_USER", u);
         }
         if !password.is_empty() {

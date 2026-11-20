@@ -17,6 +17,7 @@
 
 pub mod bundle;
 pub mod install;
+pub mod legacy;
 pub mod module;
 pub mod pool;
 pub mod probe;
@@ -285,6 +286,15 @@ impl Connection for dl_tds::Client {
             })
             .collect())
     }
+    fn session(&self) -> Value {
+        let (major, minor, build) = self.server_version();
+        json!({
+            "tds_version": survey::tds_name(self.tds_version()),
+            "encryption": if self.is_encrypted() { "full" } else { "login_only" },
+            "server_version": format!("{major}.{minor}.{build}"),
+            "peer_port": self.peer_addr().map(|a| u64::from(a.port())),
+        })
+    }
 }
 
 /// A TDS value as JSON: numbers stay numbers, decimals and dates become their text form.
@@ -521,6 +531,13 @@ impl Site {
             tuned_version: None,
             load_error,
         }
+    }
+
+    /// Where the saved SQL login came from (`sql.json` `source`, written by `sql-setup
+    /// --source`: an old agent's config, the Windows service login, or the operator), for the
+    /// site survey. Never a secret: the installer only stores the product and file path.
+    pub fn source(&self) -> Option<&Value> {
+        self.local.get("source")
     }
 
     /// Applies the config's `sql` section when its version changed since the last call.

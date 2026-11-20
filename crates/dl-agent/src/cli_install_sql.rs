@@ -88,6 +88,10 @@ pub struct SqlDone {
     pub failed: bool,
     /// The SQL password, kept for `arrival-enroll` (it takes the same sign-in).
     pub password: Secret,
+    /// The login mode chosen automatically (`windows`, `sql`), for `arrival-enroll`.
+    pub auth: Option<String>,
+    /// The SQL login chosen automatically, for `arrival-enroll`.
+    pub user: Option<String>,
 }
 
 /// What this machine saved, else what the old Check-In agent used.
@@ -268,11 +272,110 @@ pub fn run(
         }
         return Ok(done);
     }
-    if o.prompt || (interactive && (local_sql_server().is_some() || dir.join("sql.json").exists()))
-    {
+    if o.prompt {
         menu(exe, dir)?;
+        return Ok(SqlDone::default());
     }
-    Ok(SqlDone::default())
+    if dir.join(crate::sql::SQL_FILE).exists() {
+        println!("SQL login already saved on this machine: kept (--sql-prompt changes it).");
+        return Ok(SqlDone::default());
+    }
+    auto(exe, dir, interactive)
+}
+
+/// No SQL login saved yet: find, test and choose one by itself (PROTOCOL.md §9.8.1).
+fn auto(exe: &Path, dir: &Path, interactive: bool) -> Result<SqlDone, Failure> {
+    use crate::cli_install_sql_auto::{Chosen, candidates, choose};
+    use crate::sql::legacy::{Dpapi, Roots, scan};
+    let local = local_sql_server();
+    let found = scan(&Roots::of_this_machine(dir), &Dpapi);
+    for w in &found.warnings {
+        eprintln!("Note: {w}");
+    }
+    let conn = crate::cli_install::env_var(LEGACY_ENV).map(Secret::new);
+    let from = crate::cli_install::env_var(LEGACY_FROM_ENV).unwrap_or_default();
+    let script = conn.as_ref().map(|c| (c.expose(), from.as_str()));
+    let mut cands = candidates(&found, script, local.as_deref());
+    drop(found);
+    if cands.is_empty() {
+        println!("No SQL Server on this machine and no older agent's SQL login: SQL not set up.");
+        return Ok(SqlDone::default());
+    }
+    let mut trial = LiveTrial { exe, dir };
+    match choose(&cands, interactive, &mut trial, dir)? {
+        Chosen::Candidate(i) => {
+            let c = cands.swap_remove(i);
+            Ok(SqlDone {
+                failed: false,
+                auth: Some(c.auth),
+                user: (!c.user.is_empty()).then_some(c.user),
+                password: c.password,
+            })
+        }
+        Chosen::Asked => Ok(SqlDone::default()),
+        Chosen::Failed => Ok(SqlDone {
+            failed: true,
+            ..SqlDone::default()
+        }),
+    }
+}
+
+/// Tests a candidate with the installed binary's `sql-setup` (saving it when it works).
+struct LiveTrial<'a> {
+    exe: &'a Path,
+    dir: &'a Path,
+}
+
+impl crate::cli_install_sql_auto::Trial for LiveTrial<'_> {
+    fn test(&mut self, c: &crate::cli_install_sql_auto::Candidate) -> Result<(), String> {
+        let last = self.dir.join("sql-setup.last.json");
+        let _ = std::fs::remove_file(&last);
+        let ok = sql_setup(
+            self.exe,
+            self.dir,
+            &c.auth,
+            &c.server,
+            &c.user,
+            &c.password,
+            Some(&c.source),
+        )
+        .map_err(|f| f.message.clone())?;
+        if ok {
+            return Ok(());
+        }
+        Err(crate::store::read_json(&last)
+            .ok()
+            .flatten()
+            .map(|v| first_error(&v))
+            .unwrap_or_else(|| "the test failed (no result written)".into()))
+    }
+
+    fn ask(&mut self) -> Result<(), Failure> {
+        menu(self.exe, self.dir)
+    }
+}
+
+/// The first error of a `sql-setup` result.
+fn first_error(v: &dl_json::Value) -> String {
+    use dl_json::Value;
+    let msg = |e: &Value| e.get("message").and_then(Value::as_str).map(str::to_string);
+    v.get("error")
+        .and_then(msg)
+        .or_else(|| {
+            v.get("databases")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(|d| {
+                    d.get("error").and_then(msg).map(|m| {
+                        format!(
+                            "{}: {m}",
+                            d.get("name").and_then(Value::as_str).unwrap_or("?")
+                        )
+                    })
+                })
+        })
+        .unwrap_or_else(|| "the test failed".into())
 }
 
 /// A command for the installed binary that inherits none of the installer's secrets.
@@ -328,6 +431,7 @@ fn sql_setup(
     server: &str,
     user: &str,
     password: &Secret,
+    source: Option<&dl_json::Value>,
 ) -> Result<bool, Failure> {
     let data = dir.display().to_string();
     let result = dir.join("sql-setup.last.json").display().to_string();
@@ -350,6 +454,10 @@ fn sql_setup(
     }
     if !password.is_empty() {
         c.env(PASSWORD_ENV, password.expose());
+    }
+    if let Some(src) = source {
+        // Automatic choice: the installer reports once when nothing works, not per try.
+        c.args(["--source", &dl_json::to_string(src), "--no-report"]);
     }
     Ok(status_of(c, "sql-setup")? == 0)
 }
@@ -385,7 +493,7 @@ fn unattended(
             password = read_secret(&format!("Password of SQL login {user}"))?;
         }
     }
-    let ok = sql_setup(exe, dir, auth, &server, &user, &password)?;
+    let ok = sql_setup(exe, dir, auth, &server, &user, &password, None)?;
     if ok {
         println!("SQL login {auth} tested and saved.");
     } else {
@@ -397,6 +505,7 @@ fn unattended(
     Ok(SqlDone {
         failed: !ok,
         password,
+        ..SqlDone::default()
     })
 }
 
@@ -463,7 +572,7 @@ fn menu(exe: &Path, dir: &Path) -> Result<(), Failure> {
         } else {
             ("windows", Secret::default())
         };
-        let ok = sql_setup(exe, dir, auth, &server, &user, &password)?;
+        let ok = sql_setup(exe, dir, auth, &server, &user, &password, None)?;
         drop(password);
         if ok {
             println!("SQL login tested and saved.");

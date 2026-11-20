@@ -320,6 +320,30 @@ pub(crate) fn reach(transport: &Value, login: Option<&str>) -> String {
     }
 }
 
+/// `; auth NTLM, TDS 7.3B, encryption login_only, instance SMILE, port 49172` from the survey's
+/// `connection` facts (no secret is ever part of them).
+pub(crate) fn connection_note(c: &Value) -> String {
+    let mut parts = Vec::new();
+    for (key, label) in [
+        ("auth_scheme", "auth"),
+        ("tds_version", "TDS"),
+        ("encryption", "encryption"),
+        ("instance", "instance"),
+    ] {
+        if let Some(v) = c.get(key).and_then(Value::as_str) {
+            parts.push(format!("{label} {v}"));
+        }
+    }
+    if let Some(p) = c.get("port").and_then(Value::as_u64) {
+        parts.push(format!("port {p}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("; {}", parts.join(", "))
+    }
+}
+
 /// One database: connects, reads the survey warnings (C3) and, when the hub sent one with
 /// the command, probes the schema requirement (C4).
 fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Outcome {
@@ -370,6 +394,9 @@ fn database(pool: &crate::sql::SqlPool, req: Option<&probe::Requirement>) -> Out
             .and_then(Value::as_str)
     {
         detail.push_str(&format!("; {engine}"));
+    }
+    if let Some(c) = surveyed.as_ref().ok().and_then(|s| s.get("connection")) {
+        detail.push_str(&connection_note(c));
     }
     if !info.is_empty() {
         detail.push_str(&format!("; notes: {}", info.join(", ")));

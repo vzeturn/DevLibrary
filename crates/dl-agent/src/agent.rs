@@ -473,7 +473,8 @@ impl Agent {
 
     /// The site survey and its hash when it changed or is due again, else `None`.
     fn survey_due(&self, now: u64) -> Option<(Value, String)> {
-        let survey = json!({"host": self.host, "databases": self.sql.pools.surveys()});
+        let survey = json!({"host": self.host, "databases": self.sql.pools.surveys(),
+                            "sql_source": self.sql.source().cloned()});
         let hash = dl_encoding::hex::encode(Sha256::digest(dl_json::to_string(&survey).as_bytes()));
         match &self.survey_sent {
             Some((h, at)) if *h == hash && now < at + SURVEY_RESEND_SECONDS => None,

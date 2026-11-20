@@ -37,6 +37,8 @@ pub fn grammar(data: Arg) -> Command {
         .arg(Arg::flag("as-service").help("Windows auth: test as LocalSystem, the service account, via a one-shot scheduled task"))
         .arg(Arg::flag("show").help("Print the saved auth, server, user and databases (never the password)"))
         .arg(Arg::flag("json").help("Print the result as one JSON line"))
+        .arg(Arg::option("source").help("Where this login came from (JSON, no secret), saved as sql.json source for the hub"))
+        .arg(Arg::flag("no-report").help("Do not send a problem report when the test fails (the installer reports once)"))
         .arg(Arg::option("result").help("Also write the result JSON to this file"))
         .arg(Arg::flag("system-child").hidden())
         .arg(data)
@@ -75,13 +77,22 @@ pub fn main(service: &str, dir: &Path, m: &Matches) -> i32 {
         eprintln!("sql-setup: cannot write {path}: {e}");
     }
     if !outcome.ok {
-        spool_failure(dir, &outcome);
+        if !m.flag("no-report") {
+            spool_failure(dir, &outcome);
+        }
         return 1;
     }
     if m.flag("test-only") {
         return 0;
     }
-    match setup::save(dir, &req, &outcome) {
+    let source = match m.value("source").map(dl_json::parse).transpose() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("sql-setup: --source is not JSON: {e}");
+            return EXIT_CONFIG;
+        }
+    };
+    match setup::save(dir, &req, &outcome).and_then(|()| setup::set_source(dir, source)) {
         Ok(()) => {
             if !m.flag("json") {
                 println!(

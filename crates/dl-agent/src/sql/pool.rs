@@ -57,6 +57,11 @@ pub trait Connection: Send + 'static {
             "this connection cannot run introspection queries".into(),
         ))
     }
+    /// What the client side of the session negotiated (`tds_version`, `encryption`), for the
+    /// site survey; never a credential. `Null` when the connection cannot tell.
+    fn session(&self) -> Value {
+        Value::Null
+    }
 }
 
 /// Pool limits and timeouts.

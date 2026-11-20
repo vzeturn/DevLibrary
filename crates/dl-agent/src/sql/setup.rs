@@ -441,6 +441,30 @@ pub fn save(data_dir: &Path, req: &Request, outcome: &Outcome) -> Result<(), Err
     crate::identity::restrict_file(&path)
 }
 
+/// Records where the saved login came from (`sql.json` `source`, PROTOCOL.md §9.8.1): an
+/// older agent's config, the installer script, the service account, or (`None`) the operator.
+/// It reaches the hub with the site survey; it never holds a secret.
+///
+/// # Errors
+/// I/O errors.
+pub fn set_source(data_dir: &Path, source: Option<Value>) -> Result<(), Error> {
+    let path = data_dir.join(SQL_FILE);
+    let Some(mut doc) = crate::store::read_json(&path)? else {
+        return Ok(());
+    };
+    let Some(root) = doc.as_object_mut() else {
+        return Ok(());
+    };
+    let source = source.unwrap_or_else(|| json!({"kind": "operator"}));
+    let mut s = source;
+    if let Some(o) = s.as_object_mut() {
+        o.insert("chosen_at", Value::from(crate::now()));
+    }
+    root.insert("source", s);
+    crate::store::write_json(&path, &doc)?;
+    crate::identity::restrict_file(&path)
+}
+
 /// The saved login choice: the installer's default on a reinstall. Never the password.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Saved {

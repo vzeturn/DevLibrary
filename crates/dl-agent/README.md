@@ -125,7 +125,13 @@ irm https://agent.pms.id.vn/install.ps1 | iex
 ```
 
 PowerShell 5.1+ (Windows 10 / Server 2016 and later). It asks for what is missing: the
-enrolment code, then the SQL login ([1] Windows, [2] SQL; server, user and a hidden password).
+enrolment code. The SQL login is found by the agent itself (RT-0303, PROTOCOL.md §9.8.1): it reads
+the connections the older agents on the machine used (Check-In, Membership, PDA SyncAgent,
+SMILE-PMS, HotelLink, E-Invoice; in place or renamed by the bench), adds the Windows service login
+when SQL Server runs here, tests each on every SMILE database and keeps the first that works. Only
+when none works does it ask ([1] Windows, [2] SQL; server, user and a hidden password); unattended
+it exits 1 and sends `sql_auto_failed` to the hub. The heartbeat survey then names the source and
+the real `auth_scheme`, SQL and TDS versions, encryption, instance and port.
 Options go through the scriptblock form:
 
 ```text

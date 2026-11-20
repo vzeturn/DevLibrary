@@ -348,3 +348,23 @@ fn an_old_remote_server_needs_the_explicit_opt_in_and_is_pinned_unencrypted() {
         Some("unencrypted")
     );
 }
+
+#[test]
+fn the_source_of_a_chosen_login_is_saved_without_secrets_and_loads() {
+    let d = TestDir::new("sql-setup-source");
+    let req = sql_login("Hunter#2");
+    let out = run(&req, &fake(&["SMILE_FO"]));
+    save(&d.0, &req, &out).unwrap();
+    let src = dl_json::json!({"kind": "legacy_agent", "product": "einvoice",
+                              "location": "bench_old", "file": "C:/ProgramData/MM-EInvoice.bench-old-1/config.enc"});
+    set_source(&d.0, Some(src)).unwrap();
+    let site = crate::sql::Site::load(&d.0);
+    assert!(site.load_error.is_none(), "{:?}", site.load_error);
+    let s = site.source().unwrap();
+    assert_eq!(s["product"].as_str(), Some("einvoice"));
+    assert!(s["chosen_at"].as_u64().is_some());
+    assert!(!dl_json::to_string(s).contains("Hunter"));
+    set_source(&d.0, None).unwrap();
+    let site = crate::sql::Site::load(&d.0);
+    assert_eq!(site.source().unwrap()["kind"].as_str(), Some("operator"));
+}

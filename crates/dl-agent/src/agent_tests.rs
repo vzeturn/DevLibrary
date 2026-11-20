@@ -661,3 +661,32 @@ fn update_checks_resume_once_probation_commits() {
     assert_eq!(urls(&hub), ["https://hub/v1/releases/dl-agent/stable"]);
     a.supervisor.stop_all(STOP_WAIT);
 }
+
+#[test]
+fn the_survey_names_where_the_sql_login_came_from_and_never_its_password() {
+    let d = TestDir::new("agent-sql-source");
+    let data = d.0.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let sealed = crate::sql::secret::seal("Hunter#2").unwrap();
+    let doc = json!({
+        "databases": {"SMILE_FO": {"connection": "Server=.;Database=SMILE_FO;User Id=smile",
+                                    "auth": "sql", "password_sealed": sealed}},
+        "source": {"kind": "legacy_agent", "product": "checkin", "location": "in_place",
+                   "file": "C:/Program Files/MM-Arrival Agent/appsettings.Production.json"}
+    });
+    crate::store::write_json(&data.join(crate::sql::SQL_FILE), &doc).unwrap();
+    let hub = FakeHub::default();
+    hub.push(200, HB_OK);
+    let mut a = agent(&d, &hub, vec![]);
+    assert!(a.heartbeat(1000).is_none());
+    let seen = hub.seen();
+    let beat = seen.iter().find(|s| s.url.ends_with("/heartbeat")).unwrap();
+    let body = String::from_utf8_lossy(&beat.body).into_owned();
+    let v = dl_json::parse(&body).unwrap();
+    assert_eq!(
+        v["survey"]["sql_source"]["product"].as_str(),
+        Some("checkin")
+    );
+    assert!(!body.contains("Hunter"), "{body}");
+    assert!(!body.contains(&sealed));
+}
