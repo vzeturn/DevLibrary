@@ -2,6 +2,8 @@ import { installCommand } from './script';
 
 /** Placeholder the page swaps for the code it reads from the link's fragment. */
 export const CODE_SLOT = '__CODE__';
+/** Placeholder for a product's install script URL in the page's boot line. */
+const BOOT_SLOT = '__BOOT__';
 
 /** Display names of the products that mint codes (the module name is the product key). */
 export const PRODUCT_LABELS: Record<string, string> = {
@@ -14,6 +16,48 @@ export const PRODUCT_LABELS: Record<string, string> = {
   hotellink: 'Hotel Link',
   backup: 'SRBackup',
 };
+
+/**
+ * Host suffixes a product console's own install script may come from (`#boot=` / `#alt=`): the Azolo
+ * product domains. Anything else is refused so a crafted link cannot show a foreign script on the hub.
+ */
+export const BOOT_HOST_SUFFIXES = ['pms.id.vn', 'mmsolutions.vn'] as const;
+
+/**
+ * The product's own install script URL when it is safe to quote into PowerShell, else ''. Kept free
+ * of closures and TypeScript-only syntax at runtime: the page embeds it verbatim (`toString`).
+ */
+export function safeBootUrl(raw: unknown, suffixes: readonly string[]): string {
+  if (typeof raw !== 'string' || raw.length > 300) return '';
+  var m = /^https:\/\/([a-z0-9.-]+)(\/[A-Za-z0-9._~\/-]*)$/.exec(raw);
+  var host = m ? m[1] || '' : '';
+  if (!host || host.indexOf('..') >= 0) return '';
+  for (var i = 0; i < suffixes.length; i++) {
+    var s = suffixes[i] || '';
+    if (!s) continue;
+    if (host === s || host.slice(-(s.length + 1)) === '.' + s) return raw;
+  }
+  return '';
+}
+
+/** The line that runs a product's own install script (PowerShell 2.0 safe, TLS 1.2 on). */
+export function bootCommand(url: string): string {
+  return (
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; ' +
+    "& ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('" + url + "')))"
+  );
+}
+
+/**
+ * The page for a product whose console has its own install script (it carries that product's
+ * one-time token and setup): `code` is the dl-agent code the script enrols with (for the live
+ * status), `boot` the script, `alt` an optional variant for SQL Server on another machine.
+ */
+export function productDeployUrl(origin: string, p: { code: string; boot: string; alt?: string }): string {
+  const q = new URLSearchParams({ code: p.code, boot: p.boot });
+  if (p.alt) q.set('alt', p.alt);
+  return `${origin}/deploy#${q.toString()}`;
+}
 
 /** The guided page: the code travels in the URL fragment (`#code=…`), never in a request line or a log. */
 export function deployUrl(origin: string, code: string): string {
@@ -49,6 +93,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 details{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 summary{cursor:pointer;font-weight:600} details ul{margin:8px 0 0;padding-left:20px;color:var(--muted)}
 form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px} input{flex:1 1 200px;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-height:44px}
+.opt:not([hidden]){display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer}.opt input{width:18px;height:18px;margin:0;flex:none}.small{font-size:13px;margin:8px 0 0}
 @media (max-width:560px){pre{max-height:none}.cmd button{flex:1 1 100%}}
 [hidden]{display:none!important} .muted{color:var(--muted)} kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}`;
 
@@ -75,6 +120,8 @@ const BODY = `
       <h2>Dán lệnh và nhấn Enter</h2>
       <p id="expiry">Mã chỉ dùng một lần.</p>
       <div class="cmd"><pre id="cmd" aria-label="Lệnh cài đặt"></pre><button type="button" id="copy">Sao chép lệnh</button></div>
+      <p class="muted small" id="source" hidden></p>
+      <label class="muted opt" id="altrow" hidden><input type="checkbox" id="alton"> SQL Server nằm trên máy khác (không phải máy đang cài)</label>
     </div></li>
     <li class="step" id="s3"><span class="num">3</span><div class="body">
       <h2>Chờ máy kết nối</h2>
@@ -101,14 +148,26 @@ const SCRIPT = `
   var CODE_RE=/^[A-Za-z0-9-]{4,64}$/;
   var STATE_TEXT={running:'đang chạy',starting:'đang khởi động',degraded:'có lỗi',stopped:'đã dừng',disabled:'tắt'};
   var STATE_CLASS={running:'ok',starting:'warn',degraded:'bad',stopped:'bad',disabled:''};
-  var code=new URLSearchParams(location.hash.slice(1)).get('code');
+  var hp=new URLSearchParams(location.hash.slice(1));
+  var code=hp.get('code');
+  var safeBootUrl=${safeBootUrl.toString()};
+  var boot=safeBootUrl(hp.get('boot'),SUFFIXES), alt=boot?safeBootUrl(hp.get('alt'),SUFFIXES):'';
+  var badBoot=!!hp.get('boot')&&!boot;
+  function bootLine(u){return ${JSON.stringify(bootCommand(BOOT_SLOT))}.split('${BOOT_SLOT}').join(u)}
   var timer=null, started=Date.now();
   function show(id,on){$(id).hidden=!on}
   function step(n,cls){$('s'+n).className='step '+cls}
   function banner(cls,text){var b=$('result');b.className='banner '+cls;b.textContent=text;b.hidden=false}
   function start(c){
     code=c.trim().toUpperCase(); show('nocode',false); show('steps',true); show('help',true);
-    $('cmd').textContent=TEMPLATE.split('${CODE_SLOT}').join(code); poll();
+    if(badBoot){show('steps',false);show('help',false);banner('bad','Liên kết cài đặt không hợp lệ. Mở lại nút "Triển khai agent" trong console sản phẩm.');return}
+    if(boot){
+      $('source').textContent='Lệnh tải bộ cài từ '+new URL(boot).host+' (console sản phẩm).';show('source',true);
+      var pick=function(){$('cmd').textContent=bootLine($('alton').checked&&alt?alt:boot)};
+      if(alt){show('altrow',true);$('alton').addEventListener('change',pick)}
+      pick();
+    } else { $('cmd').textContent=TEMPLATE.split('${CODE_SLOT}').join(code) }
+    poll();
   }
   $('copy').addEventListener('click',function(){
     var t=$('cmd').textContent, b=$('copy');
@@ -155,6 +214,6 @@ export function renderDeployPage(origin: string, nonce: string): string {
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><title>Cài DevLibrary Agent</title>
 <style>${STYLE}</style></head><body>${BODY}
-<script nonce="${nonce}">var TEMPLATE=${template};var LABELS=${JSON.stringify(PRODUCT_LABELS)};${SCRIPT}</script>
+<script nonce="${nonce}">var TEMPLATE=${template};var LABELS=${JSON.stringify(PRODUCT_LABELS)};var SUFFIXES=${JSON.stringify(BOOT_HOST_SUFFIXES)};${SCRIPT}</script>
 </body></html>`;
 }
