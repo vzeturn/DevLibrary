@@ -116,6 +116,25 @@ describe('/mcp ops console', () => {
     expect(await (await call('repo_list', { path: 'crates' })).json()).toMatchObject({ entries: [{ name: 'dl-agent', type: 'dir' }] });
     expect(await (await call('repo_commits', { limit: 1 })).json()).toEqual([{ sha: 'abc', date: '2026-11-20T00:00:00Z', subject: 'feat: x' }]);
     expect((await call('repo_file', { path: 'missing.md' })).isError).toBe(true);
+    // Rate-limited API: the listing comes from jsDelivr's flat file list.
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
+      if (url.startsWith('https://data.jsdelivr.com/v1/packages/gh/vzeturn/DevLibrary@main')) {
+        return Response.json({ files: [{ name: '/crates/dl-agent/README.md', size: 9 }, { name: '/crates/dl-agent/src/lib.rs', size: 5 }, { name: '/crates/Cargo.toml', size: 3 }, { name: '/README.md', size: 1 }] });
+      }
+      return new Response('nope', { status: 404 });
+    });
+    expect(await (await call('repo_list', { path: 'crates' })).json()).toEqual({
+      path: 'crates',
+      ref: 'main',
+      source: 'jsdelivr',
+      entries: [
+        { name: 'Cargo.toml', path: 'crates/Cargo.toml', type: 'file', size: 3 },
+        { name: 'dl-agent', path: 'crates/dl-agent', type: 'dir', size: 0 },
+      ],
+    });
+    expect((await call('repo_list', { path: 'nothing' })).isError).toBe(true);
     expect((await call('repo_file', { path: '../../etc/passwd' })).isError).toBe(true);
   });
 });
