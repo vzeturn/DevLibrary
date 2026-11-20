@@ -54,9 +54,15 @@ export function bootCommand(url: string): string {
  * one-time token and setup): `code` is the dl-agent code the script enrols with (for the live
  * status), `boot` the script, `alt` an optional variant for SQL Server on another machine.
  */
-export function productDeployUrl(origin: string, p: { code: string; boot: string; alt?: string }): string {
-  const q = new URLSearchParams({ code: p.code, boot: p.boot });
+export function productDeployUrl(
+  origin: string,
+  p: { code?: string; boot: string; alt?: string; product?: string },
+): string {
+  const q = new URLSearchParams();
+  if (p.code) q.set('code', p.code);
+  q.set('boot', p.boot);
   if (p.alt) q.set('alt', p.alt);
+  if (p.product) q.set('p', p.product);
   return `${origin}/deploy#${q.toString()}`;
 }
 
@@ -161,6 +167,7 @@ const SCRIPT = `
   function banner(cls,text){var b=$('result');b.className='banner '+cls;b.textContent=text;b.hidden=false}
   function start(c){
     code=c.trim().toUpperCase(); show('nocode',false); show('steps',true); show('help',true);
+    var prod=hp.get('p'); if(prod&&LABELS.hasOwnProperty(prod)){var pc=$('product');pc.textContent=LABELS[prod];pc.className='chip'}
     if(badBoot){show('steps',false);show('help',false);banner('bad','Liên kết cài đặt không hợp lệ. Mở lại nút "Triển khai agent" trong console sản phẩm.');return}
     if(boot){
       $('source').textContent='Lệnh tải bộ cài từ '+new URL(boot).host+' (console sản phẩm).';show('source',true);
@@ -168,7 +175,11 @@ const SCRIPT = `
       if(alt){show('altrow',true);$('alton').addEventListener('change',pick)}
       pick();
     } else { $('cmd').textContent=TEMPLATE.split('${CODE_SLOT}').join(code) }
-    poll();
+    if(code){poll();return}
+    // A product that mints its hub code during the install (Check-In) sends no code: the console follows the agent.
+    $('lead').textContent='Ba bước, khoảng 2 phút.';
+    $('spin').hidden=true; $('s3').querySelector('h2').textContent='Xem kết quả trong console';
+    $('state').textContent='Lệnh chạy xong (báo "Hoàn tất") thì quay lại console sản phẩm: agent hiện là đã kết nối.';
   }
   $('copy').addEventListener('click',function(){
     var t=$('cmd').textContent, b=$('copy');
@@ -205,7 +216,7 @@ const SCRIPT = `
       .then(function(s){render(s);if(s.state==='waiting'||(s.state==='connected'&&!(s.agent.online&&s.agent.selftest))){if($('spin').hidden===false||s.state==='connected'){timer=setTimeout(poll,s.state==='waiting'?5000:8000)}}})
       .catch(function(){timer=setTimeout(poll,10000)});
   }
-  if(code&&CODE_RE.test(code)){start(code)}else{show('nocode',true)}
+  if(code&&CODE_RE.test(code)){start(code)}else if(!code&&hp.get('boot')){start('')}else{show('nocode',true)}
 })();`;
 
 /** The whole page; `nonce` authorises its one inline script under the response's CSP. */

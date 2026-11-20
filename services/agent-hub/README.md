@@ -230,7 +230,7 @@ tab). The page (Vietnamese, light/dark, phone width) does the rest:
 A product whose console already serves its own install script (it carries the product's one-time
 token and setup, e.g. E-Invoice `/agent/bootstrap/{token}/dl/{code}`) links
 `<hub>/deploy#code=<dl code>&boot=<script url>[&alt=<variant for SQL Server on another machine>]`
-(`productDeployUrl` builds it). The page then shows the line that runs that script and still tracks
+(`productDeployUrl` builds it). A product that mints its hub code during the install (Check-In) sends `#boot=…&p=<product>` without `code`: the page shows the steps and sends the installer back to the product console for the result. The page then shows the line that runs that script and still tracks
 the dl code. `boot`/`alt` must be `https://` on a host under `pms.id.vn` or `mmsolutions.vn`
 (`BOOT_HOST_SUFFIXES`), with at most a plain query (e.g. `?channel=canary`), no port or quotes; any other link shows "Liên kết cài đặt không hợp
 lệ" and no command, so a crafted link cannot put a foreign script on the hub's page.
