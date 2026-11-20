@@ -2,8 +2,9 @@
 //! in PowerShell, now in the signed binary so the script only downloads, verifies and hands off.
 //!
 //! Order: Administrator check, folders, Defender exclusion, older copies removed, binary
-//! placed in Program Files, SQL login, enrolment (kept when enrolled), module setup, replaced
-//! agents, channel/pin, service + recovery + watchdog, Kaspersky hint, first heartbeat.
+//! placed in Program Files, SQL login, enrolment (kept when enrolled; a code then attaches its
+//! product to this agent), module setup, replaced agents, channel/pin, service + recovery +
+//! watchdog, Kaspersky hint, first heartbeat.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -83,7 +84,7 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
         exe.display()
     );
     let mut sql = sqlstep::run(&exe, dir, &o.sql, o.interactive, enrolled)?;
-    enroll_step(app, dir, o, enrolled)?;
+    let attach_failed = enroll_step(app, dir, o, enrolled)?;
     setup_step(&exe, dir, o, std::mem::take(&mut sql.password))?;
     replace_step(app, &manager, &o.replace, &exe)?;
     apply_target(app, dir, o.target.as_ref())?;
@@ -103,6 +104,9 @@ fn setup(app: &App, dir: &Path, o: &MachineOpts) -> Result<i32, Failure> {
             ),
             EXIT_FAILED,
         ));
+    }
+    if let Some(f) = attach_failed {
+        return Err(f);
     }
     Ok(0)
 }
@@ -255,10 +259,23 @@ fn av_failure(path: &Path, why: &str) -> Failure {
     )
 }
 
-fn enroll_step(app: &App, dir: &Path, o: &MachineOpts, enrolled: bool) -> Result<(), Failure> {
+/// Enrols (not enrolled, or `--reenroll`), or on an enrolled machine given a code adds that
+/// code's product to this agent (RT-0298). `Ok(Some)`: the attach failed; reported at the end so
+/// the service still comes back with the products it had.
+fn enroll_step(
+    app: &App,
+    dir: &Path,
+    o: &MachineOpts,
+    enrolled: bool,
+) -> Result<Option<Failure>, Failure> {
     if enrolled && !o.reenroll {
-        println!("Already enrolled: keeping this machine's identity");
-        return Ok(());
+        let code = o.code.as_deref().map_or("", str::trim);
+        if code.is_empty() {
+            println!("Already enrolled: keeping this machine's identity");
+            return Ok(None);
+        }
+        let transport = Box::new(crate::hub::HttpTransport::new());
+        return Ok(crate::cli_attach::install_step(dir, code, transport));
     }
     let code = match &o.code {
         Some(c) => c.clone(),
@@ -285,13 +302,15 @@ fn enroll_step(app: &App, dir: &Path, o: &MachineOpts, enrolled: bool) -> Result
             "pass --hub <url> (the one-line installer does)",
         ));
     }
-    crate::cli::enroll_with(app, dir, &hubs, code.trim(), enrolled).map_err(|e| {
-        Failure::new(
-            format!("enrolment failed: {e}"),
-            "the code may be used, expired or revoked: ask the hub admin for a new one",
-            EXIT_FAILED,
-        )
-    })
+    crate::cli::enroll_with(app, dir, &hubs, code.trim(), enrolled)
+        .map(|()| None)
+        .map_err(|e| {
+            Failure::new(
+                format!("enrolment failed: {e}"),
+                "the code may be used, expired or revoked: ask the hub admin for a new one",
+                EXIT_FAILED,
+            )
+        })
 }
 
 /// Runs the module setup (`--setup`); `arrival-enroll` takes the same SQL sign-in through env.

@@ -180,6 +180,7 @@ pub fn command(app: &App) -> Command {
                 .arg(data()),
         )
         .subcommand(crate::cli_sql::grammar(data()))
+        .subcommand(crate::cli_attach::grammar(data()))
         .subcommand(crate::selftest::cli::grammar(data()));
     app.tools.iter().fold(cmd, |cmd, t| {
         cmd.subcommand((t.grammar)(Command::new(t.name)).arg(data()))
@@ -197,6 +198,7 @@ pub fn main(app: App) -> i32 {
     let dir = data_dir(&app.service, sub);
     let result = match name {
         "enroll" => enroll(&app, &dir, sub),
+        crate::cli_attach::COMMAND => return crate::cli_attach::main(&app.service, &dir, sub),
         "run" => return run(&app, &dir),
         "install" => return crate::cli_install::main_install(&app, &dir, sub),
         "update" => return crate::cli_install::main_update(&app, &dir, sub),

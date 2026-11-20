@@ -15,7 +15,7 @@ import { listProductKeys, revokeProductKey } from '../repo/productKeys';
 import { listReleases, listPromotions } from '../repo/releases';
 import { listReports } from '../repo/reports';
 import { listTenants, upsertTenant } from '../repo/tenants';
-import { agentsView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
+import { agentsView, agentView, commandsView, createEnrollCode, enqueueCommand, revoke, setChannel } from '../services/admin';
 import { setConfig } from '../services/config';
 import { benchView, createBench, revokeBenchBundle } from '../services/bench';
 import { createDemoBench } from '../services/demoBench';
@@ -117,6 +117,7 @@ adminRoutes.delete('/product-keys/:id', async (c) => {
 });
 
 adminRoutes.get('/agents', async (c) => c.json({ agents: await agentsView(c.env, c.req.query('tenant_id'), nowSeconds()) }));
+adminRoutes.get('/agents/:id', async (c) => c.json({ agent: await agentView(c.env, c.req.param('id'), nowSeconds()) }));
 adminRoutes.put('/agents/:id/channel', async (c) => {
   const body = validate(channelBody, await jsonBody(c.req));
   await setChannel(c.env, c.req.param('id'), body.channel);

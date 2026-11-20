@@ -5,6 +5,8 @@ pub mod channel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cli_attach;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_install_sql;

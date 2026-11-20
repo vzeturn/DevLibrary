@@ -5,6 +5,7 @@ import { HttpError } from '../lib/http';
 import { getAgent, listAgents, revokeAgent, setChannelOverride } from '../repo/agents';
 import { insertCommand, listCommands, type CommandRow } from '../repo/commands';
 import { insertCode } from '../repo/enrollCodes';
+import { listProductLinks } from '../repo/productLinks';
 import { ensureSite, getTenant } from '../repo/tenants';
 
 export interface AgentView {
@@ -22,6 +23,14 @@ export interface AgentView {
   degraded_modules: string[];
   revoked: boolean;
   heartbeat: unknown;
+  /** Products this agent serves (`product_links`, RT-0298). */
+  products: ProductLinkView[];
+}
+
+export interface ProductLinkView {
+  product: string;
+  external_id: string;
+  created_at: number;
 }
 
 /** Offline after three missed heartbeats (PROTOCOL §3). */
@@ -29,8 +38,14 @@ export function isOnline(lastSeen: number | null, heartbeatSeconds: number, now:
   return lastSeen !== null && now - lastSeen <= 3 * heartbeatSeconds;
 }
 
-export async function agentsView(env: Env, tenantId: string | undefined, now: number): Promise<AgentView[]> {
-  const rows = await listAgents(env.DB, tenantId);
+export async function agentsView(env: Env, tenantId: string | undefined, now: number, agentId?: string): Promise<AgentView[]> {
+  const rows = await listAgents(env.DB, tenantId, agentId);
+  const products = new Map<string, ProductLinkView[]>();
+  for (const l of await listProductLinks(env.DB, { tenantId, agentId })) {
+    const list = products.get(l.agent_id) ?? [];
+    list.push({ product: l.product, external_id: l.external_id, created_at: l.created_at });
+    products.set(l.agent_id, list);
+  }
   return rows.map((a) => ({
     id: a.id,
     tenant_id: a.tenant_id,
@@ -46,7 +61,15 @@ export async function agentsView(env: Env, tenantId: string | undefined, now: nu
     degraded_modules: a.degraded_modules ? a.degraded_modules.split(', ') : [],
     revoked: a.revoked_at !== null,
     heartbeat: a.heartbeat_body ? (JSON.parse(a.heartbeat_body) as unknown) : null,
+    products: products.get(a.id) ?? [],
   }));
+}
+
+/** One agent with its product links; 404 when unknown. */
+export async function agentView(env: Env, agentId: string, now: number): Promise<AgentView> {
+  const [agent] = await agentsView(env, undefined, now, agentId);
+  if (!agent) throw new HttpError(404, 'agent_not_found');
+  return agent;
 }
 
 export interface NewCode {
