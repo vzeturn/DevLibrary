@@ -128,6 +128,51 @@ describe('POST /admin/agents/:id/attach', () => {
     for (const v of Object.values(body.secret)) expect(listed).not.toContain(v);
   });
 
+  describe('the module directory from the agent config', () => {
+    const TOKENS = {
+      einvoice: { DL_AGENT_EINVOICE_TOKEN: 'EI-TOKEN-9921' },
+      arrival: { DL_AGENT_ARRIVAL_TOKEN: 'AR-TOKEN-5512' },
+      membership: { DL_AGENT_MEMBERSHIP_TOKEN: 'MB-TOKEN-3307' },
+    } as const;
+    const URL_OPT = { einvoice: ['--platform-url', 'https://ei.example'], arrival: ['--cloud-url', 'https://ar.example'], membership: ['--hub-url', 'https://mb.example'] } as const;
+
+    async function attachArgvFor(module: keyof typeof TOKENS, modules: Record<string, unknown>): Promise<string[]> {
+      const agent = await enrollAgent(env, 'dl-bench');
+      if (Object.keys(modules).length > 0) await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules } });
+      const [flag, val] = URL_OPT[module];
+      const res = await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module, secret: TOKENS[module], options: { [flag]: val } });
+      expect(res.status).toBe(202);
+      const cmd = (await heartbeat(agent)).commands[0];
+      return (cmd?.args as { argv: string[] }).argv;
+    }
+
+    it.each([
+      ['einvoice', 'config_dir', '--config-dir', 'C:\\ProgramData\\dl-agent\\bench\\einvoice'],
+      ['arrival', 'install_dir', '--install-dir', 'C:\\ProgramData\\dl-agent\\bench\\arrival'],
+      ['membership', 'program_data_dir', '--config-dir', 'C:\\ProgramData\\dl-agent\\bench\\membership'],
+    ] as const)('%s: passes %s as %s', async (module, key, flag, dir) => {
+      const argv = await attachArgvFor(module, { [module]: { enabled: true, [key]: `  ${dir} ` } });
+      expect(argv).toEqual([...URL_OPT[module], flag, dir]);
+    });
+
+    it.each(['einvoice', 'arrival', 'membership'] as const)('%s: no flag when the key is unset', async (module) => {
+      expect(await attachArgvFor(module, { [module]: { enabled: true } })).toEqual([...URL_OPT[module]]);
+      expect(await attachArgvFor(module, {})).toEqual([...URL_OPT[module]]);
+    });
+
+    it('ignores an empty or multi-line value', async () => {
+      expect(await attachArgvFor('einvoice', { einvoice: { config_dir: '   ' } })).toEqual([...URL_OPT.einvoice]);
+      expect(await attachArgvFor('einvoice', { einvoice: { config_dir: 'C:\\x\n--force' } })).toEqual([...URL_OPT.einvoice]);
+    });
+
+    it('leaves a module without a directory key alone even if the config has one', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules: { 'pms-site': { enabled: true, config_dir: 'C:\\x', install_dir: 'C:\\y' } } } });
+      expect((await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, PMS)).status).toBe(202);
+      expect((await heartbeat(agent)).commands[0]?.args).toMatchObject({ argv: ['--cloud-url', 'https://bench-pms.example'] });
+    });
+  });
+
   it('clears the secret of a command that expired before the agent came back', async () => {
     const agent = await enrollAgent(env, 'dl-bench');
     await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { ...PMS, ttl_seconds: 60 });

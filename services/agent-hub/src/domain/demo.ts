@@ -46,7 +46,18 @@ export interface DemoModule {
   flags: DemoFlag[];
   /** The flag that enrols again over an existing enrolment (another tenant), null when none. */
   reenroll: string | null;
+  /**
+   * Remote attach only: the module's config key naming the directory the module reads its enrolment
+   * from, and the tool flag that makes the tool write there (else it writes to its own default).
+   * Null for a module that enrols into the agent data dir.
+   */
+  dir: DemoDir | null;
   note: string;
+}
+
+export interface DemoDir {
+  key: string;
+  flag: string;
 }
 
 const s = (from: string, to: string, what: string, required = true): DemoSecret => ({ from, to, required, what });
@@ -63,6 +74,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_EINVOICE_URL', '--platform-url', 'E-Invoice platform origin')],
     flags: [FORCE],
     reenroll: '--force',
+    dir: { key: 'config_dir', flag: '--config-dir' },
     note: 'SQL login from MMEI_SQL_HOST/USER/PASSWORD/AUTH when set, else the tool defaults',
   },
   {
@@ -73,6 +85,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_PMS_URL', '--cloud-url', 'PMS cloud origin')],
     flags: [FORCE],
     reenroll: '--force',
+    dir: null,
     note: 'the module redeems the code within 30 s',
   },
   {
@@ -81,11 +94,12 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     setup: 'arrival-enroll',
     secrets: [
       s('DL_AGENT_DEMO_ARRIVAL_TOKEN', 'DL_AGENT_ARRIVAL_TOKEN', 'enrolment token (platform console, demo hotel)'),
-      s('DL_AGENT_DEMO_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_PMS', 'PMS connection string (else the saved one, else asked)', false),
+      s('DL_AGENT_DEMO_ARRIVAL_PMS', 'DL_AGENT_ARRIVAL_PMS', 'PMS connection string (else the saved one, the old agent one, or the core sql.json SMILE_FO)', false),
     ],
     options: [o('DL_AGENT_DEMO_ARRIVAL_URL', '--cloud-url', 'Check-In cloud origin')],
     flags: [FORCE],
     reenroll: '--force',
+    dir: { key: 'install_dir', flag: '--install-dir' },
     note: '',
   },
   {
@@ -99,6 +113,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_MEMBERSHIP_URL', '--hub-url', 'Membership hub origin')],
     flags: [FORCE],
     reenroll: '--force',
+    dir: { key: 'program_data_dir', flag: '--config-dir' },
     note: '',
   },
   {
@@ -117,6 +132,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     ],
     flags: [FORCE],
     reenroll: '--force',
+    dir: null,
     note: '',
   },
   {
@@ -127,6 +143,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_BACKUP_URL', '--hub-url', 'SRBackup hub origin')],
     flags: [FORCE],
     reenroll: '--force',
+    dir: null,
     note: '',
   },
   {
@@ -143,6 +160,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     ],
     flags: [{ flag: '--sql-admin-saved', what: 'use the SQL login dl-agent saved in sql.json as the SQL administrator' }],
     reenroll: null,
+    dir: null,
     note: 'needs a dl-agent build that reads DL_AGENT_PDA_CODE (RT-0261)',
   },
   {
@@ -153,6 +171,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [],
     flags: [],
     reenroll: null,
+    dir: null,
     note: 'no enrol step: reads the DeviceAgent appsettings and token file already on the PC',
   },
   {
@@ -163,6 +182,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [],
     flags: [],
     reenroll: null,
+    dir: null,
     note: 'no enrol step: uses the pda-sync identity',
   },
 ];

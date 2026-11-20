@@ -4,7 +4,9 @@
 //! The enrollment token (shown once by the platform console) comes from
 //! `DL_AGENT_ARRIVAL_TOKEN`, else the first line of stdin; the PMS connection string from
 //! `DL_AGENT_ARRIVAL_PMS`, else the next line of stdin, else the one already saved, else the
-//! one the removed .NET agent saved (its sign-in mode preselected; `DL_AGENT_ARRIVAL_SQL_AUTH`
+//! one the removed .NET agent saved, else the core's `databases.SMILE_FO` in `<agent data dir>/sql.json`
+//! (what `dl-agent sql-setup` keeps, unsealed the way the module does at run time; its sign-in
+//! mode preselected; `DL_AGENT_ARRIVAL_SQL_AUTH`
 //! = `windows` | `sql` with `DL_AGENT_ARRIVAL_SQL_USER` and `DL_AGENT_SQL_PASSWORD` chooses
 //! another). None of them is ever taken from the command line (it would show in the process
 //! list) or printed.
@@ -31,6 +33,7 @@ use dl_json::{Map, Value};
 use dl_time::OffsetDateTime;
 
 use crate::agent::cloud;
+use crate::agent::core_sql;
 use crate::agent::layout::{IDENTITY_IN_INSTALL, Layout};
 use crate::agent::secrets::{Identity, TenantKeyStore};
 use crate::agent::settings::{BASE_FILE, PRODUCTION_FILE, Settings};
@@ -73,7 +76,7 @@ pub fn arrival_enroll_tool() -> Tool {
 
 fn grammar(cmd: Command) -> Command {
     cmd.about(
-        "Enrolls this site with Azolo Check-In for the arrival module (token from DL_AGENT_ARRIVAL_TOKEN or stdin, PMS connection string from DL_AGENT_ARRIVAL_PMS or stdin)",
+        "Enrolls this site with Azolo Check-In for the arrival module (token from DL_AGENT_ARRIVAL_TOKEN or stdin, PMS connection string from DL_AGENT_ARRIVAL_PMS or stdin, else the saved one, the old agent's, or the core's sql.json SMILE_FO)",
     )
     .arg(
         Arg::option("cloud-url")
@@ -193,7 +196,7 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
         )));
     }
     let identity = Identity::from_token(&token).map_err(|e| fail(&e))?;
-    let mut pms = connection(io, &saved, &legacy)?;
+    let (mut pms, from_core) = connection(io, &saved, &legacy, fallback)?;
     if !args.no_probe {
         pms = probe(io, pms)?;
     }
@@ -223,6 +226,18 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
     if let Some(file) = &key_plan.tenant_key_file {
         files::restrict(file).map_err(|e| fail(&e))?;
     }
+    // A connection taken from the core's sql.json may carry the unsealed SQL password: it
+    // is used to probe only. The module reads sql.json at run time (core_sql::apply), so the
+    // settings keep what was saved, else the placeholder.
+    let persisted = if from_core {
+        if usable_value(&saved.pms_connection_string) {
+            saved.pms_connection_string.trim().to_string()
+        } else {
+            PLACEHOLDER.to_string()
+        }
+    } else {
+        pms.clone()
+    };
     let production = install.join(PRODUCTION_FILE);
     let text = files::production_settings(
         files::read_optional(&production)
@@ -230,7 +245,7 @@ pub fn run_args(args: &Args, fallback: &Path, io: &mut Io<'_>) -> Result<(), Str
             .as_deref(),
         &AgentKeys {
             cloud_base_url: base.to_string().trim_end_matches('/').to_string(),
-            pms_connection_string: pms.clone(),
+            pms_connection_string: persisted,
             identity_file: identity_path.clone(),
             idempotency_file: data.join("agent-idempotency.jsonl"),
             tenant_key_file: key_plan.tenant_key_file.clone(),
@@ -350,14 +365,20 @@ fn legacy_installs(args: &Args, io: &mut Io<'_>) -> Result<Vec<(LegacyInstall, S
     Ok(out)
 }
 
+fn usable_value(s: &str) -> bool {
+    !s.trim().is_empty() && !s.trim().starts_with(PLACEHOLDER)
+}
+
 /// The PMS connection string: the environment, stdin, the install's own settings, else the
-/// newest old install's; then the sign-in mode the operator chose (`DL_AGENT_ARRIVAL_SQL_AUTH`).
+/// newest old install's, else the core's `sql.json` `SMILE_FO` (`module_dir` is the module's
+/// directory under the agent data dir, as for the module at run time); then the sign-in mode the operator chose (`DL_AGENT_ARRIVAL_SQL_AUTH`).
 fn connection(
     io: &mut Io<'_>,
     saved: &Settings,
     legacy: &[(LegacyInstall, Settings)],
-) -> Result<String, String> {
-    let usable = |s: &str| !s.trim().is_empty() && !s.trim().starts_with(PLACEHOLDER);
+    module_dir: &Path,
+) -> Result<(String, bool), String> {
+    let usable = usable_value;
     let mut pms = secret(io, PMS_ENV, "PMS connection string")?;
     let mut from = "given".to_string();
     if pms.is_empty() && usable(&saved.pms_connection_string) {
@@ -371,6 +392,15 @@ fn connection(
     {
         pms = s.pms_connection_string.trim().to_string();
         from = format!("old agent {}", install.dir.display());
+    }
+    let mut from_core = false;
+    if pms.is_empty()
+        && let Some((connection, _)) =
+            core_sql::core_entry(module_dir).map_err(|e| format!("{NAME}: {e}"))?
+    {
+        pms = connection.trim().to_string();
+        from = "core sql.json".into();
+        from_core = true;
     }
     if pms.is_empty() {
         return Err(format!(
@@ -400,7 +430,7 @@ fn connection(
             "{NAME}: PMS connection from {from}; sql_auth={auth}{login} (preselected {preselected})"
         ),
     )?;
-    Ok(pms)
+    Ok((pms, from_core))
 }
 
 /// `data/dl-enroll.json`: what this enrol did, for the self-test and the hub (no secrets).

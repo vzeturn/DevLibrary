@@ -77,6 +77,22 @@ export function attachArgv(m: DemoModule, options: Record<string, string>, flags
   ];
 }
 
+/**
+ * The module's configured directory as a tool flag, so the tool writes where the module reads. Nothing
+ * when the module has no such key, the key is unset or empty, or the value is not one plain line (CR, LF
+ * or NUL): the tool then keeps its default directory, as before.
+ */
+export function dirArgv(m: DemoModule, config: unknown): string[] {
+  if (!m.dir || !config || typeof config !== 'object') return [];
+  const mods = (config as { modules?: unknown }).modules;
+  const mod = mods && typeof mods === 'object' ? (mods as Record<string, unknown>)[m.module] : undefined;
+  const raw = mod && typeof mod === 'object' ? (mod as Record<string, unknown>)[m.dir.key] : undefined;
+  if (typeof raw !== 'string') return [];
+  const dir = raw.trim();
+  if (dir === '' || dir.length > 2048 || /[\r\n\0]/.test(dir)) return [];
+  return [m.dir.flag, dir];
+}
+
 /** The secret variables, checked against the module's table row. */
 export function attachSecret(m: DemoModule, secret: Record<string, string>): Record<string, string> {
   const known = new Set(m.secrets.map((s) => s.to));
@@ -99,13 +115,14 @@ export async function remoteAttach(env: Env, agentId: string, body: RemoteAttach
   if (!m.setup && (Object.keys(body.secret).length > 0 || Object.keys(body.options).length > 0 || body.flags.length > 0 || body.reenroll)) {
     throw new HttpError(400, 'module_has_no_enrol_step');
   }
-  const argv = m.setup ? attachArgv(m, body.options, body.flags, body.reenroll) : [];
+  const args = m.setup ? attachArgv(m, body.options, body.flags, body.reenroll) : [];
   const secret = m.setup ? attachSecret(m, body.secret) : {};
   const agent = await liveAgent(env, agentId);
   await clearExpiredSecrets(env.DB, now);
 
   const current = await getConfig(env.DB, agent.id);
   const base = current ? (JSON.parse(current.body) as unknown) : DEFAULT_CONFIG.body;
+  const argv = [...args, ...dirArgv(m, base)];
   const merged = mergeModules(base, { [m.module]: { enabled: true } });
   const changed = JSON.stringify(merged) !== JSON.stringify(base);
   const version = changed || !current ? await putConfig(env.DB, agent.id, JSON.stringify(merged), now) : current.version;
