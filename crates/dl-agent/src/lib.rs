@@ -29,6 +29,8 @@ pub mod legacy_sql;
 pub mod manifest;
 pub mod optout;
 pub mod proxy;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod remote_attach;
 pub mod report;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod selftest;

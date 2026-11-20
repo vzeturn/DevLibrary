@@ -1,5 +1,5 @@
 //! The built-in `sys` module: proves the data directory is writable, answers `sys.ping` and
-//! runs the `selftest` command.
+//! runs the `selftest` and `attach` commands.
 //!
 //! Every agent runs it, so the canary gate always has at least one module to judge and a
 //! full disk or broken permissions show up as a report instead of silent data loss.
@@ -19,6 +19,9 @@ use crate::supervisor::{Factory, Module, ModuleContext};
 pub const PROBE_EVERY: Duration = Duration::from_secs(60);
 /// The remote command that runs the self-test in the service (module `sys`, or none).
 pub const SELFTEST: &str = "selftest";
+/// The remote command that runs a product's enrol tool sent from the hub (remote attach,
+/// PROTOCOL.md §4.2); module `sys`, or none.
+pub const ATTACH: &str = "attach";
 
 /// Runs the self-test for the `selftest` command: takes the command's arguments and returns
 /// `(ok, output)`. The CLI builds it (it knows the app's modules and their self-tests).
@@ -41,6 +44,8 @@ pub struct SysModule {
     failures: u64,
     selftest: Option<SelfTestHook>,
     busy: Arc<AtomicBool>,
+    attach: Option<SelfTestHook>,
+    attach_busy: Arc<AtomicBool>,
 }
 
 /// Factory for [`SysModule`] without a self-test.
@@ -50,17 +55,23 @@ pub fn factory() -> Factory {
 
 /// Factory for [`SysModule`] answering `selftest` with `hook`.
 pub fn factory_with(hook: Option<SelfTestHook>) -> Factory {
+    factory_with_hooks(hook, None)
+}
+
+/// Factory for [`SysModule`] answering `selftest` with `selftest` and `attach` with `attach`.
+pub fn factory_with_hooks(selftest: Option<SelfTestHook>, attach: Option<SelfTestHook>) -> Factory {
     Arc::new(move || {
         Box::new(SysModule {
-            selftest: hook.clone(),
+            selftest: selftest.clone(),
+            attach: attach.clone(),
             ..SysModule::default()
         })
     })
 }
 
-/// `cmd` addressed to `sys` when it is a `selftest` without a module.
+/// `cmd` addressed to `sys` when it is a `selftest` or an `attach` without a module.
 pub fn route(mut cmd: Command) -> Command {
-    if cmd.module.is_none() && cmd.kind == SELFTEST {
+    if cmd.module.is_none() && (cmd.kind == SELFTEST || cmd.kind == ATTACH) {
         cmd.module = Some("sys".into());
     }
     cmd
@@ -99,6 +110,7 @@ impl SysModule {
             match cmd.kind.as_str() {
                 "sys.ping" => ctx.complete(&cmd.id, true, "pong"),
                 SELFTEST => self.start_selftest(ctx, cmd),
+                ATTACH => self.start_attach(ctx, cmd),
                 other => ctx.complete(&cmd.id, false, &format!("sys: unknown command {other}")),
             }
         }
@@ -110,23 +122,45 @@ impl SysModule {
             ctx.complete(&cmd.id, false, "sys: this build has no self-test");
             return;
         };
-        if self.busy.swap(true, Ordering::SeqCst) {
-            ctx.complete(&cmd.id, false, "sys: a self-test is already running");
+        spawn_hook(ctx, cmd, hook, &self.busy, "selftest", "a self-test");
+    }
+
+    /// Runs a product's enrol tool on its own thread (it talks to the product cloud and SQL
+    /// Server) and answers when done.
+    fn start_attach(&self, ctx: &ModuleContext, cmd: Command) {
+        let Some(hook) = self.attach.clone() else {
+            ctx.complete(&cmd.id, false, "sys: this build cannot attach a product");
             return;
-        }
-        let id = cmd.id.clone();
-        let (worker, busy) = (ctx.clone(), Busy(self.busy.clone()));
-        let spawned = std::thread::Builder::new()
-            .name("selftest".into())
-            .spawn(move || {
-                let _busy = busy;
-                let (ok, out) = (hook.0)(&cmd.args);
-                worker.complete(&cmd.id, ok, &out);
-            });
-        if let Err(e) = spawned {
-            self.busy.store(false, Ordering::SeqCst);
-            ctx.complete(&id, false, &format!("sys: cannot start the self-test: {e}"));
-        }
+        };
+        spawn_hook(ctx, cmd, hook, &self.attach_busy, "attach", "an attach");
+    }
+}
+
+/// Runs `hook` for `cmd` on a thread named `name`, one at a time per `busy` flag.
+fn spawn_hook(
+    ctx: &ModuleContext,
+    cmd: Command,
+    hook: SelfTestHook,
+    busy_flag: &Arc<AtomicBool>,
+    name: &str,
+    what: &str,
+) {
+    if busy_flag.swap(true, Ordering::SeqCst) {
+        ctx.complete(&cmd.id, false, &format!("sys: {what} is already running"));
+        return;
+    }
+    let id = cmd.id.clone();
+    let (worker, busy) = (ctx.clone(), Busy(busy_flag.clone()));
+    let spawned = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _busy = busy;
+            let (ok, out) = (hook.0)(&cmd.args);
+            worker.complete(&cmd.id, ok, &out);
+        });
+    if let Err(e) = spawned {
+        busy_flag.store(false, Ordering::SeqCst);
+        ctx.complete(&id, false, &format!("sys: cannot start {what}: {e}"));
     }
 }
 
@@ -191,6 +225,7 @@ mod tests {
             Some("backup")
         );
         assert_eq!(route(command("other", None)).module, None);
+        assert_eq!(route(command(ATTACH, None)).module.as_deref(), Some("sys"));
     }
 
     #[test]
@@ -216,5 +251,26 @@ mod tests {
         let none = SysModule::default();
         none.start_selftest(&ctx, command(SELFTEST, None));
         assert!(!none.busy.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn attach_runs_its_hook_and_answers_without_one() {
+        let d = TestDir::new("sys-attach");
+        let ctx = ModuleContext::standalone("sys", dl_json::Value::Null, d.0.clone());
+        let hook = SelfTestHook(Arc::new(|_: &Value| (true, "attached".to_string())));
+        let m = SysModule {
+            attach: Some(hook),
+            ..SysModule::default()
+        };
+        m.start_attach(&ctx, command(ATTACH, None));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while m.attach_busy.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!m.attach_busy.load(Ordering::SeqCst));
+        assert!(!m.busy.load(Ordering::SeqCst));
+        let none = SysModule::default();
+        none.start_attach(&ctx, command(ATTACH, None));
+        assert!(!none.attach_busy.load(Ordering::SeqCst));
     }
 }

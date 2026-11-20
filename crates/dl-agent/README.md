@@ -236,6 +236,24 @@ Remove: `irm https://agent.pms.id.vn/uninstall.ps1 | iex` (or `dl-agent uninstal
 hub, removes the watchdog task, the service, the program and the Defender exclusion; the data
 folder (identity, spool, logs) stays unless `-Purge` (`--purge`).
 
+### Attach a product from the hub, no site visit (RT-0261)
+
+Install dl-agent once per customer (any product's install line). Every further product is
+switched on from the hub; nobody touches the machine again:
+
+```sh
+curl -sS -X POST https://agent.pms.id.vn/admin/agents/<agent_id>/attach \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"module":"pms-site","secret":{"DL_AGENT_PMS_CODE":"<one-time code from the PMS console>"},
+       "options":{"--cloud-url":"https://<pms cloud>"},"external_id":"azolo-demo"}'
+```
+
+The hub enables the module, sends the agent one `attach` command that runs the module's enrol
+tool with the code (in a variable, never on the command line; the hub forgets it once the
+agent has it), then restarts the module. `GET /admin/commands?agent_id=<id>` shows the tool's
+exit and output (secrets masked). Variables and flags per module are the demo bench table
+above; `pms-device` and `speaker` take only `{"module": …}`. Needs dl-agent 1.3.17 or newer.
+
 ## Commands
 
 | Command | Meaning |
