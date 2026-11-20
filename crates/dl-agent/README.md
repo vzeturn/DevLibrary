@@ -254,6 +254,36 @@ agent has it), then restarts the module. `GET /admin/commands?agent_id=<id>` sho
 exit and output (secrets masked). Variables and flags per module are the demo bench table
 above; `pms-device` and `speaker` take only `{"module": …}`. Needs dl-agent 1.3.17 or newer.
 
+### Machines that already run an agent: no install line again (RT-0261)
+
+**dl-agent already installed.** Nothing to run on site. The agent updates itself from the hub
+(signed manifest, probation, automatic rollback; PROTOCOL.md §5–6): canary machines take a new
+build within one heartbeat, stable machines once the build is promoted (`rel.sh promote`, after
+the canary gate). A patch reaches every stable agent at once inside its site window, a minor
+ramps 10 → 50 → 100 %, a major only where allowed (ADR 0001). Remote attach needs 1.3.17 or
+newer; older agents get it through that same update, then `attach` works.
+
+**An old product agent (before dl-agent).** The product's own cloud orders its old agent to
+replace itself: the old agent asks its cloud for the dl-agent install script with a one-time
+hub code minted by the product key, starts it detached as SYSTEM, the script enrols dl-agent
+with the product's enrol tool (`--switch`: keeps the hotel identity, SQL login and queue) and
+`-Replace` removes the old service only after the enrol succeeded. Nobody runs a command.
+
+| Old agent | Ordered from its cloud, no site visit | Where |
+|-----------|----------------------------------------|-------|
+| E-Invoice (Go) | yes: `agent_config.switch_to_dl` (RT-0237) | MM-EINVOICE `internal/agentcollector/switch_dl.go`, `POST /api/v1/agent/update/switch` |
+| Check-In (.NET) | yes: `POST /api/platform/tenants/{id}/dl-switch` (RT-0252) | SmileCheckin `docs/saas/AGENT_DL_INSTALLER.md` |
+| Hotel Link (Go) | no: new installs only (`SMILEHL_AGENT_INSTALLER=dl`) | SMILE-HLAPI `go/internal/hub/dlinstall.go` |
+| Membership (.NET) | no: `membership-enroll --switch` exists, nothing orders it | DevLibrary `crates/dl-agent-membership/src/enroll/switch.rs` |
+| PDAOrder SyncAgent / speaker | no | SML-PDAOrder `apps/sql-sync-agent`, `apps/speaker-agent` |
+| SMILE-PMS site / device agent | no | SMILE-PMS `apps/site-agent`, `apps/device-agent` |
+| SR Backup (Go) | no | SRBackup `agent/` |
+
+Each "no" row is work in that product's repository (its old agent learns the switch order, as
+E-Invoice and Check-In did, and ships through the old agent's own self-update); the hub side
+(product keys, one-time codes, `install.ps1 -Setup <tool> -Replace <service>`) already serves
+every product.
+
 ## Commands
 
 | Command | Meaning |
