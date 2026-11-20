@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- agent-hub: `GET /admin/agents` and the status page list only live machines; revoked agents show with `include_revoked=1` (also `list_agents` in the MCP tools), and `GET /admin/agents/:id` still finds them (RT-0375). Policy: real customer tenants are `demo=false` (stable), canary only for our machines and consented pilots, a machine ahead of stable is pinned to canary until stable catches up (ADR 0004, README "Release channels for customers").
+
 ### Fixed
 
 - dl-agent: `pda-enroll` no longer fails where the service runs as LocalSystem and SQL Server takes Windows authentication only (Muine Bay, RT-0365). With no `--sql-admin-user` or `--sql-admin-saved` it tries the Windows identity first and, when SQL Server refuses it (`SQL_NO_ACCESS`, `SQL_LOGIN_FAILED`, `SQL_DATABASE_NOT_FOUND`), the SMILE default login `smile` to create `pda_sync` (never altered). Its password is `DL_AGENT_PDA_SQL_DEFAULT_PASSWORD` or the default built into the release; the user can be set with `DL_AGENT_PDA_SQL_DEFAULT_USER`. Each attempt is a console line and an `ENROLL_SQL_ADMIN_ATTEMPT` site event without the password, and when both fail the error lists them and suggests `--sql-admin-user`. The hub's pda-sync attach accepts the new password variable.

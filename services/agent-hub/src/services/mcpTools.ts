@@ -287,8 +287,9 @@ const TOOLS: ToolDef[] = [
   {
     name: 'list_agents',
     description: 'Agents with version, channel, last heartbeat, modules and the products attached; optionally one tenant.',
-    inputSchema: obj({ tenant_id: str('Tenant id (optional).') }),
-    run: (ctx, a) => adminJson(ctx, `/admin/agents${qs({ tenant_id: optArg(a, 'tenant_id', ID) })}`),
+    inputSchema: obj({ tenant_id: str('Tenant id (optional).'), include_revoked: str('"1" also lists revoked agents (default: live machines only).') }),
+    run: (ctx, a) =>
+      adminJson(ctx, `/admin/agents${qs({ tenant_id: optArg(a, 'tenant_id', ID), include_revoked: optArg(a, 'include_revoked', /^(1|true)$/) })}`),
   },
   {
     name: 'get_agent',

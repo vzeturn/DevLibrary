@@ -38,8 +38,15 @@ export function isOnline(lastSeen: number | null, heartbeatSeconds: number, now:
   return lastSeen !== null && now - lastSeen <= 3 * heartbeatSeconds;
 }
 
-export async function agentsView(env: Env, tenantId: string | undefined, now: number, agentId?: string): Promise<AgentView[]> {
-  const rows = await listAgents(env.DB, tenantId, agentId);
+/** Revoked agents are left out unless `includeRevoked` is set; a lookup by `agentId` always finds them. */
+export async function agentsView(
+  env: Env,
+  tenantId: string | undefined,
+  now: number,
+  agentId?: string,
+  includeRevoked = false,
+): Promise<AgentView[]> {
+  const rows = await listAgents(env.DB, tenantId, agentId, includeRevoked || agentId !== undefined);
   const products = new Map<string, ProductLinkView[]>();
   for (const l of await listProductLinks(env.DB, { tenantId, agentId })) {
     const list = products.get(l.agent_id) ?? [];
