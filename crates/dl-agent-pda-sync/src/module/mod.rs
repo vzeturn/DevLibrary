@@ -8,6 +8,7 @@
 //! `agent.json` the module stays degraded and answers commands; then it runs the loops
 //! of the C# host and mirrors `status.json` into its dl-agent state, metrics and reports.
 
+pub mod admin_login;
 pub mod commands;
 pub mod dry_run;
 pub mod selftest;

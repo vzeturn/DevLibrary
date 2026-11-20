@@ -171,6 +171,8 @@ describe('demo module table', () => {
       if (m.setup) expect(src, m.module).toContain(`"${m.setup}"`);
       for (const s of m.secrets) expect(src, `${m.module} ${s.to}`).toContain(`"${s.to}"`);
       for (const o of m.options) expect(src, `${m.module} ${o.flag}`).toContain(`Arg::option("${o.flag.slice(2)}")`);
+      for (const f of m.flags) expect(src, `${m.module} ${f.flag}`).toContain(`Arg::flag("${f.flag.slice(2)}")`);
+      if (m.reenroll) expect(m.flags.map((f) => f.flag), m.module).toContain(m.reenroll);
       for (const v of [...m.secrets.map((x) => x.from), ...m.options.map((x) => x.from)]) expect(v).toMatch(/^DL_AGENT_DEMO_[A-Z_]+$/);
     }
     expect(new Set(demoVariables()).size).toBe(demoVariables().length);
@@ -181,7 +183,7 @@ describe('demo module table', () => {
     expect(ps.startsWith('$DemoTable = @(\n')).toBe(true);
     expect(ps.match(/^ {2}@\{ Module = /gm)?.length).toBe(DEMO_MODULES.length);
     expect(ps).toContain(
-      "@{ Module = 'pda-sync'; Setup = 'pda-enroll'; SecretFrom = @('DL_AGENT_DEMO_PDA_CODE'); SecretTo = @('DL_AGENT_PDA_CODE'); SecretNeed = @('DL_AGENT_DEMO_PDA_CODE'); OptionFrom = @('DL_AGENT_DEMO_PDA_URL'); OptionFlag = @('--url'); OptionNeed = @('DL_AGENT_DEMO_PDA_URL');",
+      "@{ Module = 'pda-sync'; Setup = 'pda-enroll'; SecretFrom = @('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD'); SecretTo = @('DL_AGENT_PDA_CODE', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD'); SecretNeed = @('DL_AGENT_DEMO_PDA_CODE'); OptionFrom = @('DL_AGENT_DEMO_PDA_URL', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_USER'); OptionFlag = @('--url', '--sql-admin-user'); OptionNeed = @('DL_AGENT_DEMO_PDA_URL');",
     );
     expect(ps).toContain("@{ Module = 'speaker'; Setup = ''; SecretFrom = @(); SecretTo = @(); SecretNeed = @()");
   });

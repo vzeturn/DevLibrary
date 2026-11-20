@@ -17,6 +17,12 @@ const PMS = {
   external_id: 'azolo-demo',
 };
 
+const PDA = {
+  module: 'pda-sync',
+  secret: { DL_AGENT_PDA_CODE: 'PDA-ONE-TIME-4410' },
+  options: { '--url': 'https://azolo-demo-pos.example' },
+};
+
 interface Wire {
   id: string;
   kind: string;
@@ -102,6 +108,26 @@ describe('POST /admin/agents/:id/attach', () => {
     expect(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM commands').get()).toEqual({ n: 0 });
   });
 
+  it.each([
+    [{ module: 'einvoice', secret: { DL_AGENT_EINVOICE_TOKEN: 'EI-TOKEN-9921' }, options: { '--platform-url': 'https://ei.example' }, reenroll: true }, 'einvoice-enroll', ['--platform-url', 'https://ei.example', '--force']],
+    [{ module: 'arrival', secret: { DL_AGENT_ARRIVAL_TOKEN: 'AR-TOKEN-5512' }, options: { '--cloud-url': 'https://ar.example' }, reenroll: true }, 'arrival-enroll', ['--cloud-url', 'https://ar.example', '--force']],
+    [{ ...PMS, flags: ['--force'] }, 'pms-enroll', ['--cloud-url', 'https://bench-pms.example', '--force']],
+    [{ ...PDA, flags: ['--sql-admin-saved'] }, 'pda-enroll', ['--url', 'https://azolo-demo-pos.example', '--sql-admin-saved']],
+    [
+      { ...PDA, secret: { ...PDA.secret, DL_AGENT_PDA_SQL_ADMIN_PASSWORD: 'Adm1n-Pass' }, options: { ...PDA.options, '--sql-admin-user': 'sa' } },
+      'pda-enroll',
+      ['--url', 'https://azolo-demo-pos.example', '--sql-admin-user', 'sa'],
+    ],
+  ])('passes re-enrol and value-less flags to the tool (%#)', async (body, tool, argv) => {
+    const agent = await enrollAgent(env, 'dl-bench');
+    const res = await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, body);
+    expect(res.status).toBe(202);
+    const hb = await heartbeat(agent);
+    expect(hb.commands).toEqual([expect.objectContaining({ kind: 'attach', args: expect.objectContaining({ tool, argv, env: body.secret }) })]);
+    const listed = await (await admin(env, 'GET', '/admin/commands')).text();
+    for (const v of Object.values(body.secret)) expect(listed).not.toContain(v);
+  });
+
   it('clears the secret of a command that expired before the agent came back', async () => {
     const agent = await enrollAgent(env, 'dl-bench');
     await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { ...PMS, ttl_seconds: 60 });
@@ -120,6 +146,10 @@ describe('POST /admin/agents/:id/attach', () => {
     [{ ...PMS, options: { ...PMS.options, '--data': 'C:\\x' } }, 400, 'unknown_option'],
     [{ ...PMS, options: { '--cloud-url': 'https://x\n--force' } }, 400, 'invalid_body'],
     [{ module: 'speaker', secret: { X: 'y' } }, 400, 'module_has_no_enrol_step'],
+    [{ module: 'speaker', reenroll: true }, 400, 'module_has_no_enrol_step'],
+    [{ ...PMS, flags: ['--sql-admin-saved'] }, 400, 'unknown_flag'],
+    [{ ...PMS, flags: ['--data'] }, 400, 'unknown_flag'],
+    [{ ...PDA, reenroll: true }, 400, 'reenroll_not_supported'],
   ])('refuses %j', async (body, status, error) => {
     const agent = await enrollAgent(env, 'dl-bench');
     const res = await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, body);
