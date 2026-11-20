@@ -17,7 +17,13 @@ export async function getTenantDemo(db: D1Database, tenantId: string): Promise<b
   return demo === 1;
 }
 
-export async function listAgents(db: D1Database, tenantId: string | undefined, agentId?: string): Promise<AgentListRow[]> {
+/** `includeRevoked` is false for a list of live machines; a lookup by `agentId` passes true. */
+export async function listAgents(
+  db: D1Database,
+  tenantId: string | undefined,
+  agentId?: string,
+  includeRevoked = true,
+): Promise<AgentListRow[]> {
   const sql = `
     SELECT a.*, t.demo AS tenant_demo, h.received_at AS heartbeat_at, h.version AS heartbeat_version,
            h.body AS heartbeat_body,
@@ -27,8 +33,9 @@ export async function listAgents(db: D1Database, tenantId: string | undefined, a
     JOIN tenants t ON t.id = a.tenant_id
     LEFT JOIN heartbeats h ON h.agent_id = a.id
     WHERE (?1 IS NULL OR a.tenant_id = ?1) AND (?2 IS NULL OR a.id = ?2)
+      AND (?3 = 1 OR a.revoked_at IS NULL)
     ORDER BY a.tenant_id, a.site_id, a.hostname`;
-  return (await db.prepare(sql).bind(tenantId ?? null, agentId ?? null).all<AgentListRow>()).results;
+  return (await db.prepare(sql).bind(tenantId ?? null, agentId ?? null, includeRevoked ? 1 : 0).all<AgentListRow>()).results;
 }
 
 export async function setChannelOverride(db: D1Database, id: string, channel: Channel | null): Promise<boolean> {

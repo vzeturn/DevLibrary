@@ -62,6 +62,10 @@ const reportQuery = z.object({
   version: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(200),
 });
+const agentsQuery = z.object({
+  tenant_id: z.string().optional(),
+  include_revoked: z.enum(['1', 'true', '0', 'false']).optional(),
+});
 const diagnosticsQuery = z.object({
   agent_id: z.string().optional(),
   tenant_id: z.string().optional(),
@@ -120,7 +124,11 @@ adminRoutes.delete('/product-keys/:id', async (c) => {
   return c.json({});
 });
 
-adminRoutes.get('/agents', async (c) => c.json({ agents: await agentsView(c.env, c.req.query('tenant_id'), nowSeconds()) }));
+adminRoutes.get('/agents', async (c) => {
+  const q = validate(agentsQuery, c.req.query());
+  const includeRevoked = q.include_revoked === '1' || q.include_revoked === 'true';
+  return c.json({ agents: await agentsView(c.env, q.tenant_id, nowSeconds(), undefined, includeRevoked) });
+});
 adminRoutes.get('/agents/:id', async (c) => c.json({ agent: await agentView(c.env, c.req.param('id'), nowSeconds()) }));
 adminRoutes.put('/agents/:id/channel', async (c) => {
   const body = validate(channelBody, await jsonBody(c.req));

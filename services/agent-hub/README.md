@@ -8,7 +8,7 @@ A Cloudflare Worker (TypeScript strict, Hono, D1, R2). This is the only non-Rust
 | Area | Endpoints |
 |---|---|
 | Agents (§1–§5) | `POST /v1/enroll` (one-time code), then Ed25519-signed `POST /v1/attach` (another product's code on the same agent, PROTOCOL §2.3), `POST /v1/heartbeat`, `POST /v1/reports`, `POST /v1/agent/selftest`, `POST /v1/agent/diagnostics?command_id=` (zip), `POST /v1/commands/:id/result`, `GET /v1/releases/:product/:channel`, `GET /v1/artifacts/:key` (R2 `ARTIFACTS`, never `diag/…`) |
-| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents`, `GET /admin/agents/:id` (each with its `products` links), `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`, `POST /admin/agents/:id/attach` (remote attach: enable a product module and run its enrol tool on the machine, PROTOCOL §4.2; for einvoice, arrival and membership the hub adds the directory the agent config names for the module, so the tool writes where the module reads; arrival-enroll without a connection string uses the core's saved SMILE_FO); `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `POST /admin/demo-bench`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit`; `PUT/GET /admin/test-runs/:suite?limit` |
+| Admin (`Authorization: Bearer $ADMIN_TOKEN`) | `PUT /admin/tenants/:id`, `GET /admin/tenants`; `POST/GET /admin/enroll-codes`, `DELETE /admin/enroll-codes/:id`; `GET /admin/agents?tenant_id&include_revoked` (live machines only; `include_revoked=1` also lists revoked ones), `GET /admin/agents/:id` (finds revoked agents too) (each with its `products` links), `PUT /admin/agents/:id/channel`, `POST /admin/agents/:id/revoke`, `PUT /admin/agents/:id/config`, `POST /admin/agents/:id/attach` (remote attach: enable a product module and run its enrol tool on the machine, PROTOCOL §4.2; for einvoice, arrival and membership the hub adds the directory the agent config names for the module, so the tool writes where the module reads; arrival-enroll without a connection string uses the core's saved SMILE_FO); `POST/GET /admin/commands`; `GET /admin/releases`, `PUT /admin/releases/:product/:version` (canary manifest as the raw body), `GET …/gate`, `POST …/promote`; `GET /admin/reports?tenant_id&severity&fingerprint&version`; `GET /admin/agents/:id/survey`; `PUT/GET/DELETE /admin/products/:product/site-requirements`, `GET /admin/products/:product/sites?tenant_id` (ready / not ready per site, with reasons); `POST/GET /admin/product-keys`, `DELETE /admin/product-keys/:id`; `GET /admin/agents/:id/selftest`; `POST/GET /admin/bench`, `DELETE /admin/bench/:id`; `POST /admin/demo-bench`; `GET /admin/diagnostics?agent_id&tenant_id&limit`, `GET /admin/diagnostics/:id/download`; `GET /admin/audit?since&actor&path_prefix&limit`; `PUT/GET /admin/test-runs/:suite?limit` |
 | Ops console (`Authorization: Bearer $MCP_TOKEN`) | `POST /mcp` (MCP, JSON-RPC): read-only tools for the Request Tracking assistant, see below |
 | Product platforms (`Authorization: Bearer <product key>`) | `POST /products/:product/enroll-codes` `{external_id, name, site_id?, ttl_seconds?, demo?}` → code for tenant `<product>-<external_id>` (created on first use), agent starts with `modules.<product>.enabled` |
 | Install (public, `no-store`) | `GET /install.ps1` (Windows installer, this hub as default), `GET /install/info/:product/:channel/:target` (`key=value` lines: version, sha256, size, `server_time`, download path), `GET /install/download/:product/:channel/:version/:target` (streams the R2 build of a published release, or redirects to an off-hub URL) |
@@ -87,6 +87,18 @@ Notes:
   pause/resume, tenant hold `POST`/`DELETE`, agent revoke), which go ahead and log the would-be row
   (`admin_audit_write_failed`, `fail_open: true`).
 - A cron trigger prunes the nonce replay table every 15 minutes.
+
+## Release channels for customers
+
+Rule and background: [ADR 0004](../../docs/decisions/0004-customers-on-stable.md).
+
+1. Create a customer tenant with `demo=false` (`PUT /admin/tenants/:id`); its agents follow stable.
+2. Canary only for our machines and consented pilots: `PUT /admin/agents/:id/channel {"channel":"canary"}`
+   and record why. A machine ahead of stable stays pinned, never downgraded.
+3. When stable reaches the machine's version, unpin: `PUT /admin/agents/:id/channel {"channel":"stable"}`.
+4. Before promoting, read `GET /admin/releases/:product/:version/gate`; promote only when every check passes.
+5. After a test round, `POST /admin/agents/:id/revoke` the offline test agents so `GET /admin/agents`
+   shows only live machines (`include_revoked=1` lists the rest).
 
 ## Demo bench (one command, RT-0261)
 

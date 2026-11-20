@@ -123,3 +123,25 @@ describe('POST /v1/heartbeat', () => {
     ]);
   });
 });
+
+describe('GET /admin/agents and revoked agents (RT-0375)', () => {
+  type List = { agents: { id: string; revoked: boolean }[] };
+  it('hides revoked agents by default, lists them with include_revoked, and still finds one by id', async () => {
+    const other = await enrollAgent(env, 'acme');
+    expect((await admin(env, 'POST', `/admin/agents/${other.id}/revoke`)).status).toBe(200);
+
+    const live = (await (await admin(env, 'GET', '/admin/agents')).json()) as List;
+    expect(live.agents.map((a) => a.id)).toEqual([agent.id]);
+
+    for (const flag of ['1', 'true']) {
+      const all = (await (await admin(env, 'GET', `/admin/agents?include_revoked=${flag}`)).json()) as List;
+      expect(all.agents.map((a) => a.id).sort()).toEqual([agent.id, other.id].sort());
+      expect(all.agents.find((a) => a.id === other.id)?.revoked).toBe(true);
+    }
+
+    const one = await admin(env, 'GET', `/admin/agents/${other.id}`);
+    expect(one.status).toBe(200);
+    expect(((await one.json()) as { agent: { revoked: boolean } }).agent.revoked).toBe(true);
+    expect((await admin(env, 'GET', '/admin/agents?include_revoked=maybe')).status).toBe(400);
+  });
+});
