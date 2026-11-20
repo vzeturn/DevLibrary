@@ -115,13 +115,16 @@ describe('/deploy guided install', () => {
     const ok = 'https://einvoice.mmsolutions.vn/agent/bootstrap/tok_1-a/dl/ABCD-EFGH';
     expect(safeBootUrl(ok, BOOT_HOST_SUFFIXES)).toBe(ok);
     expect(safeBootUrl('https://arrival.pms.id.vn/agent/install.ps1', BOOT_HOST_SUFFIXES)).not.toBe('');
+    expect(safeBootUrl(`${ok}/remote?channel=canary`, BOOT_HOST_SUFFIXES)).toBe(`${ok}/remote?channel=canary`);
     for (const bad of [
       'http://einvoice.mmsolutions.vn/x', // not https
       'https://evil.example/x',
       'https://pms.id.vn.evil.example/x',
       'https://evilpms.id.vn/x', // suffix without the dot
       "https://a.pms.id.vn/x');Remove-Item C:\\ -Recurse;('", // quote breaks out of the PowerShell string
-      'https://a.pms.id.vn/x?token=1', // no query
+      "https://a.pms.id.vn/x?a='b", // quote in the query
+      'https://a.pms.id.vn/x?a=$(calc)',
+      'https://a.pms.id.vn/x?a=%27',
       'https://a.pms.id.vn:8443/x',
       'https://a..pms.id.vn/x',
       'https://a.pms.id.vn',

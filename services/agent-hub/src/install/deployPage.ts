@@ -24,12 +24,13 @@ export const PRODUCT_LABELS: Record<string, string> = {
 export const BOOT_HOST_SUFFIXES = ['pms.id.vn', 'mmsolutions.vn'] as const;
 
 /**
- * The product's own install script URL when it is safe to quote into PowerShell, else ''. Kept free
+ * The product's own install script URL when it is safe to quote into PowerShell, else ''. A plain
+ * query (letters, digits, `=&._-`, e.g. `?channel=canary`) is allowed; quotes, `%`, `$` and ports are not. Kept free
  * of closures and TypeScript-only syntax at runtime: the page embeds it verbatim (`toString`).
  */
 export function safeBootUrl(raw: unknown, suffixes: readonly string[]): string {
   if (typeof raw !== 'string' || raw.length > 300) return '';
-  var m = /^https:\/\/([a-z0-9.-]+)(\/[A-Za-z0-9._~\/-]*)$/.exec(raw);
+  var m = /^https:\/\/([a-z0-9.-]+)(\/[A-Za-z0-9._~\/-]*)(\?[A-Za-z0-9._=&-]*)?$/.exec(raw);
   var host = m ? m[1] || '' : '';
   if (!host || host.indexOf('..') >= 0) return '';
   for (var i = 0; i < suffixes.length; i++) {
