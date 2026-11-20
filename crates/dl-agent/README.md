@@ -163,7 +163,9 @@ Unattended (RMM, SYSTEM): environment only, never a password on the command line
 The script only downloads, checks and hands off: size and SHA-256 against `/install/info`, then
 `verify-self` checks the Ed25519 release signature of `/install/manifest/...` (the installed
 agent does it when it knows the verb, else the download itself), then `<download> install --hub
-...` does the machine setup: Defender exclusion, older copies and `-Replace` services removed,
+...` does the machine setup: Defender exclusion only when Defender is the active antivirus (with another
+one, such as Kaspersky, it prints what to trust instead; the script passes `--no-defender` and adds
+the exclusion itself), older copies and `-Replace` services removed,
 program placed in `%ProgramFiles%\DevLibrary\<product>`, enrol unless already enrolled, SQL login,
 `-Setup`, service + watchdog task, wait for the first heartbeat. Re-running the line repairs or
 updates the install and keeps the identity. A build older than `dl-agent install` is installed by

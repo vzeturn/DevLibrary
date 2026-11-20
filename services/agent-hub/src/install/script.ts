@@ -3,7 +3,10 @@
  * Code's install.ps1. It downloads the build, checks its size and SHA-256 against the hub, has
  * the release signature checked (`verify-self`), then hands off to the signed binary
  * (`dl-agent install`), which does the machine setup: old copies, service + watchdog, SQL login
- * (hidden password prompt), enrolment, `-Setup`, `-Replace`, Defender exclusion, link wait.
+ * (hidden password prompt), enrolment, `-Setup`, `-Replace`, link wait. The script itself checks
+ * the antivirus (RT-0361): with a third-party one Defender is left alone and the operator is told
+ * what to trust; with Defender in charge the exclusion is added here, never by a hidden child
+ * PowerShell of the binary. The build is downloaded into the install folder, not %TEMP%.
  *
  * One script for every Windows: it parses and runs on PowerShell 2.0 (Windows 7 / Server 2008
  * R2: WebClient, no JSON cmdlets, no Get-FileHash, no Invoke-RestMethod) and is short enough for
@@ -157,6 +160,45 @@ function Show-AvBlock {
   }
 }
 
+# Another antivirus (RT-0361): Defender is passive then, and editing it from an unsigned program
+# is what behaviour engines (Kaspersky PDM) flag as a trojan. Security Center names it on client
+# Windows; Windows Server has none, so running services are matched too.
+$AvServices = '^(avp|klnagent|ekrn|vsserv|bdredline|avast|avg|mcafee|mfemms|sophos|sepmasterservice|ntrtscan|bkav|csfalconservice)'
+$AvDisplays = 'Kaspersky|ESET |Bitdefender|Avast|AVG Antivirus|McAfee|Sophos|Symantec|Norton|Trend Micro|Bkav|CMC Antivirus|Malwarebytes|SentinelOne'
+function Get-OtherAv {
+  $names = @()
+  try {
+    foreach ($a in @(Get-WmiObject -Namespace root\SecurityCenter2 -Class AntivirusProduct -ErrorAction Stop)) {
+      if ($a.displayName -and ([string]$a.displayName) -notmatch 'Defender|Microsoft') { $names += [string]$a.displayName }
+    }
+  } catch { Write-Verbose ('Security Center not readable (Windows Server has none): ' + $_.Exception.Message) }
+  foreach ($s in @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Running' })) {
+    if ($s.DisplayName -match 'Defender|Microsoft') { continue }
+    if ($s.Name -match $AvServices -or $s.DisplayName -match $AvDisplays) { $names += [string]$s.DisplayName }
+  }
+  return @($names | Select-Object -Unique)
+}
+
+# With another antivirus: Defender is left alone and the operator is told what to trust. With
+# Defender in charge: its exclusion is added here, in this visible console, before the download;
+# the binary is always told --no-defender so it never starts a hidden PowerShell for it.
+function Set-AvTrust([string]$installDir, [string]$data) {
+  $others = @(Get-OtherAv)
+  if ($others.Count -gt 0) {
+    Warn ('Antivirus on this PC: ' + ($others -join ', ') + '. Windows Defender is left alone (it is passive).')
+    Warn ('If it blocks the agent: add ' + $Exe + ' as a Trusted application and exclude ' + $installDir + ' and ' + $data + ' from scanning, then run the same command again.')
+    if (($others -join ' ') -match 'Kaspersky') { Warn 'Kaspersky: Settings > Threats and exclusions > Specify trusted applications > Add, and choose "Do not monitor application activity".' }
+    return
+  }
+  if ($NoDefender -or -not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) { return }
+  try {
+    $mp = Get-MpComputerStatus -ErrorAction Stop
+    if (-not $mp.AntivirusEnabled) { Say 'Windows Defender is not active: no exclusion added.'; return }
+    Add-MpPreference -ExclusionPath @($installDir, $data) -ErrorAction Stop
+    Say ('Windows Defender exclusion added for ' + $installDir + ' and ' + $data)
+  } catch { Warn ('Windows Defender exclusion not added: ' + $_.Exception.Message) }
+}
+
 function Get-Sha256([string]$path) {
   $s = [IO.File]::OpenRead($path)
   try { $h = [Security.Cryptography.SHA256]::Create().ComputeHash($s) } finally { $s.Close() }
@@ -191,7 +233,8 @@ function Invoke-Legacy([string]$lane) {
   foreach ($k in @($named.Keys)) { if ($named[$k]) { $p[$k] = $named[$k] } }
   if ($SqlPrompt) { $p.SqlPrompt = $true }
   if ($Reenroll) { $p.Reenroll = $true }
-  if ($NoDefender) { $p.NoDefender = $true }
+  # Set-AvTrust already handled Defender (RT-0361).
+  $p.NoDefender = $true
   $text = Get-HubText '/install/legacy.ps1'
   if ($text -notmatch 'DevLibrary Agent installer') { Stop-Install 69 ($Unreachable + ': /install/legacy.ps1 is not the installer') ('Open ' + $Hub + '/healthz in a browser on this PC, then run again.') }
   Set-StrictMode -Off
@@ -234,6 +277,7 @@ function Install-Agent {
     if (-not $pf) { $pf = $env:ProgramFiles }
     $Exe = Join-Path $pf ('DevLibrary\' + $Product + '\' + $Product + '.exe')
     $Data = Join-Path $env:ProgramData $Product
+    $InstallDir = Split-Path $Exe
 
     # The build to download: the target's, else -Channel's, else the channel this machine follows.
     $version = ''
@@ -252,9 +296,13 @@ function Install-Agent {
       $skew = (UnixNow) - [long]$info['server_time']
       if ([Math]::Abs($skew) -gt $MaxSkew) { Stop-Install 78 ('The clock is off by ' + $skew + ' s; the hub refuses agents more than 5 min off.') 'Set the date, time and time zone of this PC, then run again.' }
     }
+    # The download lands in the install folder (Administrators only), not %TEMP%: an unsigned
+    # program run from %TEMP% that installs a service is a dropper to behaviour engines (RT-0361).
+    foreach ($d in @($InstallDir, $Data)) { if (-not (Test-Path $d)) { [void](New-Item -ItemType Directory -Force -Path $d) } }
+    Set-AvTrust $InstallDir $Data
     Say ('Downloading ' + $Product + ' ' + $info['version'] + ' (' + $info['channel'] + ', ' + $os + ') from ' + $Hub)
 
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ($Product + '-setup-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.exe')
+    $tmp = Join-Path $InstallDir ($Product + '-setup-' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.exe')
     try { (New-Client).DownloadFile($Hub + $info['download'], $tmp) }
     catch { $ex = Get-WebError $_; Stop-Install 69 ($Unreachable + ' (download: ' + $ex.Message + ')') 'Run again; if it repeats, allow the hub in the proxy or firewall.' }
     if (-not (Test-Path $tmp)) { Start-Sleep -Seconds 2 }
@@ -296,7 +344,7 @@ function Install-Agent {
     if ($SqlUser) { $argv += @('--sql-user', $SqlUser) }
     if ($SqlPrompt) { $argv += '--sql-prompt' }
     if ($Reenroll) { $argv += '--reenroll' }
-    if ($NoDefender) { $argv += '--no-defender' }
+    $argv += '--no-defender'
     if ($Setup) { $argv += @('--setup', $Setup) }
     foreach ($r in $Replace) { if ($r) { $argv += @('--replace', $r) } }
     if ($Code) { $env:DL_AGENT_ENROLL_CODE = $Code }
