@@ -248,6 +248,45 @@ pub fn files(dirs: &[PathBuf], file: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// `CRYPTPROTECT_LOCAL_MACHINE` in a DPAPI blob's `dwFlags` (offset 40, after `dwVersion`,
+/// the provider GUID, the master key version and the master key GUID).
+const LOCAL_MACHINE_FLAG: u32 = 0x4;
+const FLAGS_AT: usize = 40;
+
+/// The scope a DPAPI blob was sealed with: `Some(true)` LocalMachine, `Some(false)`
+/// CurrentUser, `None` when `blob` is not a DPAPI blob.
+pub fn machine_scope(blob: &[u8]) -> Option<bool> {
+    let version = u32::from_le_bytes(blob.get(..4)?.try_into().ok()?);
+    let flags = u32::from_le_bytes(blob.get(FLAGS_AT..FLAGS_AT + 4)?.try_into().ok()?);
+    (version == 1).then_some(flags & LOCAL_MACHINE_FLAG != 0)
+}
+
+/// The warning for an old agent's secret sealed for one Windows user (DPAPI CurrentUser):
+/// the service account could never open it, so it is skipped. `None` for any other content.
+pub fn current_user_warning(file: &Path, blob: &[u8]) -> Option<String> {
+    (machine_scope(blob) == Some(false)).then(|| {
+        format!(
+            "Warning: {} is sealed for one Windows user (DPAPI CurrentUser); the service cannot use it, skipped",
+            file.display()
+        )
+    })
+}
+
+/// Whether `file` holds a CurrentUser DPAPI blob; prints the warning when it does. A file
+/// that cannot be read answers `false` (its reader reports the error).
+pub fn sealed_for_one_user(file: &Path) -> bool {
+    let Ok(blob) = std::fs::read(file) else {
+        return false;
+    };
+    match current_user_warning(file, &blob) {
+        Some(w) => {
+            eprintln!("{w}");
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +379,38 @@ mod tests {
         );
         std::fs::remove_dir_all(&agent).unwrap();
         assert_eq!(copies_in(&agent, None).len(), 2);
+    }
+
+    /// A DPAPI blob laid out as Windows writes it (`dwVersion` 1, `dwFlags` at 40).
+    fn dpapi_blob(machine: bool) -> Vec<u8> {
+        let mut b = 1u32.to_le_bytes().to_vec();
+        b.resize(40, 0xAB);
+        b.extend_from_slice(&(if machine { 0x5u32 } else { 0x1 }).to_le_bytes());
+        b.extend_from_slice(b"ciphertext");
+        b
+    }
+
+    #[test]
+    fn a_current_user_blob_is_skipped_with_a_warning() {
+        let f = Path::new("C:/ProgramData/MM.Membership.Agent/config.dpapi");
+        assert_eq!(machine_scope(&dpapi_blob(true)), Some(true));
+        assert_eq!(machine_scope(&dpapi_blob(false)), Some(false));
+        assert_eq!(machine_scope(b"{\"plain\": 1}"), None);
+        assert!(current_user_warning(f, &dpapi_blob(true)).is_none());
+        let w = current_user_warning(f, &dpapi_blob(false)).unwrap();
+        assert!(
+            w.contains("CurrentUser") && w.contains("config.dpapi"),
+            "{w}"
+        );
+        let dir = std::env::temp_dir().join(format!("dl-cu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cu = dir.join("cu.bin");
+        std::fs::write(&cu, dpapi_blob(false)).unwrap();
+        let lm = dir.join("lm.bin");
+        std::fs::write(&lm, dpapi_blob(true)).unwrap();
+        assert!(sealed_for_one_user(&cu));
+        assert!(!sealed_for_one_user(&lm));
+        assert!(!sealed_for_one_user(&dir.join("missing.bin")));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -3,7 +3,7 @@
 //! password under DPAPI LocalMachine), for the installer to reuse (RT-0303).
 
 use dl_agent::cli_install_sql::Secret;
-use dl_agent::legacy_sql::{Candidate, copies, machine_dirs};
+use dl_agent::legacy_sql::{Candidate, copies, machine_dirs, sealed_for_one_user};
 use dl_agent::sql::secret::AuthMode;
 
 use crate::config::identity::AgentIdentity;
@@ -31,6 +31,9 @@ pub fn pda_legacy_sql() -> Vec<Candidate> {
             }
         };
         if instance.trim().is_empty() {
+            continue;
+        }
+        if sealed_for_one_user(&paths.secrets_dir().join(format!("{SQL_PASSWORD}.bin"))) {
             continue;
         }
         let store = FileSecretStore::dpapi(paths.secrets_dir());

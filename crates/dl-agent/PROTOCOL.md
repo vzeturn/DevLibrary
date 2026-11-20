@@ -508,7 +508,10 @@ describes its host and every declared database. Facts only, no data and no secre
   alter_dbo, execute, view_definition, backup_database}`, `syntax_2012` (engine ≥ 11 and
   compat ≥ 110: `THROW`, `OFFSET`, `IIF`, … accepted), `transport` (rung), `session`
   (engine ≥ 10: `auth_scheme` `SQL`/`NTLM`/`KERBEROS`, `net_transport`, `server_port` from
-  `CONNECTIONPROPERTY`, plus `tds` (`7.3B`, `7.4`, …); `error` instead when the query fails)
+  `CONNECTIONPROPERTY`, `instance` from `SERVERPROPERTY('InstanceName')` (`null` for the
+  default instance), plus `tds` (`7.3B`, `7.4`, …); `error` instead when the query fails; and
+  always the TLS level: `encryption` `full`, `login_only` or `none` (unencrypted rung) and
+  `tls`, the transport rung that connected)
   and `warnings`:
 
   | warning | meaning |

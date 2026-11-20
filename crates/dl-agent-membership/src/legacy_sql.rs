@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use dl_agent::legacy_sql::{Candidate, copies, from_connection_string, machine_dirs};
+use dl_agent::legacy_sql::{
+    Candidate, copies, from_connection_string, machine_dirs, sealed_for_one_user,
+};
 
 use crate::config::{ConfigStore, DIR_NAME, Dpapi};
 
@@ -16,6 +18,9 @@ pub fn membership_legacy_sql() -> Vec<Candidate> {
         .flat_map(|d| copies(d))
     {
         let store = ConfigStore::new(&dir, Arc::new(Dpapi));
+        if sealed_for_one_user(&store.path()) {
+            continue;
+        }
         match store.load() {
             Ok(Some(cfg)) => {
                 let source = format!("the old Membership agent ({})", store.path().display());
