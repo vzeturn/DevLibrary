@@ -61,6 +61,10 @@ pub trait Connection: Send + 'static {
     fn tds_version(&self) -> Option<u32> {
         None
     }
+    /// Whether the whole session is encrypted (`false`: the login only), when it knows.
+    fn encrypted(&self) -> Option<bool> {
+        None
+    }
 }
 
 /// Pool limits and timeouts.

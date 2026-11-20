@@ -298,7 +298,7 @@ fn rung(stats: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `; sign-in NTLM, TDS 7.3B, SQL Server 2008 R2` from the survey's `session` and engine;
+/// `; sign-in NTLM, TDS 7.3B, encryption login_only, instance SMILE, port 49172` from the survey's `session`;
 /// empty when the server did not say (SQL Server 2005, or the session query failed).
 pub(crate) fn signed_in(session: &Value) -> String {
     let get = |k: &str| session.get(k).and_then(Value::as_str);
@@ -308,6 +308,15 @@ pub(crate) fn signed_in(session: &Value) -> String {
     }
     if let Some(t) = get("tds") {
         parts.push(format!("TDS {t}"));
+    }
+    if let Some(e) = get("encryption") {
+        parts.push(format!("encryption {e}"));
+    }
+    if let Some(i) = get("instance") {
+        parts.push(format!("instance {i}"));
+    }
+    if let Some(p) = session.get("server_port").and_then(Value::as_u64) {
+        parts.push(format!("port {p}"));
     }
     if parts.is_empty() {
         String::new()

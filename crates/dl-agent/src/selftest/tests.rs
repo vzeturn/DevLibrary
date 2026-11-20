@@ -560,3 +560,14 @@ fn command_output_fits_and_keeps_failures_first() {
     assert_eq!(v["checks"].as_array().map(Vec::len), Some(1));
     assert_eq!(v["summary"]["fail"].as_u64(), Some(1));
 }
+
+#[test]
+fn the_database_check_names_sign_in_tds_tls_level_instance_and_port() {
+    let s = json!({"auth_scheme": "NTLM", "tds": "7.3B", "encryption": "login_only",
+                   "tls": "tls1.0", "instance": "SMILE", "server_port": 49172});
+    assert_eq!(
+        checks_core::signed_in(&s),
+        "; sign-in NTLM, TDS 7.3B, encryption login_only, instance SMILE, port 49172"
+    );
+    assert_eq!(checks_core::signed_in(&json!({})), "");
+}

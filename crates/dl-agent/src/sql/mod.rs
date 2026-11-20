@@ -256,6 +256,9 @@ impl Connection for dl_tds::Client {
     fn tds_version(&self) -> Option<u32> {
         Some(dl_tds::Client::tds_version(self))
     }
+    fn encrypted(&self) -> Option<bool> {
+        Some(dl_tds::Client::is_encrypted(self))
+    }
     fn set_query_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
         self.set_timeout(timeout).map_err(tds)
     }

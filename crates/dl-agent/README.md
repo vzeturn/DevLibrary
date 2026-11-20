@@ -130,7 +130,8 @@ the installer tries, best first, the login this agent saved, then each old agent
 site `state\databases.json`, E-Invoice `config.enc`, Check-In `appsettings.Production.json`,
 Membership `config.dpapi`, HotelLink `config.json`, PDAOrder SyncAgent `agent.json` + sealed
 password; in place, renamed `.bench-old-*` by the bench, or where a bench record moved them;
-DPAPI LocalMachine), then Windows sign-in to the local SQL Server. The first that signs in to
+DPAPI LocalMachine; a secret sealed for one Windows user (DPAPI CurrentUser) is skipped with a
+warning, since the service could never open it), then Windows sign-in to the local SQL Server. The first that signs in to
 every SMILE database is saved with `login_source` (shown by `selftest` and sent in the survey).
 Only when none works does it show the menu ([1] Windows, [2] SQL; server, user and a hidden
 password); an unattended run then installs and enrols without SQL, files one

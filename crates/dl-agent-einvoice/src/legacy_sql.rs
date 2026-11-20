@@ -1,7 +1,9 @@
 //! The SQL logins the old MM-EInvoice agent left on this machine (`%ProgramData%\MM-EInvoice\
 //! config.enc`, in place or renamed by the bench), for the installer to reuse (RT-0303).
 
-use dl_agent::legacy_sql::{Candidate, copies, from_connection_string, machine_dirs};
+use dl_agent::legacy_sql::{
+    Candidate, copies, from_connection_string, machine_dirs, sealed_for_one_user,
+};
 
 use crate::agent_config::AgentConfig;
 
@@ -13,6 +15,9 @@ pub fn einvoice_legacy_sql() -> Vec<Candidate> {
         .flat_map(|d| copies(d))
     {
         let file = dir.join("config.enc");
+        if sealed_for_one_user(&file) {
+            continue;
+        }
         match AgentConfig::load(&dir) {
             Ok(Some(cfg)) => {
                 let source = format!("the old E-Invoice agent ({})", file.display());

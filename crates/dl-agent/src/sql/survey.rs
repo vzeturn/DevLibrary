@@ -51,7 +51,8 @@ const GRANTS: [&str; 9] = [
 pub const SESSION_SQL: &str = "SELECT \
 CAST(CONNECTIONPROPERTY('auth_scheme') AS nvarchar(40)) AS auth_scheme, \
 CAST(CONNECTIONPROPERTY('net_transport') AS nvarchar(40)) AS net_transport, \
-CAST(CONNECTIONPROPERTY('local_tcp_port') AS nvarchar(16)) AS server_port";
+CAST(CONNECTIONPROPERTY('local_tcp_port') AS nvarchar(16)) AS server_port, \
+CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128)) AS instance";
 
 /// Surveys the database behind `conn`; `rung` is the transport rung it was reached on.
 /// On SQL Server 2008 and later the session facts ([`SESSION_SQL`]) and the TDS version the
@@ -76,7 +77,9 @@ pub fn survey(conn: &mut impl Connection, rung: Option<&str>) -> Result<Value, E
         Ok(Value::Null)
     };
     if let Some(o) = s.as_object_mut() {
-        o.insert("session", session(facts, conn.tds_version()));
+        let mut sess = session(facts, conn.tds_version());
+        add_transport(&mut sess, conn.encrypted(), rung);
+        o.insert("session", sess);
     }
     Ok(s)
 }
@@ -101,7 +104,7 @@ pub fn session(facts: Result<Value, Error>, tds: Option<u32>) -> Value {
     let mut m = Map::new();
     match facts {
         Ok(row) => {
-            for k in ["auth_scheme", "net_transport"] {
+            for k in ["auth_scheme", "net_transport", "instance"] {
                 m.insert(k, text(&row, k).map_or(Value::Null, Value::from));
             }
             m.insert(
@@ -115,6 +118,21 @@ pub fn session(facts: Result<Value, Error>, tds: Option<u32>) -> Value {
     }
     m.insert("tds", tds.map_or(Value::Null, |v| Value::from(tds_name(v))));
     Value::Object(m)
+}
+
+/// Adds the TLS level to a `session` block: `encryption` (`full`, `login_only`, or `none` on
+/// the unencrypted rung) and `tls`, the transport rung that connected (§9.4).
+pub fn add_transport(session: &mut Value, encrypted: Option<bool>, rung: Option<&str>) {
+    let encryption = match (rung, encrypted) {
+        (Some("unencrypted"), _) => Some("none"),
+        (_, Some(true)) => Some("full"),
+        (_, Some(false)) => Some("login_only"),
+        (_, None) => None,
+    };
+    if let Some(m) = session.as_object_mut() {
+        m.insert("encryption", encryption.map_or(Value::Null, Value::from));
+        m.insert("tls", rung.map_or(Value::Null, Value::from));
+    }
 }
 
 /// The marketing name of an engine version (`10.50.1600.1` → `SQL Server 2008 R2`).
@@ -243,6 +261,24 @@ mod tests {
             "create_procedure": "1", "create_function": "1", "create_table": "1",
             "alter_dbo": "1", "execute": "1", "view_definition": "1", "backup_database": "1"
         })
+    }
+
+    #[test]
+    fn the_session_block_names_the_tls_level_and_the_named_instance() {
+        let row = json!({"auth_scheme": "SQL", "net_transport": "TCP",
+                         "server_port": "49172", "instance": "SMILE"});
+        let mut s = session(Ok(row), Some(0x730B_0003));
+        add_transport(&mut s, Some(false), Some("tls1.0"));
+        assert_eq!(s["instance"].as_str(), Some("SMILE"));
+        assert_eq!(s["encryption"].as_str(), Some("login_only"));
+        assert_eq!(s["tls"].as_str(), Some("tls1.0"));
+        let mut clear = session(Ok(json!({})), None);
+        add_transport(&mut clear, Some(false), Some("unencrypted"));
+        assert_eq!(clear["encryption"].as_str(), Some("none"));
+        assert!(clear["instance"].is_null());
+        let mut full = session(Ok(json!({})), None);
+        add_transport(&mut full, Some(true), Some("as_configured"));
+        assert_eq!(full["encryption"].as_str(), Some("full"));
     }
 
     #[test]
