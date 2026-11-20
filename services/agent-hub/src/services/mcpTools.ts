@@ -63,6 +63,24 @@ async function github(ctx: ToolContext, url: string): Promise<Response> {
   return ctx.fetch(url, { headers: { 'User-Agent': 'devlibrary-agent-hub-ops', Accept: 'application/vnd.github+json' } });
 }
 
+/** Directory entries of `path` from jsDelivr's flat file list of the repository (files and folders, sizes of files). */
+async function listFromJsdelivr(ctx: ToolContext, path: string, ref: string): Promise<unknown> {
+  const res = await ctx.fetch(`https://data.jsdelivr.com/v1/packages/gh/${REPO}@${encodeURIComponent(ref)}?structure=flat`);
+  if (!res.ok) throw new ToolError(`github rate-limited and jsdelivr answered ${res.status}`);
+  const { files } = (await res.json()) as { files: { name: string; size: number }[] };
+  const prefix = path ? `/${path}/` : '/';
+  const entries = new Map<string, { name: string; path: string; type: string; size: number }>();
+  for (const f of files) {
+    if (!f.name.startsWith(prefix)) continue;
+    const [head, ...rest] = f.name.slice(prefix.length).split('/');
+    if (!head) continue;
+    const full = `${path ? `${path}/` : ''}${head}`;
+    if (!entries.has(head)) entries.set(head, { name: head, path: full, type: rest.length ? 'dir' : 'file', size: rest.length ? 0 : f.size });
+  }
+  if (entries.size === 0) throw new ToolError(`not found: ${path}@${ref}`);
+  return { path, ref, source: 'jsdelivr', entries: [...entries.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'hub_test_results',
@@ -98,6 +116,8 @@ const TOOLS: ToolDef[] = [
       const ref = optArg(a, 'ref', REF) ?? 'main';
       const res = await github(ctx, `https://api.github.com/repos/${REPO}/contents/${encodeURI(path)}?ref=${encodeURIComponent(ref)}`);
       if (res.status === 404) throw new ToolError(`not found: ${path}@${ref}`);
+      // The unauthenticated API is rate-limited per IP, and Worker IPs are shared: list from jsDelivr then.
+      if (res.status === 403 || res.status === 429) return listFromJsdelivr(ctx, path, ref);
       if (!res.ok) throw new ToolError(`github answered ${res.status}`);
       const items = (await res.json()) as { name: string; path: string; type: string; size: number }[] | { type: string };
       if (!Array.isArray(items)) throw new ToolError(`${path} is a file: use repo_file`);
