@@ -137,4 +137,29 @@ describe('/mcp ops console', () => {
     expect((await call('repo_list', { path: 'nothing' })).isError).toBe(true);
     expect((await call('repo_file', { path: '../../etc/passwd' })).isError).toBe(true);
   });
+
+  it('repo_pull and repo_commit read one pull request and one commit, patches capped', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith('/pulls/65')) {
+        return Response.json({ title: 'feat: x', state: 'closed', merged: true, merged_at: '2026-11-19T00:00:00Z', merge_commit_sha: 'm1', body: 'why', head: { ref: 'feat', sha: 'h1' }, base: { ref: 'main', sha: 'b1' } });
+      }
+      if (url.includes('/pulls/65/files')) return Response.json([{ filename: 'docs/report.md', status: 'added', additions: 3, deletions: 0, patch: 'x'.repeat(5000) }]);
+      if (url.endsWith('/commits/f241daf')) {
+        return Response.json({ sha: 'f241daf000', commit: { message: 'fix: y', author: { date: '2026-11-19T01:00:00Z' } }, parents: [{ sha: 'p1' }], files: [{ filename: 'a.rs', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1 +1 @@' }] });
+      }
+      return new Response('nope', { status: 404 });
+    });
+    const pr = (await (await call('repo_pull', { number: 65 })).json()) as { merged: boolean; head: { sha: string }; files: { path: string; patch: string }[] };
+    expect(pr).toMatchObject({ number: 65, merged: true, head: { sha: 'h1' }, base: { ref: 'main' } });
+    expect(pr.files[0]?.path).toBe('docs/report.md');
+    expect(pr.files[0]?.patch.endsWith('…[truncated]')).toBe(true);
+    expect(seen).toContain('https://api.github.com/repos/vzeturn/DevLibrary/pulls/65/files?per_page=100');
+    expect(await (await call('repo_commit', { sha: 'f241daf' })).json()).toMatchObject({ sha: 'f241daf000', message: 'fix: y', parents: ['p1'], files: [{ path: 'a.rs', patch: '@@ -1 +1 @@' }] });
+    expect((await call('repo_pull', { number: 9 })).isError).toBe(true);
+    expect((await call('repo_pull', { number: 'x' })).isError).toBe(true);
+    expect((await call('repo_commit', { sha: 'main; rm' })).isError).toBe(true);
+  });
 });

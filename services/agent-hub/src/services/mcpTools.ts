@@ -81,11 +81,41 @@ async function listFromJsdelivr(ctx: ToolContext, path: string, ref: string): Pr
   return { path, ref, source: 'jsdelivr', entries: [...entries.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
+interface GhPull {
+  title: string;
+  state: string;
+  merged?: boolean;
+  merged_at?: string | null;
+  merge_commit_sha?: string | null;
+  body?: string | null;
+  head?: { ref: string; sha: string };
+  base?: { ref: string; sha: string };
+}
+interface GhFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+/** Longest patch excerpt per file; read the whole file with repo_file at the commit. */
+export const MAX_PATCH = 4000;
+
+function changed(files: GhFile[]): unknown[] {
+  return files.map((f) => ({
+    path: f.filename,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    patch: f.patch === undefined ? null : f.patch.length > MAX_PATCH ? `${f.patch.slice(0, MAX_PATCH)}…[truncated]` : f.patch,
+  }));
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'hub_test_results',
-    description: 'Latest published `pnpm test` runs of the hub (services/agent-hub): commit, counts, typecheck, failures. Newest first.',
-    inputSchema: obj({ suite: str('Suite name (default agent-hub).'), limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Runs to return (default 1).' } }),
+    description: 'Latest published test runs: suite agent-hub (pnpm typecheck + vitest) or cargo (clippy + cargo test --workspace of the Rust crates, any commit). Commit, counts, typecheck (clippy for cargo), failures. Newest first.',
+    inputSchema: obj({ suite: str('Suite name: agent-hub (pnpm typecheck + vitest, default) or cargo (cargo clippy -D warnings as typecheck + cargo test --workspace, run isolated: no secrets, no network).'), limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Runs to return (default 1).' } }),
     run: async (ctx, a) => {
       const suite = optArg(a, 'suite', /^[a-z][a-z0-9-]{1,40}$/) ?? 'agent-hub';
       const limit = typeof a.limit === 'number' ? a.limit : 1;
@@ -135,6 +165,45 @@ const TOOLS: ToolDef[] = [
       if (!res.ok) throw new ToolError(`github answered ${res.status}`);
       const list = (await res.json()) as { sha: string; commit: { message: string; author: { date: string } } }[];
       return list.map((c) => ({ sha: c.sha, date: c.commit.author.date, subject: c.commit.message.split('\n')[0] }));
+    },
+  },
+  {
+    name: 'repo_pull',
+    description: `One pull request of ${REPO}: title, state, merged, head and base commits, description, and the files it changes (status, line counts, patch excerpt).`,
+    inputSchema: obj({ number: { type: 'integer', minimum: 1, description: 'Pull request number, e.g. 65.' } }, ['number']),
+    run: async (ctx, a) => {
+      const n = typeof a.number === 'number' && Number.isInteger(a.number) && a.number > 0 && a.number < 1e7 ? a.number : 0;
+      if (!n) throw new ToolError('invalid number');
+      const res = await github(ctx, `https://api.github.com/repos/${REPO}/pulls/${n}`);
+      if (res.status === 404) throw new ToolError(`no pull request #${n}`);
+      if (!res.ok) throw new ToolError(`github answered ${res.status}`);
+      const pr = (await res.json()) as GhPull;
+      const files = await github(ctx, `https://api.github.com/repos/${REPO}/pulls/${n}/files?per_page=100`);
+      return {
+        number: n,
+        title: pr.title,
+        state: pr.state,
+        merged: pr.merged ?? Boolean(pr.merged_at),
+        merged_at: pr.merged_at ?? null,
+        merge_commit: pr.merge_commit_sha ?? null,
+        head: { ref: pr.head?.ref, sha: pr.head?.sha },
+        base: { ref: pr.base?.ref, sha: pr.base?.sha },
+        body: (pr.body ?? '').slice(0, 20_000),
+        files: files.ok ? changed((await files.json()) as GhFile[]) : { error: `github answered ${files.status}` },
+      };
+    },
+  },
+  {
+    name: 'repo_commit',
+    description: `One commit of ${REPO} (full or short sha): message, author date, parents and the files it changes (status, line counts, patch excerpt).`,
+    inputSchema: obj({ sha: str('Commit sha, e.g. f241daf.') }, ['sha']),
+    run: async (ctx, a) => {
+      const sha = arg(a, 'sha', /^[0-9a-f]{7,40}$/);
+      const res = await github(ctx, `https://api.github.com/repos/${REPO}/commits/${sha}`);
+      if (res.status === 404 || res.status === 422) throw new ToolError(`no commit ${sha}`);
+      if (!res.ok) throw new ToolError(`github answered ${res.status}`);
+      const c = (await res.json()) as { sha: string; commit: { message: string; author: { date: string } }; parents?: { sha: string }[]; files?: GhFile[] };
+      return { sha: c.sha, date: c.commit.author.date, message: c.commit.message.slice(0, 20_000), parents: (c.parents ?? []).map((p) => p.sha), files: changed(c.files ?? []) };
     },
   },
   {
