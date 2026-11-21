@@ -246,6 +246,11 @@ token and setup, e.g. E-Invoice `/agent/bootstrap/{token}/dl/{code}`) links
 the dl code. `boot`/`alt` must be `https://` on a host under `pms.id.vn` or `mmsolutions.vn`
 (`BOOT_HOST_SUFFIXES`), with at most a plain query (e.g. `?channel=canary`), no port or quotes; any other link shows "Liên kết cài đặt không hợp
 lệ" and no command, so a crafted link cannot put a foreign script on the hub's page.
+A product whose script is safe under `iex` (turns TLS 1.2 on itself, no `param()` block) adds `&irm=1`
+(`productDeployUrl({ irm: true })`): the page then shows `irm <boot> | iex` (or the `alt` URL), and a
+folded "Máy cũ? dùng lệnh này" row with its own copy button keeps the long TLS 1.2 + `WebClient` line
+for Windows Server 2012 R2/2016 without TLS 1.2 or PowerShell 2.0. Any other `irm` value, or none,
+keeps the long line only (RT-0461).
 
 The code stays in the URL fragment (never sent in a request line or logged) and in POST bodies; the
 status answers only for the machine that used that code (host, version, modules, self-test counts:

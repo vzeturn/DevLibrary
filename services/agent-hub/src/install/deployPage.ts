@@ -50,19 +50,39 @@ export function bootCommand(url: string): string {
 }
 
 /**
+ * The short line for a product that vouches its script runs under `iex` (`#irm=1`: it turns TLS 1.2 on
+ * itself and has no `param()` block). Needs PowerShell 3.0+ with TLS 1.2 available; older machines use
+ * {@link bootCommand}.
+ */
+export function irmCommand(url: string): string {
+  return 'irm ' + url + ' | iex';
+}
+
+/**
+ * The commands the page shows for a product script: the main line, and for `irm=1` the
+ * {@link bootCommand} fallback for old machines (Windows Server 2012 R2/2016 without TLS 1.2, PowerShell 2.0).
+ * The page's inline `commands()` mirrors it (tested on the rendered page).
+ */
+export function productCommands(url: string, irm: boolean): { main: string; legacy: string } {
+  const legacy = bootCommand(url);
+  return irm ? { main: irmCommand(url), legacy } : { main: legacy, legacy: '' };
+}
+
+/**
  * The page for a product whose console has its own install script (it carries that product's
  * one-time token and setup): `code` is the dl-agent code the script enrols with (for the live
  * status), `boot` the script, `alt` an optional variant for SQL Server on another machine.
  */
 export function productDeployUrl(
   origin: string,
-  p: { code?: string; boot: string; alt?: string; product?: string },
+  p: { code?: string; boot: string; alt?: string; product?: string; irm?: boolean },
 ): string {
   const q = new URLSearchParams();
   if (p.code) q.set('code', p.code);
   q.set('boot', p.boot);
   if (p.alt) q.set('alt', p.alt);
   if (p.product) q.set('p', p.product);
+  if (p.irm) q.set('irm', '1');
   return `${origin}/deploy#${q.toString()}`;
 }
 
@@ -100,6 +120,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 details{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 summary{cursor:pointer;font-weight:600} details ul{margin:8px 0 0;padding-left:20px;color:var(--muted)}
 form{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px} input{flex:1 1 200px;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-height:44px}
+details.legacy{margin-top:12px;padding:10px 14px} details.legacy .cmd{margin-top:8px}
 .opt:not([hidden]){display:flex;gap:8px;align-items:center;margin-top:10px;cursor:pointer}.opt input{width:18px;height:18px;margin:0;flex:none}.small{font-size:13px;margin:8px 0 0}
 @media (max-width:560px){pre{max-height:none}.cmd button{flex:1 1 100%}}
 [hidden]{display:none!important} .muted{color:var(--muted)} kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}`;
@@ -129,6 +150,10 @@ const BODY = `
       <div class="cmd"><pre id="cmd" aria-label="Lệnh cài đặt"></pre><button type="button" id="copy">Sao chép lệnh</button></div>
       <p class="muted small" id="source" hidden></p>
       <label class="muted opt" id="altrow" hidden><input type="checkbox" id="alton"> SQL Server nằm trên máy khác (không phải máy đang cài)</label>
+      <details class="legacy" id="legacy" hidden><summary>Máy cũ? dùng lệnh này</summary>
+        <p class="muted small">Windows Server 2012 R2/2016 chưa bật TLS 1.2, hoặc PowerShell 2.0: lệnh này tự bật TLS 1.2 rồi tải bằng WebClient.</p>
+        <div class="cmd"><pre id="cmdold" aria-label="Lệnh cài đặt cho máy cũ"></pre><button type="button" id="copyold">Sao chép lệnh</button></div>
+      </details>
     </div></li>
     <li class="step" id="s3"><span class="num">3</span><div class="body">
       <h2>Chờ máy kết nối</h2>
@@ -160,7 +185,11 @@ const SCRIPT = `
   var safeBootUrl=${safeBootUrl.toString()};
   var boot=safeBootUrl(hp.get('boot'),SUFFIXES), alt=boot?safeBootUrl(hp.get('alt'),SUFFIXES):'';
   var badBoot=!!hp.get('boot')&&!boot;
+  var irm=hp.get('irm')==='1';
   function bootLine(u){return ${JSON.stringify(bootCommand(BOOT_SLOT))}.split('${BOOT_SLOT}').join(u)}
+  function irmLine(u){return ${JSON.stringify(irmCommand(BOOT_SLOT))}.split('${BOOT_SLOT}').join(u)}
+  // Same result as productCommands(u, irm).
+  function commands(u){return irm?{main:irmLine(u),legacy:bootLine(u)}:{main:bootLine(u),legacy:''}}
   var timer=null, started=Date.now();
   function show(id,on){$(id).hidden=!on}
   function step(n,cls){$('s'+n).className='step '+cls}
@@ -171,7 +200,7 @@ const SCRIPT = `
     if(badBoot){show('steps',false);show('help',false);banner('bad','Liên kết cài đặt không hợp lệ. Mở lại nút "Triển khai agent" trong console sản phẩm.');return}
     if(boot){
       $('source').textContent='Lệnh tải bộ cài từ '+new URL(boot).host+' (console sản phẩm).';show('source',true);
-      var pick=function(){$('cmd').textContent=bootLine($('alton').checked&&alt?alt:boot)};
+      var pick=function(){var c=commands($('alton').checked&&alt?alt:boot);$('cmd').textContent=c.main;$('cmdold').textContent=c.legacy;show('legacy',!!c.legacy)};
       if(alt){show('altrow',true);$('alton').addEventListener('change',pick)}
       pick();
     } else { $('cmd').textContent=TEMPLATE.split('${CODE_SLOT}').join(code) }
@@ -181,12 +210,15 @@ const SCRIPT = `
     $('spin').hidden=true; $('s3').querySelector('h2').textContent='Xem kết quả trong console';
     $('state').textContent='Lệnh chạy xong (báo "Hoàn tất") thì quay lại console sản phẩm: agent hiện là đã kết nối.';
   }
-  $('copy').addEventListener('click',function(){
-    var t=$('cmd').textContent, b=$('copy');
-    var done=function(){b.textContent='Đã sao chép ✓';step(1,'done');step(2,'active');setTimeout(function(){b.textContent='Sao chép lệnh'},2500)};
-    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,function(){selectCmd()})}else{selectCmd()}
-  });
-  function selectCmd(){var r=document.createRange();r.selectNodeContents($('cmd'));var s=getSelection();s.removeAllRanges();s.addRange(r)}
+  function copyFrom(pre,btn){
+    $(btn).addEventListener('click',function(){
+      var t=$(pre).textContent, b=$(btn);
+      var done=function(){b.textContent='Đã sao chép ✓';step(1,'done');step(2,'active');setTimeout(function(){b.textContent='Sao chép lệnh'},2500)};
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,function(){selectCmd(pre)})}else{selectCmd(pre)}
+    });
+  }
+  copyFrom('cmd','copy'); copyFrom('cmdold','copyold');
+  function selectCmd(id){var r=document.createRange();r.selectNodeContents($(id));var s=getSelection();s.removeAllRanges();s.addRange(r)}
   $('codeform').addEventListener('submit',function(e){e.preventDefault();var v=$('codein').value.trim();if(CODE_RE.test(v)){location.hash='code='+encodeURIComponent(v.toUpperCase());start(v)}else{$('codein').setAttribute('aria-invalid','true')}});
   function fmtTime(ts){return new Date(ts*1000).toLocaleString('vi-VN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'})}
   function render(s){
