@@ -104,7 +104,13 @@ not ship its log anywhere. Reports never carry it.
 2. Stop and remove the old service: `sc stop SmilePmsDeviceAgent`, `sc delete SmilePmsDeviceAgent`.
    Keep `C:\Program Files\SmilePms\DeviceAgent` (the appsettings files) and
    `%ProgramData%\SmilePms\DeviceAgent` (the token file and the outbox).
-3. Enable the module: `modules.pms-device.enabled = true`, with `appsettings_dir` only when the
+3. Enrol it when the PC has no DeviceAgent appsettings yet: `dl-agent pms-device-enroll --api-url
+   https://<pms api>` (optional `--agent-id`, `--appsettings-dir`, `--token-file`, `--force`; token
+   from `DL_AGENT_PMS_DEVICE_TOKEN` or generated). It writes `Agent:ApiBaseUrl`, `Agent:AgentId` and
+   `Agent:TokenFile`, and prints `sha256=<hex>` of the token: register `{"agentId","workstation","sha256"}`
+   in the PMS (`DEVICE_AGENT_TOKENS`). The token is never printed.
+   An `appsettings.{Environment}.json` that sets `Agent:*` overrides what the tool writes.
+   Enable the module: `modules.pms-device.enabled = true`, with `appsettings_dir` only when the
    old agent was installed elsewhere and `overrides` for what its service environment set.
 4. Check `pms-device.status`: the detail reads `polling <url> as <agent id> (<adapter>)` and
    `outbox_pending` is 0 once the old results are sent. Do not run both: two agents with one

@@ -24,6 +24,7 @@ fn main() {
         .tool(dl_agent_pms::pms_enroll_tool())
         .selftest(dl_agent_pms::pms_site_selftest())
         .module(dl_agent_pms_device::pms_device_module())
+        .tool(dl_agent_pms_device::pms_device_enroll_tool())
         .selftest(dl_agent_pms_device::pms_device_selftest())
         .module(dl_agent_hotellink::hotellink_module())
         .tool(dl_agent_hotellink::hl_enroll_tool())

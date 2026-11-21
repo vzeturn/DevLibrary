@@ -19,6 +19,8 @@ pub mod contracts;
 pub mod module;
 pub mod native;
 pub mod queue;
+pub mod tools;
 
 pub use module::selftest::pms_device_selftest;
 pub use module::{Hooks, NAME, PmsDeviceModule, pms_device_module, pms_device_module_with};
+pub use tools::pms_device_enroll_tool;

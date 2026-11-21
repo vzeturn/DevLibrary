@@ -78,19 +78,22 @@ export function attachArgv(m: DemoModule, options: Record<string, string>, flags
 }
 
 /**
- * The module's configured directory as a tool flag, so the tool writes where the module reads. Nothing
- * when the module has no such key, the key is unset or empty, or the value is not one plain line (CR, LF
- * or NUL): the tool then keeps its default directory, as before.
+ * The module's configured files and directories as tool flags, so the tool writes where the module reads.
+ * A key that is missing, unset, empty or not one plain line (CR, LF or NUL) is skipped on its own: the
+ * tool then keeps its default for that one.
  */
 export function dirArgv(m: DemoModule, config: unknown): string[] {
-  if (!m.dir || !config || typeof config !== 'object') return [];
+  if (m.dirs.length === 0 || !config || typeof config !== 'object') return [];
   const mods = (config as { modules?: unknown }).modules;
   const mod = mods && typeof mods === 'object' ? (mods as Record<string, unknown>)[m.module] : undefined;
-  const raw = mod && typeof mod === 'object' ? (mod as Record<string, unknown>)[m.dir.key] : undefined;
-  if (typeof raw !== 'string') return [];
-  const dir = raw.trim();
-  if (dir === '' || dir.length > 2048 || /[\r\n\0]/.test(dir)) return [];
-  return [m.dir.flag, dir];
+  if (!mod || typeof mod !== 'object') return [];
+  return m.dirs.flatMap((d) => {
+    const raw = (mod as Record<string, unknown>)[d.key];
+    if (typeof raw !== 'string') return [];
+    const dir = raw.trim();
+    if (dir === '' || dir.length > 2048 || /[\r\n\0]/.test(dir)) return [];
+    return [d.flag, dir];
+  });
 }
 
 /** The secret variables, checked against the module's table row. */
@@ -128,7 +131,12 @@ export async function remoteAttach(env: Env, agentId: string, body: RemoteAttach
   const version = changed || !current ? await putConfig(env.DB, agent.id, JSON.stringify(merged), now) : current.version;
 
   if (body.external_id) {
-    await upsertProductLink(env.DB, { product: m.module, external_id: body.external_id, tenant_id: agent.tenant_id, agent_id: agent.id, site_id: agent.site_id }, now);
+    await upsertProductLink(
+      env.DB,
+      { product: m.module, external_id: body.external_id, tenant_id: agent.tenant_id, agent_id: agent.id, site_id: agent.site_id },
+      now,
+      body.reenroll,
+    );
   }
   if (!m.setup) return { agent_id: agent.id, module: m.module, config_version: version, command: null };
 

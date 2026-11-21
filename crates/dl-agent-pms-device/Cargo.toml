@@ -14,6 +14,8 @@ readme = "README.md"
 dl-agent.workspace = true
 dl-log.workspace = true
 dl-json.workspace = true
+dl-cli.workspace = true
+dl-rand.workspace = true
 dl-http.workspace = true
 dl-uuid.workspace = true
 dl-time.workspace = true
@@ -25,3 +27,6 @@ dl-winos.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dependencies]
+dl-winsvc.workspace = true

@@ -23,4 +23,6 @@ pub use reader::{
 pub use timespan::{TimeSpan, TimeSpanParseError};
 pub use validator::{MAX_COMMAND_TIMEOUT, ValidationErrors, validate};
 
+pub(crate) use validator::{api_base_url_error, is_valid_agent_id};
+
 pub(crate) use dotnet::eq_ignore_case;

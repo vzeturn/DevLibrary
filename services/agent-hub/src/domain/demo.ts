@@ -47,11 +47,11 @@ export interface DemoModule {
   /** The flag that enrols again over an existing enrolment (another tenant), null when none. */
   reenroll: string | null;
   /**
-   * Remote attach only: the module's config key naming the directory the module reads its enrolment
-   * from, and the tool flag that makes the tool write there (else it writes to its own default).
-   * Null for a module that enrols into the agent data dir.
+   * Remote attach only: the module's config keys naming the files or directories the module reads its
+   * enrolment from, each with the tool flag that makes the tool write there (else it writes to its own
+   * default). Empty for a module that enrols into the agent data dir.
    */
-  dir: DemoDir | null;
+  dirs: DemoDir[];
   note: string;
 }
 
@@ -74,7 +74,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_EINVOICE_URL', '--platform-url', 'E-Invoice platform origin')],
     flags: [FORCE],
     reenroll: '--force',
-    dir: { key: 'config_dir', flag: '--config-dir' },
+    dirs: [{ key: 'config_dir', flag: '--config-dir' }],
     note: 'SQL login from MMEI_SQL_HOST/USER/PASSWORD/AUTH when set, else the tool defaults',
   },
   {
@@ -85,7 +85,10 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_PMS_URL', '--cloud-url', 'PMS cloud origin')],
     flags: [FORCE],
     reenroll: '--force',
-    dir: null,
+    dirs: [
+      { key: 'config_path', flag: '--config' },
+      { key: 'state_dir', flag: '--state-dir' },
+    ],
     note: 'the module redeems the code within 30 s',
   },
   {
@@ -99,7 +102,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_ARRIVAL_URL', '--cloud-url', 'Check-In cloud origin')],
     flags: [FORCE],
     reenroll: '--force',
-    dir: { key: 'install_dir', flag: '--install-dir' },
+    dirs: [{ key: 'install_dir', flag: '--install-dir' }],
     note: '',
   },
   {
@@ -113,7 +116,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_MEMBERSHIP_URL', '--hub-url', 'Membership hub origin')],
     flags: [FORCE],
     reenroll: '--force',
-    dir: { key: 'program_data_dir', flag: '--config-dir' },
+    dirs: [{ key: 'program_data_dir', flag: '--config-dir' }],
     note: '',
   },
   {
@@ -132,7 +135,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     ],
     flags: [FORCE],
     reenroll: '--force',
-    dir: null,
+    dirs: [],
     note: '',
   },
   {
@@ -143,7 +146,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [o('DL_AGENT_DEMO_BACKUP_URL', '--hub-url', 'SRBackup hub origin')],
     flags: [FORCE],
     reenroll: '--force',
-    dir: null,
+    dirs: [],
     note: '',
   },
   {
@@ -161,19 +164,22 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     ],
     flags: [{ flag: '--sql-admin-saved', what: 'use the SQL login dl-agent saved in sql.json as the SQL administrator' }],
     reenroll: null,
-    dir: null,
+    dirs: [],
     note: 'needs a dl-agent build that reads DL_AGENT_PDA_CODE (RT-0261)',
   },
   {
     module: 'pms-device',
     product: 'SMILE PMS devices',
-    setup: null,
-    secrets: [],
-    options: [],
-    flags: [],
-    reenroll: null,
-    dir: null,
-    note: 'no enrol step: reads the DeviceAgent appsettings and token file already on the PC',
+    setup: 'pms-device-enroll',
+    secrets: [s('DL_AGENT_DEMO_PMS_DEVICE_TOKEN', 'DL_AGENT_PMS_DEVICE_TOKEN', 'device agent token (else generated; register its sha256 in the PMS)', false)],
+    options: [
+      o('DL_AGENT_DEMO_PMS_DEVICE_URL', '--api-url', 'PMS API origin'),
+      o('DL_AGENT_DEMO_PMS_DEVICE_AGENT_ID', '--agent-id', 'device agent id (default: computer name)', false),
+    ],
+    flags: [FORCE],
+    reenroll: '--force',
+    dirs: [{ key: 'appsettings_dir', flag: '--appsettings-dir' }],
+    note: 'writes AgentId, TokenFile and ApiBaseUrl; prints the token sha256 to register in the PMS',
   },
   {
     module: 'speaker',
@@ -183,7 +189,7 @@ export const DEMO_MODULES: readonly DemoModule[] = [
     options: [],
     flags: [],
     reenroll: null,
-    dir: null,
+    dirs: [],
     note: 'no enrol step: uses the pda-sync identity',
   },
 ];

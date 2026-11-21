@@ -34,16 +34,8 @@ impl std::error::Error for ValidationErrors {}
 pub fn validate(o: &AgentOptions) -> Result<(), ValidationErrors> {
     let mut errors = Vec::new();
 
-    match api_url(&o.api_base_url) {
-        None => errors.push("Agent:ApiBaseUrl must be an absolute URL".to_owned()),
-        Some((scheme, loopback)) => {
-            if !(scheme == "https" || scheme == "http" && loopback) {
-                errors.push(
-                    "Agent:ApiBaseUrl must use https (plain http is allowed only for loopback)"
-                        .to_owned(),
-                );
-            }
-        }
+    if let Some(e) = api_base_url_error(&o.api_base_url) {
+        errors.push(e);
     }
 
     if !agent_id_matches(&o.agent_id) {
@@ -82,6 +74,24 @@ pub fn validate(o: &AgentOptions) -> Result<(), ValidationErrors> {
     } else {
         Err(ValidationErrors(errors))
     }
+}
+
+/// The `Agent:ApiBaseUrl` rule alone: an absolute URL, https (http only for loopback).
+pub(crate) fn api_base_url_error(url: &str) -> Option<String> {
+    match api_url(url) {
+        None => Some("Agent:ApiBaseUrl must be an absolute URL".to_owned()),
+        Some((scheme, loopback)) => {
+            (!(scheme == "https" || scheme == "http" && loopback)).then(|| {
+                "Agent:ApiBaseUrl must use https (plain http is allowed only for loopback)"
+                    .to_owned()
+            })
+        }
+    }
+}
+
+/// The `Agent:AgentId` rule alone.
+pub(crate) fn is_valid_agent_id(id: &str) -> bool {
+    agent_id_matches(id)
 }
 
 /// `^[A-Za-z0-9_-]{1,64}$` with .NET semantics: `$` also matches before one final `\n`, so

@@ -179,16 +179,19 @@ name = "dl-agent-pms-device"
 version = "0.2.1"
 dependencies = [
  "dl-agent",
+ "dl-cli",
  "dl-encoding",
  "dl-hash",
  "dl-http",
  "dl-json",
  "dl-log",
  "dl-pcsc",
+ "dl-rand",
  "dl-serial",
  "dl-time",
  "dl-uuid",
  "dl-winos",
+ "dl-winsvc",
 ]
 
 [[package]]

@@ -96,9 +96,13 @@ export async function writeAttach(db: D1Database, w: AttachWrite): Promise<Attac
   return { ok: w.body === null || version !== null, version };
 }
 
-/** Records (or moves) the link of a product tenant to an agent, outside an attach code (remote attach). */
-export async function upsertProductLink(db: D1Database, l: Omit<ProductLinkRow, 'created_at'>, now: number): Promise<void> {
-  await db
+/**
+ * Records (or moves) the link of a product tenant to an agent, outside an attach code (remote attach).
+ * With `replaceOthers` (re-enrol onto a new tenant) the agent's other links of the same product go in the
+ * same batch, so the old tenant link does not linger.
+ */
+export async function upsertProductLink(db: D1Database, l: Omit<ProductLinkRow, 'created_at'>, now: number, replaceOthers = false): Promise<void> {
+  const upsert = db
     .prepare(
       `INSERT INTO product_links (product, external_id, tenant_id, agent_id, site_id, created_at)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -107,6 +111,13 @@ export async function upsertProductLink(db: D1Database, l: Omit<ProductLinkRow, 
          created_at = CASE WHEN product_links.agent_id = excluded.agent_id
                            THEN product_links.created_at ELSE excluded.created_at END`,
     )
-    .bind(l.product, l.external_id, l.tenant_id, l.agent_id, l.site_id, now)
-    .run();
+    .bind(l.product, l.external_id, l.tenant_id, l.agent_id, l.site_id, now);
+  if (!replaceOthers) {
+    await upsert.run();
+    return;
+  }
+  const dropOthers = db
+    .prepare('DELETE FROM product_links WHERE agent_id = ?1 AND product = ?2 AND external_id <> ?3')
+    .bind(l.agent_id, l.product, l.external_id);
+  await db.batch([dropOthers, upsert]);
 }

@@ -175,7 +175,7 @@ An agent installed once takes every further product from the hub; nobody goes to
 1. enables `modules.<module>` in the agent's config (new version; other modules and keys stay),
    and records `product_links(module, external_id)` when `external_id` is given;
 2. for a module with an enrol tool (the demo bench table, `services/agent-hub/src/domain/demo.ts`:
-   `einvoice-enroll`, `pms-enroll`, `arrival-enroll`, `membership-enroll`, `hl-enroll`,
+   `einvoice-enroll`, `pms-enroll`, `pms-device-enroll`, `arrival-enroll`, `membership-enroll`, `hl-enroll`,
    `backup-enroll`, `pda-enroll`), queues one command
    `{kind:"attach", args:{module, tool, argv:[flag, value, …], env:{DL_AGENT_…: code}}}`.
    `secret` must name only the variables the tool reads and `options` only its flags; the
@@ -183,10 +183,12 @@ An agent installed once takes every further product from the hub; nobody goes to
    (`--force`, pda-sync `--sql-admin-saved`), appended after the options; `reenroll: true`
    adds the row's re-enrol flag (`--force`) and is refused (`reenroll_not_supported`) for a
    module without one. For einvoice (`config_dir` → `--config-dir`), arrival (`install_dir` →
-   `--install-dir`) and membership (`program_data_dir` → `--config-dir`) the hub reads that key
-   from the agent's `modules.<module>` config and, when it is a non-empty one-line string,
-   appends the flag so the tool writes to the directory the module reads (key unset: the tool's
-   default). The secret is stored apart from `args`, never shown by
+   `--install-dir`), membership (`program_data_dir` → `--config-dir`), pms-site (`config_path` →
+   `--config` and `state_dir` → `--state-dir`) and pms-device (`appsettings_dir` →
+   `--appsettings-dir`) the hub reads those keys from the agent's `modules.<module>` config and,
+   for each that is a non-empty one-line string, appends the flag so the tool writes where the
+   module reads (key unset: the tool's default). With `reenroll` and an `external_id`, the
+   agent's other `product_links` of the same product are removed in the same write. The secret is stored apart from `args`, never shown by
    `GET /admin/commands` (only `has_secret`) or the audit trail, added to `args.env` when the
    agent takes the command and cleared from the hub in the same step (or at expiry);
 3. when the agent answers the `attach` command `ok`, queues `restart_module` for the module.
@@ -196,7 +198,7 @@ as a child process with `env` added, no console input (a tool that would prompt 
 most 10 minutes. It refuses a tool this build does not register, `--data` in `argv`, a line
 break in an argument and any variable not named `DL_AGENT_*`. The answer is
 `"<module> <tool>: exit <n>\n<output>"` with every secret value replaced by `***`.
-Modules with no enrol step (`pms-device`, `speaker`) are only enabled in the config. Agents
+A module with no enrol step (`speaker`) is only enabled in the config. Agents
 older than 1.3.17 answer `sys: unknown command attach` (update them first: `update_now`).
 
 ## 5. Releases, channels and the canary gate
