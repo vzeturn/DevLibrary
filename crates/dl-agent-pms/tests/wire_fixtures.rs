@@ -121,12 +121,15 @@ fn manifest_codes_match_the_agent() {
 fn hello_ops_and_replay_fixtures() {
     match wire::decode_json(&read("hello-ops.json")).unwrap() {
         Frame::Hello(h) => {
+            // The fixture is SMILE-PMS's sample hello (a byte copy); this build advertises
+            // every op it names, and more as the manifest grows.
             let m = dl_agent_pms::ops::Manifest::load().unwrap();
-            assert_eq!(
-                h.ops,
-                Some(m.implemented_ops()),
-                "this build advertises the fixture's ops"
-            );
+            let ours = m.implemented_ops();
+            let theirs = h.ops.expect("hello-ops.json carries ops");
+            assert!(!theirs.is_empty());
+            for op in &theirs {
+                assert!(ours.contains(op), "this build advertises {op}: {ours:?}");
+            }
             assert_eq!(h.contract_max, m.contract_max());
             assert_eq!(h.schema_version, 0);
         }

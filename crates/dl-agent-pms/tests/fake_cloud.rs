@@ -58,6 +58,8 @@ fn enrolls_runs_ops_and_reconnects_after_a_close() {
         s.state == ModuleState::Running
             && metric(s, "ops_ok") == Some(2)
             && metric(s, "reconnects") == Some(1)
+            // The worker counts the op (ops_ok) before it ends (ops_inflight): wait for both.
+            && metric(s, "ops_inflight") == Some(0)
     });
     assert_eq!(st.state, ModuleState::Running, "{st:?}");
     assert_eq!(st.detail, format!("connected to {}", cloud.base));
@@ -200,7 +202,19 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
         .iter()
         .filter_map(Value::as_str)
         .collect();
-    assert_eq!(ops, ["fo.hotelDate.get@1"]);
+    assert_eq!(
+        ops,
+        [
+            "fo.arrivals.expected@1",
+            "fo.availability.chart@1",
+            "fo.clerk.login@1",
+            "fo.clerk.rights.get@1",
+            "fo.departures.expected@1",
+            "fo.hotelDate.get@1",
+            "fo.inhouse.list@1",
+            "fo.reservation.list@1",
+        ]
+    );
 
     let f = &seen.result_frames;
     assert_eq!(f.len(), 4, "{f:?}");
@@ -223,7 +237,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
     assert_eq!(journal.get("entries").and_then(Value::as_u64), Some(1));
     assert_eq!(journal.get("full").and_then(Value::as_bool), Some(false));
     let ops = status.get("ops").and_then(Value::as_array).expect("ops");
-    assert_eq!(ops.len(), 1);
+    assert_eq!(ops.len(), 8);
 
     // An op for a database outside SMILE_FO/POS/BO is a bad frame: the agent closes.
     assert!(r.command("pms.reconnect").ok);

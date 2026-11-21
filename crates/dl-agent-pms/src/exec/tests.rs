@@ -88,6 +88,38 @@ fn args_must_match_the_plan() {
 }
 
 #[test]
+fn clerk_login_binds_its_constant_and_never_echoes_secrets() {
+    let m = Manifest::load().unwrap();
+    let op = m.lookup("fo.clerk.login").unwrap();
+    let args = |s: &str| json::parse(s.as_bytes()).unwrap();
+    let calls = bind_args(
+        op,
+        &args(r#"{"clerkId":"SML","passwordHash":"H4SH","todayPassword":"T0DAY"}"#),
+    )
+    .unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params.len(), 4);
+    // RT-0528: a refused arg names the arg and the rule, never the value.
+    for bad in [
+        r#"{"clerkId":"SML","passwordHash":"SECRET-HASH-0123456789-0123456789-0123456789-0123456789","todayPassword":"x"}"#,
+        r#"{"clerkId":"SML","passwordHash":"x","todayPassword":"SECRET-TODAY-0123456789"}"#,
+        r#"{"clerkId":"SML","passwordHash":{"v":"SECRET-OBJ"},"todayPassword":"x"}"#,
+        r#"{"clerkId":"SML","passwordHash":"x","todayPassword":"x","ComputerName":"SECRET-EXTRA"}"#,
+    ] {
+        let e = bind_args(op, &args(bad)).err().unwrap();
+        assert!(e.starts_with("invalid_args: "), "{e}");
+        assert!(!e.contains("SECRET"), "{e}");
+    }
+    let rights = m.lookup("fo.clerk.rights.get").unwrap();
+    assert_eq!(
+        bind_args(rights, &args(r#"{"clerkId":"SML"}"#))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn hotel_date_needs_a_row_with_a_date() {
     let row = |v: J| {
         let mut r = Row::new();

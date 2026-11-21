@@ -448,7 +448,43 @@ mod tests {
         assert!(m.allowed("gethoteldate1"));
         assert!(!m.allowed("MM_Op_CreateLog"));
         assert_eq!(m.contract_max(), 1);
-        assert_eq!(m.implemented_ops(), vec!["fo.hotelDate.get@1".to_owned()]);
+        assert_eq!(
+            m.implemented_ops(),
+            [
+                "fo.arrivals.expected@1",
+                "fo.availability.chart@1",
+                "fo.clerk.login@1",
+                "fo.clerk.rights.get@1",
+                "fo.departures.expected@1",
+                "fo.hotelDate.get@1",
+                "fo.inhouse.list@1",
+                "fo.reservation.list@1",
+            ]
+        );
+        // RT-0528: the clerk login is a keyless, non-idempotent write on vendor LogIn; its
+        // ComputerName is a manifest constant, the rest are caller args.
+        let login = m.lookup("fo.clerk.login").unwrap();
+        assert_eq!((login.kind.as_str(), login.idempotent), ("write", false));
+        assert_eq!(login.target_db.as_deref(), Some("SMILE_FO"));
+        assert_eq!(login.calls[0].proc_name, "LogIn");
+        let args: Vec<&str> = login.calls[0]
+            .params
+            .iter()
+            .map(|p| p.arg.as_str())
+            .collect();
+        assert_eq!(args, ["clerkId", "passwordHash", "todayPassword", ""]);
+        assert!(login.calls[0].params[3].has_value());
+        let rights = m.lookup("fo.clerk.rights.get").unwrap();
+        assert_eq!(rights.kind, "read");
+        assert_eq!(rights.calls[0].proc_name, "UGetUserPermission");
+        for p in [
+            "login",
+            "ugetuserpermission",
+            "availabilitychartnew",
+            "rptreservmasterlist",
+        ] {
+            assert!(m.allowed(p), "{p}");
+        }
         let hash = crate::sha256_hex(m.procs.join("\n").as_bytes());
         assert_eq!(m.allowlist_hash, hash);
     }

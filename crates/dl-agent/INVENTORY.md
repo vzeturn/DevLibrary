@@ -75,7 +75,7 @@ shared by every module on the site.
 - **pms-site**: WSS stream with JWT, allow-listed ops on SMILE_FO/SMILE_BO/SMILE_POS only (`target_db` per op,
   SMILE-only contract of SMILE-PMS ADR 2026-11-19), ≤ 8 ops in flight, deadlock retry, result caps, local op
   journal for request-key replay; settings from core `sql.json` (`databases.json` only as fallback); commands
-  `pms.status`, `pms.selftest`, `pms.op_dry_run`; first op `fo.hotelDate.get@1`. MM_PMS on site removed.
+  `pms.status`, `pms.selftest`, `pms.op_dry_run`; ops `fo.hotelDate.get@1`, the clerk login `fo.clerk.login@1` + `fo.clerk.rights.get@1` and five FO reads (RT-0528). MM_PMS on site removed.
   Bench end-to-end pending.
 - **pms-device**: claim/result polling 1 s with durable outbox, locks (LockSDK x86 → 32-bit helper process),
   ESC/POS TCP/serial/spooler, PC/SC, OPOS IDispatch, SAPI. Needs enrollment (today: manual token).
