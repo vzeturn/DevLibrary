@@ -140,7 +140,7 @@ impl SqliteOutbox {
         )
     }
 
-    fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
+    pub(super) fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
         sql::exec(
             db,
             "INSERT INTO meta(key,value) VALUES($k,$v) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

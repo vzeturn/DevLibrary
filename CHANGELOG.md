@@ -13,6 +13,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent: pda-sync re-stamps queued batches with the new agent id after `pda-enroll` changes the identity, so they are no longer refused (`Batch agent_id does not match`) and quarantined, and the recovery resnapshot after an identity change skips the 6 h cooldown (Muine Bay, RT-0450).
 - dl-agent: pda-sync skips orphan rows right away when the outbox is full but a few bytes under its cap, instead of after 30 minutes (RT-0442).
 - agent-hub: remote attach of `pms-site` passes the module's `config_path` as `--config` and `state_dir` as `--state-dir`, so `pms-enroll` writes where the module reads instead of the default `C:\ProgramData\SmilePMS\Agent` (RT-0422).
 - agent-hub: a remote attach with `reenroll: true` and a new `external_id` removes the agent's other `product_links` of that product, so the old tenant no longer lingers (RT-0422).
