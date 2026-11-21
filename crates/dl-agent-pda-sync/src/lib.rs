@@ -21,6 +21,8 @@ pub mod diagnostics;
 /// service, self-update and diagnostics bundle are dl-agent's.
 pub mod hosting;
 
+/// The cloud's `legacy.export` command: the migrate script's export and upload, run by the agent.
+pub mod legacy_export;
 /// The old SyncAgent's SQL login, for the installer (RT-0303).
 pub mod legacy_sql;
 /// The dl-agent module, its tools, self-test and hub commands.

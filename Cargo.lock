@@ -150,6 +150,7 @@ dependencies = [
  "dl-winos",
  "dl-winsvc",
  "dl-ws",
+ "dl-zip",
 ]
 
 [[package]]

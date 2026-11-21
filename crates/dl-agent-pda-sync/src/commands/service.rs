@@ -15,11 +15,13 @@ use super::verify::{VerifyCommandHandler, VerifyParts};
 use super::verify_manifest::HttpCloudManifestSource;
 use crate::bootstrap::{SqlAdminCredential, SqlOrderGrantsProbe};
 use crate::contracts::SyncCatalog;
+use crate::contracts::time::TimeZone;
 use crate::hosting::cli::Unhandled;
 use crate::hosting::host::AgentServices;
 use crate::hosting::services::{LoopService, ServiceError};
 use crate::outbox::CaptureStatus;
-use crate::reporting::{Logger, SiteEvents};
+use crate::reporting::site_event_store::DEFAULT_CAPACITY;
+use crate::reporting::{Logger, SiteEventStore, SiteEvents, SqliteSiteEventStore, Value};
 use crate::util::ctx::Ctx;
 
 /// `CommandService`: the command channel as a resilient loop (`Commands`).
@@ -126,10 +128,15 @@ pub fn build(
         log,
         repair,
     ));
-    let schema = Arc::new(TableSchemaGuard::new(events, log));
+    let schema = Arc::new(TableSchemaGuard::new(events.clone(), log));
+    let legacy_export = Arc::new(crate::legacy_export::LegacyExportCommandHandler::new(
+        legacy_export_env(s, events.clone()),
+        log,
+    ));
     let mut executor = SiteCommandExecutor::new(store, s.clock.clone(), log)
         .with_resnapshot(resnapshot)
         .with_verify(verify)
+        .with_legacy_export(legacy_export)
         .with_grants(grants.clone())
         .with_schema(schema);
     if let Some(n) = &extras.nudge {
@@ -151,6 +158,49 @@ pub fn build(
         Box::new(CommandService::new(channel)),
         Box::new(OrderGrantsService::new(grants)),
     ])
+}
+
+/// The environment of `legacy.export` (RT-0390): the site events go to the queue of the
+/// agent under the sources `legacy-export` and `legacy-upload`; when that queue cannot be
+/// opened they go through the host's reporter.
+fn legacy_export_env(
+    s: &AgentServices,
+    fallback: Arc<dyn SiteEvents>,
+) -> crate::legacy_export::LegacyExportEnv {
+    let queue: Option<Arc<dyn SiteEventStore>> = match SqliteSiteEventStore::try_open(
+        s.paths.events_db(),
+        DEFAULT_CAPACITY,
+    ) {
+        Ok(q) => Some(Arc::new(q)),
+        Err(error) => {
+            s.log.warn(
+                    "The site event queue {Path} could not be opened for legacy.export ({Error}); its events go through the agent's reporter",
+                    &[
+                        Value::from(s.paths.events_db().display().to_string()),
+                        Value::from(error),
+                    ],
+                );
+            None
+        }
+    };
+    let zone = crate::hosting::host::site_time_zone(s.options.site_time_zone.as_deref())
+        .unwrap_or_else(|_| TimeZone::local());
+    crate::legacy_export::production_env(crate::legacy_export::ProductionParts {
+        work_dir: s.paths.data_dir().join("legacy-export"),
+        identity: s.identity.clone(),
+        secrets: s.secrets.clone(),
+        http: s.http.clone(),
+        tokens: s.tokens.clone(),
+        clock: s.clock.clone(),
+        zone,
+        events: crate::legacy_export::events::queue_events_factory(
+            queue,
+            fallback,
+            s.log.clone(),
+            s.clock.clone(),
+        ),
+        exporter: format!("PdaSyncAgent {}", crate::hosting::agent_version()),
+    })
 }
 
 /// The [`RuntimeHooks::before_capture`](crate::hosting::host::RuntimeHooks) factory:
