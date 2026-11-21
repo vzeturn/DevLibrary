@@ -10,7 +10,8 @@ use capture_runner_support::*;
 use dl_agent_pda_sync::capture::status::{LEDGER_TAIL_JOB, MASTERS_JOB, OPEN_JOB};
 use dl_agent_pda_sync::capture::{
     BatchStore, CaptureError, CaptureSource, CaptureState, OPEN_STREAM, OutboxBatchStore,
-    SqliteCaptureState, StateFactory, ZoneFactory,
+    SqliteCaptureState, StateCommit, StateFactory, TEXT_REVISION, TEXT_REVISION_CURSOR,
+    ZoneFactory,
 };
 use dl_agent_pda_sync::config::{AgentError, RuntimeConfig, codes};
 use dl_agent_pda_sync::contracts::WireJson;
@@ -156,6 +157,74 @@ fn resumes_after_a_restart_without_resending_and_picks_up_what_changed_meanwhile
         "the open check did not change across the restart"
     );
     assert_eq!(queue.rows("DefRVCList").len(), 1);
+    should_be_contiguous_per_stream(&queue.batches());
+}
+
+/// ADR 0123: an agent updated from a build before text values lost their trailing spaces.
+#[test]
+fn a_state_from_before_the_text_revision_resends_its_ledger_history_once_and_nothing_else() {
+    let site = site();
+    let queue = Arc::new(MemoryBatchStore::default());
+    let state = one_state();
+    let first = runner(
+        &site,
+        state.clone(),
+        Arc::new(RecordingBlobStore::new(queued())),
+    );
+    let run = RunningCapture::start(&first, queue.clone(), config(fast_config()));
+    run.until(
+        || queue.rows("Invoice").len() == 2 && first.status().runs(LEDGER_TAIL_JOB) > 0,
+        "first run",
+    );
+    run.stop();
+    let shared = (state)().unwrap();
+    let bg = dl_agent_pda_sync::util::ctx::Ctx::background();
+    assert_eq!(
+        shared.get_cursor(TEXT_REVISION_CURSOR, &bg).unwrap(),
+        Some(TEXT_REVISION.to_owned()),
+        "a fresh state only records the revision"
+    );
+
+    let mut old = StateCommit::default();
+    old.cursors.insert(TEXT_REVISION_CURSOR, None);
+    shared.commit(&old, &bg).unwrap();
+
+    let second = runner(
+        &site,
+        state.clone(),
+        Arc::new(RecordingBlobStore::new(queued())),
+    );
+    let run = RunningCapture::start(&second, queue.clone(), config(fast_config()));
+    run.until(
+        || queue.rows("Invoice").len() == 4 && second.status().runs(MASTERS_JOB) > 0,
+        "history resent",
+    );
+    run.stop();
+    let third = runner(&site, state, Arc::new(RecordingBlobStore::new(queued())));
+    let run = RunningCapture::start(&third, queue.clone(), config(fast_config()));
+    run.until(
+        || third.status().runs(LEDGER_TAIL_JOB) > 0 && third.status().runs(MASTERS_JOB) > 0,
+        "third run",
+    );
+    run.stop();
+
+    let mut k = keys(&queue.batches(), "Invoice", "check_no");
+    k.sort();
+    assert_eq!(
+        k,
+        ["1", "1", "2", "2"],
+        "each closed check is re-sent exactly once"
+    );
+    assert_eq!(
+        queue.rows("DefRVCList").len(),
+        1,
+        "masters keep their shadow and correct themselves by diff"
+    );
+    assert_eq!(
+        queue.rows("TmpInvoice").len(),
+        1,
+        "open checks are compared in full on every poll"
+    );
     should_be_contiguous_per_stream(&queue.batches());
 }
 

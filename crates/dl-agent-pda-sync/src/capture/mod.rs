@@ -37,8 +37,10 @@ mod state_tests;
 mod strategy_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod text_revision_tests;
 
-pub use engine::{CaptureEngine, OPEN_STREAM};
+pub use engine::{CaptureEngine, OPEN_STREAM, TEXT_REVISION, TEXT_REVISION_CURSOR};
 pub use error::{CaptureError, ErrorKind, Result};
 pub use failure::{CaptureFailureInfo, classify as classify_failure, code_for as sql_code_for};
 pub use governor::{CycleDeadline, PollBudget, PollGovernor};

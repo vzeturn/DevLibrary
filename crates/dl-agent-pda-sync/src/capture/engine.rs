@@ -8,7 +8,7 @@ use super::context::CaptureContext;
 use super::error::Result;
 use super::governor::CycleDeadline;
 use super::key_repair::{KeyRepairCapture, KeyRepairList};
-use super::ledger::{LedgerCapture, reopen_exclude};
+use super::ledger::{LedgerCapture, reopen_exclude, watermark_cursor};
 use super::master::MasterScanCapture;
 use super::open_check::{self, OpenCheckCapture};
 use super::options::CaptureOptions;
@@ -26,6 +26,13 @@ use crate::util::ctx::Ctx;
 
 /// Wire stream shared by every open-check table, so one check's changes stay in order.
 pub const OPEN_STREAM: &str = open_check::STREAM;
+
+/// Cursor holding the text revision the local capture state was built with (ADR 0123).
+pub const TEXT_REVISION_CURSOR: &str = "mapper:text_rev";
+
+/// Revision 1: text values lose their trailing spaces
+/// ([`trim_fixed_width`](crate::contracts::mapping::transforms::trim_fixed_width)).
+pub const TEXT_REVISION: &str = "1";
 
 /// The capture engine.
 pub struct CaptureEngine {
@@ -225,5 +232,39 @@ impl CaptureEngine {
         }
         state.commit(&commit, ctx)?;
         Ok(true)
+    }
+
+    /// `TextUpgradeStreamsAsync` (ADR 0123): `None` when the local state already has the
+    /// current [`TEXT_REVISION`]. Otherwise the streams whose history must be sent again
+    /// after the mapper's text form changed: the ledger streams that were ever loaded,
+    /// because only their rows inside the rescan window are compared again. Masters and open
+    /// checks are compared in full on every scan, so they correct themselves and keep their
+    /// shadows (a master needs its old keys to send their tombstones). A state that never
+    /// loaded a ledger table answers an empty list.
+    pub fn text_upgrade_streams(&self, ctx: &Ctx) -> Result<Option<Vec<String>>> {
+        let state = &*self.cx.state;
+        if state.get_cursor(TEXT_REVISION_CURSOR, ctx)?.as_deref() == Some(TEXT_REVISION) {
+            return Ok(None);
+        }
+        let mut loaded = Vec::new();
+        for p in &self.plan.ledger {
+            for c in cursors_of(p).into_iter().chain([watermark_cursor(p)]) {
+                if state.get_cursor(&c, ctx)?.is_some() {
+                    loaded.push(p.name().to_owned());
+                    break;
+                }
+            }
+        }
+        Ok(Some(loaded))
+    }
+
+    /// `MarkTextRevisionAsync`: records that the local state follows the current
+    /// [`TEXT_REVISION`].
+    pub fn mark_text_revision(&self, ctx: &Ctx) -> Result<()> {
+        let mut commit = StateCommit::default();
+        commit
+            .cursors
+            .insert(TEXT_REVISION_CURSOR, Some(TEXT_REVISION.to_owned()));
+        self.cx.state.commit(&commit, ctx)
     }
 }

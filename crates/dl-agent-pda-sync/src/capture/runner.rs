@@ -273,6 +273,9 @@ fn restart_reason(
     Ok((ConfigKey::of(&config.current())? != *key).then_some("runtime config changed"))
 }
 
+#[path = "runner_resets.rs"]
+mod resets;
+
 fn distinct(items: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for s in items {
@@ -459,27 +462,7 @@ impl Shared {
             ],
         );
 
-        if queue.needs_resnapshot()? {
-            self.log.warn(
-                "Resnapshot requested: capture forgets what it sent and sends every row in scope again",
-                &[],
-            );
-            engine.reset(ctx)?;
-            queue.clear_needs_resnapshot()?;
-            // Pending targeted ones are covered too, or they would restart the session forever.
-            let streams = distinct(
-                engine
-                    .streams()
-                    .into_iter()
-                    .chain(queue.pending_stream_resnapshot()?),
-            );
-            queue.begin_stream_resnapshot(&streams)?;
-        } else {
-            let streams = queue.pending_stream_resnapshot()?;
-            if !streams.is_empty() {
-                self.reset_streams(&engine, &**queue, &streams, ctx)?;
-            }
-        }
+        self.session_resets(&engine, &**queue, ctx)?;
 
         if self.initial_load(&engine, &**queue, &**config, &key, ctx)? {
             queue.stream_resnapshot_captured()?;
@@ -630,34 +613,6 @@ impl Shared {
             }
         }
         false
-    }
-
-    /// Targeted resnapshot (ADR 0102): capture forgets what it sent for the pending streams
-    /// only. A stream the plan does not know turns it into a resnapshot of everything.
-    fn reset_streams(
-        &self,
-        engine: &CaptureEngine,
-        queue: &dyn BatchStore,
-        streams: &[String],
-        ctx: &Ctx,
-    ) -> Result<()> {
-        let joined = streams.join(", ");
-        if engine.reset_streams(streams, ctx)? {
-            self.log.info(
-                "Stream resnapshot: capture forgets what it sent for {Streams} and sends their rows again",
-                &[Value::from(joined)],
-            );
-            return queue.begin_stream_resnapshot(streams);
-        }
-        self.log.warn(
-            "Stream resnapshot of {Streams} names a stream this capture plan does not have ({Code}); sending every row in scope again instead",
-            &[Value::from(joined), Value::from(codes::SYNC_STREAM_RESNAPSHOT)],
-        );
-        engine.reset(ctx)?;
-        queue.begin_stream_resnapshot(&distinct(
-            engine.streams().into_iter().chain(streams.iter().cloned()),
-        ))?;
-        queue.clear_needs_resnapshot()
     }
 
     fn on_job_completed(
