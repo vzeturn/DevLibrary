@@ -13,22 +13,24 @@ log() { printf '{"ts":"%s","event":"%s","detail":"%s"}\n' "$(date -u +%FT%TZ)" "
 once() {
   ts=$(date -u +%Y%m%dT%H%M%SZ)
   f=$(mktemp /tmp/dl-vault-XXXXXX)
-  trap 'rm -f "$f"' EXIT
   if ! BAO_TOKEN=$BAO_BACKUP_TOKEN bao operator raft snapshot save "$f" >/dev/null 2>&1; then
+    rm -f "$f"
     log backup.snapshot_failed "sealed or token expired"
     return 1
   fi
+  size=$(wc -c <"$f")
+  # Same Cloudflare R2 object API as scripts/release/lib.sh. The token goes through a curl
+  # config on stdin, never on the command line.
   url="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/r2/buckets/$R2_BUCKET/objects/dl-vault/$ts.snap"
-  # The token goes through a curl config on stdin, never on the command line.
   if printf 'header = "Authorization: Bearer %s"\n' "$CLOUDFLARE_API_TOKEN" |
     curl -fsS -K - -X PUT --data-binary @"$f" "$url" >/dev/null; then
-    log backup.uploaded "dl-vault/$ts.snap $(wc -c <"$f") bytes"
+    rm -f "$f"
+    log backup.uploaded "dl-vault/$ts.snap $size bytes"
   else
+    rm -f "$f"
     log backup.upload_failed "dl-vault/$ts.snap"
     return 1
   fi
-  rm -f "$f"
-  trap - EXIT
 }
 
 case "${1:-once}" in

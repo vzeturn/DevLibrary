@@ -24,7 +24,20 @@ BAO_ADDR=https://dl-vault.fly.dev services/vault/scripts/bootstrap.sh           
 # backup loop: an R2-only Cloudflare token, the account id, the backup token from bootstrap.json
 fly secrets set -a dl-vault --stage CLOUDFLARE_API_TOKEN=... CF_ACCOUNT_ID=... BAO_BACKUP_TOKEN=...
 fly deploy -a dl-vault -c services/vault/fly.toml --remote-only --depot=false
+# every deploy or restart reseals the vault: unseal with two shares (stdin, not argv)
+jq -r '.unseal_keys_b64[0]' ~/.config/dl-vault/bootstrap.json | bao operator unseal -
+jq -r '.unseal_keys_b64[1]' ~/.config/dl-vault/bootstrap.json | bao operator unseal -
+BAO_BACKUP_TOKEN=... services/vault/scripts/backup.sh once   # or wait for the loop; check fly logs for backup.uploaded
 ```
+
+Bucket `dl-vault-backups` gets an R2 lifecycle rule that deletes objects after 30 days (about
+120 snapshots). The backup loop runs in the background of the machine's entrypoint. If it
+dies, `fly logs` stops showing `backup.uploaded`; a machine restart starts it again. Hub
+monitoring of the newest snapshot's age is part of S3.
+
+If `bootstrap.sh` stops after `operator init`, the file still holds the shares and the root
+token. Finish the remaining steps by hand with that token, then `bao token revoke -self` and
+remove `root_token` from the file.
 
 Then, from `bootstrap.json`: share 1 goes to the owner (offline), share 2 to the hub kit as
 `DL_VAULT_UNSEAL_2`, share 3 to the iMac at `~/.config/dl-vault/unseal-3`. The `hub_ai` and
@@ -33,8 +46,8 @@ has been placed.
 
 ## Operating it
 
-- **Sealed after a restart**: `bao operator unseal` twice with two different shares
-  (`BAO_ADDR=https://dl-vault.fly.dev`). `GET /v1/sys/health` answers `sealed: true` until then.
+- **Sealed after a restart or deploy**: `bao operator unseal -` twice, piping in two
+  different shares (`BAO_ADDR=https://dl-vault.fly.dev`). `GET /v1/sys/health` answers `sealed: true` until then.
 - **Login**: `bao write auth/approle/login role_id=... secret_id=...` returns a 1 h token
   (renewable to 4 h). Secret IDs expire after 90 days. To rotate one:
   `bao write -f auth/approle/role/<role>/secret-id`, then destroy the old accessor.
