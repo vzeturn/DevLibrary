@@ -165,7 +165,7 @@ impl ParentPendingTracker {
         let escalated = episode.escalated_at?;
         if outbox_full {
             Some("outbox_full")
-        } else if now.ticks_since(escalated) >= ticks(self.escalate_after) * 2 {
+        } else if now.ticks_since(escalated) >= ticks(self.escalate_after).saturating_mul(2) {
             Some("resend_overdue")
         } else {
             None
