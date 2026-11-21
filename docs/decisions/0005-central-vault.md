@@ -1,6 +1,7 @@
 # 0005. One OpenBao vault on Fly.io for the keys of Hub AI and Cloud AI
 
-- Status: accepted
+- Status: accepted; decision 4 and the `hub-ai` part of decision 5 superseded by
+  [ADR 0006](0006-vault-owner-held-seal.md)
 - Date: 2026-11-21
 - Scope: `services/vault` (new Fly app `dl-vault`), the Request Tracking hub (Hub AI) and cloud
   sessions (Cloud AI) as clients
