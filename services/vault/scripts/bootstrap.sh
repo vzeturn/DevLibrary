@@ -79,6 +79,7 @@ configure() {
   is=$(get "$bao" write -f -field=secret_id auth/approle/role/importer/secret-id)
   bt=$(get "$bao" token create -orphan -policy=backup -period=24h -field=token)
   tmp=$(mktemp "$dir/state.XXXXXX")
+  trap 'rm -f "$tmp"' EXIT # a temp copy may hold credentials: never leave it behind
   # Values reach jq through the environment, not argv; root_token is dropped in the same write.
   HR=$hr HS=$hs CR=$cr CS=$cs IR=$ir IS=$is BT=$bt jq \
     '{hub_ai:{role_id:env.HR,secret_id:env.HS}, cloud_ai:{role_id:env.CR,secret_id:env.CS},
@@ -88,7 +89,7 @@ configure() {
     || { rm -f "$tmp"; echo "credential check failed; root token kept in $state" >&2; exit 1; }
   mv "$tmp" "$state"
   "$bao" token revoke -self >/dev/null
-  tmp=$(mktemp "$dir/state.XXXXXX"); jq 'del(.root_token)' "$state" >"$tmp" && mv "$tmp" "$state"
+  tmp=$(mktemp "$dir/state.XXXXXX"); jq 'del(.root_token)' "$state" >"$tmp"; mv "$tmp" "$state"
   trap - ERR
   echo "audit on (file + stdout), kv-v2 at kv/, policies, AppRoles hub-ai cloud-ai importer, backup token; root token revoked"
   echo "credentials in $state: hub_ai, cloud_ai, importer (single use, 24 h), backup_token"

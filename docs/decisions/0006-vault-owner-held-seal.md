@@ -30,7 +30,8 @@ Nothing had been deployed when this was found.
    shares offline. No share goes to a kit, a Fly secret, the iMac or the repository.
 2. **Unsealing is the owner's step.** After a deploy or a restart the vault stays sealed
    until the owner runs `scripts/unseal.sh` twice on their own machine (it decrypts one
-   share with `gpg` and pipes it to `bao operator unseal -`). Clients keep the kit as a
+   share with `gpg` and sends it as the body of `PUT /v1/sys/unseal` through curl's stdin;
+   `bao operator unseal` reads a key only from a terminal or argv). Clients keep the kit as a
    fallback until RT-0584 S3 ends, so a sealed vault is an outage of the new path only.
 3. **The root token lives only for the setup.** `init` stores it in a 0600 file on the
    bootstrap machine while the vault is sealed (it can do nothing then). `bootstrap.sh
@@ -58,6 +59,10 @@ Nothing had been deployed when this was found.
 - Losing the PGP private key, or two of the three encrypted shares, loses the vault. The
   backups (ADR 0005 decision 7) do not help then, since a snapshot needs the same shares.
   The owner keeps the key and the shares in two separate offline places.
-- The AI that runs the bootstrap holds a root token between `init` and `configure`; the vault
-  is sealed in that window, and `configure` revokes the token as its last step.
+- The AI that runs the bootstrap holds a root token from `init` until `configure` revokes it
+  as its last step. Until the owner unseals, that token can do nothing; between the owner's
+  unseal and the end of `configure` (minutes, with no secrets stored yet) it is live. This ADR
+  reads the owner's "root key" exclusion as the material that unseals or regenerates root
+  (the shares and the PGP key), which no AI ever holds; the owner can instead run `configure`
+  themselves to keep even this short-lived token away from an AI.
 - The restore drill needs the owner to unseal the restored node with the original shares.
