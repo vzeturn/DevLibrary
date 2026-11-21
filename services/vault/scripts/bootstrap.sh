@@ -79,7 +79,7 @@ configure() {
   is=$(get "$bao" write -f -field=secret_id auth/approle/role/importer/secret-id)
   bt=$(get "$bao" token create -orphan -policy=backup -period=24h -field=token)
   tmp=$(mktemp "$dir/state.XXXXXX")
-  trap 'rm -f "$tmp"' EXIT # a temp copy may hold credentials: never leave it behind
+  trap 'rm -f "${tmp:-}"' EXIT # a temp copy may hold credentials: never leave it behind
   # Values reach jq through the environment, not argv; root_token is dropped in the same write.
   HR=$hr HS=$hs CR=$cr CS=$cs IR=$ir IS=$is BT=$bt jq \
     '{hub_ai:{role_id:env.HR,secret_id:env.HS}, cloud_ai:{role_id:env.CR,secret_id:env.CS},
