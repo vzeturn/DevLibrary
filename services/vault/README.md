@@ -27,7 +27,7 @@ fly deploy -a dl-vault -c services/vault/fly.toml --remote-only --depot=false
 # every deploy or restart reseals the vault: unseal with two shares (stdin, not argv)
 jq -r '.unseal_keys_b64[0]' ~/.config/dl-vault/bootstrap.json | bao operator unseal -
 jq -r '.unseal_keys_b64[1]' ~/.config/dl-vault/bootstrap.json | bao operator unseal -
-BAO_BACKUP_TOKEN=... services/vault/scripts/backup.sh once   # or wait for the loop; check fly logs for backup.uploaded
+fly ssh console -a dl-vault -C '/usr/local/bin/backup.sh once'   # inside the machine (its secrets); or wait for the loop, then fly logs shows backup.uploaded
 ```
 
 Bucket `dl-vault-backups` gets an R2 lifecycle rule that deletes objects after 30 days (about

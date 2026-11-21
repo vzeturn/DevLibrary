@@ -46,7 +46,7 @@ tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 HR=$hr HS=$hs CR=$cr CS=$cs BT=$bt jq \
   '. + {hub_ai:{role_id:env.HR,secret_id:env.HS}, cloud_ai:{role_id:env.CR,secret_id:env.CS}, backup_token:env.BT}' \
   "$out" >"$tmp"
-jq -e '[.hub_ai.secret_id, .cloud_ai.secret_id, .backup_token, (.unseal_keys_b64|length == 3)] | all' "$tmp" >/dev/null
+jq -e '[(.hub_ai.secret_id, .cloud_ai.secret_id, .backup_token | length > 0), (.unseal_keys_b64 | length == 3)] | all' "$tmp" >/dev/null
 mv "$tmp" "$out"
 
 "$bao" token revoke -self >/dev/null
