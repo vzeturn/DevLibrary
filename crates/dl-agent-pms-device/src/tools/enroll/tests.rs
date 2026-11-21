@@ -57,12 +57,13 @@ fn run_with(a: &Args, token: Option<&str>) -> (Result<(), String>, String) {
         },
         &env(token),
     );
-    if r.is_ok() && a.token_file.is_some() {
-        // The token file was restricted before it replaced the real one (when it was written).
-        let n = restricted.borrow().len();
-        assert!(n <= 1, "{n}");
+    let out = String::from_utf8(out).unwrap();
+    if r.is_ok() {
+        // The token file is restricted exactly once, and only when it was written.
+        let want = usize::from(out.contains("token written"));
+        assert_eq!(restricted.borrow().len(), want);
     }
-    (r, String::from_utf8(out).unwrap())
+    (r, out)
 }
 
 fn settings(a: &Args) -> Value {

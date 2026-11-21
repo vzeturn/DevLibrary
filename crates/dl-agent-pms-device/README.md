@@ -109,6 +109,7 @@ not ship its log anywhere. Reports never carry it.
    from `DL_AGENT_PMS_DEVICE_TOKEN` or generated). It writes `Agent:ApiBaseUrl`, `Agent:AgentId` and
    `Agent:TokenFile`, and prints `sha256=<hex>` of the token: register `{"agentId","workstation","sha256"}`
    in the PMS (`DEVICE_AGENT_TOKENS`). The token is never printed.
+   An `appsettings.{Environment}.json` that sets `Agent:*` overrides what the tool writes.
    Enable the module: `modules.pms-device.enabled = true`, with `appsettings_dir` only when the
    old agent was installed elsewhere and `overrides` for what its service environment set.
 4. Check `pms-device.status`: the detail reads `polling <url> as <agent id> (<adapter>)` and

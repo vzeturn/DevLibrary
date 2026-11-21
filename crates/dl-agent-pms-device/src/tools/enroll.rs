@@ -144,11 +144,13 @@ pub(crate) fn run_args(
     };
 
     let (token, written) = decide_token(args, &token_path, getenv)?;
+    // Settings first: if this write fails the token file is still the old one, which the PMS
+    // already knows; the other order could rotate the token and then leave no way to learn its hash.
+    set_agent_keys(&mut root, &args.api_url, &agent_id, &token_path);
+    write_settings(&settings_path, &root)?;
     if written {
         write_private(&token_path, token.as_bytes(), restrict)?;
     }
-    set_agent_keys(&mut root, &args.api_url, &agent_id, &token_path);
-    write_settings(&settings_path, &root)?;
 
     let sha = dl_encoding::hex::encode(<dl_hash::Sha256 as dl_hash::Digest>::digest(
         token.as_bytes(),
@@ -327,16 +329,29 @@ fn replace_file(path: &Path, bytes: &[u8], restrict: Option<Restrict<'_>>) -> Re
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    let mut f = open_tmp(&tmp, restrict.is_some())
-        .map_err(|x| e(&format!("create {}", tmp.display()), &x))?;
-    f.write_all(bytes)
-        .and_then(|()| f.sync_all())
-        .map_err(|x| e(&format!("write {}", tmp.display()), &x))?;
-    drop(f);
-    if let Some(r) = restrict {
-        r(&tmp).map_err(|x| e("restrict", &x))?;
+    let staged = (|| -> Result<(), String> {
+        let mut f = open_tmp(&tmp, restrict.is_some())
+            .map_err(|x| e(&format!("create {}", tmp.display()), &x))?;
+        f.write_all(bytes)
+            .and_then(|()| f.sync_all())
+            .map_err(|x| e(&format!("write {}", tmp.display()), &x))?;
+        drop(f);
+        if let Some(r) = restrict {
+            r(&tmp).map_err(|x| e("restrict", &x))?;
+        }
+        std::fs::rename(&tmp, path).map_err(|x| e(&format!("replace {}", path.display()), &x))
+    })();
+    match staged {
+        Ok(()) => Ok(()),
+        Err(msg) => match std::fs::remove_file(&tmp) {
+            Ok(()) => Err(msg),
+            Err(x) if x.kind() == std::io::ErrorKind::NotFound => Err(msg),
+            Err(x) => Err(format!(
+                "{msg}; also could not remove {}: {x}",
+                tmp.display()
+            )),
+        },
     }
-    std::fs::rename(&tmp, path).map_err(|x| e(&format!("replace {}", path.display()), &x))
 }
 
 #[cfg(unix)]
