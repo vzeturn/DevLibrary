@@ -17,6 +17,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent: pda-sync drops trailing spaces from every text value it sends (codes, names, TCVN3 text; only U+0020 at the end, an all-space value becomes empty), as the C# SyncAgent does since ADR 0123 (RT-0370). A store whose `ItemDef.ICode` is `CHAR(12)` sent `"100001      "` while `RVCItem`/`RVCItemMenu` carry `"100001"`, so every outlet menu row was skipped as an orphan and the PDA menu stayed empty (Muine Bay spa). Masters and open checks correct themselves on the next scan (trimmed rows first, then tombstones for the padded keys); ledger history already sent is sent once more, tracked by the capture cursor `mapper:text_rev`. The wire `mapper_ver` is unchanged.
 - dl-agent: `pms-enroll --force` also deletes the module's `agent.key`, so the next enrollment uses a fresh Ed25519 key. Before, a site moved to another tenant kept the key still registered to its old agent and the PMS control plane refused the enrollment (`enrollment refused`, RT-0465).
 - dl-agent: pda-sync re-stamps queued batches with the new agent id after `pda-enroll` changes the identity, so they are no longer refused (`Batch agent_id does not match`) and quarantined, and the recovery resnapshot after an identity change skips the 6 h cooldown (Muine Bay, RT-0450).
 - dl-agent: pda-sync skips orphan rows right away when the outbox is full but a few bytes under its cap, instead of after 30 minutes (RT-0442).

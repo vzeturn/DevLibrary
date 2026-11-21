@@ -14,17 +14,18 @@ fn format_error(column: &str, message: String) -> MappingError {
 }
 
 /// TCVN3 to Unicode: bytes are decoded; a string of chars below U+0100 is taken as bytes
-/// read through Latin-1; any other string is already Unicode.
+/// read through Latin-1; any other string is already Unicode. Trailing spaces are dropped
+/// ([`trim_fixed_width`]).
 pub fn tcvn3(value: &RawValue, column: &str) -> Result<Option<String>, MappingError> {
     match value {
         RawValue::Null => Ok(None),
-        RawValue::Bytes(b) => Ok(Some(tcvn3::decode(b))),
+        RawValue::Bytes(b) => Ok(Some(trim_fixed_width(tcvn3::decode(b)))),
         RawValue::String(s) => {
             if s.chars().all(|c| u32::from(c) < 0x100) {
                 let bytes: Vec<u8> = s.chars().map(|c| u32::from(c) as u8).collect();
-                Ok(Some(tcvn3::decode(&bytes)))
+                Ok(Some(trim_fixed_width(tcvn3::decode(&bytes))))
             } else {
-                Ok(Some(s.clone()))
+                Ok(Some(trim_fixed_width(s.clone())))
             }
         }
         other => Err(format_error(
@@ -35,6 +36,17 @@ pub fn tcvn3(value: &RawValue, column: &str) -> Result<Option<String>, MappingEr
             ),
         )),
     }
+}
+
+/// `ValueTransforms.TrimFixedWidth` (ADR 0123): text without its trailing spaces. The store
+/// database pads `CHAR(n)` values and ignores trailing spaces when it compares text, so
+/// `'100001'` and `'100001      '` are one code there; PostgreSQL `text` sees two. Only
+/// U+0020 is dropped, as in that comparison (tabs, newlines, leading and inner spaces stay);
+/// an all-space value becomes `""`, never NULL.
+pub fn trim_fixed_width(mut value: String) -> String {
+    let len = value.trim_end_matches(' ').len();
+    value.truncate(len);
+    value
 }
 
 /// `new decimal(double)`: rounded to 15 significant digits (7 for `float`).
@@ -182,7 +194,7 @@ pub fn generic(
     use RawValue::*;
     Ok(Some(match value {
         Null => return Ok(None),
-        String(s) => s.clone(),
+        String(s) => trim_fixed_width(s.clone()),
         DateTime(_) | DateTimeOffset(_) => return local_time(value, column, zone),
         Decimal(d) => canonical_value::decimal_string(*d),
         Bool(b) => canonical_value::bool_string(*b).to_owned(),

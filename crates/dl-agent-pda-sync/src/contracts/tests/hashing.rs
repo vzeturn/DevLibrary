@@ -477,3 +477,66 @@ fn staff_pin_golden_vector() {
         !staff::is_usable(Some("12a")) && !staff::is_usable(None) && !staff::is_usable(Some("١٢"))
     );
 }
+
+/// `Text_loses_trailing_spaces_as_the_store_database_compares_it` (ADR 0123).
+#[test]
+fn text_loses_trailing_spaces_as_the_store_database_compares_it() {
+    let z = vietnam();
+    for (stored, expected) in [
+        ("100001      ", "100001"),
+        (
+            "  keeps leading and inner  spaces  ",
+            "  keeps leading and inner  spaces",
+        ),
+        ("   ", ""),
+        ("tab stays\t", "tab stays\t"),
+        ("a b\t ", "a b\t"),
+        ("plain", "plain"),
+        ("", ""),
+    ] {
+        let latin1 = RawValue::Bytes(stored.bytes().collect());
+        let cases = [
+            transforms::generic(&stored.into(), "c", &z),
+            transforms::tcvn3(&stored.into(), "c"),
+            transforms::tcvn3(&latin1, "c"),
+        ];
+        for got in cases {
+            assert_eq!(got.unwrap().as_deref(), Some(expected), "{stored:?}");
+        }
+    }
+    assert_eq!(
+        transforms::tcvn3(&"Phở bò   ".into(), "c")
+            .unwrap()
+            .as_deref(),
+        Some("Phở bò"),
+        "an already-Unicode value is trimmed too"
+    );
+}
+
+/// `A_fixed_width_code_maps_to_the_same_key_and_hash_as_its_trimmed_form` (ADR 0123).
+#[test]
+fn a_fixed_width_code_maps_to_the_same_key_and_hash_as_its_trimmed_form() {
+    let item = |code: &str, name: &str| {
+        row([
+            ("ICode", code.into()),
+            ("IName", name.into()),
+            ("Price", dec("50000.00")),
+            ("IClass", RawValue::I32(901)),
+            ("IGroup", "1".into()),
+            ("IActive", RawValue::Bool(true)),
+            ("RVC", RawValue::I32(1)),
+        ])
+    };
+    let padded = mapper()
+        .map("ItemDef", &item("100001      ", "Pho bo    "))
+        .unwrap();
+    let trimmed = mapper().map("ItemDef", &item("100001", "Pho bo")).unwrap();
+
+    assert_eq!(
+        padded.key.get("item_code").cloned().flatten().as_deref(),
+        Some("100001")
+    );
+    assert_eq!(padded.key, trimmed.key);
+    assert_eq!(padded.columns, trimmed.columns);
+    assert_eq!(padded.hash, trimmed.hash);
+}
