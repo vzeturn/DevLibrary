@@ -1,8 +1,15 @@
 {
   "manifest_version": 2,
-  "allowlist_hash": "4a5c05628d7f11bdb0212890d8a636b46f5fca117a2004f99260008df0cdd523",
+  "allowlist_hash": "d52a7d4f6508016cdd49cff19324065247bfb36b0d7a26402e19839cabe0d701",
   "procs": [
-    "GetHotelDate1"
+    "AvailabilityChartNew",
+    "GetHotelDate1",
+    "HSKPArrivalExpected",
+    "HSKPCurrentOccupied",
+    "HSKPDepartureExpected",
+    "LogIn",
+    "rptReservMasterList",
+    "UGetUserPermission"
   ],
   "excluded_proc_patterns": [
     "^SMLExecRsSql$",
@@ -12,6 +19,145 @@
     "^xp_\\w+$"
   ],
   "ops": [
+    {
+      "name": "fo.arrivals.expected",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "HSKPArrivalExpected",
+          "params": [
+            {
+              "name": "sDate",
+              "type": "varchar",
+              "arg": "date",
+              "size": 20
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fo.availability.chart",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "AvailabilityChartNew",
+          "params": [
+            {
+              "name": "RoomType",
+              "type": "varchar",
+              "arg": "roomType",
+              "size": 20
+            },
+            {
+              "name": "sDate",
+              "type": "varchar",
+              "arg": "startDate",
+              "size": 20
+            },
+            {
+              "name": "NumDate",
+              "type": "int",
+              "arg": "numDays"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fo.clerk.login",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 15000,
+      "idempotent": false,
+      "calls": [
+        {
+          "proc": "LogIn",
+          "params": [
+            {
+              "name": "ClerkID",
+              "type": "varchar",
+              "arg": "clerkId",
+              "size": 6
+            },
+            {
+              "name": "Password",
+              "type": "varchar",
+              "arg": "passwordHash",
+              "size": 50
+            },
+            {
+              "name": "TodayPassword",
+              "type": "varchar",
+              "arg": "todayPassword",
+              "size": 20
+            },
+            {
+              "name": "ComputerName",
+              "type": "varchar",
+              "value": "Azolo PMS",
+              "size": 50
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fo.clerk.rights.get",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 10000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "UGetUserPermission",
+          "params": [
+            {
+              "name": "UserID",
+              "type": "varchar",
+              "arg": "clerkId",
+              "size": 30
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fo.departures.expected",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "HSKPDepartureExpected",
+          "params": [
+            {
+              "name": "sDate",
+              "type": "varchar",
+              "arg": "date",
+              "size": 20
+            }
+          ]
+        }
+      ]
+    },
     {
       "name": "fo.folioLogDef.list",
       "contract_ver": 1,
@@ -54,6 +200,56 @@
         {
           "proc": "GetHotelDate1",
           "params": []
+        }
+      ]
+    },
+    {
+      "name": "fo.inhouse.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "HSKPCurrentOccupied",
+          "params": [
+            {
+              "name": "sDate",
+              "type": "varchar",
+              "arg": "date",
+              "size": 20
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fo.reservation.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "rptReservMasterList",
+          "params": [
+            {
+              "name": "sFromDate",
+              "type": "varchar",
+              "arg": "fromDate",
+              "size": 16
+            },
+            {
+              "name": "sToDate",
+              "type": "varchar",
+              "arg": "toDate",
+              "size": 16
+            }
+          ]
         }
       ]
     },

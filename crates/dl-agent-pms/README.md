@@ -52,6 +52,14 @@ customer database (no `MM_OpLog`, no migrations, no retention job).
 | Op | Database | Procedure | Result |
 |---|---|---|---|
 | `fo.hotelDate.get@1` (read) | `SMILE_FO` | vendor `GetHotelDate1` (`Select HotelDate From HotelParameter`) | one set, first row `HotelDate` (datetime, wall clock as stored); no row or `NULL` → `failed` `NO_DATA`. The cloud returns `{hotelDate: 'YYYY-MM-DD'}`, the date part with no timezone shift. |
+| `fo.clerk.login@1` (write, keyless, not idempotent) | `SMILE_FO` | vendor `LogIn` (`ClerkID`, `Password` = `passwordHash`, `TodayPassword`, `ComputerName` = manifest constant `Azolo PMS`) | the procedure's sets and `ReturnValue`. Tried once, never journaled or replayed. `passwordHash` and `todayPassword` are secrets: no log line, telemetry report or bind error carries an arg value. |
+| `fo.clerk.rights.get@1` (read) | `SMILE_FO` | vendor `UGetUserPermission` (`UserID` = `clerkId`) | the clerk's rights rows. |
+| `fo.availability.chart@1` (read) | `SMILE_FO` | vendor `AvailabilityChartNew` (`roomType`, `startDate`, `numDays`) | the chart rows. |
+| `fo.reservation.list@1` (read) | `SMILE_FO` | vendor `rptReservMasterList` (`fromDate`, `toDate`) | reservation rows (guest names). |
+| `fo.arrivals.expected@1`, `fo.departures.expected@1`, `fo.inhouse.list@1` (read) | `SMILE_FO` | vendor `HSKPArrivalExpected`, `HSKPDepartureExpected`, `HSKPCurrentOccupied` (`date`) | room/guest rows. |
+
+Result rows (guest names) are sent to the cloud only; the agent logs op name, id, status, code
+and duration, never rows or args.
 
 `assets/ops-manifest.json` is a byte copy of SMILE-PMS `packages/shared/src/ops/ops-manifest.json`
 (manifest v2). `tests/ops_manifest_drift.rs` fails when it differs from the file named by
