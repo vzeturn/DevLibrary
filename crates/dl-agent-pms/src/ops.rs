@@ -12,6 +12,12 @@ use crate::json;
 use crate::minire::Regex;
 use crate::pat;
 
+mod select;
+#[cfg(test)]
+mod select_tests;
+
+pub use select::{Filter, SELECT_OPS, Select, Table};
+
 /// The manifest this build carries.
 pub const EMBEDDED: &str = include_str!("../assets/ops-manifest.json");
 
@@ -86,13 +92,15 @@ impl Param {
     }
 }
 
-/// One procedure call of an op's plan.
+/// One call of an op's plan: a procedure call, or a direct read of a declared table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
-    /// Procedure name.
+    /// Procedure name ("" for a select call).
     pub proc_name: String,
-    /// Parameters in order.
+    /// Parameters in order (empty for a select call).
     pub params: Vec<Param>,
+    /// The table read of a select call (`None` for a procedure call).
+    pub select: Option<Select>,
 }
 
 /// One manifest entry.
@@ -125,6 +133,8 @@ pub struct Manifest {
     pub allowlist_hash: String,
     /// The allow-listed procedures.
     pub procs: Vec<String>,
+    /// The tables select calls may read.
+    pub tables: Vec<Table>,
     /// Ops in manifest order.
     pub ops: Vec<Op>,
     by_name: HashMap<String, usize>,
@@ -220,13 +230,23 @@ fn parse_op(v: &Value) -> Result<Op, String> {
     )?;
     let mut calls = Vec::new();
     for c in arr(o, "calls")? {
-        let co = fields(obj_of(c, "call")?, &["proc", "params"], "call")?;
+        let co = fields(obj_of(c, "call")?, &["proc", "params", "select"], "call")?;
+        let select = match json::field_ci(co, "select") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(select::parse_select(v)?),
+        };
+        let proc_name = s(co, "proc")?;
+        let params: Vec<Param> = arr(co, "params")?
+            .iter()
+            .map(parse_param)
+            .collect::<Result<_, _>>()?;
+        if select.is_some() && (!proc_name.is_empty() || !params.is_empty()) {
+            return Err(e("call: exactly one of proc (with params) or select"));
+        }
         calls.push(Call {
-            proc_name: s(co, "proc")?,
-            params: arr(co, "params")?
-                .iter()
-                .map(parse_param)
-                .collect::<Result<_, _>>()?,
+            proc_name,
+            params,
+            select,
         });
     }
     Ok(Op {
@@ -251,7 +271,7 @@ pub fn target_db_of(target: &str) -> Option<&'static str> {
     }
 }
 
-fn validate_op(op: &Op, allowed: &HashSet<String>) -> Result<(), String> {
+fn validate_op(op: &Op, allowed: &HashSet<String>, tables: &select::Tables) -> Result<(), String> {
     if !pat::is_op_name(&op.name) {
         return Err("name is not <domain>.<area>.<verb>".into());
     }
@@ -280,6 +300,16 @@ fn validate_op(op: &Op, allowed: &HashSet<String>) -> Result<(), String> {
     }
     let mut outputs = HashSet::new();
     for c in &op.calls {
+        if let Some(sel) = &c.select {
+            if op.kind != KIND_READ {
+                return Err("a select call is allowed only in a read op".into());
+            }
+            select::validate_select(sel, tables)?;
+            continue;
+        }
+        if c.proc_name.is_empty() {
+            return Err("a call needs exactly one of proc or select".into());
+        }
         if !allowed.contains(&c.proc_name.to_lowercase()) {
             return Err(format!("proc {} is not allow-listed", c.proc_name));
         }
@@ -329,8 +359,9 @@ impl Manifest {
     }
 
     /// Decodes and validates a manifest: any proc outside the allow-list, any allow-listed
-    /// proc matching an excluded pattern (or the agent's floor), unknown bind types and
-    /// duplicate names are refused, so a bad generator output fails at boot.
+    /// proc matching an excluded pattern (or the agent's floor), a select call on a table
+    /// or column the `tables` list does not declare, unknown bind types and duplicate names
+    /// are refused, so a bad generator output fails at boot.
     pub fn parse(raw: &[u8]) -> Result<Manifest, String> {
         let v = json::parse(raw).map_err(|x| e(x.to_string()))?;
         let o = fields(
@@ -339,6 +370,7 @@ impl Manifest {
                 "manifest_version",
                 "allowlist_hash",
                 "procs",
+                "tables",
                 "excluded_proc_patterns",
                 "ops",
             ],
@@ -381,13 +413,14 @@ impl Manifest {
             }
             allowed.insert(p.to_lowercase());
         }
+        let (tables, table_set) = select::parse_tables(o)?;
         let ops = arr(o, "ops")?
             .iter()
             .map(parse_op)
             .collect::<Result<Vec<_>, _>>()?;
         let mut by_name = HashMap::new();
         for (idx, op) in ops.iter().enumerate() {
-            validate_op(op, &allowed).map_err(|x| e(format!("op {}: {x}", op.name)))?;
+            validate_op(op, &allowed, &table_set).map_err(|x| e(format!("op {}: {x}", op.name)))?;
             if by_name.insert(op.name.clone(), idx).is_some() {
                 return Err(e(format!("op {} is listed twice", op.name)));
             }
@@ -396,6 +429,7 @@ impl Manifest {
             manifest_version: version,
             allowlist_hash: s(o, "allowlist_hash")?,
             procs,
+            tables,
             ops,
             by_name,
             allowed,
