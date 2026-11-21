@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
-import { BOOT_HOST_SUFFIXES, bootCommand, CODE_SLOT, PRODUCT_LABELS, productDeployUrl, renderDeployPage, safeBootUrl } from '../src/install/deployPage';
+import { BOOT_HOST_SUFFIXES, bootCommand, CODE_SLOT, irmCommand, PRODUCT_LABELS, productCommands, productDeployUrl, renderDeployPage, safeBootUrl } from '../src/install/deployPage';
 import { admin, createTenant, enrollRequest, heartbeatBody, newKeys, setNow, signed, T0, testEnv, type TestEnv } from './helpers';
 
 let env: TestEnv;
@@ -146,6 +146,33 @@ describe('/deploy guided install', () => {
     expect(html).toContain("else if(!code&&hp.get('boot')){start('')}");
     expect(html).toContain('quay lại console sản phẩm');
     expect(html).toContain('LABELS.hasOwnProperty(prod)');
+  });
+
+  it('shows the short irm line only when the product vouches for it (irm=1), with the old-machine fallback', () => {
+    const boot = 'https://checkin.mmsolutions.vn/i/K7QM4XPA';
+    const alt = 'https://checkin.mmsolutions.vn/i/K7QM4XPA/r';
+    expect(irmCommand(boot)).toBe(`irm ${boot} | iex`);
+    expect(irmCommand(boot).length).toBeLessThanOrEqual(60);
+    expect(productCommands(boot, true)).toEqual({ main: `irm ${boot} | iex`, legacy: bootCommand(boot) });
+    expect(productCommands(alt, true)).toEqual({ main: `irm ${alt} | iex`, legacy: bootCommand(alt) });
+    expect(productCommands(alt, true).main.length).toBeLessThanOrEqual(60);
+    expect(productCommands(boot, true).legacy).toMatch(/^\[Net\.ServicePointManager\]::SecurityProtocol = .* -bor 3072; .*New-Object Net\.WebClient\)\.DownloadString\('https:\/\/checkin\.mmsolutions\.vn\/i\/K7QM4XPA'\)/);
+    // Without irm=1 the page keeps today's line and no fallback.
+    expect(productCommands(boot, false)).toEqual({ main: bootCommand(boot), legacy: '' });
+    // The page's inline copy gives the same lines and turns the flag on for "1" only.
+    const html = renderDeployPage('https://hub.test', 'n0nce');
+    const page = /function bootLine[\s\S]*?function commands\(u\)\{[^\n]*\}/.exec(html)?.[0] ?? '';
+    for (const [flag, on] of [['1', true], ['true', false], ['', false]] as const) {
+      const inline = new Function('irm', `${page};return commands`)(flag === '1') as (u: string) => { main: string; legacy: string };
+      expect(inline(boot), flag).toEqual(productCommands(boot, on));
+      expect(inline(alt), flag).toEqual(productCommands(alt, on));
+    }
+    expect(html).toContain("var irm=hp.get('irm')==='1';");
+    expect(html).toContain('Máy cũ? dùng lệnh này');
+    expect(html).toContain('id="copyold"');
+    expect(productDeployUrl('https://hub.test', { boot, alt, product: 'arrival', irm: true })).toBe(
+      'https://hub.test/deploy#boot=https%3A%2F%2Fcheckin.mmsolutions.vn%2Fi%2FK7QM4XPA&alt=https%3A%2F%2Fcheckin.mmsolutions.vn%2Fi%2FK7QM4XPA%2Fr&p=arrival&irm=1',
+    );
   });
 
   it('builds a product link with code, script and the remote-SQL variant in the fragment only', async () => {
