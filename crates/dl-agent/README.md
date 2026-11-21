@@ -217,7 +217,7 @@ refused) and, after the install:
 | `hotellink` | `hl-enroll` | `DL_AGENT_DEMO_HL_TOKEN` → `DL_AGENT_HL_TOKEN`, optional `DL_AGENT_DEMO_HL_SQL_PASSWORD` → `DL_AGENT_HL_SQL_PASSWORD`; `DL_AGENT_DEMO_HL_URL` → `--hub-url`, `DL_AGENT_DEMO_HL_HOTEL_ID` → `--hotel-id`, `DL_AGENT_DEMO_HL_INSTANCE_ID` → `--instance-id`, optional `DL_AGENT_DEMO_HL_SQL_USER` → `--sql-user` |
 | `backup` | `backup-enroll` | `DL_AGENT_DEMO_BACKUP_KEY` → `DL_AGENT_BACKUP_KEY`; `DL_AGENT_DEMO_BACKUP_URL` → `--hub-url` |
 | `pda-sync` | `pda-enroll` | `DL_AGENT_DEMO_PDA_CODE` → `DL_AGENT_PDA_CODE`; `DL_AGENT_DEMO_PDA_URL` → `--url` |
-| `pms-device` | none | reads the DeviceAgent appsettings and token file already on the PC |
+| `pms-device` | `pms-device-enroll` | `DL_AGENT_DEMO_PMS_DEVICE_URL` → `--api-url`, optional `DL_AGENT_DEMO_PMS_DEVICE_AGENT_ID` → `--agent-id`, optional `DL_AGENT_DEMO_PMS_DEVICE_TOKEN` → `DL_AGENT_PMS_DEVICE_TOKEN` (else generated; the tool prints its sha256 to register in the PMS) |
 | `speaker` | none | uses the `pda-sync` identity |
 
 1. each enrol tool runs with its code set for that process only (never argv, never written by the
@@ -254,10 +254,13 @@ The hub enables the module, sends the agent one `attach` command that runs the m
 tool with the code (in a variable, never on the command line; the hub forgets it once the
 agent has it), then restarts the module. `GET /admin/commands?agent_id=<id>` shows the tool's
 exit and output (secrets masked). Variables and flags per module are the demo bench table
-above; `pms-device` and `speaker` take only `{"module": …}`. For einvoice, arrival and
-membership the hub also passes the directory the agent config names for the module
-(`modules.einvoice.config_dir`, `modules.arrival.install_dir`, `modules.membership.program_data_dir`),
-so the tool writes where the module reads; with no such key the tool's own default applies.
+above; `speaker` takes only `{"module": …}`. For einvoice, arrival, membership, pms-site and
+pms-device the hub also passes what the agent config names for the module
+(`modules.einvoice.config_dir`, `modules.arrival.install_dir`, `modules.membership.program_data_dir`,
+`modules.pms-site.config_path` → `--config` and `state_dir` → `--state-dir`,
+`modules.pms-device.appsettings_dir` → `--appsettings-dir`),
+so the tool writes where the module reads; `reenroll: true` with a new `external_id` also drops the
+agent's older links of that product; with no such key the tool's own default applies.
 `arrival-enroll` with no connection string given, saved or left by the old agent uses the
 `SMILE_FO` entry of `sql.json` that `dl-agent sql-setup` saved. Needs dl-agent 1.3.17 or newer.
 
@@ -285,7 +288,7 @@ not a SQL Server administrator (agent 1.3.19 or newer for `--sql-admin-saved`):
 ```
 
 Refusals: `unknown_flag` (not in the module's list), `reenroll_not_supported` (pda-sync has no
-re-enrol flag), `module_has_no_enrol_step` (pms-device, speaker).
+re-enrol flag), `module_has_no_enrol_step` (speaker).
 
 ### Machines that already run an agent: no install line again (RT-0261)
 
