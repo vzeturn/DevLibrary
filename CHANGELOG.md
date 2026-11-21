@@ -6,6 +6,16 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- dl-agent: `dl-agent pms-device-enroll --api-url URL [--agent-id ID] [--appsettings-dir DIR] [--token-file PATH] [--force]` makes the `pms-device` module startable: it writes `Agent:ApiBaseUrl`, `Agent:AgentId` (default: the computer name) and `Agent:TokenFile` into the DeviceAgent `appsettings.json` (other keys kept; a file with comments or trailing commas is refused, not overwritten) and the token into a private token file, from `DL_AGENT_PMS_DEVICE_TOKEN` or generated (32 random bytes, hex). It prints `sha256=<hex>` of the token for the PMS operator to register; the token is never printed. An existing different token is replaced only with `--force` (RT-0422).
+- agent-hub: remote attach and the demo bench enrol `pms-device` with `pms-device-enroll` (`DL_AGENT_DEMO_PMS_DEVICE_URL`, optional `DL_AGENT_DEMO_PMS_DEVICE_TOKEN` and `DL_AGENT_DEMO_PMS_DEVICE_AGENT_ID`); the hub passes the module's `appsettings_dir` as `--appsettings-dir` (RT-0422).
+
+### Fixed
+
+- agent-hub: remote attach of `pms-site` passes the module's `config_path` as `--config` and `state_dir` as `--state-dir`, so `pms-enroll` writes where the module reads instead of the default `C:\ProgramData\SmilePMS\Agent` (RT-0422).
+- agent-hub: a remote attach with `reenroll: true` and a new `external_id` removes the agent's other `product_links` of that product, so the old tenant no longer lingers (RT-0422).
+
 ### Changed
 
 - agent-hub: `GET /admin/agents` and the status page list only live machines; revoked agents show with `include_revoked=1` (also `list_agents` in the MCP tools), and `GET /admin/agents/:id` still finds them (RT-0375). Policy: real customer tenants are `demo=false` (stable), canary only for our machines and consented pilots, a machine ahead of stable is pinned to canary until stable catches up (ADR 0004, README "Release channels for customers").

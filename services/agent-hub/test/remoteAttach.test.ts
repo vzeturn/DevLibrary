@@ -99,12 +99,12 @@ describe('POST /admin/agents/:id/attach', () => {
   it('keeps other modules and keys and does not bump the version when nothing changes', async () => {
     const agent = await enrollAgent(env, 'dl-bench');
     await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules: { arrival: { enabled: true, poll: 5 } }, log_level: 'debug' } });
-    const first = (await (await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'pms-device' })).json()) as Record<string, unknown>;
-    expect(first).toMatchObject({ module: 'pms-device', command: null });
-    const again = (await (await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'pms-device' })).json()) as Record<string, unknown>;
+    const first = (await (await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'speaker' })).json()) as Record<string, unknown>;
+    expect(first).toMatchObject({ module: 'speaker', command: null });
+    const again = (await (await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'speaker' })).json()) as Record<string, unknown>;
     expect(again.config_version).toBe(first.config_version);
     const row = env.DB.raw.prepare('SELECT body FROM configs WHERE agent_id = ?').get(agent.id) as { body: string };
-    expect(JSON.parse(row.body)).toEqual({ modules: { arrival: { enabled: true, poll: 5 }, 'pms-device': { enabled: true } }, log_level: 'debug' });
+    expect(JSON.parse(row.body)).toEqual({ modules: { arrival: { enabled: true, poll: 5 }, speaker: { enabled: true } }, log_level: 'debug' });
     expect(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM commands').get()).toEqual({ n: 0 });
   });
 
@@ -165,11 +165,76 @@ describe('POST /admin/agents/:id/attach', () => {
       expect(await attachArgvFor('einvoice', { einvoice: { config_dir: 'C:\\x\n--force' } })).toEqual([...URL_OPT.einvoice]);
     });
 
-    it('leaves a module without a directory key alone even if the config has one', async () => {
+    it('pms-site: passes config_path and state_dir, each on its own when set', async () => {
       const agent = await enrollAgent(env, 'dl-bench');
-      await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules: { 'pms-site': { enabled: true, config_dir: 'C:\\x', install_dir: 'C:\\y' } } } });
+      await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, {
+        body: { modules: { 'pms-site': { enabled: true, config_path: ' C:\\bench\\pms\\config.json ', state_dir: 'C:\\bench\\pms\\state', config_dir: 'C:\\x' } } },
+      });
       expect((await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, PMS)).status).toBe(202);
-      expect((await heartbeat(agent)).commands[0]?.args).toMatchObject({ argv: ['--cloud-url', 'https://bench-pms.example'] });
+      expect((await heartbeat(agent)).commands[0]?.args).toMatchObject({
+        argv: ['--cloud-url', 'https://bench-pms.example', '--config', 'C:\\bench\\pms\\config.json', '--state-dir', 'C:\\bench\\pms\\state'],
+      });
+    });
+
+    it('pms-site: skips only the bad or unset one', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules: { 'pms-site': { enabled: true, config_path: 'C:\\a\nb', state_dir: 'C:\\s' } } } });
+      expect((await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, PMS)).status).toBe(202);
+      expect((await heartbeat(agent)).commands[0]?.args).toMatchObject({ argv: ['--cloud-url', 'https://bench-pms.example', '--state-dir', 'C:\\s'] });
+    });
+
+    it('pms-device: runs pms-device-enroll with the url, id, appsettings_dir and the token in env only', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      await admin(env, 'PUT', `/admin/agents/${agent.id}/config`, { body: { modules: { 'pms-device': { enabled: true, appsettings_dir: 'C:\\bench\\device' } } } });
+      const body = {
+        module: 'pms-device',
+        secret: { DL_AGENT_PMS_DEVICE_TOKEN: 'DEVICE-TOKEN-8842-LONG-ENOUGH' },
+        options: { '--api-url': 'https://pms-api.example', '--agent-id': 'front-desk-1' },
+        reenroll: true,
+      };
+      expect((await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, body)).status).toBe(202);
+      expect((await heartbeat(agent)).commands[0]?.args).toMatchObject({
+        tool: 'pms-device-enroll',
+        argv: ['--api-url', 'https://pms-api.example', '--agent-id', 'front-desk-1', '--force', '--appsettings-dir', 'C:\\bench\\device'],
+        env: body.secret,
+      });
+      expect(await (await admin(env, 'GET', '/admin/commands')).text()).not.toContain('DEVICE-TOKEN-8842');
+    });
+
+    it('pms-device: the token is optional, the url is not', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      expect((await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'pms-device' })).status).toBe(400);
+      const ok = await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'pms-device', options: { '--api-url': 'https://pms-api.example' } });
+      expect(ok.status).toBe(202);
+    });
+  });
+
+  describe('re-enrol onto a new tenant', () => {
+    const links = (agentId: string): unknown[] =>
+      env.DB.raw.prepare('SELECT product, external_id FROM product_links WHERE agent_id = ? ORDER BY product, external_id').all(agentId);
+
+    it('moves the product link: the old external_id of that agent and product goes, other products stay', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, PMS);
+      await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { module: 'speaker', external_id: 'spk-1' });
+      const res = await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { ...PMS, external_id: 'azolo-new', reenroll: true });
+      expect(res.status).toBe(202);
+      expect(links(agent.id)).toEqual([
+        { product: 'pms-site', external_id: 'azolo-new' },
+        { product: 'speaker', external_id: 'spk-1' },
+      ]);
+      const rows = env.DB.raw.prepare("SELECT args FROM commands WHERE kind = 'attach' ORDER BY rowid").all() as { args: string }[];
+      expect((JSON.parse(rows.at(-1)?.args ?? '{}') as { argv: string[] }).argv).toContain('--force');
+    });
+
+    it('keeps the old link without reenroll', async () => {
+      const agent = await enrollAgent(env, 'dl-bench');
+      await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, PMS);
+      await admin(env, 'POST', `/admin/agents/${agent.id}/attach`, { ...PMS, external_id: 'azolo-new' });
+      expect(links(agent.id)).toEqual([
+        { product: 'pms-site', external_id: 'azolo-demo' },
+        { product: 'pms-site', external_id: 'azolo-new' },
+      ]);
     });
   });
 

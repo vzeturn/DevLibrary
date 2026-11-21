@@ -185,6 +185,8 @@ describe('demo module table', () => {
     expect(ps).toContain(
       "@{ Module = 'pda-sync'; Setup = 'pda-enroll'; SecretFrom = @('DL_AGENT_DEMO_PDA_CODE', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_DEMO_PDA_SQL_DEFAULT_PASSWORD'); SecretTo = @('DL_AGENT_PDA_CODE', 'DL_AGENT_PDA_SQL_ADMIN_PASSWORD', 'DL_AGENT_PDA_SQL_DEFAULT_PASSWORD'); SecretNeed = @('DL_AGENT_DEMO_PDA_CODE'); OptionFrom = @('DL_AGENT_DEMO_PDA_URL', 'DL_AGENT_DEMO_PDA_SQL_ADMIN_USER'); OptionFlag = @('--url', '--sql-admin-user'); OptionNeed = @('DL_AGENT_DEMO_PDA_URL');",
     );
+    // pms-device needs its API URL; with it unset the script skips just that module (`set DL_AGENT_DEMO_PMS_DEVICE_URL`).
+    expect(ps).toContain("@{ Module = 'pms-device'; Setup = 'pms-device-enroll'; SecretFrom = @('DL_AGENT_DEMO_PMS_DEVICE_TOKEN'); SecretTo = @('DL_AGENT_PMS_DEVICE_TOKEN'); SecretNeed = @(); OptionFrom = @('DL_AGENT_DEMO_PMS_DEVICE_URL', 'DL_AGENT_DEMO_PMS_DEVICE_AGENT_ID'); OptionFlag = @('--api-url', '--agent-id'); OptionNeed = @('DL_AGENT_DEMO_PMS_DEVICE_URL');");
     expect(ps).toContain("@{ Module = 'speaker'; Setup = ''; SecretFrom = @(); SecretTo = @(); SecretNeed = @()");
   });
 });
