@@ -90,9 +90,20 @@ impl LegacySite for Site {
     }
 }
 
+/// What the fake cloud answers.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Clean,
+    RefuseDry,
+    RefuseCommit,
+    CommitTimeout,
+    /// The post-commit dry run reports differing rows the cloud kept (`updated` false).
+    PostDiffers,
+}
+
 /// Records each upload's query, whether the site was offline then, and the manifest.
 struct Uploader {
-    refuse_dry: bool,
+    mode: Mode,
     root: PathBuf,
     calls: Mutex<Vec<(bool, UploadQuery, bool)>>,
     manifest: Mutex<Option<String>>,
@@ -107,7 +118,14 @@ impl BundleUploader for Uploader {
         _ctx: &Ctx,
     ) -> Result<UploadAnswer, TransportFailure> {
         let offline = self.root.join(OFFLINE).is_file();
+        let after_commit = self.calls.lock().unwrap().iter().any(|c| !c.0);
         self.calls.lock().unwrap().push((dry_run, query, offline));
+        if !dry_run && self.mode == Mode::CommitTimeout {
+            return Err(TransportFailure {
+                code: "TIMEOUT".to_owned(),
+                message: "the request timed out".to_owned(),
+            });
+        }
         let bytes = std::fs::read(&zip.path).unwrap();
         let manifest = dl_zip::ZipArchive::new(std::io::Cursor::new(bytes))
             .unwrap()
@@ -128,8 +146,18 @@ impl BundleUploader for Uploader {
             }],
             ..LegacyImportAck::default()
         };
-        if dry_run && self.refuse_dry {
+        let refuse = match self.mode {
+            Mode::RefuseDry => dry_run,
+            Mode::RefuseCommit => !dry_run,
+            _ => false,
+        };
+        if refuse {
             ack.refusal_code = Some("TENANT_ACTIVE".to_owned());
+            ack.committed = false;
+        }
+        if dry_run && after_commit && self.mode == Mode::PostDiffers {
+            ack.tables[0].same = 0;
+            ack.tables[0].differing = 1;
         }
         Ok(UploadAnswer {
             status: 200,
@@ -175,14 +203,9 @@ impl Fx {
         }
     }
 
-    fn run(
-        &self,
-        refuse_dry: bool,
-        pda_db: &Path,
-        extra: &str,
-    ) -> (SyncCommandResult, Arc<Uploader>) {
+    fn run(&self, mode: Mode, pda_db: &Path, extra: &str) -> (SyncCommandResult, Arc<Uploader>) {
         let up = Arc::new(Uploader {
-            refuse_dry,
+            mode,
             root: self.root.clone(),
             calls: Mutex::new(Vec::new()),
             manifest: Mutex::new(None),
@@ -211,8 +234,13 @@ impl Fx {
             app_version: Arc::new(|_| None),
         };
         let h = LegacyExportCommandHandler::new(env, &self.env.log);
+        let live = if extra.contains("allow_live") {
+            ""
+        } else {
+            r#","allow_live":false"#
+        };
         let payload = stj::parse(&format!(
-            r#"{{"source":"pda-db","app_pool":"PdaApp","allow_live":false,"prefer_legacy":false,"viet_qr_only":false,"reason":"cutover","take_offline":true{extra}}}"#
+            r#"{{"source":"pda-db","app_pool":"PdaApp","prefer_legacy":false,"viet_qr_only":false,"reason":"cutover","take_offline":true{live}{extra}}}"#
         ))
         .unwrap();
         let r = h.execute(&command(payload), &Ctx::background()).unwrap();
@@ -244,7 +272,11 @@ fn command(payload: Json) -> SyncCommand {
 #[test]
 fn a_commit_keeps_the_site_offline_and_every_upload_carries_keep_tenant() {
     let fx = Fx::new();
-    let (r, up) = fx.run(false, &fx.pda_db, r#","commit":true,"keep_tenant":true"#);
+    let (r, up) = fx.run(
+        Mode::Clean,
+        &fx.pda_db,
+        r#","commit":true,"keep_tenant":true"#,
+    );
     assert_eq!(r.status, CommandStatus::Applied, "{:?}", r.reason);
     let calls = up.calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 3, "dry run, commit, post-commit dry run");
@@ -281,7 +313,7 @@ fn a_commit_keeps_the_site_offline_and_every_upload_carries_keep_tenant() {
 #[test]
 fn without_keep_tenant_the_query_leaves_it_out_and_a_dry_run_brings_the_site_back() {
     let fx = Fx::new();
-    let (r, up) = fx.run(false, &fx.pda_db, r#","commit":false"#);
+    let (r, up) = fx.run(Mode::Clean, &fx.pda_db, r#","commit":false"#);
     assert_eq!(r.status, CommandStatus::Applied, "{:?}", r.reason);
     let calls = up.calls.lock().unwrap().clone();
     assert_eq!(calls.len(), 1);
@@ -299,7 +331,7 @@ fn without_keep_tenant_the_query_leaves_it_out_and_a_dry_run_brings_the_site_bac
 #[test]
 fn a_refused_dry_run_removes_the_agents_file() {
     let fx = Fx::new();
-    let (r, _) = fx.run(true, &fx.pda_db, r#","commit":true"#);
+    let (r, _) = fx.run(Mode::RefuseDry, &fx.pda_db, r#","commit":true"#);
     assert_eq!(
         r.status,
         CommandStatus::Applied,
@@ -322,7 +354,7 @@ fn a_precheck_refusal_after_placing_removes_the_file_again() {
     let fx = Fx::new();
     // No pda.db: the store gate refuses after the site was put offline.
     let missing = fx.env.dir.join("nowhere").join("pda.db");
-    let (r, up) = fx.run(false, &missing, r#","commit":true"#);
+    let (r, up) = fx.run(Mode::Clean, &missing, r#","commit":true"#);
     assert_eq!(r.status, CommandStatus::Rejected);
     assert!(
         r.reason
@@ -348,7 +380,7 @@ fn a_precheck_refusal_after_placing_removes_the_file_again() {
 fn an_existing_app_offline_is_left_alone_even_without_a_commit() {
     let fx = Fx::new();
     std::fs::write(fx.root.join(OFFLINE), b"operator's notice").unwrap();
-    let (r, _) = fx.run(false, &fx.pda_db, r#","commit":false"#);
+    let (r, _) = fx.run(Mode::Clean, &fx.pda_db, r#","commit":false"#);
     assert_eq!(r.status, CommandStatus::Applied, "{:?}", r.reason);
     assert_eq!(
         std::fs::read(fx.root.join(OFFLINE)).unwrap(),
@@ -365,7 +397,7 @@ fn an_existing_app_offline_is_left_alone_even_without_a_commit() {
 fn no_legacy_app_found_is_a_specific_rejection() {
     let fx = Fx::new();
     std::fs::remove_file(fx.root.join("MM.PdaOrder.Api.dll")).unwrap();
-    let (r, _) = fx.run(false, &fx.pda_db, r#","commit":true"#);
+    let (r, _) = fx.run(Mode::Clean, &fx.pda_db, r#","commit":true"#);
     assert_eq!(r.status, CommandStatus::Rejected);
     let reason = r.reason.unwrap();
     assert!(
@@ -373,4 +405,89 @@ fn no_legacy_app_found_is_a_specific_rejection() {
         "{reason}"
     );
     assert!(!fx.root.join(OFFLINE).exists());
+}
+
+#[test]
+fn keep_tenant_accepts_differing_rows_the_cloud_kept_and_without_it_they_fail() {
+    let fx = Fx::new();
+    let (r, _) = fx.run(
+        Mode::PostDiffers,
+        &fx.pda_db,
+        r#","commit":true,"keep_tenant":true"#,
+    );
+    assert_eq!(r.status, CommandStatus::Applied, "{:?}", r.reason);
+    let codes = fx.codes();
+    assert!(
+        codes.contains(&"LEGACY_EXPORT_UPLOADED".to_owned()),
+        "{codes:?}"
+    );
+    assert!(
+        !codes.contains(&"LEGACY_EXPORT_FAILED".to_owned()),
+        "{codes:?}"
+    );
+
+    let fx = Fx::new();
+    fx.run(Mode::PostDiffers, &fx.pda_db, r#","commit":true"#);
+    let events = fx.events.events();
+    let failed = events
+        .iter()
+        .find(|e| e.code == "LEGACY_EXPORT_FAILED")
+        .expect("the count check fails without keep_tenant");
+    assert_eq!(
+        failed.detail.get("error_code"),
+        Some(&Json::from("COUNT_CHECK_FAILED"))
+    );
+    // Failed after the commit: the site is retired, the file stays.
+    assert!(fx.root.join(OFFLINE).is_file());
+}
+
+#[test]
+fn a_commit_timeout_keeps_the_site_offline_and_a_commit_refusal_brings_it_back() {
+    let fx = Fx::new();
+    fx.run(Mode::CommitTimeout, &fx.pda_db, r#","commit":true"#);
+    assert!(
+        fx.root.join(OFFLINE).is_file(),
+        "the cloud may have committed"
+    );
+    let codes = fx.codes();
+    assert!(
+        codes.contains(&"LEGACY_SITE_OFFLINE_KEPT_UNKNOWN".to_owned()),
+        "{codes:?}"
+    );
+    assert!(
+        !codes.contains(&"LEGACY_SITE_OFFLINE_REMOVED".to_owned()),
+        "{codes:?}"
+    );
+
+    let fx = Fx::new();
+    fx.run(Mode::RefuseCommit, &fx.pda_db, r#","commit":true"#);
+    assert!(
+        !fx.root.join(OFFLINE).exists(),
+        "a definite refusal: nothing committed"
+    );
+    assert!(
+        fx.codes()
+            .contains(&"LEGACY_SITE_OFFLINE_REMOVED".to_owned())
+    );
+}
+
+#[test]
+fn take_offline_with_allow_live_is_ignored_and_said_so() {
+    let fx = Fx::new();
+    let (r, _) = fx.run(
+        Mode::Clean,
+        &fx.pda_db,
+        r#","commit":false,"allow_live":true"#,
+    );
+    assert_eq!(r.status, CommandStatus::Applied, "{:?}", r.reason);
+    assert!(!fx.root.join(OFFLINE).exists());
+    let codes = fx.codes();
+    assert!(
+        codes.contains(&"LEGACY_SITE_OFFLINE_IGNORED".to_owned()),
+        "{codes:?}"
+    );
+    assert!(
+        !codes.contains(&"LEGACY_SITE_OFFLINE_PLACED".to_owned()),
+        "{codes:?}"
+    );
 }

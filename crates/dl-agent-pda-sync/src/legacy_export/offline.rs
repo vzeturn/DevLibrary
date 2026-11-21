@@ -37,6 +37,60 @@ pub const EVENT_PLACED: &str = "LEGACY_SITE_OFFLINE_PLACED";
 pub const EVENT_REMOVED: &str = "LEGACY_SITE_OFFLINE_REMOVED";
 /// Event: the commit succeeded, the file stays (the site is retired).
 pub const EVENT_KEPT: &str = "LEGACY_SITE_OFFLINE_KEPT";
+/// Event: the commit's outcome is unknown, the file stays until the operator checks.
+pub const EVENT_KEPT_UNKNOWN: &str = "LEGACY_SITE_OFFLINE_KEPT_UNKNOWN";
+/// Event: `take_offline` was ignored (`allow_live` or `vietqr_only`).
+pub const EVENT_IGNORED: &str = "LEGACY_SITE_OFFLINE_IGNORED";
+
+/// What is known of the cloud commit when a run ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitState {
+    /// The cloud answered: nothing was committed (refusal, failure before the commit, dry run).
+    NotCommitted,
+    /// The commit succeeded.
+    Committed,
+    /// The commit was sent and no definite answer came back; the cloud may have committed.
+    Unknown,
+}
+
+impl CommitState {
+    /// The state after a run: committed when it says so or failed after the commit, unknown
+    /// when the commit stage failed without a definite cloud answer.
+    pub fn of(outcome: std::result::Result<bool, &ExportError>) -> CommitState {
+        match outcome {
+            Ok(true) => CommitState::Committed,
+            Ok(false) => CommitState::NotCommitted,
+            Err(e) if e.stage == stages::POST_COMMIT => CommitState::Committed,
+            Err(e) if super::upload::commit_outcome_unknown(e) => CommitState::Unknown,
+            Err(_) => CommitState::NotCommitted,
+        }
+    }
+}
+
+/// Says that `take_offline` was ignored, when it was ordered with `allow_live` or
+/// `vietqr_only` (neither needs the site offline).
+pub fn report_ignored(p: &super::payload::LegacyExportPayload, events: &RunEvents, log: &Logger) {
+    if !p.take_offline || !(p.allow_live || p.vietqr_only) {
+        return;
+    }
+    let why = if p.vietqr_only {
+        "viet_qr_only"
+    } else {
+        "allow_live"
+    };
+    let mut d = Map::new();
+    d.insert("reason", why);
+    events.export(
+        site_event_levels::INFO,
+        EVENT_IGNORED,
+        &format!("take_offline ignored with {why}: the legacy site is left as it is"),
+        d,
+    );
+    log.info(
+        "legacy.export: take_offline ignored with {Why}",
+        &[Value::from(why)],
+    );
+}
 
 /// IIS as the agent sees it; tests replace it.
 pub trait LegacySite: Send + Sync {
@@ -301,12 +355,13 @@ pub fn report_placed(events: &RunEvents, p: &Placement) {
 }
 
 /// Ends the placement of a run: after a successful commit the file stays (the site is
-/// retired), otherwise the file the agent created is removed. A file that was already
+/// retired); when the commit's outcome is unknown it stays too and the operator is told to
+/// check the import; otherwise the file the agent created is removed. A file that was already
 /// there is never touched. A removal failure is logged and returned (stage `stage`), for the
 /// caller to report.
 pub fn finish(
     p: &Placement,
-    committed: bool,
+    state: CommitState,
     stage: &'static str,
     events: &RunEvents,
     log: &Logger,
@@ -314,7 +369,23 @@ pub fn finish(
     if !p.created {
         return Ok(());
     }
-    if committed {
+    if state == CommitState::Unknown {
+        events.export(
+            site_event_levels::WARN,
+            EVENT_KEPT_UNKNOWN,
+            &format!(
+                "The commit was sent but no definite answer came back; {OFFLINE_FILE} stays in {}. Check the import result (tenant readiness) in the cloud: if nothing was imported, delete the file to bring the legacy site back, or rerun the export",
+                p.root
+            ),
+            detail(p),
+        );
+        log.warn(
+            "legacy.export: commit outcome unknown; app_offline.htm left in place",
+            &[],
+        );
+        return Ok(());
+    }
+    if state == CommitState::Committed {
         events.export(
             site_event_levels::INFO,
             EVENT_KEPT,

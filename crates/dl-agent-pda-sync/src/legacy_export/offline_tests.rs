@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::events::{MemoryEvents, RunEvents};
 use super::offline::{
-    EVENT_KEPT, EVENT_REMOVED, LegacySite, OFFLINE_PAGE, Placement, discover, expand_env, finish,
-    looks_like_pda, parse_paths, place,
+    CommitState, EVENT_KEPT, EVENT_KEPT_UNKNOWN, EVENT_REMOVED, LegacySite, OFFLINE_PAGE,
+    Placement, discover, expand_env, finish, looks_like_pda, parse_paths, place,
 };
 use super::payload::LegacyExportPayload;
 use super::sources::AppPoolProbe;
@@ -223,7 +223,14 @@ fn a_file_that_was_already_there_is_never_touched() {
     assert_eq!(p.evidence("x present"), "x present");
 
     let (mem, events) = run_events();
-    finish(&p, false, stages::CLEANUP, &events, &log()).unwrap();
+    finish(
+        &p,
+        CommitState::NotCommitted,
+        stages::CLEANUP,
+        &events,
+        &log(),
+    )
+    .unwrap();
     assert_eq!(
         std::fs::read(tmp.0.join(OFFLINE_FILE)).unwrap(),
         b"operator's own"
@@ -238,15 +245,75 @@ fn the_agents_file_is_removed_without_a_commit_and_kept_after_one() {
 
     let p = place(&tmp.text(), &site).unwrap();
     let (mem, events) = run_events();
-    finish(&p, false, stages::CLEANUP, &events, &log()).unwrap();
+    finish(
+        &p,
+        CommitState::NotCommitted,
+        stages::CLEANUP,
+        &events,
+        &log(),
+    )
+    .unwrap();
     assert!(!tmp.0.join(OFFLINE_FILE).exists());
     assert_eq!(mem.codes(), vec![EVENT_REMOVED.to_owned()]);
 
     let p = place(&tmp.text(), &site).unwrap();
     let (mem, events) = run_events();
-    finish(&p, true, stages::CLEANUP, &events, &log()).unwrap();
+    finish(&p, CommitState::Committed, stages::CLEANUP, &events, &log()).unwrap();
     assert!(tmp.0.join(OFFLINE_FILE).is_file());
     assert_eq!(mem.codes(), vec![EVENT_KEPT.to_owned()]);
+}
+
+#[test]
+fn an_unknown_commit_outcome_keeps_the_file_and_tells_the_operator() {
+    use super::sources::ExportError;
+    let at = |stage, code: &str, refused: bool| {
+        if refused {
+            ExportError::refused(stage, code, "x")
+        } else {
+            ExportError::new(stage, code, "x")
+        }
+    };
+    let of = |e: &ExportError| CommitState::of(Err(e));
+    // A timeout or transport failure while committing: the cloud may have committed.
+    assert_eq!(
+        of(&at(stages::COMMIT, "TIMEOUT", false)),
+        CommitState::Unknown
+    );
+    assert_eq!(
+        of(&at(stages::COMMIT, codes::LEGACY_UPLOAD_FAILED, false)),
+        CommitState::Unknown
+    );
+    // A definite cloud answer at the commit: nothing committed.
+    assert_eq!(
+        of(&at(stages::COMMIT, "TENANT_ACTIVE", true)),
+        CommitState::NotCommitted
+    );
+    assert_eq!(
+        of(&at(
+            stages::COMMIT,
+            codes::LEGACY_UPLOAD_NOT_COMMITTED,
+            false
+        )),
+        CommitState::NotCommitted
+    );
+    assert_eq!(
+        of(&at(stages::DRY_RUN, "TIMEOUT", false)),
+        CommitState::NotCommitted
+    );
+    assert_eq!(
+        of(&at(stages::POST_COMMIT, "COUNT_CHECK_FAILED", false)),
+        CommitState::Committed
+    );
+    assert_eq!(CommitState::of(Ok(true)), CommitState::Committed);
+    assert_eq!(CommitState::of(Ok(false)), CommitState::NotCommitted);
+
+    let tmp = Tmp::new();
+    let p = place(&tmp.text(), &Site::with(Vec::new())).unwrap();
+    let (mem, events) = run_events();
+    finish(&p, CommitState::Unknown, stages::CLEANUP, &events, &log()).unwrap();
+    assert!(tmp.0.join(OFFLINE_FILE).is_file());
+    assert_eq!(mem.codes(), vec![EVENT_KEPT_UNKNOWN.to_owned()]);
+    assert!(mem.events()[0].message.contains("Check the import result"));
 }
 
 #[test]
@@ -259,7 +326,14 @@ fn a_removal_failure_is_returned_not_swallowed() {
         created: true,
     };
     let (mem, events) = run_events();
-    let e = finish(&p, false, stages::CLEANUP, &events, &log()).unwrap_err();
+    let e = finish(
+        &p,
+        CommitState::NotCommitted,
+        stages::CLEANUP,
+        &events,
+        &log(),
+    )
+    .unwrap_err();
     assert_eq!(
         (e.code.as_str(), e.stage),
         (codes::LEGACY_SITE_OFFLINE_FAILED, stages::CLEANUP)

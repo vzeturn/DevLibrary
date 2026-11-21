@@ -321,6 +321,7 @@ impl LegacyExportCommandHandler {
 
     fn precheck(&self, p: &LegacyExportPayload, events: &RunEvents) -> Result<Prepared> {
         let env = &self.env;
+        offline::report_ignored(p, events, &self.log);
         if p.vietqr_only {
             // Nothing but the registry: no gate, no store, no SQL Server.
             let vietqr = env.vietqr.read();
@@ -377,7 +378,13 @@ impl LegacyExportCommandHandler {
             Err(mut e) => {
                 // Refused before anything was committed: the site goes back online.
                 if let Some(o) = &placed
-                    && let Err(rm) = offline::finish(o, false, stages::PRECHECK, events, &self.log)
+                    && let Err(rm) = offline::finish(
+                        o,
+                        offline::CommitState::NotCommitted,
+                        stages::PRECHECK,
+                        events,
+                        &self.log,
+                    )
                 {
                     events.failed(&rm);
                     e.message.push_str(&format!(" ({})", rm.message));
@@ -540,11 +547,8 @@ fn run(
 
     if let Some(o) = &prep.offline {
         // The site stays offline only once the cloud commit succeeded.
-        let committed = match &outcome {
-            Ok(done) => done.committed,
-            Err(e) => e.stage == stages::POST_COMMIT,
-        };
-        if let Err(e) = offline::finish(o, committed, stages::CLEANUP, &events, log) {
+        let state = offline::CommitState::of(outcome.as_ref().map(|d| d.committed));
+        if let Err(e) = offline::finish(o, state, stages::CLEANUP, &events, log) {
             events.failed(&e);
         }
     }

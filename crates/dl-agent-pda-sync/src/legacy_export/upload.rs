@@ -490,6 +490,13 @@ pub struct UploadPlan {
     pub vietqr_only: bool,
 }
 
+/// Whether an error of the run leaves the commit's outcome unknown: a failure at the commit
+/// stage that is not a definite answer of the cloud (a transport failure or timeout, or a
+/// transient status after every retry), so the cloud may have committed.
+pub fn commit_outcome_unknown(e: &ExportError) -> bool {
+    e.stage == stages::COMMIT && !e.refusal && e.code != codes::LEGACY_UPLOAD_NOT_COMMITTED
+}
+
 /// The `HTTP_<status>` code of an error answer, or the problem's own code.
 fn http_code(a: &UploadAnswer) -> String {
     a.problem_code
@@ -613,7 +620,7 @@ pub fn run_sequence(
     if !commit.committed {
         return Err(ExportError::new(
             stages::COMMIT,
-            codes::LEGACY_UPLOAD_FAILED,
+            codes::LEGACY_UPLOAD_NOT_COMMITTED,
             "The cloud answered without committing the import and without a refusal code.",
         ));
     }
@@ -622,16 +629,15 @@ pub fn run_sequence(
     let post_summary = AckSummary::of(&post);
     sent(stages::POST_COMMIT, &post_summary);
     require_clean(&post, stages::POST_COMMIT)?;
-    let gap = post
-        .tables
-        .iter()
-        .find(|t| t.inserted != 0 || (t.differing != 0 && (plan.vietqr_only || !t.updated)));
+    // With keep_tenant the cloud keeps its own values by design: differing rows are reported
+    // with `updated` false and are not a gap; rows still to insert always are.
+    let left = |t: &&crate::contracts::wire::LegacyImportTableAck| {
+        t.inserted != 0
+            || (t.differing != 0 && !plan.keep_tenant && (plan.vietqr_only || !t.updated))
+    };
+    let gap = post.tables.iter().find(left);
     if let Some(t) = gap {
-        let still = post
-            .tables
-            .iter()
-            .filter(|t| t.inserted != 0 || (t.differing != 0 && (plan.vietqr_only || !t.updated)))
-            .count();
+        let still = post.tables.iter().filter(left).count();
         return Err(ExportError::new(
             stages::POST_COMMIT,
             "COUNT_CHECK_FAILED",

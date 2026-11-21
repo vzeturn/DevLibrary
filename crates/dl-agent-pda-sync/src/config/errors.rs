@@ -79,6 +79,8 @@ pub mod codes {
     pub const LEGACY_UPLOAD_TOO_LARGE: &str = "LEGACY_UPLOAD_TOO_LARGE";
     /// legacy-upload failed.
     pub const LEGACY_UPLOAD_FAILED: &str = "LEGACY_UPLOAD_FAILED";
+    /// legacy-upload: the cloud answered the commit without committing and without a refusal.
+    pub const LEGACY_UPLOAD_NOT_COMMITTED: &str = "LEGACY_UPLOAD_NOT_COMMITTED";
 
     /// Enroll preflight: the instance accepts Windows logins only.
     pub const SQL_WINDOWS_AUTH_ONLY: &str = "SQL_WINDOWS_AUTH_ONLY";
