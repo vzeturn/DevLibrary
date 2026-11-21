@@ -4,7 +4,10 @@
 //! look (within 30 s, or at once on `pms.reconnect`) and then removes it from the file.
 //!
 //! A site that already has `identity.json` is enrolled: nothing changes unless `--force`,
-//! which deletes `identity.json` so the new code is used (the Go agent's re-enroll step).
+//! which deletes `identity.json` so the new code is used (the Go agent's re-enroll step),
+//! and also `agent.key`, so the module enrolls with a fresh Ed25519 key: the control plane
+//! keeps the old public key registered to the old agent (`UNIQUE(public_key)`) and refuses
+//! a second enrollment with it, e.g. when the site moves to another tenant (RT-0465).
 //! The code is never printed; it may come from `DL_AGENT_PMS_CODE` instead of `--code`.
 
 use std::io::Write;
@@ -18,7 +21,7 @@ use dl_json::{Map, Value};
 use crate::acl::{self, Guard};
 use crate::config;
 use crate::json;
-use crate::keystore::IDENTITY_FILE;
+use crate::keystore::{IDENTITY_FILE, KEY_FILE};
 
 #[cfg(test)]
 mod tests;
@@ -66,7 +69,10 @@ fn grammar(cmd: Command) -> Command {
                 .value_name("DIR")
                 .help("State directory to record in the config (default: the config's own)"),
         )
-        .arg(Arg::flag("force").help("Enroll again although identity.json exists (deletes it)"))
+        .arg(Arg::flag("force").help(
+            "Enroll again although identity.json exists (deletes it and agent.key, so a new \
+             key is generated)",
+        ))
 }
 
 /// What the command line asked for.
@@ -126,9 +132,11 @@ pub(crate) fn run_args(
                 ),
             );
         }
-        std::fs::remove_file(&identity)
-            .map_err(|e| format!("{NAME}: remove {}: {e}", identity.display()))?;
-        say(out, &format!("{NAME}: removed {}", identity.display()))?;
+        remove(out, &identity)?;
+    }
+    if args.force {
+        // The old key stays registered to the old agent; enrolling with it again is refused.
+        remove(out, &state_dir.join(KEY_FILE))?;
     }
     let mut obj = read_object(&path)?;
     obj.insert("cloud_url", args.cloud_url.as_str());
@@ -146,6 +154,15 @@ pub(crate) fn run_args(
             path.display()
         ),
     )
+}
+
+/// Deletes `path` when it exists and says so.
+fn remove(out: &mut dyn Write, path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => say(out, &format!("{NAME}: removed {}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{NAME}: remove {}: {e}", path.display())),
+    }
 }
 
 fn say(out: &mut dyn Write, line: &str) -> Result<(), String> {

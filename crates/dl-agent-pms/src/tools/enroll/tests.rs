@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use super::*;
 use crate::acl::AclError;
+use crate::keystore::{FileProtector, Store};
 
 struct TempDir(PathBuf);
 
@@ -166,17 +167,68 @@ fn an_enrolled_site_is_left_alone_unless_forced() {
     let state = d.0.join("state");
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(state.join(IDENTITY_FILE), r#"{"agent_id":"a"}"#).unwrap();
+    std::fs::write(
+        state.join(KEY_FILE),
+        r#"{"scheme":"file-0600","sealed":""}"#,
+    )
+    .unwrap();
 
     let (r, out) = run_with(&args(&cfg, Some(&state), false), &FakeGuard::default());
     r.unwrap();
     assert!(out.contains("already enrolled"), "{out}");
     assert!(!cfg.exists());
     assert!(state.join(IDENTITY_FILE).exists());
+    assert!(state.join(KEY_FILE).exists());
 
     let (r, out) = run_with(&args(&cfg, Some(&state), true), &FakeGuard::default());
     r.unwrap();
-    assert!(out.contains("removed"), "{out}");
+    assert!(
+        out.contains(IDENTITY_FILE) && out.contains(KEY_FILE),
+        "{out}"
+    );
     assert!(!state.join(IDENTITY_FILE).exists());
+    assert!(!state.join(KEY_FILE).exists());
+    assert_eq!(
+        config::load(Some(&cfg), &no_env).unwrap().enrollment_code,
+        CODE
+    );
+}
+
+#[test]
+fn force_replaces_a_key_left_behind_without_identity() {
+    // RT-0465: a forced re-enroll that already deleted identity.json once, then was refused
+    // because the old key is registered to the old agent; running it again must drop the key.
+    let d = TempDir::new("stale-key");
+    let cfg = d.0.join("config.json");
+    let state = d.0.join("state");
+    let store = Store::open_with(&state, Box::new(FileProtector)).unwrap();
+    let (old, created) = store.key().unwrap();
+    assert!(created);
+
+    let (r, _) = run_with(&args(&cfg, Some(&state), false), &FakeGuard::default());
+    r.unwrap();
+    assert!(
+        state.join(KEY_FILE).exists(),
+        "without --force the key is kept"
+    );
+
+    let (r, out) = run_with(&args(&cfg, Some(&state), true), &FakeGuard::default());
+    r.unwrap();
+    assert!(out.contains(KEY_FILE), "{out}");
+    assert!(!state.join(KEY_FILE).exists());
+    let (new, created) = store.key().unwrap();
+    assert!(created);
+    assert_ne!(old.seed(), new.seed());
+}
+
+#[test]
+fn force_on_an_empty_state_dir_succeeds() {
+    let d = TempDir::new("force-empty");
+    let cfg = d.0.join("config.json");
+    let state = d.0.join("state");
+    let (r, out) = run_with(&args(&cfg, Some(&state), true), &FakeGuard::default());
+    r.unwrap();
+    assert!(!out.contains("removed"), "{out}");
     assert_eq!(
         config::load(Some(&cfg), &no_env).unwrap().enrollment_code,
         CODE

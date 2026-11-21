@@ -14,6 +14,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent: `pms-enroll --force` also deletes the module's `agent.key`, so the next enrollment uses a fresh Ed25519 key. Before, a site moved to another tenant kept the key still registered to its old agent and the PMS control plane refused the enrollment (`enrollment refused`, RT-0465).
 - dl-agent: pda-sync re-stamps queued batches with the new agent id after `pda-enroll` changes the identity, so they are no longer refused (`Batch agent_id does not match`) and quarantined, and the recovery resnapshot after an identity change skips the 6 h cooldown (Muine Bay, RT-0450).
 - dl-agent: pda-sync skips orphan rows right away when the outbox is full but a few bytes under its cap, instead of after 30 minutes (RT-0442).
 - agent-hub: remote attach of `pms-site` passes the module's `config_path` as `--config` and `state_dir` as `--state-dir`, so `pms-enroll` writes where the module reads instead of the default `C:\ProgramData\SmilePMS\Agent` (RT-0422).
