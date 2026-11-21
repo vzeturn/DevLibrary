@@ -21,7 +21,7 @@ use dl_json::Value as Json;
 
 use super::batches::{OutboxItem, SqliteOutbox};
 use super::error::{OutboxError, UploadError};
-use super::parent_pending::ParentPendingTracker;
+use super::parent_pending::{ParentPendingEpisode, ParentPendingTracker};
 use crate::config::codes;
 use crate::config::time::{SharedClock, SystemClock, Timestamp};
 use crate::contracts::time::{DateTimeOffset, TICKS_PER_SECOND};
@@ -343,7 +343,20 @@ impl BatchUploader {
         if self.parents.parent_gone(&episode, resent, now)
             || self.parents.skip_orphans_early(&episode, now)
         {
-            return self.skip_orphans(item, parent, waited, ctx);
+            return self.skip_orphans(item, parent, waited, "was resent in full", ctx);
+        }
+        if let Some(stall) = self.stalled_resend(&episode, now)? {
+            self.log.warn(
+                "Stream {Stream} waited {WaitedSeconds} s for parent stream {ParentStream} that capture cannot resend ({Reason}): leaving out the rows without a parent ({Code})",
+                &[
+                    Value::from(&item.stream),
+                    Value::from(waited),
+                    Value::from(parent),
+                    Value::from(stall),
+                    Value::from(codes::SYNC_PARENT_PENDING),
+                ],
+            );
+            return self.skip_orphans(item, parent, waited, "could not be resent", ctx);
         }
         self.log.info(
             "Batch {Stream}#{Seq} waits for parent stream {ParentStream} (attempt {Attempts}, {WaitedSeconds} s); next try at {Next:O}",
@@ -392,11 +405,25 @@ impl BatchUploader {
         Ok(Outcome::Parked)
     }
 
+    /// After the escalation: why the parent resend cannot finish (full outbox or overdue).
+    fn stalled_resend(
+        &self,
+        episode: &ParentPendingEpisode,
+        now: DateTimeOffset,
+    ) -> Result<Option<&'static str>, UploadError> {
+        if episode.escalated_at.is_none() {
+            return Ok(None);
+        }
+        let full = self.outbox.is_full()?;
+        Ok(self.parents.parent_resend_stall(episode, full, now))
+    }
+
     fn skip_orphans(
         &mut self,
         item: &OutboxItem,
         parent: &str,
         waited: i64,
+        resend: &str,
         ctx: &Ctx,
     ) -> Result<Outcome, UploadError> {
         let bearer = self.tokens.get_access_token(ctx)?;
@@ -435,7 +462,7 @@ impl BatchUploader {
             return Ok(Outcome::Done);
         }
         let why = format!(
-            "parent stream {parent} was resent in full and the rows are still missing after {waited} s: {}",
+            "parent stream {parent} {resend} and the rows are still missing after {waited} s: {}",
             reason.as_deref().unwrap_or("-")
         );
         self.quarantine_refused(item, resp.status, Some(PARENT_GONE_CODE), Some(&why))?;

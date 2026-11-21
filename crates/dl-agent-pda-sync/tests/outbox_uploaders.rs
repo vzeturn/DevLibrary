@@ -10,6 +10,7 @@ use std::time::Duration;
 use dl_agent_pda_sync::config::AgentIdentity;
 use dl_agent_pda_sync::config::codes;
 use dl_agent_pda_sync::config::time::SharedClock;
+use dl_agent_pda_sync::contracts::WireJson;
 use dl_agent_pda_sync::contracts::wire::{
     SyncBatch, SyncBlobRef, SyncMode, SyncRow, sync_streams, wire_version,
 };
@@ -39,11 +40,16 @@ struct Fx {
 
 impl Fx {
     fn new() -> Fx {
+        Fx::with_cap(i64::MAX)
+    }
+
+    /// A fixture whose outbox refuses batches beyond `cap_bytes` stored payload bytes.
+    fn with_cap(cap_bytes: i64) -> Fx {
         let env = TestEnv::new();
         let cloud = FakeCloud::start();
         let agent = agent(&env, &cloud);
         let outbox =
-            Arc::new(SqliteOutbox::open(env.paths.outbox_db(), i64::MAX, &env.log).unwrap());
+            Arc::new(SqliteOutbox::open(env.paths.outbox_db(), cap_bytes, &env.log).unwrap());
         let uploader = BatchUploader::new(
             outbox.clone(),
             agent.http.clone(),
@@ -627,6 +633,61 @@ fn a_parent_gone_batch_is_sent_once_more_skipping_orphans_and_is_not_quarantined
         .count();
     assert_eq!(skipped, 1);
     assert!(fx.errors().is_empty());
+}
+
+fn orphan_skip_seqs(fx: &Fx) -> Vec<i64> {
+    fx.cloud
+        .with(|c| c.orphan_skips.iter().map(|b| b.seq).collect())
+}
+
+#[test]
+fn a_full_outbox_that_cannot_take_the_parent_resend_skips_the_orphans_after_the_escalation() {
+    let probe = Fx::new();
+    let cap = i64::try_from(probe.batch(1, CHILD, CHILD, None).to_json().len()).unwrap();
+    let mut fx = Fx::with_cap(cap);
+    fx.cloud.with(|c| {
+        c.parent_pending.insert(CHILD.into(), PARENT.into());
+        c.honor_skip_orphans = true;
+    });
+    fx.enqueue_stream(CHILD);
+    assert!(fx.outbox.is_full().unwrap());
+    fx.cycle();
+
+    fx.wait_parked(Duration::from_secs(14 * 60));
+    assert!(orphan_skip_seqs(&fx).is_empty(), "not escalated yet");
+    // The escalation asks for the resend; the parent never finishes (capture is refused), so the next attempt skips.
+    fx.wait_parked(STEP * 3);
+
+    assert_eq!(orphan_skip_seqs(&fx), [1]);
+    assert_eq!(fx.outbox.depth().unwrap(), 0);
+    assert_eq!(fx.outbox.quarantined_count().unwrap(), 0);
+    assert!(fx.errors().is_empty());
+    assert!(!fx.outbox.is_full().unwrap());
+}
+
+#[test]
+fn an_escalated_stream_with_room_in_the_outbox_skips_orphans_only_after_twice_the_bound() {
+    let mut fx = Fx::new();
+    fx.cloud.with(|c| {
+        c.parent_pending.insert(CHILD.into(), PARENT.into());
+        c.honor_skip_orphans = true;
+    });
+    fx.enqueue_stream(CHILD);
+    fx.cycle();
+    fx.wait_parked(Duration::from_secs(16 * 60)); // escalated, the parent resnapshot never finishes
+    assert_eq!(
+        fx.outbox.pending_stream_resnapshot().unwrap(),
+        [PARENT, CHILD]
+    );
+
+    fx.wait_parked(Duration::from_secs(28 * 60));
+    assert!(orphan_skip_seqs(&fx).is_empty(), "inside 2 x the bound");
+    assert_eq!(fx.outbox.depth().unwrap(), 1);
+
+    fx.wait_parked(STEP * 2);
+    assert_eq!(orphan_skip_seqs(&fx), [1]);
+    assert_eq!(fx.outbox.depth().unwrap(), 0);
+    assert_eq!(fx.outbox.quarantined_count().unwrap(), 0);
 }
 
 #[test]
