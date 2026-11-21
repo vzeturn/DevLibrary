@@ -144,6 +144,21 @@ fn a_select_op_returns_rows() {
 #[test]
 fn the_embedded_manifest_still_loads() {
     let m = Manifest::load().unwrap();
-    assert!(m.tables.is_empty(), "SMILE-PMS has not declared tables yet");
+    // RT-0614: SMILE-PMS RT-0474 S9 declares the seven tables read by fo.availability.source.
+    let mut tables: Vec<&str> = m.tables.iter().map(|t| t.name.as_str()).collect();
+    tables.sort_unstable();
+    assert_eq!(
+        tables,
+        [
+            "AllotmentContract",
+            "AllotmentContractWeekday",
+            "Folio",
+            "GroupBlockDetail",
+            "GroupFolio",
+            "HotelParameter",
+            "RoomType",
+        ]
+    );
+    assert!(m.lookup("fo.availability.source").is_some());
     assert!(!m.implemented_ops().is_empty());
 }
