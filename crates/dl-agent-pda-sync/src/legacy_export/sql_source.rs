@@ -39,33 +39,65 @@ pub fn refused_login(e: &ExportError) -> bool {
         || e.code == codes::SQL_NO_ACCESS
 }
 
-/// Runs `primary`; when the login is refused and there is a `fallback`, runs it once. When
-/// both are refused the failure names both attempts (no secrets).
-pub fn with_fallback<T>(
-    primary: impl FnOnce() -> Result<T>,
-    fallback: Option<impl FnOnce() -> Result<T>>,
-    instance: &str,
-) -> Result<T> {
-    let first = match primary() {
-        Ok(v) => return Ok(v),
-        Err(e) => e,
-    };
-    let (true, Some(second)) = (refused_login(&first), fallback) else {
-        return Err(first);
-    };
-    second().map_err(|e| {
-        let mut both = ExportError::new(
-            stages::EXPORT,
-            codes::SQL_NO_ACCESS,
-            format!(
-                "SQL Server '{instance}' refused both logins: pda_sync with the stored password (error {}) and Windows integrated authentication of the agent's service account (error {}). Give one of them SELECT on the POS database.",
-                first.sql_number.map_or_else(|| "?".to_owned(), |n| n.to_string()),
-                e.sql_number.map_or_else(|| "?".to_owned(), |n| n.to_string()),
-            ),
-        );
-        both.sql_number = e.sql_number.or(first.sql_number);
-        both
-    })
+/// Which login the run uses: `pda_sync` first; once it is refused (at connect or by a query)
+/// and a fallback exists, integrated authentication for the rest of the run.
+pub struct Failover {
+    has_fallback: bool,
+    integrated: std::sync::atomic::AtomicBool,
+}
+
+impl Failover {
+    /// With or without an integrated-authentication fallback.
+    pub fn new(has_fallback: bool) -> Failover {
+        Failover {
+            has_fallback,
+            integrated: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the run switched to integrated authentication.
+    pub fn is_integrated(&self) -> bool {
+        self.integrated.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Runs `attempt(false)`; when the login is refused, runs `attempt(true)` once and keeps
+    /// it for later calls. When both are refused the failure names both attempts (no secrets).
+    pub fn run<T>(&self, instance: &str, attempt: impl Fn(bool) -> Result<T>) -> Result<T> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.is_integrated() {
+            return attempt(true);
+        }
+        let first = match attempt(false) {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
+        };
+        if !(self.has_fallback && refused_login(&first)) {
+            return Err(first);
+        }
+        match attempt(true) {
+            Ok(v) => {
+                self.integrated.store(true, SeqCst);
+                Ok(v)
+            }
+            Err(e) => {
+                let num = |e: &ExportError| {
+                    e.sql_number
+                        .map_or_else(|| "?".to_owned(), |n| n.to_string())
+                };
+                let mut both = ExportError::new(
+                    stages::EXPORT,
+                    codes::SQL_NO_ACCESS,
+                    format!(
+                        "SQL Server '{instance}' refused both logins: pda_sync with the stored password (error {}) and Windows integrated authentication of the agent's service account (error {}). Give one of them SELECT on the POS database.",
+                        num(&first),
+                        num(&e)
+                    ),
+                );
+                both.sql_number = e.sql_number.or(first.sql_number);
+                Err(both)
+            }
+        }
+    }
 }
 
 // ---- SQL Server
@@ -76,6 +108,7 @@ pub struct TdsSqlSource {
     /// Windows integrated authentication (the service account), tried once when the
     /// primary login is refused.
     fallback: Option<dl_tds::Config>,
+    failover: Failover,
     instance: String,
     database: String,
 }
@@ -86,6 +119,7 @@ impl TdsSqlSource {
         TdsSqlSource {
             config,
             fallback: None,
+            failover: Failover::new(false),
             instance: instance.to_owned(),
             database: database.to_owned(),
         }
@@ -94,16 +128,8 @@ impl TdsSqlSource {
     /// Adds the integrated-authentication retry for a refused primary login.
     pub fn with_fallback(mut self, fallback: dl_tds::Config) -> TdsSqlSource {
         self.fallback = Some(fallback);
+        self.failover = Failover::new(true);
         self
-    }
-
-    fn connect(&self) -> Result<Client> {
-        let attempt = |c: &dl_tds::Config| Client::connect(c).map_err(|e| self.failure(&e, None));
-        with_fallback(
-            || attempt(&self.config),
-            self.fallback.as_ref().map(|f| move || attempt(f)),
-            &self.instance,
-        )
     }
 
     fn failure(&self, e: &dl_tds::Error, client: Option<&mut Client>) -> ExportError {
@@ -124,14 +150,14 @@ impl TdsSqlSource {
         }
     }
 
-    /// Runs one statement on a fresh connection and hands its first result set to `f`.
-    fn query<T>(
+    /// One statement on a fresh connection with the given login.
+    fn attempt(
         &self,
+        config: &dl_tds::Config,
         sql: &str,
         params: &[Param],
-        f: impl FnOnce(dl_tds::ResultSet) -> Result<T>,
-    ) -> Result<T> {
-        let mut client = self.connect()?;
+    ) -> Result<Option<dl_tds::ResultSet>> {
+        let mut client = Client::connect(config).map_err(|e| self.failure(&e, None))?;
         client.take_messages();
         client
             .set_timeout(Some(STATEMENT_TIMEOUT))
@@ -139,7 +165,25 @@ impl TdsSqlSource {
         let results = client
             .query(&format!("{PREAMBLE}{sql}"), params)
             .map_err(|e| self.failure(&e, Some(&mut client)))?;
-        match results.into_sets().into_iter().next() {
+        Ok(results.into_sets().into_iter().next())
+    }
+
+    /// Runs one statement and hands its first result set to `f`; a refused login, at
+    /// connect or at query time, switches the run to integrated authentication.
+    fn query<T>(
+        &self,
+        sql: &str,
+        params: &[Param],
+        f: impl FnOnce(dl_tds::ResultSet) -> Result<T>,
+    ) -> Result<T> {
+        let set = self.failover.run(&self.instance, |integrated| {
+            let config = match (&self.fallback, integrated) {
+                (Some(fallback), true) => fallback,
+                _ => &self.config,
+            };
+            self.attempt(config, sql, params)
+        })?;
+        match set {
             Some(set) => f(set),
             None => Err(ExportError::new(
                 stages::EXPORT,

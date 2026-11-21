@@ -611,3 +611,77 @@ pub fn legacy_cell(v: &LegacyValue) -> Cell {
         LegacyValue::Int(n) => Cell::Int(*n),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::legacy_export::sql_source::LegacySqlStoreSource;
+    use std::sync::Arc;
+
+    #[test]
+    fn sql_errors_are_explained_by_code_and_never_quote_other_server_text() {
+        let e = explain_sql_failure(53, 20, "network path was not found", "box", "SMILE_POS");
+        assert_eq!(
+            (e.code.as_str(), e.sql_number),
+            (codes::SQL_UNREACHABLE, Some(53))
+        );
+        assert!(e.message.contains("sql_instance") && e.message.contains("1433"));
+        let e = explain_sql_failure(18456, 14, "Login failed", "box", "SMILE_POS");
+        assert_eq!(e.code, codes::SQL_LOGIN_FAILED);
+        let e = explain_sql_failure(4060, 11, "Cannot open database", "box", "OTHER");
+        assert_eq!(e.code, codes::SQL_DATABASE_NOT_FOUND);
+        assert!(e.message.contains("'OTHER'"));
+        let e = explain_sql_failure(
+            245,
+            16,
+            "Conversion failed when converting 'Nguyen Van A'",
+            "box",
+            "D",
+        );
+        assert!(!e.message.contains("Nguyen"), "{}", e.message);
+        assert_eq!(e.sql_number, Some(245));
+    }
+
+    struct Tables(Vec<(String, i64)>);
+
+    impl LegacySqlSource for Tables {
+        fn database(&self) -> String {
+            "SMILE_POS".into()
+        }
+        fn rvc_list(&self) -> Result<Vec<(i32, String)>> {
+            Ok(Vec::new())
+        }
+        fn pda_tables(&self) -> Result<Vec<(String, i64)>> {
+            Ok(self.0.clone())
+        }
+        fn columns(&self, _q: &str) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn for_each_row(
+            &self,
+            _q: &str,
+            _c: &[String],
+            _s: &mut dyn FnMut(Vec<dl_tds::Value>) -> Result<()>,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn rows_in_two_schemas_or_no_known_table_refuse_the_from_sql_export() {
+        let zone = Arc::new(TimeZone::utc());
+        let two = Arc::new(Tables(vec![
+            ("dbo.Pda_Config".into(), 2),
+            ("pda.Pda_Config".into(), 3),
+        ]));
+        let Err(e) = LegacySqlStoreSource::open(two, zone.clone()) else {
+            panic!("two schemas with rows must be refused");
+        };
+        assert_eq!(e.code, codes::LEGACY_EXPORT_FAILED);
+        assert!(e.message.contains("more than one schema"));
+        let Err(e) = LegacySqlStoreSource::open(Arc::new(Tables(Vec::new())), zone) else {
+            panic!("no table must be refused");
+        };
+        assert_eq!(e.code, codes::LEGACY_STORE_MISSING);
+    }
+}

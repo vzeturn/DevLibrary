@@ -102,10 +102,20 @@ pub fn production_env(p: ProductionParts) -> LegacyExportEnv {
                 )
             })?;
         let config = agent_connection(&instance, &database, &String::from_utf8_lossy(&password));
-        Ok(
-            Arc::new(sql_source::TdsSqlSource::new(config, &instance, &database))
-                as Arc<dyn sources::LegacySqlSource>,
-        )
+        let mut source = sql_source::TdsSqlSource::new(config, &instance, &database);
+        if cfg!(windows) {
+            // Like bootstrap/admin.rs: the service account's Windows login.
+            source = source.with_fallback(
+                crate::config::sql::data_source(&instance)
+                    .with_database(&database)
+                    .with_encrypt(dl_tds::Encrypt::Required)
+                    .with_trust_server_certificate(true)
+                    .with_connect_timeout(crate::config::sql::CONNECT_TIMEOUT)
+                    .with_app_name(crate::config::sql::APP_NAME)
+                    .with_integrated_auth(),
+            );
+        }
+        Ok(Arc::new(source) as Arc<dyn sources::LegacySqlSource>)
     });
     LegacyExportEnv {
         work_dir: p.work_dir,

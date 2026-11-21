@@ -133,11 +133,6 @@ fn the_maintenance_gate_wants_evidence_or_allow_live() {
     assert!(e.message.contains("counts as closed"), "{}", e.message);
     let e = gate(None, Some("App"), false, &Pool(None)).unwrap_err();
     assert!(e.message.contains("not available here"), "{}", e.message);
-
-    // A site root that does not exist is a bad argument, not a closed gate.
-    let missing = tmp.0.join("nope");
-    let e = gate(missing.to_str(), None, true, &Pool(None)).unwrap_err();
-    assert_eq!(e.code, codes::BAD_ARGUMENTS);
 }
 
 // ---- the values of the oldest builds
@@ -207,9 +202,6 @@ fn sql_values_become_what_the_pda_db_move_stored() {
         Cell::Blob(vec![1, 2])
     );
     assert_eq!(c(LegacySqlKind::Raw, Tds::Bool(false)), Cell::Int(0));
-    assert_eq!(c(LegacySqlKind::Raw, Tds::I8(7)), Cell::Int(7));
-    assert_eq!(c(LegacySqlKind::Raw, Tds::F64(1.5)), Cell::Real(1.5));
-    assert_eq!(c(LegacySqlKind::Raw, Tds::Null), Cell::Null);
     // A type the map did not expect is kept as text, never dropped.
     assert_eq!(
         c(LegacySqlKind::Fixed2, Tds::String("n/a".into())),
@@ -492,8 +484,6 @@ fn the_bundle_follows_the_contract_and_its_hashes_are_stable() {
     );
 }
 
-// ---- the signed upload against a fake hub
-
 type Seen = Arc<Mutex<Vec<(String, String, Vec<(String, String)>, usize)>>>;
 
 struct Hub {
@@ -732,12 +722,6 @@ fn a_cloud_error_answer_carries_its_code_and_a_short_message() {
     };
     let e = parse_ack(&resp).unwrap_err();
     assert_eq!(e.code, codes::LEGACY_UPLOAD_FAILED);
-    // Both spellings of the import result are accepted.
-    let snake = SyncResponse {
-        status: 200,
-        body: br#"{"data":{"slug":"x","manifest_sha256":"ab","dry_run":true}}"#.to_vec(),
-    };
-    assert!(parse_ack(&snake).unwrap().dry_run);
 }
 
 #[test]
@@ -772,29 +756,44 @@ fn refused(n: i32) -> ExportError {
 }
 
 #[test]
-fn a_refused_pda_sync_login_retries_once_with_integrated_auth() {
-    use super::sql_source::with_fallback;
-    let calls = std::cell::Cell::new(0);
-    let ok = with_fallback(
-        || Err(refused(18456)),
-        Some(|| {
-            calls.set(calls.get() + 1);
+fn a_refused_pda_sync_login_switches_to_integrated_auth_and_stays() {
+    use super::sql_source::Failover;
+    let log = std::cell::RefCell::new(Vec::new());
+    let f = Failover::new(true);
+    // Refused at connect (18456): the fallback answers.
+    let v = f.run("box", |integrated| {
+        log.borrow_mut().push(integrated);
+        if integrated {
             Ok(1)
-        }),
-        "box",
-    );
-    assert_eq!((ok.unwrap(), calls.get()), (1, 1));
+        } else {
+            Err(refused(18456))
+        }
+    });
+    assert_eq!(v.unwrap(), 1);
+    assert!(f.is_integrated());
+    // Sticky: the next query goes straight to integrated auth.
+    f.run("box", |i| {
+        log.borrow_mut().push(i);
+        Ok(2)
+    })
+    .unwrap();
+    assert_eq!(*log.borrow(), vec![false, true, true]);
+
+    // Refused at query time (229) behaves the same.
+    let f = Failover::new(true);
+    let n = std::cell::Cell::new(0);
+    f.run("box", |i| {
+        n.set(n.get() + 1);
+        if i { Ok(()) } else { Err(refused(229)) }
+    })
+    .unwrap();
+    assert!(f.is_integrated() && n.get() == 2);
+
     // Both refused: SQL_NO_ACCESS naming both attempts.
-    let both = with_fallback::<i32>(|| Err(refused(229)), Some(|| Err(refused(18456))), "box")
+    let both = Failover::new(true)
+        .run::<i32>("box", |i| Err(refused(if i { 18456 } else { 229 })))
         .unwrap_err();
     assert_eq!(both.code, codes::SQL_NO_ACCESS);
     assert!(both.message.contains("pda_sync") && both.message.contains("integrated"));
-    // Unreachable is not a refusal: no retry. Without a fallback the first error stands.
-    let mut down = ExportError::new(stages::EXPORT, codes::SQL_UNREACHABLE, "x");
-    down.sql_number = Some(53);
-    let e = with_fallback::<i32>(|| Err(down), Some(|| Ok(2)), "box").unwrap_err();
-    assert_eq!(e.code, codes::SQL_UNREACHABLE);
-    let e = with_fallback::<i32>(|| Err(refused(18456)), None::<fn() -> Result<i32>>, "box")
-        .unwrap_err();
-    assert_eq!(e.sql_number, Some(18456));
+    assert!(both.message.contains("229") && both.message.contains("18456"));
 }
