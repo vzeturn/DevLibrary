@@ -7,7 +7,8 @@ use crate::util::stj::{Naming, Obj, ReadError, Writer};
 
 /// Paths and limits of the import upload.
 pub mod legacy_import_wire {
-    /// Agent path prefix (`PUT {prefix}{sha256}?dryRun=..&preferLegacy=..`).
+    /// Agent path prefix
+    /// (`PUT {prefix}{sha256}?dryRun=..&preferLegacy=..[&keepTenant=true]`).
     pub const PATH_PREFIX: &str = "/sync/v1/legacy/import/";
     /// API-key path prefix (ADR 0096).
     pub const KEY_PATH_PREFIX: &str = "/api/v1/legacy/import/";
@@ -16,18 +17,57 @@ pub mod legacy_import_wire {
     /// Largest zip the cloud accepts.
     pub const MAX_BYTES: i64 = 95 * 1024 * 1024;
 
-    /// Path and query the agent signs and sends.
-    pub fn path_and_query(sha256: &str, dry_run: bool, prefer_legacy: bool) -> String {
-        query(PATH_PREFIX, sha256, dry_run, prefer_legacy)
+    /// Path and query the agent signs and sends. `keepTenant=true` is appended only when
+    /// `keep_tenant`, so the URL of a run without it is unchanged.
+    pub fn path_and_query(
+        sha256: &str,
+        dry_run: bool,
+        prefer_legacy: bool,
+        keep_tenant: bool,
+    ) -> String {
+        query(PATH_PREFIX, sha256, dry_run, prefer_legacy, keep_tenant)
     }
 
     /// Path and query of the API-key upload.
-    pub fn key_path_and_query(sha256: &str, dry_run: bool, prefer_legacy: bool) -> String {
-        query(KEY_PATH_PREFIX, sha256, dry_run, prefer_legacy)
+    pub fn key_path_and_query(
+        sha256: &str,
+        dry_run: bool,
+        prefer_legacy: bool,
+        keep_tenant: bool,
+    ) -> String {
+        query(KEY_PATH_PREFIX, sha256, dry_run, prefer_legacy, keep_tenant)
     }
 
-    fn query(prefix: &str, sha256: &str, dry_run: bool, prefer_legacy: bool) -> String {
-        format!("{prefix}{sha256}?dryRun={dry_run}&preferLegacy={prefer_legacy}")
+    fn query(
+        prefix: &str,
+        sha256: &str,
+        dry_run: bool,
+        prefer_legacy: bool,
+        keep_tenant: bool,
+    ) -> String {
+        let keep = if keep_tenant { "&keepTenant=true" } else { "" };
+        format!("{prefix}{sha256}?dryRun={dry_run}&preferLegacy={prefer_legacy}{keep}")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn keep_tenant_is_appended_only_when_set() {
+            assert_eq!(
+                path_and_query("ab", true, false, false),
+                "/sync/v1/legacy/import/ab?dryRun=true&preferLegacy=false"
+            );
+            assert_eq!(
+                path_and_query("ab", false, true, true),
+                "/sync/v1/legacy/import/ab?dryRun=false&preferLegacy=true&keepTenant=true"
+            );
+            assert_eq!(
+                key_path_and_query("ab", true, true, true),
+                "/api/v1/legacy/import/ab?dryRun=true&preferLegacy=true&keepTenant=true"
+            );
+        }
     }
 }
 

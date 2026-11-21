@@ -52,6 +52,11 @@ pub mod codes {
 
     /// legacy-export: the legacy site is still live (ADR 0085).
     pub const LEGACY_SITE_LIVE: &str = "LEGACY_SITE_LIVE";
+    /// legacy-export `take_offline`: no site root given and not exactly one legacy PDA web
+    /// app found in IIS.
+    pub const LEGACY_SITE_UNRESOLVED: &str = "LEGACY_SITE_UNRESOLVED";
+    /// legacy-export `take_offline`: `app_offline.htm` could not be written or removed.
+    pub const LEGACY_SITE_OFFLINE_FAILED: &str = "LEGACY_SITE_OFFLINE_FAILED";
     /// legacy-export failed.
     pub const LEGACY_EXPORT_FAILED: &str = "LEGACY_EXPORT_FAILED";
     /// No `pda.db` at the given path (ADR 0093).
@@ -74,6 +79,8 @@ pub mod codes {
     pub const LEGACY_UPLOAD_TOO_LARGE: &str = "LEGACY_UPLOAD_TOO_LARGE";
     /// legacy-upload failed.
     pub const LEGACY_UPLOAD_FAILED: &str = "LEGACY_UPLOAD_FAILED";
+    /// legacy-upload: the cloud answered the commit without committing and without a refusal.
+    pub const LEGACY_UPLOAD_NOT_COMMITTED: &str = "LEGACY_UPLOAD_NOT_COMMITTED";
 
     /// Enroll preflight: the instance accepts Windows logins only.
     pub const SQL_WINDOWS_AUTH_ONLY: &str = "SQL_WINDOWS_AUTH_ONLY";

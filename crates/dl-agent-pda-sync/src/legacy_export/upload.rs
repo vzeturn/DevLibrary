@@ -244,6 +244,25 @@ impl TransportFailure {
     }
 }
 
+/// The query flags of an upload besides `dryRun`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UploadQuery {
+    /// Sent as `preferLegacy`.
+    pub prefer_legacy: bool,
+    /// Sent as `keepTenant=true` when set, left out otherwise.
+    pub keep_tenant: bool,
+}
+
+impl UploadQuery {
+    /// The flags.
+    pub const fn new(prefer_legacy: bool, keep_tenant: bool) -> UploadQuery {
+        UploadQuery {
+            prefer_legacy,
+            keep_tenant,
+        }
+    }
+}
+
 /// Sends the zip to the import endpoint.
 pub trait BundleUploader: Send + Sync {
     /// One upload; a dry run writes nothing in the cloud.
@@ -251,7 +270,7 @@ pub trait BundleUploader: Send + Sync {
         &self,
         zip: &BundleZip,
         dry_run: bool,
-        prefer_legacy: bool,
+        query: UploadQuery,
         ctx: &Ctx,
     ) -> std::result::Result<UploadAnswer, TransportFailure>;
 }
@@ -296,10 +315,15 @@ impl BundleUploader for HttpBundleUploader {
         &self,
         zip: &BundleZip,
         dry_run: bool,
-        prefer_legacy: bool,
+        query: UploadQuery,
         ctx: &Ctx,
     ) -> std::result::Result<UploadAnswer, TransportFailure> {
-        let path = legacy_import_wire::path_and_query(&zip.sha256, dry_run, prefer_legacy);
+        let path = legacy_import_wire::path_and_query(
+            &zip.sha256,
+            dry_run,
+            query.prefer_legacy,
+            query.keep_tenant,
+        );
         let mut resp = self
             .put(&path, zip, ctx)
             .map_err(|e| TransportFailure::of(&e))?;
@@ -459,9 +483,18 @@ pub struct UploadPlan {
     pub commit: bool,
     /// Passed as `preferLegacy`.
     pub prefer_legacy: bool,
+    /// Passed as `keepTenant=true` on every upload of the run when set.
+    pub keep_tenant: bool,
     /// A VietQR-only bundle: `ROWS_DIFFER` keeps the cloud's account, and the count check
     /// reads `differing` strictly.
     pub vietqr_only: bool,
+}
+
+/// Whether an error of the run leaves the commit's outcome unknown: a failure at the commit
+/// stage that is not a definite answer of the cloud (a transport failure or timeout, or a
+/// transient status after every retry), so the cloud may have committed.
+pub fn commit_outcome_unknown(e: &ExportError) -> bool {
+    e.stage == stages::COMMIT && !e.refusal && e.code != codes::LEGACY_UPLOAD_NOT_COMMITTED
 }
 
 /// The `HTTP_<status>` code of an error answer, or the problem's own code.
@@ -494,11 +527,11 @@ fn one_upload(
     zip: &BundleZip,
     stage: &'static str,
     dry_run: bool,
-    prefer_legacy: bool,
+    query: UploadQuery,
     ctx: &Ctx,
 ) -> Result<LegacyImportAck> {
     let answer = up
-        .send(zip, dry_run, prefer_legacy, ctx)
+        .send(zip, dry_run, query, ctx)
         .map_err(|f| ExportError::new(stage, &f.code, f.message))?;
     match answer.ack.clone() {
         Some(ack) => Ok(ack),
@@ -556,7 +589,8 @@ pub fn run_sequence(
         );
     };
 
-    let dry = one_upload(up, zip, stages::DRY_RUN, true, plan.prefer_legacy, ctx)?;
+    let query = UploadQuery::new(plan.prefer_legacy, plan.keep_tenant);
+    let dry = one_upload(up, zip, stages::DRY_RUN, true, query, ctx)?;
     let dry_summary = AckSummary::of(&dry);
     sent(stages::DRY_RUN, &dry_summary);
     if let Some(code) = &dry.refusal_code {
@@ -579,32 +613,31 @@ pub fn run_sequence(
         });
     }
 
-    let commit = one_upload(up, zip, stages::COMMIT, false, plan.prefer_legacy, ctx)?;
+    let commit = one_upload(up, zip, stages::COMMIT, false, query, ctx)?;
     let commit_summary = AckSummary::of(&commit);
     sent(stages::COMMIT, &commit_summary);
     require_clean(&commit, stages::COMMIT)?;
     if !commit.committed {
         return Err(ExportError::new(
             stages::COMMIT,
-            codes::LEGACY_UPLOAD_FAILED,
+            codes::LEGACY_UPLOAD_NOT_COMMITTED,
             "The cloud answered without committing the import and without a refusal code.",
         ));
     }
 
-    let post = one_upload(up, zip, stages::POST_COMMIT, true, plan.prefer_legacy, ctx)?;
+    let post = one_upload(up, zip, stages::POST_COMMIT, true, query, ctx)?;
     let post_summary = AckSummary::of(&post);
     sent(stages::POST_COMMIT, &post_summary);
     require_clean(&post, stages::POST_COMMIT)?;
-    let gap = post
-        .tables
-        .iter()
-        .find(|t| t.inserted != 0 || (t.differing != 0 && (plan.vietqr_only || !t.updated)));
+    // With keep_tenant the cloud keeps its own values by design: differing rows are reported
+    // with `updated` false and are not a gap; rows still to insert always are.
+    let left = |t: &&crate::contracts::wire::LegacyImportTableAck| {
+        t.inserted != 0
+            || (t.differing != 0 && !plan.keep_tenant && (plan.vietqr_only || !t.updated))
+    };
+    let gap = post.tables.iter().find(left);
     if let Some(t) = gap {
-        let still = post
-            .tables
-            .iter()
-            .filter(|t| t.inserted != 0 || (t.differing != 0 && (plan.vietqr_only || !t.updated)))
-            .count();
+        let still = post.tables.iter().filter(left).count();
         return Err(ExportError::new(
             stages::POST_COMMIT,
             "COUNT_CHECK_FAILED",

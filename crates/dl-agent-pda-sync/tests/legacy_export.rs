@@ -17,7 +17,7 @@ use dl_agent_pda_sync::legacy_export::sources::{
     AppPoolProbe, BrandingSource, ExportError, LegacySqlSource, VietQrRead, VietQrSource, stages,
 };
 use dl_agent_pda_sync::legacy_export::upload::{
-    BundleUploader, BundleZip, TransportFailure, UploadAnswer,
+    BundleUploader, BundleZip, TransportFailure, UploadAnswer, UploadQuery,
 };
 use dl_agent_pda_sync::legacy_export::{
     LEGACY_EXPORT, LegacyExportCommandHandler, LegacyExportEnv,
@@ -170,7 +170,7 @@ impl BundleUploader for FakeUploader {
         &self,
         zip: &BundleZip,
         dry_run: bool,
-        prefer_legacy: bool,
+        query: UploadQuery,
         _ctx: &Ctx,
     ) -> Result<UploadAnswer, TransportFailure> {
         if let Some(tx) = self.entered.lock().unwrap().take() {
@@ -181,7 +181,7 @@ impl BundleUploader for FakeUploader {
         }
         self.calls.lock().unwrap().push(Call {
             dry_run,
-            prefer_legacy,
+            prefer_legacy: query.prefer_legacy,
             zip_existed: zip.path.is_file(),
         });
         self.zips
@@ -271,6 +271,7 @@ impl Fx {
             pda_db: self.pda_db.clone(),
             sql: Arc::new(move |_p| Ok(sql.clone())),
             pools: Arc::new(Stopped),
+            site: Arc::new(dl_agent_pda_sync::legacy_export::offline::IisSite::default()),
             branding: Arc::new(NoBrand),
             vietqr: Arc::new(Account(vq)),
             uploader: up,

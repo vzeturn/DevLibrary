@@ -16,7 +16,7 @@ use super::sources::{
 };
 use super::sources::{ExportError, stages};
 use super::sql_source::{LegacySqlStoreSource, split_print_profiles};
-use super::upload::{BundleUploader, BundleZip, HttpBundleUploader};
+use super::upload::{BundleUploader, BundleZip, HttpBundleUploader, UploadQuery};
 use crate::config::time::{ManualClock, SharedClock, Timestamp};
 use crate::config::{AgentPaths, codes};
 use crate::contracts::WireJson;
@@ -655,7 +655,7 @@ fn the_upload_is_signed_names_its_hash_and_survives_one_expired_token() {
 
     hub.fail_401.store(1, Ordering::SeqCst);
     let answer = uploader
-        .send(&zip, true, false, &Ctx::background())
+        .send(&zip, true, UploadQuery::default(), &Ctx::background())
         .unwrap();
     assert!(
         answer.token_refreshed,
@@ -667,9 +667,8 @@ fn the_upload_is_signed_names_its_hash_and_survives_one_expired_token() {
         "{ack:?}"
     );
 
-    let committed = uploader
-        .send(&zip, false, true, &Ctx::background())
-        .unwrap();
+    let q = UploadQuery::new(true, false);
+    let committed = uploader.send(&zip, false, q, &Ctx::background()).unwrap();
     assert!(committed.ack.unwrap().committed);
     let seen = hub.seen.lock().unwrap();
     let put = seen.last().unwrap();
