@@ -30,6 +30,7 @@ use crate::contracts::wire::{
     order_command_reasons as order, order_command_types, site_command_reasons, site_command_types,
     table_command_reasons as table, table_command_types,
 };
+use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
 use crate::util::ctx::Ctx;
 
@@ -124,6 +125,7 @@ pub struct SiteCommandExecutor {
     log: Logger,
     resnapshot: Option<Arc<ResnapshotCommandHandler>>,
     verify: Option<Arc<super::verify::VerifyCommandHandler>>,
+    legacy_export: Option<Arc<LegacyExportCommandHandler>>,
     nudge: Option<Arc<dyn CaptureNudge>>,
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
@@ -148,6 +150,7 @@ impl SiteCommandExecutor {
             log,
             resnapshot: None,
             verify: None,
+            legacy_export: None,
             nudge: None,
             grants: None,
             schema,
@@ -163,6 +166,12 @@ impl SiteCommandExecutor {
     /// Runs `sync.verify` with `handler` (without one the type is unknown).
     pub fn with_verify(mut self, handler: Arc<super::verify::VerifyCommandHandler>) -> Self {
         self.verify = Some(handler);
+        self
+    }
+
+    /// Runs `legacy.export` with `handler` (without one the type is unknown).
+    pub fn with_legacy_export(mut self, handler: Arc<LegacyExportCommandHandler>) -> Self {
+        self.legacy_export = Some(handler);
         self
     }
 
@@ -245,6 +254,10 @@ impl SiteCommandExecutor {
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
             s::SYNC_VERIFY => match &self.verify {
+                Some(h) => h.execute(c, ctx),
+                None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
+            },
+            LEGACY_EXPORT => match &self.legacy_export {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },

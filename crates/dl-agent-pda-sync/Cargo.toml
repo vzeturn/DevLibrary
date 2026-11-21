@@ -27,6 +27,7 @@ dl-ws.workspace = true
 dl-signalr.workspace = true
 dl-tds.workspace = true
 dl-sqlite.workspace = true
+dl-zip.workspace = true
 dl-winsvc.workspace = true
 dl-winos.workspace = true
 

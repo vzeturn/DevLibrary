@@ -13,6 +13,12 @@ and diagnostics; this crate brings everything that reads or writes `SMILE_POS`.
 - **Commands** (`commands`): the cloud's site commands (KDS, reservations, order verbs,
   covers, combo, table moves) in one SQL transaction each, journalled in
   `Pda_SyncCommandLog` so a redelivered command is never applied twice (ADR 0029/0100).
+- **Legacy export** (`legacy_export`): the cloud's `legacy.export` command does what
+  `migrate-legacy.ps1` does by hand: it acks at once, then exports the on-prem store
+  (`pda.db`, or the SQL Server tables of a build from before it, SELECT only) into a bundle
+  under `<data dir>\legacy-export`, uploads it signed as a dry run, with `commit` commits it
+  and counts again, deletes the bundle whatever happened, and reports site events of sources
+  `legacy-export` / `legacy-upload` (RT-0390, ADR 0136).
 - **Verify** (`commands::verify`, `capture::{shadow_manifest, key_repair}`): the cloud's
   `sync.verify` compares the shadow with `GET /sync/v1/manifest` per bucket, narrows a
   mismatch to row keys (`/sync/v1/manifest/keys`) queued in `outbox.db`'s `key_repair`, and
