@@ -26,7 +26,7 @@ use crate::config::{
     AgentHealth, AgentIdentity, AgentOptions, AgentPaths, AgentStatus, RuntimeConfigStore, codes,
 };
 use crate::contracts::catalog::SyncCatalog;
-use crate::contracts::time::TimeZone;
+use crate::contracts::time::{DateTimeOffset, TimeZone};
 use crate::contracts::wire::StreamLag;
 use crate::contracts::wire::site_event_sources;
 use crate::outbox::{
@@ -141,6 +141,11 @@ impl AgentServices {
             options.outbox_cap_bytes,
             &log,
         )?);
+        outbox.adopt_agent_id(
+            &identity.agent_id_text(),
+            DateTimeOffset::from_unix_nanos(clock.now().unix_nanos(), 0)
+                .unwrap_or(DateTimeOffset::UNIX_EPOCH),
+        )?;
         let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
         let blobs = Arc::new(SqliteBlobOutbox::open(
             paths.blob_queue_db(),

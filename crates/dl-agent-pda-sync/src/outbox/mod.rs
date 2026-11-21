@@ -13,6 +13,7 @@ mod blob_uploader;
 mod blobs;
 mod error;
 mod heartbeat;
+mod identity;
 mod key_repairs;
 mod parent_pending;
 mod resnapshots;
@@ -29,6 +30,7 @@ pub use error::{OutboxError, Result, UploadError};
 pub use heartbeat::{
     CaptureStatus, HEARTBEAT_CATEGORY, HEARTBEAT_PATH, HeartbeatParts, HeartbeatSender,
 };
+pub use identity::AdoptResult;
 pub use key_repairs::{KEY_REPAIR_BATCH, OutboxKeyRepairList, SCHEMA as KEY_REPAIR_SCHEMA};
 pub use parent_pending::{ParentPendingEpisode, ParentPendingTracker};
 pub use resnapshots::{
