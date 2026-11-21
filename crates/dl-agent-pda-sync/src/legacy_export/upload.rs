@@ -124,9 +124,18 @@ impl BundleZip {
             dl_uuid::Uuid::new_v4().simple()
         ));
         std::fs::write(&path, &bytes).map_err(|e| {
-            // The half-written zip is removed; the original failure continues.
-            let _ = std::fs::remove_file(&path);
-            ExportError::io(stages::ZIP, "the zip could not be written", &e)
+            // The half-written zip is removed; a failure to remove it is told, not swallowed.
+            let left = match std::fs::remove_file(&path) {
+                Ok(()) => String::new(),
+                Err(d) if d.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(d) => format!(
+                    " The partial zip could not be deleted either ({:?}).",
+                    d.kind()
+                ),
+            };
+            let mut err = ExportError::io(stages::ZIP, "the zip could not be written", &e);
+            err.message.push_str(&left);
+            err
         })?;
         Ok(BundleZip {
             bundle,

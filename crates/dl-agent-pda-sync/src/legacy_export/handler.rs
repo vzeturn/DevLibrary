@@ -1,4 +1,4 @@
-//! Runs `legacy.export` (ADR 0135): the cloud orders the store agent to do what
+//! Runs `legacy.export` (ADR 0136): the cloud orders the store agent to do what
 //! `migrate-legacy.ps1` does by hand. The handler pre-checks, answers at once with
 //! `{"accepted":true,"runId":...}` and runs the export, the upload and the cleanup on a
 //! thread of its own, so the command channel is never blocked.
@@ -211,6 +211,12 @@ impl LegacyExportCommandHandler {
             Some(p) => p,
         };
         if let Some(problem) = payload.problem() {
+            let rid = Uuid::new_v4().to_string();
+            RunEvents::new((self.env.events)(&rid), &rid).failed(&ExportError::refused(
+                stages::PRECHECK,
+                "INVALID_PAYLOAD",
+                "the command payload is invalid",
+            ));
             return Ok(self.rejected(command, &format!("invalid_payload: {problem}")));
         }
 
@@ -221,6 +227,12 @@ impl LegacyExportCommandHandler {
                 return Ok(self.accepted(command, known));
             }
             if st.running.is_some() {
+                drop(st);
+                RunEvents::new((self.env.events)(&run_id), &run_id).failed(&ExportError::refused(
+                    stages::PRECHECK,
+                    "ALREADY_RUNNING",
+                    "another legacy export is running",
+                ));
                 return Ok(self.rejected(command, "legacy_export_already_running"));
             }
             // The slot is taken before the pre-check: a second command cannot slip in while
@@ -229,8 +241,11 @@ impl LegacyExportCommandHandler {
         }
         let prepared = match self.precheck(&payload) {
             Ok(p) => p,
-            Err(e) => {
+            Err(mut e) => {
+                e.stage = stages::PRECHECK;
                 lock(&self.state).running = None;
+                // A refusal is told to the cloud like any failed stage.
+                RunEvents::new((self.env.events)(&run_id), &run_id).failed(&e);
                 self.log.warn(
                     "legacy.export {Id} refused ({Code}, stage {Stage})",
                     &[
@@ -461,7 +476,10 @@ fn run(
             events.failed(&ExportError::refused(
                 stages::CLEANUP,
                 codes::LEGACY_EXPORT_FAILED,
-                "the local bundle could not be deleted; delete it by hand",
+                format!(
+                    "the local bundle could not be deleted ({:?}); delete it by hand",
+                    e.kind()
+                ),
             ));
             false
         }

@@ -31,11 +31,51 @@ const STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
 /// `SET`s of every read: it gives up on a lock and never wins a deadlock against POS Win.
 const PREAMBLE: &str = "SET LOCK_TIMEOUT 15000; SET DEADLOCK_PRIORITY LOW; ";
 
+/// Whether a refused connection is worth the integrated-authentication retry: the login
+/// was refused or has no access (229, 230, 916, 18456).
+pub fn refused_login(e: &ExportError) -> bool {
+    matches!(e.sql_number, Some(229 | 230 | 916 | 18456))
+        || e.code == codes::SQL_LOGIN_FAILED
+        || e.code == codes::SQL_NO_ACCESS
+}
+
+/// Runs `primary`; when the login is refused and there is a `fallback`, runs it once. When
+/// both are refused the failure names both attempts (no secrets).
+pub fn with_fallback<T>(
+    primary: impl FnOnce() -> Result<T>,
+    fallback: Option<impl FnOnce() -> Result<T>>,
+    instance: &str,
+) -> Result<T> {
+    let first = match primary() {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    let (true, Some(second)) = (refused_login(&first), fallback) else {
+        return Err(first);
+    };
+    second().map_err(|e| {
+        let mut both = ExportError::new(
+            stages::EXPORT,
+            codes::SQL_NO_ACCESS,
+            format!(
+                "SQL Server '{instance}' refused both logins: pda_sync with the stored password (error {}) and Windows integrated authentication of the agent's service account (error {}). Give one of them SELECT on the POS database.",
+                first.sql_number.map_or_else(|| "?".to_owned(), |n| n.to_string()),
+                e.sql_number.map_or_else(|| "?".to_owned(), |n| n.to_string()),
+            ),
+        );
+        both.sql_number = e.sql_number.or(first.sql_number);
+        both
+    })
+}
+
 // ---- SQL Server
 
 /// [`LegacySqlSource`] over `dl_tds`: one connection per statement, like the C# source.
 pub struct TdsSqlSource {
     config: dl_tds::Config,
+    /// Windows integrated authentication (the service account), tried once when the
+    /// primary login is refused.
+    fallback: Option<dl_tds::Config>,
     instance: String,
     database: String,
 }
@@ -45,9 +85,25 @@ impl TdsSqlSource {
     pub fn new(config: dl_tds::Config, instance: &str, database: &str) -> TdsSqlSource {
         TdsSqlSource {
             config,
+            fallback: None,
             instance: instance.to_owned(),
             database: database.to_owned(),
         }
+    }
+
+    /// Adds the integrated-authentication retry for a refused primary login.
+    pub fn with_fallback(mut self, fallback: dl_tds::Config) -> TdsSqlSource {
+        self.fallback = Some(fallback);
+        self
+    }
+
+    fn connect(&self) -> Result<Client> {
+        let attempt = |c: &dl_tds::Config| Client::connect(c).map_err(|e| self.failure(&e, None));
+        with_fallback(
+            || attempt(&self.config),
+            self.fallback.as_ref().map(|f| move || attempt(f)),
+            &self.instance,
+        )
     }
 
     fn failure(&self, e: &dl_tds::Error, client: Option<&mut Client>) -> ExportError {
@@ -75,7 +131,7 @@ impl TdsSqlSource {
         params: &[Param],
         f: impl FnOnce(dl_tds::ResultSet) -> Result<T>,
     ) -> Result<T> {
-        let mut client = Client::connect(&self.config).map_err(|e| self.failure(&e, None))?;
+        let mut client = self.connect()?;
         client.take_messages();
         client
             .set_timeout(Some(STATEMENT_TIMEOUT))

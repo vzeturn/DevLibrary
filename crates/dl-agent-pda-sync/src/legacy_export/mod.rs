@@ -1,4 +1,4 @@
-//! The `legacy.export` site command (RT-0390, ADR 0135): the store agent does what
+//! The `legacy.export` site command (RT-0390, ADR 0136): the store agent does what
 //! `migrate-legacy.ps1` plus `PdaSyncAgent legacy-export` and `legacy-upload` do by hand.
 //!
 //! - [`payload`]: the command's payload, its sources and the site event codes.

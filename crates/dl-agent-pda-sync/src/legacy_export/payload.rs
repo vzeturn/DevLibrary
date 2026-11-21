@@ -1,4 +1,4 @@
-//! The payload of the `legacy.export` site command (`LegacyExportPayload.cs`, ADR 0135)
+//! The payload of the `legacy.export` site command (`LegacyExportPayload.cs`, ADR 0136)
 //! and the values the cloud contract names around it.
 
 use crate::contracts::WireJson;
@@ -122,7 +122,7 @@ impl WireJson for LegacyExportPayload {
         w.key("allow_live").bool(self.allow_live);
         w.key("commit").bool(self.commit);
         w.key("prefer_legacy").bool(self.prefer_legacy);
-        w.key("vietqr_only").bool(self.vietqr_only);
+        w.key("viet_qr_only").bool(self.vietqr_only);
         w.key("reason").string(&self.reason);
         w.end_object();
     }
@@ -137,7 +137,7 @@ impl WireJson for LegacyExportPayload {
             allow_live: o.bool("allow_live")?,
             commit: o.bool("commit")?,
             prefer_legacy: o.bool("prefer_legacy")?,
-            vietqr_only: o.bool("vietqr_only")?,
+            vietqr_only: o.bool("viet_qr_only")?,
             reason: o.string("reason")?,
         })
     }

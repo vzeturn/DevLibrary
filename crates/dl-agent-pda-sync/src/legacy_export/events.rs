@@ -1,4 +1,4 @@
-//! The structured site events of a run (ADR 0135): sources `legacy-export` and
+//! The structured site events of a run (ADR 0136): sources `legacy-export` and
 //! `legacy-upload`, codes `LEGACY_EXPORT_STARTED`, `LEGACY_EXPORT_FAILED` and
 //! `LEGACY_EXPORT_UPLOADED`, each carrying the run id. Details hold counts, names, codes and
 //! hashes; never row data, guest names or invoice values.

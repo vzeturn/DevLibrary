@@ -1,7 +1,4 @@
-//! `legacy.export` (RT-0390, ADR 0135): the command's reject reasons and ack, the bundle
-//! written from a fixture `pda.db`, the upload sequence (dry run, commit, count check), the
-//! cleanup on success and failure, the failure events (stage and code, never row data), and
-//! the VietQR-only bundle. The signed upload is tested in `legacy_export::tests`.
+//! `legacy.export` (RT-0390, ADR 0136): command flow, bundle, upload sequence, cleanup, events.
 
 mod support;
 
@@ -290,7 +287,7 @@ impl Fx {
 
 fn payload(extra: &str) -> Json {
     stj::parse(&format!(
-        r#"{{"source":"pda-db","app_pool":"PdaApp","allow_live":false,"commit":false,"prefer_legacy":false,"vietqr_only":false,"reason":"cutover of the store"{extra}}}"#
+        r#"{{"source":"pda-db","app_pool":"PdaApp","allow_live":false,"commit":false,"prefer_legacy":false,"viet_qr_only":false,"reason":"cutover of the store"{extra}}}"#
     ))
     .unwrap()
 }
@@ -398,7 +395,14 @@ fn sql_down_at_the_precheck_is_a_specific_rejection_and_nothing_runs() {
         r.reason
     );
     assert!(h.running().is_none());
-    assert!(fx.events.events().is_empty());
+    let ev = fx.events.events();
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0].code, "LEGACY_EXPORT_FAILED");
+    assert_eq!(ev[0].detail.get("stage"), Some(&Json::from("precheck")));
+    assert_eq!(
+        ev[0].detail.get("error_code"),
+        Some(&Json::from("SQL_UNREACHABLE"))
+    );
 }
 
 #[test]
@@ -411,7 +415,7 @@ fn a_closed_maintenance_gate_rejects_and_a_stopped_pool_opens_it() {
         VietQrRead::NotSet,
     );
     let none = stj::parse(
-        r#"{"source":"pda-db","allow_live":false,"commit":false,"prefer_legacy":false,"vietqr_only":false,"reason":"r"}"#,
+        r#"{"source":"pda-db","allow_live":false,"commit":false,"prefer_legacy":false,"viet_qr_only":false,"reason":"r"}"#,
     )
     .unwrap();
     let r = exec(&h, &command(none));
@@ -760,7 +764,7 @@ fn vietqr_only_exports_the_one_registry_table_without_sql_or_a_gate() {
     ]);
     let h = fx.handler(FakeSql::dies_after_precheck(), up.clone(), vq);
     let only = stj::parse(
-        r#"{"source":"auto","allow_live":false,"commit":false,"prefer_legacy":false,"vietqr_only":true,"reason":"vietqr"}"#,
+        r#"{"source":"auto","allow_live":false,"commit":false,"prefer_legacy":false,"viet_qr_only":true,"reason":"vietqr"}"#,
     )
     .unwrap();
     assert_eq!(exec(&h, &command(only)).status, CommandStatus::Applied);
@@ -781,7 +785,7 @@ fn vietqr_only_exports_the_one_registry_table_without_sql_or_a_gate() {
         FakeUploader::new(Mode::Clean),
         VietQrRead::NotSet,
     );
-    let only = stj::parse(r#"{"source":"auto","vietqr_only":true,"reason":"vietqr"}"#).unwrap();
+    let only = stj::parse(r#"{"source":"auto","viet_qr_only":true,"reason":"vietqr"}"#).unwrap();
     let r = exec(&h2, &command(only));
     assert!(
         r.reason

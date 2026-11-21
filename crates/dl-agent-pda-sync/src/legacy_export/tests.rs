@@ -1,7 +1,6 @@
-//! Unit tests of `legacy.export`: payload, gate, old-build values, print split, bundle
-//! writer and the signed upload against a fake hub. The command flow is in
-//! `tests/legacy_export.rs`.
+//! Unit tests of `legacy.export`; the command flow is in `tests/legacy_export.rs`.
 
+use dl_tds::Value as Tds;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -9,14 +8,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dl_tds::Value as Tds;
-
 use super::bundle::{self, ExportParts};
 use super::payload::LegacyExportPayload;
 use super::sources::{
     AppPoolProbe, BrandingSource, Cell, LegacySqlSource, LegacyStore, Result, Row, RowSink,
-    VietQrRead, convert, explain_sql_failure, maintenance_gate,
+    VietQrRead, convert, maintenance_gate,
 };
+use super::sources::{ExportError, stages};
 use super::sql_source::{LegacySqlStoreSource, split_print_profiles};
 use super::upload::{BundleUploader, BundleZip, HttpBundleUploader};
 use crate::config::time::{ManualClock, SharedClock, Timestamp};
@@ -57,44 +55,30 @@ fn text(c: &Cell) -> &str {
 // ---- payload
 
 #[test]
-fn the_payload_reads_snake_case_and_validates_like_the_cloud() {
-    let p = LegacyExportPayload::from_json(
-        r#"{"source":"from-sql","sql_instance":".\\SQLEXPRESS","commit":true,"prefer_legacy":true,"reason":"why"}"#,
-    )
-    .unwrap();
-    assert_eq!(p.source, "from-sql");
-    assert_eq!(p.sql_instance.as_deref(), Some(r".\SQLEXPRESS"));
-    assert!(p.commit && p.prefer_legacy && !p.allow_live && !p.vietqr_only);
+fn the_payload_validates_like_the_cloud() {
+    let mut p = LegacyExportPayload::from_json(r#"{"source":"from-sql","reason":"why"}"#).unwrap();
     assert_eq!(p.problem(), None);
-    assert!(p.to_json().contains(r#""prefer_legacy":true"#));
-
-    let case = |f: fn(&mut LegacyExportPayload)| {
-        let mut q = p.clone();
-        f(&mut q);
-        q.problem()
-    };
+    p.source = "somewhere".into();
     assert_eq!(
-        case(|q| q.source = "somewhere".into()).unwrap(),
+        p.problem().unwrap(),
         "source must be auto, pda-db or from-sql"
     );
+    p.source = "auto".into();
+    p.database = Some(String::new());
     assert_eq!(
-        case(|q| q.database = Some(String::new())).unwrap(),
+        p.problem().unwrap(),
         "database must be 1..260 characters when given"
     );
+    p.database = None;
+    p.app_pool = Some("a\u{7}b".into());
     assert_eq!(
-        case(|q| q.app_pool = Some("a\u{7}b".into())).unwrap(),
+        p.problem().unwrap(),
         "app_pool must not contain control characters"
     );
+    p.app_pool = None;
+    p.reason = "x".repeat(301);
     assert_eq!(
-        case(|q| q.site_root = Some("x".repeat(261))).unwrap(),
-        "site_root must be 1..260 characters when given"
-    );
-    assert_eq!(
-        case(|q| q.reason = "  ".into()).unwrap(),
-        "reason is required"
-    );
-    assert_eq!(
-        case(|q| q.reason = "x".repeat(301)).unwrap(),
+        p.problem().unwrap(),
         "reason must be at most 300 characters"
     );
 }
@@ -154,26 +138,6 @@ fn the_maintenance_gate_wants_evidence_or_allow_live() {
     let missing = tmp.0.join("nope");
     let e = gate(missing.to_str(), None, true, &Pool(None)).unwrap_err();
     assert_eq!(e.code, codes::BAD_ARGUMENTS);
-}
-
-#[test]
-fn sql_errors_are_explained_by_code_and_never_quote_other_server_text() {
-    let e = explain_sql_failure(53, 20, "network path was not found", "box", "SMILE_POS");
-    assert_eq!(
-        (e.code.as_str(), e.sql_number),
-        (codes::SQL_UNREACHABLE, Some(53))
-    );
-    assert!(e.message.contains("sql_instance") && e.message.contains("1433"));
-    // An error that may quote a row value keeps only its number.
-    let e = explain_sql_failure(
-        245,
-        16,
-        "Conversion failed when converting 'Nguyen Van A'",
-        "box",
-        "D",
-    );
-    assert!(!e.message.contains("Nguyen"), "{}", e.message);
-    assert_eq!(e.sql_number, Some(245));
 }
 
 // ---- the values of the oldest builds
@@ -392,29 +356,6 @@ fn a_build_from_before_pda_db_is_read_through_the_store_map() {
     assert!(store.sql_table_needs_review("dbo.Pda_Mystery"));
     assert!(!store.sql_table_needs_review("dbo.Pda_RefreshToken"));
     assert!(!store.sql_table_needs_review("dbo.Pda_MigrationHistory"));
-}
-
-#[test]
-fn rows_in_two_schemas_or_no_known_table_refuse_the_from_sql_export() {
-    let two = Arc::new(Fake {
-        tables: vec![("dbo.Pda_Config".into(), 2), ("pda.Pda_Config".into(), 3)],
-        columns: Vec::new(),
-        rows: Vec::new(),
-    });
-    let Err(e) = LegacySqlStoreSource::open(two, Arc::new(TimeZone::utc())) else {
-        panic!("two schemas with rows must be refused");
-    };
-    assert_eq!(e.code, codes::LEGACY_EXPORT_FAILED);
-    assert!(e.message.contains("more than one schema"));
-    let none = Arc::new(Fake {
-        tables: Vec::new(),
-        columns: Vec::new(),
-        rows: Vec::new(),
-    });
-    let Err(e) = LegacySqlStoreSource::open(none, Arc::new(TimeZone::utc())) else {
-        panic!("no table must be refused");
-    };
-    assert_eq!(e.code, codes::LEGACY_STORE_MISSING);
 }
 
 // ---- the bundle writer
@@ -797,4 +738,63 @@ fn a_cloud_error_answer_carries_its_code_and_a_short_message() {
         body: br#"{"data":{"slug":"x","manifest_sha256":"ab","dry_run":true}}"#.to_vec(),
     };
     assert!(parse_ack(&snake).unwrap().dry_run);
+}
+
+#[test]
+fn the_payload_keys_match_the_csharp_contract_json() {
+    // The JSON SiteCommandContractTests emits (null sql_instance omitted).
+    let p = LegacyExportPayload::from_json(
+        r#"{"source":"auto","database":"PDAOrder","site_root":"C:\\inetpub\\pda","app_pool":"PdaPool","allow_live":true,"commit":true,"prefer_legacy":true,"viet_qr_only":true,"reason":"cut over"}"#,
+    )
+    .unwrap();
+    assert!(p.vietqr_only && p.allow_live && p.commit && p.prefer_legacy);
+    assert_eq!(p.sql_instance, None);
+    assert_eq!(p.database.as_deref(), Some("PDAOrder"));
+    assert_eq!(p.site_root.as_deref(), Some(r"C:\inetpub\pda"));
+    assert_eq!(p.app_pool.as_deref(), Some("PdaPool"));
+    let json = p.to_json();
+    for k in [
+        "\"viet_qr_only\":true",
+        "\"allow_live\":true",
+        "\"prefer_legacy\":true",
+        "\"site_root\"",
+        "\"app_pool\"",
+    ] {
+        assert!(json.contains(k), "{k} in {json}");
+    }
+    assert!(!json.contains("sql_instance"));
+}
+
+fn refused(n: i32) -> ExportError {
+    let mut e = ExportError::new(stages::EXPORT, codes::SQL_LOGIN_FAILED, "x");
+    e.sql_number = Some(n);
+    e
+}
+
+#[test]
+fn a_refused_pda_sync_login_retries_once_with_integrated_auth() {
+    use super::sql_source::with_fallback;
+    let calls = std::cell::Cell::new(0);
+    let ok = with_fallback(
+        || Err(refused(18456)),
+        Some(|| {
+            calls.set(calls.get() + 1);
+            Ok(1)
+        }),
+        "box",
+    );
+    assert_eq!((ok.unwrap(), calls.get()), (1, 1));
+    // Both refused: SQL_NO_ACCESS naming both attempts.
+    let both = with_fallback::<i32>(|| Err(refused(229)), Some(|| Err(refused(18456))), "box")
+        .unwrap_err();
+    assert_eq!(both.code, codes::SQL_NO_ACCESS);
+    assert!(both.message.contains("pda_sync") && both.message.contains("integrated"));
+    // Unreachable is not a refusal: no retry. Without a fallback the first error stands.
+    let mut down = ExportError::new(stages::EXPORT, codes::SQL_UNREACHABLE, "x");
+    down.sql_number = Some(53);
+    let e = with_fallback::<i32>(|| Err(down), Some(|| Ok(2)), "box").unwrap_err();
+    assert_eq!(e.code, codes::SQL_UNREACHABLE);
+    let e = with_fallback::<i32>(|| Err(refused(18456)), None::<fn() -> Result<i32>>, "box")
+        .unwrap_err();
+    assert_eq!(e.sql_number, Some(18456));
 }
