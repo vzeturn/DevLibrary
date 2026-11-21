@@ -8,6 +8,7 @@
 //!   the SQL Server tables of a build from before it, plus the registry), SELECT only.
 //! - [`bundle`]: the bundle writer (`manifest.json` and gzip JSON lines per table).
 //! - [`upload`]: the zip and the signed `PUT /sync/v1/legacy/import/{sha256}` sequence.
+//! - [`offline`]: `take_offline`, the agent's own `app_offline.htm` in the legacy site root.
 //! - [`events`]: the structured site events (`legacy-export` / `legacy-upload`).
 //!
 //! The bundle layout, file names and hashes are fixed by `contracts::legacy`; the cloud
@@ -16,12 +17,15 @@
 pub mod bundle;
 pub mod events;
 pub mod handler;
+pub mod offline;
 pub mod payload;
 pub mod sources;
 pub mod sql_source;
 pub mod sqlite_source;
 pub mod upload;
 
+#[cfg(test)]
+mod offline_tests;
 #[cfg(test)]
 mod tests;
 
@@ -124,6 +128,7 @@ pub fn production_env(p: ProductionParts) -> LegacyExportEnv {
             .join("pda.db"),
         sql,
         pools: Arc::new(sources::AppCmdPoolProbe),
+        site: Arc::new(offline::IisSite::default()),
         branding: Arc::new(sources::MachineRegistry),
         vietqr: Arc::new(sources::machine_vietqr()),
         uploader: Arc::new(upload::HttpBundleUploader::new(p.http, p.tokens)),

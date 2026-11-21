@@ -65,6 +65,12 @@ pub struct LegacyExportPayload {
     pub vietqr_only: bool,
     /// Why the operator ordered it.
     pub reason: String,
+    /// Put the legacy site offline before the export (`app_offline.htm` written by the
+    /// agent into `site_root`, or the one legacy PDA app found in IIS). Only with
+    /// `allow_live` false; ignored for `vietqr_only`. Old clouds omit it (false).
+    pub take_offline: bool,
+    /// Passed to every upload of the run as `keepTenant=true`. Old clouds omit it (false).
+    pub keep_tenant: bool,
 }
 
 fn utf16_len(s: &str) -> usize {
@@ -124,6 +130,8 @@ impl WireJson for LegacyExportPayload {
         w.key("prefer_legacy").bool(self.prefer_legacy);
         w.key("viet_qr_only").bool(self.vietqr_only);
         w.key("reason").string(&self.reason);
+        w.key("take_offline").bool(self.take_offline);
+        w.key("keep_tenant").bool(self.keep_tenant);
         w.end_object();
     }
 
@@ -139,6 +147,8 @@ impl WireJson for LegacyExportPayload {
             prefer_legacy: o.bool("prefer_legacy")?,
             vietqr_only: o.bool("viet_qr_only")?,
             reason: o.string("reason")?,
+            take_offline: o.opt_bool("take_offline")?.unwrap_or(false),
+            keep_tenant: o.opt_bool("keep_tenant")?.unwrap_or(false),
         })
     }
 }

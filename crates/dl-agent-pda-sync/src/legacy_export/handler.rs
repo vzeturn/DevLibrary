@@ -9,7 +9,8 @@
 //! event. Reasons a command is rejected, as stored in `sync.commands.last_error`:
 //! `invalid_payload: ...`, `contract_version_unsupported`, `legacy_export_already_running`,
 //! `legacy_sql_unreachable: ...`, `legacy_site_live: ...`, `legacy_store_missing: ...`,
-//! `legacy_vietqr_not_set: ...`, `legacy_vietqr_unreadable: ...`, `legacy_bad_arguments: ...`.
+//! `legacy_vietqr_not_set: ...`, `legacy_vietqr_unreadable: ...`, `legacy_bad_arguments: ...`,
+//! `legacy_site_unresolved: ...`, `legacy_site_offline_failed: ...`.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use dl_uuid::Uuid;
 
 use super::bundle::{self, ExportParts};
 use super::events::{EventsFactory, RunEvents};
+use super::offline::{self, LegacySite, Placement};
 use super::payload::{LegacyExportPayload, sources};
 use super::sources::{
     AppPoolProbe, BrandingSource, ExportError, LegacySqlSource, LegacyStore, Result, VietQrRead,
@@ -70,6 +72,8 @@ pub struct LegacyExportEnv {
     pub sql: SqlFactory,
     /// IIS app pool state.
     pub pools: Arc<dyn AppPoolProbe>,
+    /// IIS applications and the wait after `app_offline.htm` (`take_offline`).
+    pub site: Arc<dyn LegacySite>,
     /// Registry brand values.
     pub branding: Arc<dyn BrandingSource>,
     /// Registry VietQR account.
@@ -140,12 +144,16 @@ struct Prepared {
     maintenance: LegacyBundleMaintenance,
     app_version: Option<String>,
     vietqr: VietQrRead,
+    /// The `app_offline.htm` of `take_offline`.
+    offline: Option<Placement>,
 }
 
 /// The reason string stored for a refused command.
 fn reject_reason(e: &ExportError) -> String {
     let reason = match e.code.as_str() {
         codes::LEGACY_SITE_LIVE => "legacy_site_live",
+        codes::LEGACY_SITE_UNRESOLVED => "legacy_site_unresolved",
+        codes::LEGACY_SITE_OFFLINE_FAILED => "legacy_site_offline_failed",
         codes::LEGACY_STORE_MISSING => "legacy_store_missing",
         codes::LEGACY_VIETQR_NOT_SET => "legacy_vietqr_not_set",
         codes::LEGACY_VIETQR_UNREADABLE => "legacy_vietqr_unreadable",
@@ -239,13 +247,14 @@ impl LegacyExportCommandHandler {
             // SQL Server is being asked.
             st.running = Some(run_id.clone());
         }
-        let prepared = match self.precheck(&payload) {
+        let events = RunEvents::new((self.env.events)(&run_id), &run_id);
+        let prepared = match self.precheck(&payload, &events) {
             Ok(p) => p,
             Err(mut e) => {
                 e.stage = stages::PRECHECK;
                 lock(&self.state).running = None;
                 // A refusal is told to the cloud like any failed stage.
-                RunEvents::new((self.env.events)(&run_id), &run_id).failed(&e);
+                events.failed(&e);
                 self.log.warn(
                     "legacy.export {Id} refused ({Code}, stage {Stage})",
                     &[
@@ -310,7 +319,7 @@ impl LegacyExportCommandHandler {
         lock(&self.state).running.clone()
     }
 
-    fn precheck(&self, p: &LegacyExportPayload) -> Result<Prepared> {
+    fn precheck(&self, p: &LegacyExportPayload, events: &RunEvents) -> Result<Prepared> {
         let env = &self.env;
         if p.vietqr_only {
             // Nothing but the registry: no gate, no store, no SQL Server.
@@ -341,19 +350,62 @@ impl LegacyExportCommandHandler {
                 },
                 app_version: (env.app_version)(p.site_root.as_deref()),
                 vietqr,
+                offline: None,
             });
         }
 
         let sql = (env.sql)(p)?;
         // SQL Server must answer before the command is accepted: the RVC list is read here.
         sql.rvc_list()?;
-        let maintenance = maintenance_gate(
-            p.site_root.as_deref(),
+        // take_offline: the agent puts the legacy site in maintenance itself.
+        let placed = if p.take_offline && !p.allow_live {
+            let root = match &p.site_root {
+                Some(r) => r.clone(),
+                None => offline::discover(env.site.as_ref())?,
+            };
+            let placed = offline::place(&root, env.site.as_ref())?;
+            offline::report_placed(events, &placed);
+            Some(placed)
+        } else {
+            None
+        };
+        match self.precheck_live(p, sql, placed.as_ref()) {
+            Ok(prep) => Ok(Prepared {
+                offline: placed,
+                ..prep
+            }),
+            Err(mut e) => {
+                // Refused before anything was committed: the site goes back online.
+                if let Some(o) = &placed
+                    && let Err(rm) = offline::finish(o, false, stages::PRECHECK, events, &self.log)
+                {
+                    events.failed(&rm);
+                    e.message.push_str(&format!(" ({})", rm.message));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// The maintenance and store gates of a store export.
+    fn precheck_live(
+        &self,
+        p: &LegacyExportPayload,
+        sql: Arc<dyn LegacySqlSource>,
+        placed: Option<&Placement>,
+    ) -> Result<Prepared> {
+        let env = &self.env;
+        let site_root = placed.map(|o| o.root.as_str()).or(p.site_root.as_deref());
+        let mut maintenance = maintenance_gate(
+            site_root,
             p.app_pool.as_deref(),
             p.allow_live,
             env.pools.as_ref(),
         )?;
-        let app_version = (env.app_version)(p.site_root.as_deref());
+        if let Some(o) = placed {
+            maintenance.evidence = o.evidence(&maintenance.evidence);
+        }
+        let app_version = (env.app_version)(site_root);
         let store = match p.source.as_str() {
             sources::FROM_SQL => Store::FromSql,
             sources::PDA_DB => Store::PdaDb,
@@ -385,6 +437,7 @@ impl LegacyExportCommandHandler {
             maintenance,
             app_version,
             vietqr: env.vietqr.read(),
+            offline: None,
         })
     }
 }
@@ -485,6 +538,17 @@ fn run(
         }
     };
 
+    if let Some(o) = &prep.offline {
+        // The site stays offline only once the cloud commit succeeded.
+        let committed = match &outcome {
+            Ok(done) => done.committed,
+            Err(e) => e.stage == stages::POST_COMMIT,
+        };
+        if let Err(e) = offline::finish(o, committed, stages::CLEANUP, &events, log) {
+            events.failed(&e);
+        }
+    }
+
     match outcome {
         Ok(done) => {
             let mut detail = done.detail(deleted);
@@ -562,6 +626,7 @@ fn run_stages(
     let plan = UploadPlan {
         commit: p.commit,
         prefer_legacy: p.prefer_legacy,
+        keep_tenant: p.keep_tenant,
         vietqr_only: p.vietqr_only,
     };
     let outcome = run_sequence(env.uploader.as_ref(), &zip, plan, events, &ctx)?;
