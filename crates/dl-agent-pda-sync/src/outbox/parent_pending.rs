@@ -150,6 +150,28 @@ impl ParentPendingTracker {
         }
     }
 
+    /// Capture cannot resend the parent stream, so waiting for its resnapshot would
+    /// never end: after the escalation the outbox is full (capture is refused and keeps
+    /// its changes) or twice [`ParentPendingTracker::escalate_after`] has passed since the
+    /// escalation. Returns the reason (`outbox_full` or `resend_overdue`), `None` while the
+    /// wait is still sensible. The caller has already ruled out
+    /// [`ParentPendingTracker::parent_gone`] (resnapshot finished).
+    pub fn parent_resend_stall(
+        &self,
+        episode: &ParentPendingEpisode,
+        outbox_full: bool,
+        now: DateTimeOffset,
+    ) -> Option<&'static str> {
+        let escalated = episode.escalated_at?;
+        if outbox_full {
+            Some("outbox_full")
+        } else if now.ticks_since(escalated) >= ticks(self.escalate_after) * 2 {
+            Some("resend_overdue")
+        } else {
+            None
+        }
+    }
+
     /// The cloud left out the stream's orphan rows (ADR 0109): remembered for
     /// [`ParentPendingTracker::ORPHANS_REMEMBERED`].
     pub fn orphans_skipped(&mut self, stream: &str, now: DateTimeOffset) {
@@ -244,5 +266,24 @@ mod tests {
         assert!(!t.skip_orphans_early(&e, at(119)));
         assert!(t.skip_orphans_early(&e, at(120)));
         assert!(!t.skip_orphans_early(&e, at(24 * 3600 - 100)));
+    }
+
+    #[test]
+    fn a_stalled_parent_resend_needs_an_escalation_and_a_full_outbox_or_the_bound() {
+        let mut t = ParentPendingTracker::new(Duration::from_secs(60));
+        t.park("Trn", "Invoice", at(0));
+        let mut e = t.find("Trn").unwrap().clone();
+        assert_eq!(
+            t.parent_resend_stall(&e, true, at(500)),
+            None,
+            "not escalated"
+        );
+        e.escalated_at = Some(at(60));
+        assert_eq!(t.parent_resend_stall(&e, true, at(61)), Some("outbox_full"));
+        assert_eq!(t.parent_resend_stall(&e, false, at(179)), None);
+        assert_eq!(
+            t.parent_resend_stall(&e, false, at(180)),
+            Some("resend_overdue")
+        );
     }
 }

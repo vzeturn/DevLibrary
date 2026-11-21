@@ -173,6 +173,13 @@ impl SqliteOutbox {
         self.scalar("SELECT COALESCE(SUM(bytes),0) FROM outbox", &[])
     }
 
+    /// The stored payload bytes leave no room for any further batch: `enqueue` refuses a
+    /// batch when `stored + len > cap_bytes`, so with `stored >= cap_bytes` it refuses
+    /// every one (a batch is at least one byte).
+    pub fn is_full(&self) -> Result<bool> {
+        Ok(self.bytes()? >= self.cap_bytes)
+    }
+
     /// Batches parked by [`SqliteOutbox::quarantine`].
     pub fn quarantined_count(&self) -> Result<i64> {
         self.scalar("SELECT COUNT(*) FROM outbox WHERE quarantined=1", &[])
