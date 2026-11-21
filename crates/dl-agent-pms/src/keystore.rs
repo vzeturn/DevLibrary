@@ -115,7 +115,8 @@ fn other(m: impl Into<String>) -> KeystoreError {
     KeystoreError::Other(m.into())
 }
 
-const KEY_FILE: &str = "agent.key";
+/// The sealed Ed25519 key inside the state directory.
+pub const KEY_FILE: &str = "agent.key";
 /// The enrolled identity inside the state directory.
 pub const IDENTITY_FILE: &str = "identity.json";
 
