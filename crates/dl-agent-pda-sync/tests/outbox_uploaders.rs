@@ -666,6 +666,34 @@ fn a_full_outbox_that_cannot_take_the_parent_resend_skips_the_orphans_after_the_
 }
 
 #[test]
+fn an_outbox_a_few_bytes_under_the_cap_after_a_refusal_skips_the_orphans_at_the_next_attempt() {
+    let probe = Fx::new();
+    let len = i64::try_from(probe.batch(1, CHILD, CHILD, None).to_json().len()).unwrap();
+    let mut fx = Fx::with_cap(len + 3);
+    fx.cloud.with(|c| {
+        c.parent_pending.insert(CHILD.into(), PARENT.into());
+        c.honor_skip_orphans = true;
+    });
+    fx.enqueue_stream(CHILD);
+    assert!(!fx.outbox.is_full().unwrap(), "a few bytes under the cap");
+    let refused = fx
+        .outbox
+        .enqueue(PARENT, |seq| fx.batch(seq, PARENT, PARENT, None), false)
+        .unwrap();
+    assert_eq!(refused, EnqueueResult::CapReached);
+    assert!(fx.outbox.is_full().unwrap());
+    fx.cycle();
+
+    fx.wait_parked(Duration::from_secs(14 * 60));
+    assert!(orphan_skip_seqs(&fx).is_empty(), "not escalated yet");
+    fx.wait_parked(STEP * 3);
+
+    assert_eq!(orphan_skip_seqs(&fx), [1]);
+    assert_eq!(fx.outbox.depth().unwrap(), 0);
+    assert!(fx.errors().is_empty());
+}
+
+#[test]
 fn an_escalated_stream_with_room_in_the_outbox_skips_orphans_only_after_twice_the_bound() {
     let mut fx = Fx::new();
     fx.cloud.with(|c| {

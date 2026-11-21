@@ -14,6 +14,7 @@
 //! ```
 
 use std::path::Path;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use dl_sqlite::{Connection, TransactionBehavior};
@@ -81,6 +82,8 @@ pub struct ResequenceResult {
 pub struct SqliteOutbox {
     db: Mutex<Connection>,
     cap_bytes: i64,
+    /// Stored bytes at the last cap refusal (-1 = none since the last queued batch).
+    refused_at: AtomicI64,
     pub(super) log: Logger,
 }
 
@@ -111,6 +114,7 @@ impl SqliteOutbox {
         Ok(SqliteOutbox {
             db: Mutex::new(db),
             cap_bytes,
+            refused_at: AtomicI64::new(-1),
             log: log.for_category(CATEGORY),
         })
     }
@@ -173,11 +177,15 @@ impl SqliteOutbox {
         self.scalar("SELECT COALESCE(SUM(bytes),0) FROM outbox", &[])
     }
 
-    /// The stored payload bytes leave no room for any further batch: `enqueue` refuses a
-    /// batch when `stored + len > cap_bytes`, so with `stored >= cap_bytes` it refuses
-    /// every one (a batch is at least one byte).
+    /// The outbox cannot take a further batch: either the stored payload bytes reached
+    /// `cap_bytes`, or `enqueue` refused a batch (`stored + len > cap_bytes`) and nothing
+    /// has drained since (the stored bytes are still at or above the count at the refusal).
+    /// The second case covers an outbox a few bytes under the cap, where every real batch
+    /// is refused although `bytes() < cap_bytes`. An ack or purge that frees room clears it.
     pub fn is_full(&self) -> Result<bool> {
-        Ok(self.bytes()? >= self.cap_bytes)
+        let bytes = self.bytes()?;
+        let refused = self.refused_at.load(Ordering::Relaxed);
+        Ok(bytes >= self.cap_bytes || (refused >= 0 && bytes >= refused))
     }
 
     /// Batches parked by [`SqliteOutbox::quarantine`].
@@ -229,6 +237,7 @@ impl SqliteOutbox {
         let len = i64::try_from(json.len()).unwrap_or(i64::MAX);
         if stored.saturating_add(len) > self.cap_bytes {
             tx.rollback()?;
+            self.refused_at.store(stored, Ordering::Relaxed);
             if request_resnapshot_on_cap {
                 Self::set_meta(&db, "needs_resnapshot", "1")?;
                 let reason = format!("outbox cap of {} bytes reached", self.cap_bytes);
@@ -257,6 +266,7 @@ ON CONFLICT(stream) DO UPDATE SET last_seq=excluded.last_seq,
             &[("$s", &stream), ("$q", &seq), ("$w", &batch.watermark)],
         )?;
         tx.commit()?;
+        self.refused_at.store(-1, Ordering::Relaxed);
         Ok(EnqueueResult::Queued)
     }
 

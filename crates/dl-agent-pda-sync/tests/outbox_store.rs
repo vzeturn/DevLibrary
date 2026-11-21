@@ -406,6 +406,44 @@ fn cap_reached_sets_needs_resnapshot_without_dropping_queued_data_or_the_cursor(
 }
 
 #[test]
+fn is_full_follows_a_refusal_just_under_the_cap_until_something_drains() {
+    let probe = Env::with_cap(i64::MAX);
+    probe
+        .outbox
+        .enqueue("s", |seq| padded_batch("s", seq, None, 0), false)
+        .unwrap();
+    let small = probe.outbox.bytes().unwrap();
+
+    let env = Env::with_cap(small * 2 + 5);
+    for _ in 0..2 {
+        let r = env
+            .outbox
+            .enqueue("s", |seq| padded_batch("s", seq, None, 0), false)
+            .unwrap();
+        assert_eq!(r, EnqueueResult::Queued);
+    }
+    assert!(env.outbox.bytes().unwrap() < small * 2 + 5);
+    assert!(!env.outbox.is_full().unwrap());
+
+    let r = env
+        .outbox
+        .enqueue("s", |seq| padded_batch("s", seq, None, 50), false)
+        .unwrap();
+    assert_eq!(r, EnqueueResult::CapReached);
+    assert!(env.outbox.is_full().unwrap(), "refused with room left");
+
+    env.outbox.ack_below("s", 2).unwrap();
+    assert!(!env.outbox.is_full().unwrap(), "an ack freed room");
+
+    let r = env
+        .outbox
+        .enqueue("s", |seq| padded_batch("s", seq, None, 0), false)
+        .unwrap();
+    assert_eq!(r, EnqueueResult::Queued);
+    assert!(!env.outbox.is_full().unwrap());
+}
+
+#[test]
 fn cap_reached_without_resnapshot_request_leaves_the_flag_alone() {
     let env = Env::with_cap(10);
     let r = env
