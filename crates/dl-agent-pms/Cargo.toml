@@ -30,3 +30,7 @@ dl-winsvc.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# The scripted TDS server (`dl_tds::fake`) behind the executor tests of select calls.
+dl-tds = { workspace = true, features = ["fake-server"] }

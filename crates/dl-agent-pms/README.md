@@ -61,6 +61,37 @@ customer database (no `MM_OpLog`, no migrations, no retention job).
 Result rows (guest names) are sent to the cloud only; the agent logs op name, id, status, code
 and duration, never rows or args.
 
+#### Select calls ([ADR 0007](../../docs/decisions/0007-pms-select-calls.md))
+
+A read op may read a table directly instead of calling a procedure, but only a table and
+columns the manifest declares in its top-level `tables` list:
+
+```json
+"tables": [{"name": "Room", "columns": ["RoomNo", "RoomType", "Status"]}],
+"calls": [{"select": {
+  "table": "Room",
+  "columns": ["RoomNo", "RoomType", "Status"],
+  "where": [{"column": "RoomType", "op": "=",
+             "param": {"name": "roomType", "type": "varchar", "arg": "roomType", "size": 10, "nullable": false}}],
+  "order_by": ["RoomNo"],
+  "max_rows": 2000}}]
+```
+
+- A call has exactly one of `proc` (with `params`) or `select`; a select only in an op of kind `read`.
+- Table and column names are bare identifiers, matched case-insensitively against `tables`;
+  `columns` is non-empty without duplicates. Table names matching `^sys`, `^#` or
+  `^INFORMATION_SCHEMA$` are refused (the table floor, next to the procedure floor). The schema is always `dbo`.
+- `op` is one of `=`, `<>`, `<`, `<=`, `>`, `>=`; conditions are joined with `AND`. A `param`
+  follows the procedure-parameter rules (bindable type, exactly one of `arg` or `value`), never
+  `output`, with unique names in the call. `max_rows` is 1..=10 000.
+- All of it is checked when the manifest is parsed, so a bad manifest stops the agent at boot.
+- The statement is built from the manifest only, e.g.
+  `SELECT TOP (2000) [RoomNo], [RoomType], [Status] FROM [dbo].[Room] WHERE [RoomType] = @roomType ORDER BY [RoomNo]`;
+  values are bound through `sp_executesql`, never spliced. It runs like a procedure call (same
+  transaction, lock timeout, deadline, retries, caps and encoding) and returns one result set
+  without `ReturnValue`. `allowlist_hash` still covers `procs` only. The site's SQL login needs
+  `SELECT` on the declared tables.
+
 `assets/ops-manifest.json` is a byte copy of SMILE-PMS `packages/shared/src/ops/ops-manifest.json`
 (manifest v2). `tests/ops_manifest_drift.rs` fails when it differs from the file named by
 `PMS_OPS_MANIFEST`.

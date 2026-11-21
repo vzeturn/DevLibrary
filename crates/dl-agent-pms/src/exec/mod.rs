@@ -1,5 +1,6 @@
 //! Runs ops on the site's SMILE databases: parameterized calls of allow-listed vendor
-//! procedures only, on the database the op frame names (`target_db`, which must be the
+//! procedures, or parameterized reads of tables and columns the manifest declares
+//! (select calls, ADR 0007) only, on the database the op frame names (`target_db`, which must be the
 //! one the manifest gives the op's target), one transaction per op, results encoded to
 //! JSON exactly as the Go agent did (`internal/exec`). Nothing is written to a customer
 //! database by the agent itself: replays are answered by the local journal
@@ -266,6 +267,11 @@ impl SqlExecutor {
         b: &mut SetBuilder,
         outputs: &mut BTreeMap<String, J>,
     ) -> Result<(), ExecErr> {
+        if let Some(sql) = &c.sql {
+            // A select call: the text comes from the validated manifest, values are binds.
+            let r = conn.query(ctx, sql, &c.params)?;
+            return b.read_sets(&r);
+        }
         if !self.manifest.allowed(&c.proc_name) {
             return Err(ExecErr::NotAllowed);
         }
@@ -422,5 +428,7 @@ impl Executor for SqlExecutor {
     }
 }
 
+#[cfg(test)]
+mod select_tests;
 #[cfg(test)]
 mod tests;

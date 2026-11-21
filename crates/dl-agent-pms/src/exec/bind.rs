@@ -9,6 +9,8 @@ pub(super) struct Output {
 
 pub(super) struct BoundCall {
     pub(super) proc_name: String,
+    /// The statement of a select call, built from manifest identifiers only.
+    pub(super) sql: Option<String>,
     pub(super) params: Vec<Param>,
     pub(super) outputs: Vec<Output>,
 }
@@ -152,6 +154,26 @@ pub(super) fn bind_value(p: &ops::Param, raw: Option<&J>) -> Result<ParamValue, 
     })
 }
 
+/// Binds one input parameter from its arg (marked used) or its manifest constant.
+fn bind_input<'a>(
+    p: &'a ops::Param,
+    args: &Map,
+    used: &mut std::collections::HashSet<&'a str>,
+) -> Result<Param, String> {
+    let (src, label) = if p.arg.is_empty() {
+        (p.value.as_ref(), p.name.as_str())
+    } else {
+        used.insert(p.arg.as_str());
+        let v = args.get(&p.arg);
+        if v.is_none() && !p.nullable {
+            return Err(format!("invalid_args: {}: required", p.arg));
+        }
+        (v, p.arg.as_str())
+    };
+    let val = bind_value(p, src).map_err(|e| format!("invalid_args: {label}: {e}"))?;
+    Ok(Param::new(&p.name, val))
+}
+
 /// Checks the args against the manifest types and builds every call's parameters.
 /// Values are only ever bound as parameters; nothing is spliced into SQL.
 pub(super) fn bind_args(op: &ops::Op, args: &J) -> Result<Vec<BoundCall>, String> {
@@ -166,9 +188,18 @@ pub(super) fn bind_args(op: &ops::Op, args: &J) -> Result<Vec<BoundCall>, String
     for c in &op.calls {
         let mut bc = BoundCall {
             proc_name: c.proc_name.clone(),
+            sql: None,
             params: Vec::new(),
             outputs: Vec::new(),
         };
+        if let Some(sel) = &c.select {
+            for f in &sel.filters {
+                bc.params.push(bind_input(&f.param, args, &mut used)?);
+            }
+            bc.sql = Some(sel.sql());
+            calls.push(bc);
+            continue;
+        }
         for p in &c.params {
             if p.output {
                 bc.params.push(Param::output(&p.name, typed_null(&p.typ)));
@@ -178,18 +209,7 @@ pub(super) fn bind_args(op: &ops::Op, args: &J) -> Result<Vec<BoundCall>, String
                 });
                 continue;
             }
-            let (src, label) = if p.arg.is_empty() {
-                (p.value.as_ref(), p.name.as_str())
-            } else {
-                used.insert(p.arg.as_str());
-                let v = args.get(&p.arg);
-                if v.is_none() && !p.nullable {
-                    return Err(format!("invalid_args: {}: required", p.arg));
-                }
-                (v, p.arg.as_str())
-            };
-            let val = bind_value(p, src).map_err(|e| format!("invalid_args: {label}: {e}"))?;
-            bc.params.push(Param::new(&p.name, val));
+            bc.params.push(bind_input(p, args, &mut used)?);
         }
         calls.push(bc);
     }
