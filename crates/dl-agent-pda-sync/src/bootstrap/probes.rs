@@ -144,6 +144,35 @@ pub const CHECKED: [(&str, &str, Option<&str>); 4] = [
     ("dbo.tmpTrn", "UPDATE", Some("CheckNo")),
 ];
 
+/// The per-RVC counters of `100_sequence_grants.sql` (RT-0654) that `pda_sync` may not
+/// update, as `dbo.LastCheck4` (`SqlOrderGrantsProbe.CounterGrantsSql`). The candidates are
+/// every RVC of `dbo.Para` under both prefixes plus the counters `pda_sync` can already see:
+/// a sequence it holds no permission on is not in its `sys.objects`. A name with no object
+/// behind it gives NULL and is not reported.
+pub const COUNTER_GRANTS_SQL: &str = "SELECT c.name FROM (
+    SELECT N'dbo.' + k.prefix + r.rvc AS name
+    FROM (SELECT DISTINCT LTRIM(RTRIM(CAST(RVC AS nvarchar(20)))) AS rvc FROM dbo.Para WHERE RVC IS NOT NULL) r
+    CROSS JOIN (VALUES (N'LastCheck'), (N'LastTrn')) k(prefix)
+    WHERE r.rvc <> N'' AND r.rvc NOT LIKE N'%[^0-9]%'
+    UNION
+    SELECT N'dbo.' + o.name FROM sys.objects o
+    WHERE o.schema_id = SCHEMA_ID(N'dbo') AND o.type IN ('SO', 'U')
+      AND ((o.name LIKE N'LastCheck[0-9]%' AND SUBSTRING(o.name, 10, 128) NOT LIKE N'%[^0-9]%')
+        OR (o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'))
+) c
+WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', N'UPDATE') = 0
+ORDER BY c.name;";
+
+/// The missing-permission entries of [`COUNTER_GRANTS_SQL`]'s rows (`UPDATE dbo.LastCheck4`).
+pub fn counter_grants_missing(rows: &[dl_tds::Value]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|v| match v {
+            dl_tds::Value::String(name) => Some(format!("UPDATE {name}")),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The real grants probe (`SqlOrderGrantsProbe`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SqlOrderGrantsProbe;
@@ -177,6 +206,13 @@ impl OrderGrantsProbe for SqlOrderGrantsProbe {
                 });
             }
         }
+        let r = run(&mut c, COUNTER_GRANTS_SQL, &[], PROBE_TIMEOUT, ctx)?;
+        let names: Vec<dl_tds::Value> = r
+            .rows()
+            .iter()
+            .filter_map(|row| row.value(0).cloned())
+            .collect();
+        missing.extend(counter_grants_missing(&names));
         Ok(missing)
     }
 }
@@ -189,6 +225,27 @@ pub fn is_permission_denied(f: &SqlFailure) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counter_grants_probe_names_each_counter_pda_sync_may_not_update() {
+        // A sequence without a grant is invisible to pda_sync: the RVC list names it.
+        assert!(COUNTER_GRANTS_SQL.contains("FROM dbo.Para"));
+        assert!(COUNTER_GRANTS_SQL.contains("(VALUES (N'LastCheck'), (N'LastTrn'))"));
+        assert!(
+            COUNTER_GRANTS_SQL
+                .contains("WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', N'UPDATE') = 0")
+        );
+        assert!(COUNTER_GRANTS_SQL.starts_with("SELECT "));
+        assert!(!COUNTER_GRANTS_SQL.contains("NEXT VALUE"));
+        assert_eq!(
+            counter_grants_missing(&[
+                dl_tds::Value::String("dbo.LastCheck4".into()),
+                dl_tds::Value::Null,
+                dl_tds::Value::String("dbo.LastTrn4".into()),
+            ]),
+            ["UPDATE dbo.LastCheck4", "UPDATE dbo.LastTrn4"]
+        );
+    }
 
     #[test]
     fn login_failures_name_their_cause() {
