@@ -3,7 +3,8 @@
 -- reaches them through dynamic SQL. That breaks the ownership chain, so EXECUTE on the procedure (070) is not enough:
 -- pda_sync gets error 229 on the counter and the open check is inserted without a check number. This script grants
 -- pda_sync what each counter needs: UPDATE on a sequence (what NEXT VALUE FOR requires; SELECT does not exist for a
--- sequence), SELECT and UPDATE on a counter table. Only grants: no vendor object is created, altered or dropped (ADR 0100
+-- sequence), SELECT, INSERT, UPDATE and DELETE on a counter table (the procedure inserts a row to take the next number:
+-- 'The INSERT permission was denied on the object LastCheck4'). Only grants: no vendor object is created, altered or dropped (ADR 0100
 -- allow-list, docs/internal/pos-compat.md). Idempotent (GRANT is repeatable): an RVC added later is covered by the next
 -- run, and a build without these objects grants nothing. Names match exactly (the prefix and digits only), each is
 -- quoted with QUOTENAME and the kind is read from sys.objects before anything is granted.
@@ -17,7 +18,7 @@ OPEN counters;
 FETCH NEXT FROM counters INTO @name, @type;
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    SET @sql = CASE WHEN @type = 'SO' THEN N'GRANT UPDATE ON OBJECT::dbo.' ELSE N'GRANT SELECT, UPDATE ON OBJECT::dbo.' END
+    SET @sql = CASE WHEN @type = 'SO' THEN N'GRANT UPDATE ON OBJECT::dbo.' ELSE N'GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.' END
         + QUOTENAME(@name) + N' TO [pda_sync];';
     EXECUTE sys.sp_executesql @sql;
     FETCH NEXT FROM counters INTO @name, @type;

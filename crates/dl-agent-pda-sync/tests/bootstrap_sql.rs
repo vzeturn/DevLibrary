@@ -501,17 +501,17 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
     assert!(!has_word(
         &sql,
         &[
-            "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "INSERT", "DELETE"
+            "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "EXEC"
         ]
     ));
-    assert!(!a_line_starts_with(&sql, &["UPDATE"]));
+    assert!(!a_line_starts_with(&sql, &["UPDATE", "INSERT", "DELETE"]));
     for needle in [
         "FROM sys.objects o",
         "o.type IN ('SO', 'U')",
         "o.name LIKE N'LastCheck[0-9]%' AND SUBSTRING(o.name, 10, 128) NOT LIKE N'%[^0-9]%'",
         "o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'",
         "QUOTENAME(@name)",
-        "CASE WHEN @type = 'SO' THEN N'GRANT UPDATE ON OBJECT::dbo.' ELSE N'GRANT SELECT, UPDATE ON OBJECT::dbo.' END",
+        "CASE WHEN @type = 'SO' THEN N'GRANT UPDATE ON OBJECT::dbo.' ELSE N'GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.' END",
         "N' TO [pda_sync];'",
         "EXECUTE sys.sp_executesql @sql;",
     ] {

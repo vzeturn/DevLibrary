@@ -214,7 +214,7 @@ const EXISTS_SQL: &str = "SELECT CASE @kind
               OR (o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'))
             AND NOT EXISTS (SELECT 1 FROM sys.database_permissions p
                JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-              WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'UPDATE'
+              WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = CASE o.type WHEN 'U' THEN 'INSERT' ELSE 'UPDATE' END
                 AND p.major_id = o.object_id))
         THEN 1 ELSE 0 END)
   ELSE 0 END";
