@@ -47,6 +47,10 @@ pub enum StepKind {
     OrderGrantsOw1c,
     /// The grants of the table and multi-check verbs (OW1e, ADR 0112).
     OrderGrantsOw1e,
+    /// The grants on the per-RVC check and line counters `dbo.LastCheck<rvc>` and
+    /// `dbo.LastTrn<rvc>` that `dbo.GetRVCSeqNumber` reaches through dynamic SQL on some
+    /// builds (RT-0654).
+    SequenceGrants,
 }
 
 impl StepKind {
@@ -61,6 +65,7 @@ impl StepKind {
             StepKind::OrderGrants => "OrderGrants",
             StepKind::OrderGrantsOw1c => "OrderGrantsOw1c",
             StepKind::OrderGrantsOw1e => "OrderGrantsOw1e",
+            StepKind::SequenceGrants => "SequenceGrants",
         }
     }
 }

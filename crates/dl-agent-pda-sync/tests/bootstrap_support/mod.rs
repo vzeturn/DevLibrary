@@ -107,6 +107,7 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
         StepKind::OrderGrants => grant && script.contains("dbo.PostITrn"),
         StepKind::OrderGrantsOw1c => grant && script.contains("dbo.tmpInvoice (NGuest"),
         StepKind::OrderGrantsOw1e => grant && script.contains("dbo.tmpTrn (CheckNo"),
+        StepKind::SequenceGrants => grant && script.contains("dbo.LastCheck"),
         StepKind::Table => script.contains(&format!("CREATE TABLE dbo.{}", step.object_name)),
     }
 }

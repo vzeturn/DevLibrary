@@ -36,7 +36,8 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "command_grants",
             "order_grants",
             "order_grants_ow1c",
-            "order_grants_ow1e"
+            "order_grants_ow1e",
+            "sequence_grants"
         ]
     );
     assert!(report.steps.iter().all(|s| s.executed));
@@ -358,6 +359,7 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::OrderGrants
                 | StepKind::OrderGrantsOw1c
                 | StepKind::OrderGrantsOw1e
+                | StepKind::SequenceGrants
         )
     }) {
         let sql = read_script(step.resource_name).unwrap();
@@ -474,4 +476,46 @@ fn order_grants_ow1c_script_only_grants_the_documented_vendor_writes() {
             "NGuest, NChild, LastChgCashier, LastChgTime"
         )])
     );
+}
+
+/// The code of a script without its `--` comments.
+fn code(sql: &str) -> String {
+    sql.split('\n')
+        .map(|l| l.find("--").map_or(l, |at| &l[..at]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
+    let step = STEPS
+        .iter()
+        .find(|s| s.kind == StepKind::SequenceGrants)
+        .unwrap();
+    assert_eq!(step.id, "sequence_grants");
+    assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
+    assert_eq!(STEPS.last(), Some(step), "a new grant script runs last");
+    let sql = code(read_script(step.resource_name).unwrap());
+    // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
+    // and is quoted, and the grant follows the object's kind.
+    assert!(!has_word(
+        &sql,
+        &[
+            "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "INSERT", "DELETE"
+        ]
+    ));
+    assert!(!a_line_starts_with(&sql, &["UPDATE"]));
+    for needle in [
+        "FROM sys.objects o",
+        "o.type IN ('SO', 'U')",
+        "o.name LIKE N'LastCheck[0-9]%' AND SUBSTRING(o.name, 10, 128) NOT LIKE N'%[^0-9]%'",
+        "o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'",
+        "QUOTENAME(@name)",
+        "CASE WHEN @type = 'SO' THEN N'GRANT UPDATE ON OBJECT::dbo.' ELSE N'GRANT SELECT, UPDATE ON OBJECT::dbo.' END",
+        "N' TO [pda_sync];'",
+        "EXECUTE sys.sp_executesql @sql;",
+    ] {
+        assert!(sql.contains(needle), "{needle}");
+    }
+    assert_eq!(sql.matches("GRANT ").count(), 2);
 }
