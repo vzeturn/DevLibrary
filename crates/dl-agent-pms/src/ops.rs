@@ -487,7 +487,9 @@ mod tests {
             [
                 "fo.arrivals.expected@1",
                 "fo.availability.chart@1",
+                "fo.availability.contractStatus@1",
                 "fo.availability.source@1",
+                "fo.availability.sourceV2@1",
                 "fo.clerk.login@1",
                 "fo.clerk.rights.get@1",
                 "fo.departures.expected@1",
