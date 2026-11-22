@@ -149,7 +149,7 @@ pub const CHECKED: [(&str, &str, Option<&str>); 4] = [
 /// every RVC of `dbo.Para` under both prefixes plus the counters `pda_sync` can already see:
 /// a sequence it holds no permission on is not in its `sys.objects`. A name with no object
 /// behind it gives NULL and is not reported.
-pub const COUNTER_GRANTS_SQL: &str = "SELECT c.name FROM (
+pub const COUNTER_GRANTS_SQL: &str = "SELECT (CASE x.type WHEN 'U' THEN N'INSERT ' ELSE N'UPDATE ' END) + c.name FROM (
     SELECT N'dbo.' + k.prefix + r.rvc AS name
     FROM (SELECT DISTINCT LTRIM(RTRIM(CAST(RVC AS nvarchar(20)))) AS rvc FROM dbo.Para WHERE RVC IS NOT NULL) r
     CROSS JOIN (VALUES (N'LastCheck'), (N'LastTrn')) k(prefix)
@@ -161,14 +161,14 @@ pub const COUNTER_GRANTS_SQL: &str = "SELECT c.name FROM (
         OR (o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'))
 ) c
 JOIN sys.objects x ON x.object_id = OBJECT_ID(c.name) AND x.type IN ('SO', 'U')
-WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', N'UPDATE') = 0
+WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', CASE x.type WHEN 'U' THEN N'INSERT' ELSE N'UPDATE' END) = 0
 ORDER BY c.name;";
 
 /// The missing-permission entries of [`COUNTER_GRANTS_SQL`]'s rows (`UPDATE dbo.LastCheck4`).
 pub fn counter_grants_missing(rows: &[dl_tds::Value]) -> Vec<String> {
     rows.iter()
         .filter_map(|v| match v {
-            dl_tds::Value::String(name) => Some(format!("UPDATE {name}")),
+            dl_tds::Value::String(name) => Some(name.clone()),
             _ => None,
         })
         .collect()
@@ -234,17 +234,17 @@ mod tests {
         assert!(COUNTER_GRANTS_SQL.contains("(VALUES (N'LastCheck'), (N'LastTrn'))"));
         assert!(
             COUNTER_GRANTS_SQL
-                .contains("WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', N'UPDATE') = 0")
+                .contains("CASE x.type WHEN 'U' THEN N'INSERT' ELSE N'UPDATE' END) = 0")
         );
         assert!(COUNTER_GRANTS_SQL.starts_with("SELECT "));
         assert!(!COUNTER_GRANTS_SQL.contains("NEXT VALUE"));
         assert_eq!(
             counter_grants_missing(&[
-                dl_tds::Value::String("dbo.LastCheck4".into()),
+                dl_tds::Value::String("INSERT dbo.LastCheck4".into()),
                 dl_tds::Value::Null,
-                dl_tds::Value::String("dbo.LastTrn4".into()),
+                dl_tds::Value::String("UPDATE dbo.LastTrn4".into()),
             ]),
-            ["UPDATE dbo.LastCheck4", "UPDATE dbo.LastTrn4"]
+            ["INSERT dbo.LastCheck4", "UPDATE dbo.LastTrn4"]
         );
     }
 
