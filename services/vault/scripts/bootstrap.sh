@@ -58,7 +58,7 @@ configure() {
   jq -e 'has("stdout/")' <<<"$audits" >/dev/null || "$bao" audit enable -path=stdout file file_path=stdout >/dev/null
   mounts=$("$bao" secrets list -format=json)
   jq -e 'has("kv/")' <<<"$mounts" >/dev/null || "$bao" secrets enable -path=kv -version=2 kv >/dev/null
-  for p in hub-ai cloud-ai importer backup; do "$bao" policy write "$p" "$here/policies/$p.hcl" >/dev/null; done
+  for p in hub-ai cloud-ai importer backup hub-admin; do "$bao" policy write "$p" "$here/policies/$p.hcl" >/dev/null; done
   auths=$("$bao" auth list -format=json)
   jq -e 'has("approle/")' <<<"$auths" >/dev/null || "$bao" auth enable approle >/dev/null
   for r in hub-ai cloud-ai; do
@@ -67,6 +67,10 @@ configure() {
   done
   "$bao" write auth/approle/role/importer token_policies=importer token_ttl=1h token_max_ttl=1h \
     token_num_uses=0 secret_id_ttl=24h secret_id_num_uses=1 >/dev/null
+  # hub-admin (owner 2026-11-22): the RT hub runs Vault itself; its secret ID is minted by an
+  # admin session (generate-root) and handed to the request-tracking kit, never stored here.
+  "$bao" write auth/approle/role/hub-admin token_policies=hub-admin token_ttl=1h token_max_ttl=8h \
+    secret_id_ttl=8760h >/dev/null
 
   # Each value is checked before it is stored; the root token is revoked only after all are in $state.
   get() { local v; v=$("$@"); [ -n "$v" ] || { echo "empty value from: $*" >&2; return 1; }; printf '%s' "$v"; }
