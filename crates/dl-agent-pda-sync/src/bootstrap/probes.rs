@@ -160,6 +160,7 @@ pub const COUNTER_GRANTS_SQL: &str = "SELECT c.name FROM (
       AND ((o.name LIKE N'LastCheck[0-9]%' AND SUBSTRING(o.name, 10, 128) NOT LIKE N'%[^0-9]%')
         OR (o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'))
 ) c
+JOIN sys.objects x ON x.object_id = OBJECT_ID(c.name) AND x.type IN ('SO', 'U')
 WHERE HAS_PERMS_BY_NAME(c.name, N'OBJECT', N'UPDATE') = 0
 ORDER BY c.name;";
 
