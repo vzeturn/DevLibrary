@@ -12,14 +12,14 @@ use dl_agent_pda_sync::config::codes;
 use dl_agent_pda_sync::contracts::WireJson;
 use dl_agent_pda_sync::contracts::wire::{
     CheckStateFingerprint, CheckStateHeader, CheckStateLine, CommandStatus, KdsLineStatePayload,
-    KdsLineStateResult, OrderCheckExpectation, OrderCheckLine, OrderCheckMergePayload,
-    OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload, OrderCoversPayload,
-    OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload, OrderMultiCheckResult,
-    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, ReservationCancelPayload,
-    ReservationSavedResult, SyncCommand, SyncCommandResult, kds_line_actions as kds,
-    multi_check_aggregate, order_aggregate, order_command_reasons as order,
-    order_command_types as o, site_command_types as s, site_event_levels,
-    table_command_reasons as table, table_command_types as t,
+    KdsLineStateResult, OrderCheckCancelEmptyPayload, OrderCheckExpectation, OrderCheckLine,
+    OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
+    OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
+    OrderMultiCheckResult, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
+    ReservationCancelPayload, ReservationSavedResult, SyncCommand, SyncCommandResult,
+    kds_line_actions as kds, multi_check_aggregate, order_aggregate,
+    order_command_reasons as order, order_command_types as o, site_command_types as s,
+    site_event_levels, table_command_reasons as table, table_command_types as t,
 };
 use dl_agent_pda_sync::reporting::{Logger, SiteEvents};
 use dl_agent_pda_sync::util::ctx::Ctx;
@@ -1513,4 +1513,175 @@ fn a_table_verb_denied_by_sql_is_rejected_terminally_as_missing_grants() {
     ));
     refused(&t.exec(&cmd), order::SQL_GRANTS_MISSING);
     assert!(!t.store.logged(cmd.command_id));
+}
+
+// ---- order.check_cancel_empty (ADR 0144, RT-0775) ----
+
+const CUTOFF: &str = "2026-11-23T04:00:00";
+const VIRTUAL_TABLE: &str = "A1234";
+
+fn cancel_empty_cmd(check: i64, table: &str, cutoff: &str, expected: Option<&str>) -> SyncCommand {
+    let p = OrderCheckCancelEmptyPayload {
+        rvc_no: RVC,
+        check_no: check,
+        table_no: table.to_owned(),
+        cashier: "SML".to_owned(),
+        opened_before: cutoff.to_owned(),
+    };
+    command(t::CHECK_CANCEL_EMPTY, p.to_element(), &key(check), expected)
+}
+
+fn cancelled(t: &T) -> bool {
+    t.calls_starting("cancel-empty") > 0
+}
+
+#[test]
+fn a_stale_empty_bill_on_the_named_table_is_cancelled_and_reported_removed() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &[]);
+    let cmd = cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None);
+
+    let first = t.exec(&cmd);
+    let replay = t.exec(&cmd);
+
+    assert_eq!(first.status, CommandStatus::Applied, "{:?}", first.reason);
+    assert_eq!(multi(&first).removed, vec![check]);
+    assert!(!t.store.state().orders.checks.contains_key(&(RVC, check)));
+    assert_eq!(replay, first, "a redelivery is answered from the log");
+    assert_eq!(t.calls_starting("cancel-empty"), 1);
+    assert!(
+        t.store
+            .calls()
+            .contains(&format!("cancel-empty {check} by SML"))
+    );
+    assert!(
+        t.store
+            .calls()
+            .contains(&format!("facts {check} before {CUTOFF}"))
+    );
+}
+
+#[test]
+fn a_second_command_for_an_already_cancelled_bill_is_rejected_check_not_found() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &[]);
+    assert_eq!(
+        t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None))
+            .status,
+        CommandStatus::Applied
+    );
+    refused(
+        &t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None)),
+        order::CHECK_NOT_FOUND,
+    );
+}
+
+#[test]
+fn a_bill_that_gained_a_line_is_rejected_bill_not_empty_and_nothing_is_written() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &["CF01"]);
+    refused(
+        &t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None)),
+        table::BILL_NOT_EMPTY,
+    );
+    assert!(!cancelled(&t));
+    assert!(t.store.state().orders.checks.contains_key(&(RVC, check)));
+}
+
+#[test]
+fn a_bill_of_the_current_business_day_is_rejected_bill_not_stale() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &[]);
+    t.store.knobs().fresh_checks.insert(check);
+    refused(
+        &t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None)),
+        table::BILL_NOT_STALE,
+    );
+    assert!(!cancelled(&t));
+}
+
+#[test]
+fn a_bill_on_another_table_is_rejected_table_mismatch() {
+    for actual in ["A9999", "T4"] {
+        let t = T::new();
+        let check = t.open(actual, &[]);
+        refused(
+            &t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, CUTOFF, None)),
+            table::TABLE_MISMATCH,
+        );
+        assert!(!cancelled(&t), "{actual}");
+    }
+}
+
+#[test]
+fn the_table_is_compared_trimmed_and_ignoring_case() {
+    let t = T::new();
+    let check = t.open(" a1234 ", &[]);
+    assert_eq!(
+        t.exec(&cancel_empty_cmd(check, "A1234 ", CUTOFF, None))
+            .status,
+        CommandStatus::Applied
+    );
+}
+
+#[test]
+fn a_closed_unknown_or_paid_check_is_refused_without_a_write() {
+    let t = T::new();
+    let closed = t.open(VIRTUAL_TABLE, &[]);
+    t.close(closed);
+    refused(
+        &t.exec(&cancel_empty_cmd(closed, VIRTUAL_TABLE, CUTOFF, None)),
+        order::BILL_NOT_OPEN,
+    );
+    refused(
+        &t.exec(&cancel_empty_cmd(999_999, VIRTUAL_TABLE, CUTOFF, None)),
+        order::CHECK_NOT_FOUND,
+    );
+    let paid = t.open(VIRTUAL_TABLE, &[]);
+    t.store.knobs().paid_checks.insert(paid);
+    refused(
+        &t.exec(&cancel_empty_cmd(paid, VIRTUAL_TABLE, CUTOFF, None)),
+        table::BILL_HAS_PAYMENT,
+    );
+    assert!(!cancelled(&t));
+}
+
+#[test]
+fn a_malformed_cutoff_or_an_expected_hash_is_an_invalid_payload() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &[]);
+    invalid(&t.exec(&cancel_empty_cmd(check, VIRTUAL_TABLE, "2026-11-23", None)));
+    invalid(&t.exec(&cancel_empty_cmd(
+        check,
+        VIRTUAL_TABLE,
+        "2026-02-30T04:00:00",
+        None,
+    )));
+    invalid(&t.exec(&cancel_empty_cmd(
+        check,
+        VIRTUAL_TABLE,
+        CUTOFF,
+        Some("cs1:00"),
+    )));
+    assert!(!cancelled(&t));
+}
+
+#[test]
+fn a_cashier_longer_than_the_store_column_is_an_invalid_payload() {
+    let t = T::new();
+    let check = t.open(VIRTUAL_TABLE, &[]);
+    let p = OrderCheckCancelEmptyPayload {
+        rvc_no: RVC,
+        check_no: check,
+        table_no: VIRTUAL_TABLE.to_owned(),
+        cashier: "apikey:0123456789abcdef".to_owned(),
+        opened_before: CUTOFF.to_owned(),
+    };
+    invalid(&t.exec(&command(
+        t::CHECK_CANCEL_EMPTY,
+        p.to_element(),
+        &key(check),
+        None,
+    )));
+    assert!(!cancelled(&t));
 }

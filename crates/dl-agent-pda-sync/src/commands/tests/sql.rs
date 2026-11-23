@@ -14,9 +14,10 @@ use crate::commands::params as p;
 use crate::commands::sql_text as q;
 use crate::commands::{StoreColumn, schema_columns};
 use crate::contracts::wire::{
-    OrderCheckExpectation, OrderCheckMergePayload, OrderCheckOpenPayload, OrderComboPostPayload,
-    OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, table_command_types,
+    OrderCheckCancelEmptyPayload, OrderCheckExpectation, OrderCheckMergePayload,
+    OrderCheckOpenPayload, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
+    OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload, OrderTableChangePayload,
+    OrderTableTransferPayload, table_command_types,
 };
 
 const RVC: i32 = 3;
@@ -517,6 +518,22 @@ fn each_table_statement_is_bound_exactly_its_free_parameters() {
         ),
         ("cancel", b::CANCEL_ORDER, p::cancel_parameters(&merge)),
         (
+            "empty-facts",
+            q::EMPTY_BILL_FACTS,
+            p::empty_bill_facts_parameters(RVC, 1, "2026-11-23T04:00:00"),
+        ),
+        (
+            "cancel-empty",
+            b::CANCEL_ORDER,
+            p::cancel_empty_parameters(&OrderCheckCancelEmptyPayload {
+                rvc_no: RVC,
+                check_no: 1,
+                table_no: "A1234".into(),
+                cashier: "c".into(),
+                opened_before: "2026-11-23T04:00:00".into(),
+            }),
+        ),
+        (
             "move-source",
             b::MOVE_SOURCE_LINES,
             p::lock_parameters(RVC, 1),
@@ -569,6 +586,32 @@ fn merge_cancels_the_source_and_binds_the_cashier_as_the_canceller() {
     assert_eq!(
         param(&params, "CancelBy"),
         &ParamValue::String(Some("clerk-7".into()))
+    );
+}
+
+#[test]
+fn empty_bill_cancel_binds_the_cashier_and_the_facts_read_the_cutoff_as_iso_text() {
+    let params = p::cancel_empty_parameters(&OrderCheckCancelEmptyPayload {
+        rvc_no: RVC,
+        check_no: 7001,
+        table_no: "A1234".into(),
+        cashier: "SML".into(),
+        opened_before: "2026-11-23T04:00:00".into(),
+    });
+    assert_eq!(param(&params, "CheckNo"), &ParamValue::I64(Some(7001)));
+    assert_eq!(
+        param(&params, "CancelBy"),
+        &ParamValue::String(Some("SML".into()))
+    );
+    let facts = p::empty_bill_facts_parameters(RVC, 7001, "2026-11-23T04:00:00");
+    assert_eq!(
+        param(&facts, "OpenedBefore"),
+        &ParamValue::String(Some("2026-11-23T04:00:00".into()))
+    );
+    assert!(q::EMPTY_BILL_FACTS.contains("CONVERT(datetime, @OpenedBefore, 126)"));
+    assert!(
+        q::EMPTY_BILL_FACTS
+            .contains("FROM dbo.TmpTrn t WHERE t.CheckNo = @CheckNo AND t.RVC = @RVCNo")
     );
 }
 

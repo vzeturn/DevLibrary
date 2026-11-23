@@ -15,8 +15,17 @@ pub mod table_command_types {
     pub const CHECK_MERGE: &str = "order.check_merge";
     /// Move chosen item lines to another open check.
     pub const ITEMS_MOVE: &str = "order.items_move";
+    /// Close a stale empty check on the named table (ADR 0144, RT-0775): the agent
+    /// re-checks emptiness, table, age and payment in its own transaction first.
+    pub const CHECK_CANCEL_EMPTY: &str = "order.check_cancel_empty";
     /// All of them.
-    pub const ALL: &[&str] = &[TABLE_CHANGE, TABLE_TRANSFER, CHECK_MERGE, ITEMS_MOVE];
+    pub const ALL: &[&str] = &[
+        TABLE_CHANGE,
+        TABLE_TRANSFER,
+        CHECK_MERGE,
+        ITEMS_MOVE,
+        CHECK_CANCEL_EMPTY,
+    ];
     /// The verbs whose payload carries the expected state of every check they touch.
     pub const MULTI_CHECK: &[&str] = &[CHECK_MERGE, ITEMS_MOVE];
 }
@@ -33,6 +42,12 @@ pub mod table_command_reasons {
     pub const INVALID_MOVE_TARGET: &str = "invalid_move_target";
     /// The move source carries a discount line.
     pub const DISCOUNT_PRESENT: &str = "discount_present";
+    /// The check is not on the table the command names.
+    pub const TABLE_MISMATCH: &str = "table_mismatch";
+    /// The check was opened at or after the command's cutoff.
+    pub const BILL_NOT_STALE: &str = "bill_not_stale";
+    /// The check carries at least one line.
+    pub const BILL_NOT_EMPTY: &str = "bill_not_empty";
 }
 
 fn blank(s: &str) -> bool {
@@ -152,6 +167,110 @@ impl WireJson for OrderTableTransferPayload {
             check_no: o.int("check_no")?,
             to_table_no: o.string("to_table_no")?,
             cashier: o.string("cashier")?,
+        })
+    }
+}
+
+/// Payload of [`table_command_types::CHECK_CANCEL_EMPTY`]. `opened_before` is a
+/// store-local wall-clock timestamp `yyyy-MM-ddTHH:mm:ss` (the start of the current
+/// business day): the agent cancels only a check whose `OpenTime` is earlier.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OrderCheckCancelEmptyPayload {
+    /// RVC.
+    pub rvc_no: i32,
+    /// Check.
+    pub check_no: i64,
+    /// The table the check must be on.
+    pub table_no: String,
+    /// Recorded as the cancelling clerk.
+    pub cashier: String,
+    /// Cutoff, `yyyy-MM-ddTHH:mm:ss`.
+    pub opened_before: String,
+}
+
+impl OrderCheckCancelEmptyPayload {
+    /// Length of `yyyy-MM-ddTHH:mm:ss`.
+    pub const OPENED_BEFORE_LENGTH: usize = 19;
+
+    /// The store's `Cashier`/`CloseBy` columns are `varchar(10)` (ADR 0125).
+    pub const MAX_CASHIER: usize = 10;
+
+    /// The validation problem, `None` when valid.
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.rvc_no <= 0 {
+            return Some("rvc_no must be positive");
+        }
+        if self.check_no <= 0 {
+            return Some("check_no must be positive");
+        }
+        if blank(&self.table_no)
+            || utf16_len(self.table_no.trim()) > OrderCheckOpenPayload::MAX_TABLE_NO
+        {
+            return Some("table_no must be 1..50 characters");
+        }
+        if blank(&self.cashier) || utf16_len(&self.cashier) > Self::MAX_CASHIER {
+            return Some("cashier must be 1..10 characters");
+        }
+        if is_local_timestamp(&self.opened_before) {
+            None
+        } else {
+            Some("opened_before must be yyyy-MM-ddTHH:mm:ss")
+        }
+    }
+}
+
+/// True for a well-formed `yyyy-MM-ddTHH:mm:ss` with a real calendar date and time
+/// (`DateTime.TryParseExact` in the .NET contract).
+pub fn is_local_timestamp(value: &str) -> bool {
+    let b = value.as_bytes();
+    if b.len() != OrderCheckCancelEmptyPayload::OPENED_BEFORE_LENGTH {
+        return false;
+    }
+    let shape = b"dddd-dd-ddTdd:dd:dd";
+    for (c, k) in b.iter().zip(shape) {
+        let ok = if *k == b'd' {
+            c.is_ascii_digit()
+        } else {
+            c == k
+        };
+        if !ok {
+            return false;
+        }
+    }
+    let n = |from: usize, to: usize| -> u32 { value[from..to].parse().unwrap_or(u32::MAX) };
+    let (year, month, day) = (n(0, 4), n(5, 7), n(8, 10));
+    let (hour, minute, second) = (n(11, 13), n(14, 16), n(17, 19));
+    if year == 0 || !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
+        return false;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    (1..=days).contains(&day)
+}
+
+impl WireJson for OrderCheckCancelEmptyPayload {
+    fn write_json(&self, w: &mut Writer) {
+        w.begin_object();
+        w.key("rvc_no").int(self.rvc_no.into());
+        w.key("check_no").int(self.check_no);
+        w.key("table_no").string(&self.table_no);
+        w.key("cashier").string(&self.cashier);
+        w.key("opened_before").string(&self.opened_before);
+        w.end_object();
+    }
+
+    fn read_json(o: Obj<'_>) -> Result<Self, ReadError> {
+        Ok(OrderCheckCancelEmptyPayload {
+            rvc_no: o.int("rvc_no")?,
+            check_no: o.int("check_no")?,
+            table_no: o.string("table_no")?,
+            cashier: o.string("cashier")?,
+            opened_before: o.string("opened_before")?,
         })
     }
 }

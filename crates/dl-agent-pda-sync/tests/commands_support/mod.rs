@@ -12,16 +12,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dl_agent_pda_sync::capture::CaptureNudge;
 use dl_agent_pda_sync::commands::{
-    CheckMoneyFacts, CommandError, CommandWork, OrderCommandUnit, OrderLineFacts, OrderPostOutcome,
-    Result, SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
+    CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCommandUnit, OrderLineFacts,
+    OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
 };
 use dl_agent_pda_sync::config::{ManualClock, SharedClock, Timestamp};
 use dl_agent_pda_sync::contracts::wire::{
-    CheckStateHeader, OrderCheckLine, OrderCheckMergePayload, OrderCheckOpenPayload,
-    OrderCheckResult, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
-    OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload, OrderTableChangePayload,
-    OrderTableTransferPayload, ReservationSavePayload, SyncCommandResult, kds_line_actions,
-    order_command_reasons as reasons,
+    CheckStateHeader, OrderCheckCancelEmptyPayload, OrderCheckLine, OrderCheckMergePayload,
+    OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload, OrderCoversPayload,
+    OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload,
+    OrderTableChangePayload, OrderTableTransferPayload, ReservationSavePayload, SyncCommandResult,
+    kds_line_actions, order_command_reasons as reasons,
 };
 use dl_agent_pda_sync::util::ctx::Ctx;
 use dl_decimal::Decimal;
@@ -114,6 +114,8 @@ pub struct Knobs {
     pub missing_columns: HashSet<String>,
     pub paid_checks: HashSet<i64>,
     pub discounted_checks: HashSet<i64>,
+    /// ADR 0144: checks opened at or after the empty-bill cutoff; every other check is stale.
+    pub fresh_checks: HashSet<i64>,
     pub move_audit_error: Option<i32>,
 }
 
@@ -618,6 +620,44 @@ impl TableCommandUnit for Unit<'_> {
             has_payment: k.paid_checks.contains(&check_no),
             has_discount: k.discounted_checks.contains(&check_no),
         })
+    }
+
+    fn empty_bill_facts(
+        &mut self,
+        rvc_no: i32,
+        check_no: i64,
+        opened_before: &str,
+        _: &Ctx,
+    ) -> Result<Option<EmptyBillFacts>> {
+        self.owner
+            .call(format!("facts {check_no} before {opened_before}"));
+        let fresh = self.owner.knobs().fresh_checks.contains(&check_no);
+        let lines = self
+            .s
+            .orders
+            .lines
+            .keys()
+            .filter(|k| k.0 == check_no)
+            .count();
+        Ok(self
+            .s
+            .orders
+            .checks
+            .get(&(rvc_no, check_no))
+            .map(|c| EmptyBillFacts {
+                table_no: c.table_no.trim().to_owned(),
+                opened_before_cutoff: !fresh,
+                line_count: i32::try_from(lines).unwrap_or(i32::MAX),
+            }))
+    }
+
+    fn cancel_empty(&mut self, p: &OrderCheckCancelEmptyPayload, _: &Ctx) -> Result<()> {
+        self.owner
+            .call(format!("cancel-empty {} by {}", p.check_no, p.cashier));
+        self.s.orders.checks.remove(&(p.rvc_no, p.check_no));
+        self.s.open_checks.remove(&(p.rvc_no, p.check_no));
+        self.s.fingerprints.remove(&p.check_no);
+        Ok(())
     }
 
     fn change_table(&mut self, p: &OrderTableChangePayload, _: &Ctx) -> Result<()> {

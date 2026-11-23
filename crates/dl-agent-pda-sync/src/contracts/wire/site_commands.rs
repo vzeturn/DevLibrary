@@ -113,6 +113,7 @@ pub mod site_command_contract {
         spec(t::TABLE_TRANSFER, Interactive, 3),
         spec(t::CHECK_MERGE, Interactive, 3),
         spec(t::ITEMS_MOVE, Interactive, 3),
+        spec(t::CHECK_CANCEL_EMPTY, Durable, 8),
     ];
 
     /// The spec of a type (ordinal).

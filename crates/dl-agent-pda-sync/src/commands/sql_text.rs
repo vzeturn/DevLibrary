@@ -148,6 +148,17 @@ pub const MONEY_FACTS: &str = concat!(
     "THEN 1 ELSE 0 END;"
 );
 
+/// `OrderCommandSql.EmptyBillFacts` (ADR 0144): the trimmed table, 1 when `OpenTime` is
+/// earlier than the cutoff, the count of every `TmpTrn` line. Params: @CheckNo, @RVCNo,
+/// @OpenedBefore (`yyyy-MM-ddTHH:mm:ss`, store local); no row when the check is not in
+/// the RVC.
+pub const EMPTY_BILL_FACTS: &str = concat!(
+    "SELECT ISNULL(RTRIM(LTRIM(i.TableNo)), ''), ",
+    "CASE WHEN i.OpenTime < CONVERT(datetime, @OpenedBefore, 126) THEN 1 ELSE 0 END, ",
+    "(SELECT COUNT(*) FROM dbo.TmpTrn t WHERE t.CheckNo = @CheckNo AND t.RVC = @RVCNo) ",
+    "FROM dbo.TmpInvoice i WHERE i.CheckNo = @CheckNo AND i.RVC = @RVCNo;"
+);
+
 /// `OrderCommandSql.MissingColumnsHead`.
 pub const MISSING_COLUMNS_HEAD: &str = "SELECT need.t, need.c FROM (VALUES ";
 
