@@ -199,6 +199,73 @@ fn legacy_install_at_compatibility_level_100() {
         hash(&mut db, "FO", "7"),
         "sp_MarkCollected stored another fingerprint"
     );
+    pending_split(&mut db, &dsn);
     db.close();
     drop(guard);
+}
+
+/// RT-0784 on the same 2008-level install: FO bill 7 and POS check 9 were sent and
+/// then edited above, and both are dated long ago, so only the night sweep finds
+/// them; a site still on the old two-parameter SP keeps the legacy call.
+fn pending_split(db: &mut Client, dsn: &str) {
+    use dl_time::{Date, DateTime, OffsetDateTime, Time};
+    let vn = |h: u8| {
+        OffsetDateTime::new(
+            DateTime::new(
+                Date::new(2026, 11, 23).unwrap(),
+                Time::from_hms(h, 0, 0).unwrap(),
+            ),
+            dl_agent_einvoice::pending::vn_offset(),
+        )
+    };
+    let defaults = AgentConfig::default();
+    let at =
+        |h: u8| Sql::new(dsn, "", defaults.sp_names()).with_pending_clock(Box::new(move || vn(h)));
+    let ids = |sql: &Sql, source: &str| -> Vec<String> {
+        let p = sql
+            .select_pending(source, 50, None, Duration::from_secs(60))
+            .unwrap_or_else(|e| panic!("select_pending({source}): {e}"));
+        assert_eq!(p.edit_error, None, "{source}");
+        p.keys.into_iter().map(|k| k.id).collect()
+    };
+    exec(
+        db,
+        "UPDATE dbo.BillInfor SET TotalAmount = TotalAmount + 1 WHERE BillID = 7",
+    );
+
+    let night = at(1);
+    assert!(
+        ids(&night, "FO").is_empty(),
+        "old edit before the sweep hour"
+    );
+    assert!(
+        ids(&night, "POS").is_empty(),
+        "old edit before the sweep hour"
+    );
+    let sweep = at(3);
+    assert_eq!(
+        ids(&sweep, "FO"),
+        ["7"],
+        "night sweep finds the old FO edit"
+    );
+    assert_eq!(
+        ids(&sweep, "POS"),
+        ["9"],
+        "night sweep finds the old POS edit"
+    );
+
+    exec(
+        db,
+        "ALTER PROCEDURE dbo.sp_SelectPendingFO @Limit int = 50, @CollectFrom datetime = NULL AS
+         SELECT TOP (@Limit) ID = CAST(b.BillID AS varchar(64)) FROM dbo.BillInfor b
+         LEFT JOIN dbo.MMEI_Collected c ON c.Source = 'FO' AND c.ID = CAST(b.BillID AS varchar(64)) AND c.Ok = 1 AND c.SourceHash IS NOT NULL
+         WHERE b.Printed = 1 AND (@CollectFrom IS NULL OR b.InvDate >= @CollectFrom)
+           AND (c.ID IS NULL OR c.SourceHash <> dbo.MMEI_SourceHash('FO', CAST(b.BillID AS varchar(64))))
+         ORDER BY b.BillID DESC",
+    );
+    assert_eq!(
+        ids(&at(1), "FO"),
+        ["7"],
+        "old SP: the legacy call still finds the edit"
+    );
 }

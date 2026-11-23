@@ -30,6 +30,16 @@ behaviour (unknown values are logged once at warn).
 |---|---|---|
 | `pos_item_name` | `till` (default), `iname1` | `iname1` replaces each POS revenue line name (TrnCode 100) with `ItemDef.IName1` when filled in, looked up per check after the POS fetch (also for POS checks pulled into an FO bill). Blank or missing keeps the till name; a site without the column keeps till names. The name is not part of the source hash. `till`: no extra query. |
 
+### Pending selection (RT-0784)
+
+`sql/collect/sp_SelectPending{FO,POS}.sql` take an optional `@Mode`. The module probes
+`sys.parameters` once per source and, when the SP has it, asks for never-sent bills every
+cycle (mode 1, no hashing), re-hashes bills dated in the last 48 h every 2 minutes (mode 2)
+and pages through every sent bill once a Vietnam night from 02:00 (mode 3, 500 per cycle).
+A site whose SP predates RT-0784 keeps the single combined call (mode 0); the SP only
+changes at enrolment. An edit-detection failure keeps the never-sent keys and is reported
+as a SQL failure of the cycle. Port of MM-EINVOICE `internal/agentcollector/collectsource_pending.go`.
+
 `tests/golden_drift.rs` fails when `testdata/golden.json` differs from MM-EINVOICE's copy
 and `$MMEI_REPO` points at that checkout (skipped otherwise).
 

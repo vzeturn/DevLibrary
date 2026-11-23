@@ -26,6 +26,7 @@ pub mod log;
 pub mod module;
 pub mod money;
 pub mod outbox;
+pub mod pending;
 pub mod platform;
 pub mod pos;
 pub mod pos_names;

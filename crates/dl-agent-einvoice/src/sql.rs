@@ -16,6 +16,9 @@ use dl_time::{DateTime, OffsetDateTime};
 use crate::fo::{FoDetailRow, FoHeaderRow, FoLineRow, FoRows};
 use crate::install::{INSTALL_TIMEOUT, install_writeback_into, is_default_writeback_sp};
 use crate::log::V;
+use crate::pending::{
+    MODE_LEGACY, MODE_NEW, MODE_SWEEP, PendingCall, PendingPlanner, PendingQuerier, PendingRow,
+};
 use crate::pos::{PosRawCheck, PosRawHeader, PosRawLine};
 use crate::pos_names;
 use crate::profile::PosItemName;
@@ -114,6 +117,92 @@ pub struct Sql {
     pos: Option<Conn>,
     sp: SpNames,
     pos_item_name: PosItemName,
+    pending: PendingPlanner,
+}
+
+/// `select_pending`'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PendingKeys {
+    /// The keys to read this cycle.
+    pub keys: Vec<CollectKey>,
+    /// Edit detection (RT-0784 mode 2 or 3) failed; `keys` are still valid.
+    pub edit_error: Option<String>,
+}
+
+struct SelectQuerier<'a> {
+    sql: &'a Sql,
+    timeout: Duration,
+}
+
+impl PendingQuerier for SelectQuerier<'_> {
+    fn supports_split(&self, source: &str) -> Result<bool, String> {
+        let sp = self.sql.select_sp(source);
+        let rs = self
+            .sql
+            .conn(source)
+            .with(self.timeout, |c| {
+                c.query(
+                    "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID(@sp) AND name = '@Mode'",
+                    &[Param::new("sp", sp)],
+                )
+            })
+            .map_err(|e| err(&format!("agent: probe select sp ({source})"), e))?;
+        let n: i32 = rs
+            .rows()
+            .first()
+            .map(|r| r.get(0))
+            .transpose()
+            .map_err(|e| err("agent: scan select sp probe", e))?
+            .unwrap_or(0);
+        Ok(n > 0)
+    }
+
+    fn query(&self, source: &str, call: &PendingCall) -> Result<Vec<PendingRow>, String> {
+        let sp = self.sql.select_sp(source);
+        let mut q = format!("EXEC {sp} @Limit = @Limit, @CollectFrom = @CollectFrom");
+        let mut params = vec![
+            Param::new("Limit", call.limit),
+            Param::new("CollectFrom", call.collect_from),
+        ];
+        if call.mode != MODE_LEGACY {
+            q.push_str(", @Mode = @Mode, @ChangedFrom = @ChangedFrom, @After = @After");
+            params.push(Param::new("Mode", call.mode));
+            params.push(Param::new("ChangedFrom", call.changed_from));
+            params.push(Param::new("After", call.after.as_deref()));
+        }
+        let rs = self
+            .sql
+            .conn(source)
+            .with(self.timeout, |c| c.query(&q, &params))
+            .map_err(|e| {
+                err(
+                    &format!(
+                        "agent: select pending collect ({source}, mode {})",
+                        call.mode
+                    ),
+                    e,
+                )
+            })?;
+        rs.rows()
+            .iter()
+            .map(|r| {
+                Ok(PendingRow {
+                    id: r.get::<String>(0)?,
+                    changed: call.mode == MODE_SWEEP && r.get::<bool>(1)?,
+                })
+            })
+            .collect::<Result<_, dl_tds::Error>>()
+            .map_err(|e| err("agent: scan collect key", e))
+    }
+}
+
+fn collect_keys(source: &str, ids: Vec<String>) -> Vec<CollectKey> {
+    ids.into_iter()
+        .map(|id| CollectKey {
+            source: source.to_owned(),
+            id,
+        })
+        .collect()
 }
 
 fn err(ctx: &str, e: dl_tds::Error) -> String {
@@ -133,6 +222,7 @@ impl Sql {
             pos: (!pos_dsn.is_empty()).then(|| Conn::sealed(pos_dsn, "SMILE_POS")),
             sp,
             pos_item_name: PosItemName::default(),
+            pending: PendingPlanner::default(),
         }
     }
 
@@ -144,6 +234,7 @@ impl Sql {
             pos: pos.map(|(name, pool)| Conn::site(name, pool)),
             sp,
             pos_item_name: PosItemName::default(),
+            pending: PendingPlanner::default(),
         }
     }
 
@@ -233,41 +324,67 @@ impl Sql {
         Ok(())
     }
 
-    /// `SelectPendingCollect`.
+    /// `SelectPendingCollect`: never-sent keys every call, edited ones on the
+    /// RT-0784 cadence (see [`crate::pending`]). `Err` only when the new-bill select
+    /// failed; an edit-detection failure comes back in `PendingKeys::edit_error`.
     pub fn select_pending(
         &self,
         source: &str,
         limit: i64,
         from: Option<OffsetDateTime>,
         timeout: Duration,
+    ) -> Result<PendingKeys, String> {
+        validate_sp_name(self.select_sp(source))?;
+        let q = SelectQuerier { sql: self, timeout };
+        let sel = self.pending.select(&q, source, limit, from)?;
+        Ok(PendingKeys {
+            keys: collect_keys(source, sel.ids),
+            edit_error: sel.edit_error,
+        })
+    }
+
+    /// The never-sent keys only (the legacy combined call on an old SP), without
+    /// touching the collector's edit-detection schedule: for the self-test.
+    pub fn peek_pending(
+        &self,
+        source: &str,
+        limit: i64,
+        from: Option<OffsetDateTime>,
+        timeout: Duration,
     ) -> Result<Vec<CollectKey>, String> {
-        let sp = if source == "POS" {
+        validate_sp_name(self.select_sp(source))?;
+        let q = SelectQuerier { sql: self, timeout };
+        let mode = if q.supports_split(source)? {
+            MODE_NEW
+        } else {
+            MODE_LEGACY
+        };
+        let call = PendingCall {
+            mode,
+            limit,
+            collect_from: from,
+            changed_from: None,
+            after: None,
+        };
+        let rows = q.query(source, &call)?;
+        Ok(collect_keys(
+            source,
+            rows.into_iter().map(|r| r.id).collect(),
+        ))
+    }
+
+    /// Replaces the planner clock (tests pin the Vietnam time of day).
+    pub fn with_pending_clock(mut self, now: Box<dyn Fn() -> OffsetDateTime + Send + Sync>) -> Sql {
+        self.pending = PendingPlanner::new(now);
+        self
+    }
+
+    fn select_sp(&self, source: &str) -> &str {
+        if source == "POS" {
             &self.sp.select_pos
         } else {
             &self.sp.select_fo
-        };
-        validate_sp_name(sp)?;
-        let q = format!("EXEC {sp} @Limit = @Limit, @CollectFrom = @CollectFrom");
-        let rs = self
-            .conn(source)
-            .with(timeout, |c| {
-                c.query(
-                    &q,
-                    &[Param::new("Limit", limit), Param::new("CollectFrom", from)],
-                )
-            })
-            .map_err(|e| err(&format!("agent: select pending collect ({source})"), e))?;
-        rs.rows()
-            .iter()
-            .map(|r| {
-                r.get::<String>(0)
-                    .map(|id| CollectKey {
-                        source: source.to_owned(),
-                        id,
-                    })
-                    .map_err(|e| err("agent: scan collect key", e))
-            })
-            .collect()
+        }
     }
 
     /// `fetchPOSRaw` (sp_FetchPOS v2: header + Trn lines).
