@@ -12,8 +12,8 @@ use super::entities::{Folio, Val, ymd};
 use super::insert::{build_insert, truncation_message};
 use super::rows::{AdditionalName, ClientContact, ClientSts, FolioRate, SmileClient};
 use super::{
-    AGENT_CANCEL_CLERK_ID, AGENT_CLERK_ID, ALLOWED_UPDATE_COLS, FullRepo, PmsRepo,
-    compute_available,
+    AGENT_CANCEL_CLERK_ID, AGENT_CLERK_ID, ALLOWED_UPDATE_COLS, FullRepo,
+    LEGACY_AGENT_CANCEL_CLERK_ID, PmsRepo, compute_available,
 };
 use crate::error::{Error, Result};
 use crate::gofmt::{f0, scan_int};
@@ -263,8 +263,9 @@ impl PmsRepo for SqlRepo {
 WHERE (Booker IN ({ph})
     OR ExternalConfirmNumber IN ({ph}))
   AND ISNULL(CancelNum, 0) <> 0
-  AND ISNULL(LastChangeClerkID, '') <> @p{}",
-            keys.len() + 1
+  AND ISNULL(LastChangeClerkID, '') NOT IN (@p{}, @p{})",
+            keys.len() + 1,
+            keys.len() + 2
         );
         let mut params: Vec<Param> = keys
             .iter()
@@ -275,8 +276,57 @@ WHERE (Booker IN ({ph})
             &format!("p{}", keys.len() + 1),
             AGENT_CANCEL_CLERK_ID,
         ));
+        params.push(Param::new(
+            &format!("p{}", keys.len() + 2),
+            LEGACY_AGENT_CANCEL_CLERK_ID,
+        ));
         self.with_conn(|c| Ok(!rows(c, &sql, &params)?.is_empty()))
             .map_err(|e| e.context("has user-cancelled folio: "))
+    }
+
+    fn agent_cancelled_folio_nums(&self, booker: &str, booking_id: &str) -> Result<Vec<f64>> {
+        let mut keys: Vec<&str> = Vec::new();
+        if !booker.trim().is_empty() {
+            keys.push(booker);
+        }
+        if !booking_id.trim().is_empty() && booking_id != booker {
+            keys.push(booking_id);
+        }
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let n = keys.len();
+        let ph = (1..=n)
+            .map(|i| format!("@p{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT TOP 50 FolioNum FROM Folio
+WHERE (Booker IN ({ph})
+    OR ExternalConfirmNumber IN ({ph}))
+  AND ISNULL(CancelNum, 0) <> 0
+  AND ISNULL(LastChangeClerkID, '') IN (@p{}, @p{})
+ORDER BY FolioNum",
+            n + 1,
+            n + 2
+        );
+        let mut params: Vec<Param> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, k)| Param::new(&format!("p{}", i + 1), *k))
+            .collect();
+        params.push(Param::new(&format!("p{}", n + 1), AGENT_CANCEL_CLERK_ID));
+        params.push(Param::new(
+            &format!("p{}", n + 2),
+            LEGACY_AGENT_CANCEL_CLERK_ID,
+        ));
+        self.with_conn(|c| {
+            rows(c, &sql, &params)?
+                .iter()
+                .map(|r| Ok(r.get::<f64>(0)?))
+                .collect()
+        })
+        .map_err(|e| e.context("agent-cancelled folios: "))
     }
 
     fn get_new_confirm_num(&self) -> Result<f64> {
@@ -484,6 +534,32 @@ FROM Folio WHERE FolioNum = @p5 AND ISNULL(CancelNum, 0) = 0",
                     Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
                     Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
                     Param::new("p4", AGENT_CLERK_ID),
+                    Param::new("p5", folio_num),
+                ],
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.context(format!("append FolioLog {} {field}: ", f0(folio_num))))
+    }
+
+    fn append_folio_log_any(
+        &self,
+        folio_num: f64,
+        field: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<()> {
+        self.with_conn(|c| {
+            exec(
+                c,
+                "INSERT INTO FolioLog (FolioID, FolioNum, FolioSubNum, FieldName, OldValue, NewValue, ChangedClerk, ChangedTime)
+SELECT TOP 1 Id, FolioNum, ISNULL(FolioSubNum, 0), @p1, @p2, @p3, @p4, GETDATE()
+FROM Folio WHERE FolioNum = @p5 ORDER BY Id DESC",
+                &[
+                    Param::new("p1", clip_chars(field, FOLIO_LOG_FIELD_MAX)),
+                    Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
+                    Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
+                    Param::new("p4", AGENT_CANCEL_CLERK_ID),
                     Param::new("p5", folio_num),
                 ],
             )

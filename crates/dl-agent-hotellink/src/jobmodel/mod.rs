@@ -301,6 +301,9 @@ pub struct PmsResult {
     pub folios: Vec<PmsFolio>,
     /// `syncedAt` (RFC 3339 UTC, no fraction).
     pub synced_at: String,
+    /// `auditGaps` (omitempty): PMS change-history (FolioLog) rows the agent could not
+    /// write although the booking itself was applied (RT-0702).
+    pub audit_gaps: Vec<String>,
 }
 
 /// A folio snapshot (`jobmodel.PMSFolio`).

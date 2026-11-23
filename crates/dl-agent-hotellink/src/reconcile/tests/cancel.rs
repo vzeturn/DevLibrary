@@ -226,6 +226,7 @@ fn create_rooms_guard_skips_when_folio_appears() {
             None,
             None,
             true,
+            &super::super::history::CreateLog::new(&[]),
         )
         .expect("create_rooms");
     assert!(repo.st().inserted.is_empty(), "guard skips the insert");

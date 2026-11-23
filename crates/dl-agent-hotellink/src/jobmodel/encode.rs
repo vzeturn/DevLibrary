@@ -5,7 +5,7 @@ use super::{
     AvailRow, CancelPolicy, HlExtra, HlPayment, Job, MappingCmd, MappingRow, OpPolicy, PmsFolio,
     PmsResult, RateNight, RateNightExtra, Room,
 };
-use crate::gojson::{Obj, array};
+use crate::gojson::{Obj, array, string};
 
 impl Job {
     /// `json.Marshal(job)`.
@@ -266,6 +266,11 @@ impl PmsResult {
                 array(out, Some(&self.folios), |out, f| f.write_json(out))
             })
             .str("syncedAt", &self.synced_at);
+        if !self.audit_gaps.is_empty() {
+            o.raw("auditGaps", |out| {
+                array(out, Some(&self.audit_gaps), |out, g| string(out, g))
+            });
+        }
         o.end();
     }
 }

@@ -7,7 +7,7 @@ use dl_time::{Date, DateTime, OffsetDateTime};
 use crate::error::{Error, Result};
 use crate::gofmt::{quote, scan_int};
 use crate::jobmodel::{Job, PmsFolio, Room};
-use crate::pms::{AdditionalName, ClientSts, Folio, FolioRate, SmileClient, ymd};
+use crate::pms::{AGENT_CLERK_ID, AdditionalName, ClientSts, Folio, FolioRate, SmileClient, ymd};
 
 /// `itemKey`: the item a folio belongs to, from `UserInfo1` (`<key>#<seq>`); legacy folios
 /// without a key fall back to the room type.
@@ -154,6 +154,11 @@ pub(crate) fn build_folio(
 ) -> Result<(Folio, Vec<FolioRate>, AdditionalName)> {
     let mut f = Folio::new(now);
     f.folio_num = folio_num;
+    // A new folio carries the agent's mark from the start (creator and last changer): the
+    // SMILE FolioLog trigger concatenates LastChangeClerkID into its history row, and an
+    // empty one makes the next change lose its author (RT-0702).
+    f.reservation_clerk_id = AGENT_CLERK_ID.to_owned();
+    f.last_change_clerk_id = AGENT_CLERK_ID.to_owned();
     f.arrival_date = check_in;
     f.departure_date = check_out;
     f.room_type_code = room.room_type_code.clone();
