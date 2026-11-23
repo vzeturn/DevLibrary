@@ -35,3 +35,13 @@ installer script carries no secret: an enrollment code and the agent's signature
   token in the RT kit of this project (`OPS_<PROJECT>_CF_ACCESS_CLIENT_ID/SECRET`, RT ADR 0099), set the three
   vars, deploy. Until then the Bearer alone still works.
 - Only the RT hub (and the iMac, which pulls the kit) can call `/mcp`; a leaked `MCP_TOKEN` is no longer enough.
+
+## Rollout (2026-11-23)
+
+Access application `DevLibrary agent hub ops MCP (RT-0781)` on `agent.pms.id.vn/mcp`, policy "RT hub service token only"
+(the hub's token and one test token). The hub token is in the RT kit of `dev-library` as
+`OPS_DEV_LIBRARY_CF_ACCESS_CLIENT_ID/SECRET`; the test token as `CF_ACCESS_TEST_*_DEV_LIBRARY`. The vars are set in
+`wrangler.jsonc` and the Worker is deployed. Seen on the live host: no headers 403, wrong Bearer alone 403, service
+token without the Bearer 401 (Access and the Worker's JWT check passed, the Bearer did not), `/healthz` and
+`/install.ps1` 200. Rotation: create a new service token, write both kit names (merge), then replace the token in the
+policy; the old one stops working at once.
