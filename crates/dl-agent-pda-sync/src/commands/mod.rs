@@ -41,8 +41,8 @@ pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_column
 pub use service::{CommandExtras, CommandService};
 pub use sql_store::{ConfigSource, SqlSiteCommandStore, SqlSiteCommandUnit};
 pub use units::{
-    CheckMoneyFacts, CommandWork, OrderCommandUnit, OrderLineFacts, OrderPostOutcome,
-    SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
+    CheckMoneyFacts, CommandWork, EmptyBillFacts, OrderCommandUnit, OrderLineFacts,
+    OrderPostOutcome, SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
 };
 pub use verify::{VerifyCommandHandler, VerifyParts};
 pub use verify_manifest::{
@@ -60,10 +60,10 @@ pub mod params {
     };
     pub use super::sql_store::reservation_parameters;
     pub use super::sql_table::{
-        cancel_parameters, lock_parameters, log_trn_move_parameters, merge_line_info_parameters,
-        merge_lines_parameters, missing_columns_parameters, move_line_info_parameters,
-        move_line_parameters, table_info_parameters, transfer_header_parameters,
-        transfer_line_info_parameters,
+        cancel_empty_parameters, cancel_parameters, empty_bill_facts_parameters, lock_parameters,
+        log_trn_move_parameters, merge_line_info_parameters, merge_lines_parameters,
+        missing_columns_parameters, move_line_info_parameters, move_line_parameters,
+        table_info_parameters, transfer_header_parameters, transfer_line_info_parameters,
     };
 }
 

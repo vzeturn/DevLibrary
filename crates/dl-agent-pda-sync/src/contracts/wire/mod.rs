@@ -52,7 +52,8 @@ pub use sync_verify::{
     sync_verify_repair,
 };
 pub use table_commands::{
-    OrderCheckExpectation, OrderCheckMergePayload, OrderItemsMovePayload, OrderMultiCheckResult,
-    OrderTableChangePayload, OrderTableTransferPayload, multi_check_aggregate,
-    table_command_reasons, table_command_types,
+    OrderCheckCancelEmptyPayload, OrderCheckExpectation, OrderCheckMergePayload,
+    OrderItemsMovePayload, OrderMultiCheckResult, OrderTableChangePayload,
+    OrderTableTransferPayload, is_local_timestamp, multi_check_aggregate, table_command_reasons,
+    table_command_types,
 };

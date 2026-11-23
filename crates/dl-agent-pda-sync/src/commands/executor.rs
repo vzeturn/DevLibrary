@@ -22,13 +22,13 @@ use crate::contracts::WireJson;
 use crate::contracts::time::DateTimeOffset;
 use crate::contracts::wire::{
     CheckStateFingerprint, CommandStatus, KdsLineStatePayload, KdsLineStateResult,
-    OrderCheckExpectation, OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult,
-    OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload,
-    OrderItemsMovePayload, OrderMultiCheckResult, OrderSendPayload, OrderTableChangePayload,
-    OrderTableTransferPayload, ReservationCancelPayload, ReservationSavePayload,
-    ReservationSavedResult, SyncCommand, SyncCommandResult, check_aggregate, kds_line_actions,
-    order_command_reasons as order, order_command_types, site_command_reasons, site_command_types,
-    table_command_reasons as table, table_command_types,
+    OrderCheckCancelEmptyPayload, OrderCheckExpectation, OrderCheckMergePayload,
+    OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload, OrderCoversPayload,
+    OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload, OrderMultiCheckResult,
+    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, ReservationCancelPayload,
+    ReservationSavePayload, ReservationSavedResult, SyncCommand, SyncCommandResult,
+    check_aggregate, kds_line_actions, order_command_reasons as order, order_command_types,
+    site_command_reasons, site_command_types, table_command_reasons as table, table_command_types,
 };
 use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
@@ -271,6 +271,7 @@ impl SiteCommandExecutor {
             t::TABLE_TRANSFER => self.table_transfer(c, ctx),
             t::CHECK_MERGE => self.check_merge(c, ctx),
             t::ITEMS_MOVE => self.items_move(c, ctx),
+            t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
         }
     }
@@ -704,6 +705,84 @@ impl SiteCommandExecutor {
         c.expected_hash.is_some().then_some(
             "a multi-check command carries its expected states in checks[], not expected_hash",
         )
+    }
+
+    /// Closes a stale empty check (ADR 0144, RT-0775). Everything the cloud decided on is
+    /// re-checked under the header lock in the command's own transaction: open, on the
+    /// named table, opened before the cutoff, no line, no payment; any miss is a logged
+    /// rejection with a reason code and nothing is written.
+    fn check_cancel_empty(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
+        let p = match self.payload(
+            c,
+            "an order.check_cancel_empty",
+            |p: &OrderCheckCancelEmptyPayload| {
+                p.problem().or_else(|| {
+                    c.expected_hash
+                        .is_some()
+                        .then_some("an empty-bill cancel carries no expected_hash")
+                })
+            },
+        ) {
+            Ok(p) => p,
+            Err(r) => return Ok(r),
+        };
+        self.store.run_once(
+            c.command_id,
+            &mut |unit, t| {
+                if let Some(r) = self.schema_refusal(c, unit, t)? {
+                    return Ok(r);
+                }
+                match unit.tables().lock_check(p.rvc_no, p.check_no, t)? {
+                    None => return Ok(self.reject(c, order::CHECK_NOT_FOUND)),
+                    Some(1) => {}
+                    Some(_) => return Ok(self.reject(c, order::BILL_NOT_OPEN)),
+                }
+                let Some(facts) =
+                    unit.tables()
+                        .empty_bill_facts(p.rvc_no, p.check_no, &p.opened_before, t)?
+                else {
+                    return Ok(self.reject(c, order::CHECK_NOT_FOUND));
+                };
+                if !eq_ignore_case(&facts.table_no, p.table_no.trim()) {
+                    return Ok(self.reject_logged(c, table::TABLE_MISMATCH, &p));
+                }
+                if !facts.opened_before_cutoff {
+                    return Ok(self.reject_logged(c, table::BILL_NOT_STALE, &p));
+                }
+                if facts.line_count > 0 {
+                    return Ok(self.reject_logged(c, table::BILL_NOT_EMPTY, &p));
+                }
+                if unit
+                    .tables()
+                    .money_facts(p.rvc_no, p.check_no, t)?
+                    .has_payment
+                {
+                    return Ok(self.reject_logged(c, table::BILL_HAS_PAYMENT, &p));
+                }
+                unit.tables().cancel_empty(&p, t)?;
+                self.applied_checks(c, unit, p.rvc_no, &[], &[p.check_no], t)
+            },
+            ctx,
+        )
+    }
+
+    fn reject_logged(
+        &self,
+        c: &SyncCommand,
+        reason: &str,
+        p: &OrderCheckCancelEmptyPayload,
+    ) -> SyncCommandResult {
+        self.log.warn(
+            "Site command {Id} ({Type}) refused for check {CheckNo} of RVC {Rvc}: {Reason}",
+            &[
+                Value::from(c.command_id),
+                Value::from(c.type_.as_str()),
+                Value::from(p.check_no),
+                Value::from(p.rvc_no),
+                Value::from(reason),
+            ],
+        );
+        self.reject(c, reason)
     }
 
     fn check_merge(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {

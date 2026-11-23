@@ -9,10 +9,10 @@ use super::error::{CommandError, Result};
 use super::sql;
 use super::sql_store::SqlSiteCommandUnit;
 use super::sql_text as q;
-use super::units::{CheckMoneyFacts, StoreColumn, TableCommandUnit};
+use super::units::{CheckMoneyFacts, EmptyBillFacts, StoreColumn, TableCommandUnit};
 use crate::contracts::wire::{
-    OrderCheckMergePayload, OrderItemsMovePayload, OrderTableChangePayload,
-    OrderTableTransferPayload,
+    OrderCheckCancelEmptyPayload, OrderCheckMergePayload, OrderItemsMovePayload,
+    OrderTableChangePayload, OrderTableTransferPayload,
 };
 use crate::util::ctx::Ctx;
 
@@ -62,6 +62,21 @@ pub fn merge_line_info_parameters(p: &OrderCheckMergePayload) -> Vec<Param> {
 /// The parameters of [`b::CANCEL_ORDER`]: the emptied source, cancelled by the cashier.
 pub fn cancel_parameters(p: &OrderCheckMergePayload) -> Vec<Param> {
     let mut v = lock_parameters(p.rvc_no, p.source_check_no);
+    v.push(sql::text_param("CancelBy", Some(&p.cashier)));
+    v
+}
+
+/// The parameters of [`q::EMPTY_BILL_FACTS`].
+pub fn empty_bill_facts_parameters(rvc_no: i32, check_no: i64, opened_before: &str) -> Vec<Param> {
+    let mut v = lock_parameters(rvc_no, check_no);
+    v.push(sql::text_param("OpenedBefore", Some(opened_before)));
+    v
+}
+
+/// The parameters of [`b::CANCEL_ORDER`] for the empty-bill cleanup: the check is the one
+/// cancelled, the cashier the canceller.
+pub fn cancel_empty_parameters(p: &OrderCheckCancelEmptyPayload) -> Vec<Param> {
+    let mut v = lock_parameters(p.rvc_no, p.check_no);
     v.push(sql::text_param("CancelBy", Some(&p.cashier)));
     v
 }
@@ -231,6 +246,39 @@ impl TableCommandUnit for SqlSiteCommandUnit<'_> {
             has_payment: tender || !paid.is_zero(),
             has_discount: discount,
         })
+    }
+
+    fn empty_bill_facts(
+        &mut self,
+        rvc_no: i32,
+        check_no: i64,
+        opened_before: &str,
+        ctx: &Ctx,
+    ) -> Result<Option<EmptyBillFacts>> {
+        let r = sql::query(
+            self.c,
+            q::EMPTY_BILL_FACTS,
+            &empty_bill_facts_parameters(rvc_no, check_no, opened_before),
+            ctx,
+        )?;
+        let Some(row) = r.rows().first() else {
+            return Ok(None);
+        };
+        Ok(Some(EmptyBillFacts {
+            table_no: sql::text(row, 0).unwrap_or_default().trim().to_owned(),
+            opened_before_cutoff: sql::int32(row, 1)? == 1,
+            line_count: sql::int32(row, 2)?,
+        }))
+    }
+
+    fn cancel_empty(&mut self, payload: &OrderCheckCancelEmptyPayload, ctx: &Ctx) -> Result<()> {
+        sql::execute(
+            self.c,
+            b::CANCEL_ORDER,
+            &cancel_empty_parameters(payload),
+            ctx,
+        )
+        .map(|_| ())
     }
 
     fn change_table(&mut self, payload: &OrderTableChangePayload, ctx: &Ctx) -> Result<()> {

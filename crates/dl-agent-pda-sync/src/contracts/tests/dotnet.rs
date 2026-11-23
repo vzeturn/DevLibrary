@@ -808,3 +808,52 @@ fn mapper_matches_dotnet() {
         r#"c7b962e4557c598e580669509e4cfa9d8a0ed63c706fdeabc345fc2cdc621e8e|{"CheckNo":"500001234","CloseTime":"2026-10-24T06:30:00.0000000Z","OpenTime":"2026-10-24T05:00:00.0000000Z","PONumber":null,"PaymentInfo":"Ph\u1EDF b\u00F2","RVC":"1","SubTotal":"100000","TotalPaid":"125000.5"}"#
     );
 }
+
+/// Pinned to the same literal `SiteCommandCancelEmptyTests.The_wire_payload_is_snake_case_and_the_verb_is_durable`
+/// asserts on the .NET side (ADR 0144): both agents and the cloud speak one payload.
+#[test]
+fn check_cancel_empty_payload_is_byte_identical_to_dotnet() {
+    let p = OrderCheckCancelEmptyPayload {
+        rvc_no: 4,
+        check_no: 7001,
+        table_no: "A1234".into(),
+        cashier: "SML".into(),
+        opened_before: "2026-11-23T04:00:00".into(),
+    };
+    assert_eq!(
+        p.to_element().to_string(),
+        "{\"rvc_no\":4,\"check_no\":7001,\"table_no\":\"A1234\",\"cashier\":\"SML\",\"opened_before\":\"2026-11-23T04:00:00\"}"
+    );
+    assert_eq!(p.problem(), None);
+    let back = OrderCheckCancelEmptyPayload::from_element(&p.to_element()).unwrap();
+    assert_eq!(back, p);
+    let spec = site_command_contract::find(Some(table_command_types::CHECK_CANCEL_EMPTY)).unwrap();
+    assert_eq!(spec.delivery, SiteCommandDelivery::Durable);
+    assert_eq!(spec.max_attempts, 8);
+}
+
+#[test]
+fn local_timestamp_accepts_only_real_calendar_moments() {
+    for ok in [
+        "2026-11-23T04:00:00",
+        "2028-02-29T23:59:59",
+        "2026-12-31T00:00:00",
+    ] {
+        assert!(is_local_timestamp(ok), "{ok}");
+    }
+    for bad in [
+        "",
+        "2026-11-23",
+        "2026-11-23 04:00:00",
+        "2026-02-29T04:00:00",
+        "2026-13-01T00:00:00",
+        "2026-11-23T24:00:00",
+        "2026-11-23T04:60:00",
+        "2026-11-23T04:00:60",
+        "0000-01-01T00:00:00",
+        "2026-11-23T04:00:0x",
+        "２026-11-23T04:00:00",
+    ] {
+        assert!(!is_local_timestamp(bad), "{bad}");
+    }
+}

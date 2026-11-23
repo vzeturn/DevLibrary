@@ -57,6 +57,25 @@ const CHECK_MERGE: &[StoreColumn] = &[
     c("checkopenlog", "RVC"),
 ];
 
+const CHECK_CANCEL_EMPTY: &[StoreColumn] = &[
+    c("TmpInvoice", "CheckNo"),
+    c("TmpInvoice", "RVC"),
+    c("TmpInvoice", "Status"),
+    c("TmpInvoice", "TotalPaid"),
+    c("TmpInvoice", "TableNo"),
+    c("TmpInvoice", "OpenTime"),
+    c("TmpTrn", "CheckNo"),
+    c("TmpTrn", "RVC"),
+    c("TmpTrn", "TrnCode"),
+    c("tmpTrnInfo", "CheckNo"),
+    c("tmpInvoiceInfo", "CheckNo"),
+    c("checkopenlog", "isOpen"),
+    c("checkopenlog", "CloseTime"),
+    c("checkopenlog", "LastAction"),
+    c("checkopenlog", "CheckNo"),
+    c("checkopenlog", "RVC"),
+];
+
 const ITEMS_MOVE: &[StoreColumn] = &[
     c("TmpInvoice", "CheckNo"),
     c("TmpInvoice", "RVC"),
@@ -77,6 +96,7 @@ pub fn columns(verb: &str) -> Option<&'static [StoreColumn]> {
         t::TABLE_TRANSFER => Some(TABLE_TRANSFER),
         t::CHECK_MERGE => Some(CHECK_MERGE),
         t::ITEMS_MOVE => Some(ITEMS_MOVE),
+        t::CHECK_CANCEL_EMPTY => Some(CHECK_CANCEL_EMPTY),
         _ => None,
     }
 }

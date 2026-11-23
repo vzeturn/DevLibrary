@@ -8,10 +8,10 @@ use dl_uuid::Uuid;
 
 use super::error::Result;
 use crate::contracts::wire::{
-    OrderCheckLine, OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult,
-    OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload,
-    OrderItemsMovePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
-    ReservationSavePayload, SyncCommandResult,
+    OrderCheckCancelEmptyPayload, OrderCheckLine, OrderCheckMergePayload, OrderCheckOpenPayload,
+    OrderCheckResult, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
+    OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload, OrderTableChangePayload,
+    OrderTableTransferPayload, ReservationSavePayload, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
 
@@ -158,6 +158,19 @@ pub trait TableCommandUnit {
     /// commits.
     fn merge(&mut self, payload: &OrderCheckMergePayload, ctx: &Ctx) -> Result<()>;
 
+    /// What the empty-bill cleanup re-checks under the header lock (ADR 0144): table,
+    /// the cutoff test and the line count; `None` when the check is not in the RVC.
+    fn empty_bill_facts(
+        &mut self,
+        rvc_no: i32,
+        check_no: i64,
+        opened_before: &str,
+        ctx: &Ctx,
+    ) -> Result<Option<EmptyBillFacts>>;
+
+    /// Cancels the empty check with the legacy cancel batch.
+    fn cancel_empty(&mut self, payload: &OrderCheckCancelEmptyPayload, ctx: &Ctx) -> Result<()>;
+
     /// The item lines (TrnCode 100) of the check, update-locked until commit.
     fn lock_item_lines(&mut self, rvc_no: i32, check_no: i64, ctx: &Ctx) -> Result<Vec<i64>>;
 
@@ -244,4 +257,15 @@ pub struct CheckMoneyFacts {
     pub has_payment: bool,
     /// A discount line.
     pub has_discount: bool,
+}
+
+/// The facts the empty-bill cleanup guards on (ADR 0144).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyBillFacts {
+    /// The check's table, trimmed.
+    pub table_no: String,
+    /// Whether `OpenTime` is earlier than the cutoff.
+    pub opened_before_cutoff: bool,
+    /// How many `TmpTrn` lines the check carries (any code).
+    pub line_count: i32,
 }
