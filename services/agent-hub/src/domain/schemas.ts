@@ -42,8 +42,8 @@ export const heartbeatBody = z.object({
       // `deferred` is sent by dl-agent <= 1.3.32 while an update waits for its window; its `version` carries the
       // reason, so it is cut instead of refused: a heartbeat is never rejected over the update status (RT-0818).
       state: z.enum(['idle', 'probation', 'rolled_back', 'deferred']),
-      version: z.string().transform((v) => v.slice(0, 64)).optional(),
-      detail: z.string().transform((v) => v.slice(0, 500)).optional(),
+      version: z.string().max(4096).transform((v) => v.slice(0, 64)).optional(),
+      detail: z.string().max(4096).transform((v) => v.slice(0, 500)).optional(),
     })
     .optional(),
   modules: z
