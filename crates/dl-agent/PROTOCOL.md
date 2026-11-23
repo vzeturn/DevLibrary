@@ -523,7 +523,7 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
   `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6);
   `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7);
-  `sql.inventory {database?, checksum?}` → `{"<name>":inventory}` (§9.8). There is
+  `sql.inventory {database?, checksum?, section?, after?, limit?}` → `{"<name>":inventory}` (§9.8). There is
   deliberately no command that runs arbitrary SQL sent by the hub: a bundle must carry a
   release signature, and projects otherwise reach their databases through their own modules.
 
@@ -658,7 +658,7 @@ against its baked-in release keys, so neither the hub nor the network can push S
 
 ### 9.8 Database inventory
 
-`sql.inventory {database?, checksum?}` lets two copies of a database (a site and its cloud
+`sql.inventory {database?, checksum?, section?, after?, limit?}` lets two copies of a database (a site and its cloud
 twin) be compared without moving data. Read-only, built from the catalog; counts, hashes and
 object names only, never a row.
 
@@ -674,3 +674,8 @@ object names only, never a row.
   failure only marks that table (`checksum_error`).
 - Answer per database: `{"totals": {tables, rows, modules}, "tables": {"dbo.x": {…}},
   "modules": {"dbo.p": {…}}, "checksum_missing": []}`.
+- **Paging**: a full answer for a large database does not fit one result (60,000 bytes), so
+  an answer over that limit fails whole with `inventory_too_large` instead of arriving cut.
+  `section` (`"tables"` or `"modules"`) lists only that part; `limit` (1–1000) and `after`
+  (a key) page it in key order, and `next` is the `after` for the following page while more
+  remain. Only tables in the page are checksummed; `totals` always cover the whole database.

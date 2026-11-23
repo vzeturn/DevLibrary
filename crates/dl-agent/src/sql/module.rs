@@ -285,11 +285,15 @@ impl<C: Connector> SqlModule<C> {
         (ok, dl_json::to_string(&Value::Object(out)))
     }
 
-    /// `sql.inventory {database?, checksum?}`: row counts, column-layout and definition
+    /// `sql.inventory {database?, checksum?, section?, after?, limit?}`: row counts, column-layout and definition
     /// hashes per object, plus data checksums when asked (§9.8). No row leaves the server.
     fn inventory_now(&self, args: &Value) -> (bool, String) {
         let checksum = match inventory::Checksum::from_arg(args.get("checksum")) {
             Ok(c) => c,
+            Err(e) => return (false, format!("sql: {e}")),
+        };
+        let page = match inventory::Page::from_args(args) {
+            Ok(p) => p,
             Err(e) => return (false, format!("sql: {e}")),
         };
         let only = args.get("database").and_then(Value::as_str);
@@ -302,7 +306,7 @@ impl<C: Connector> SqlModule<C> {
             let answer = match self
                 .pools
                 .get(&name)
-                .and_then(|p| p.with(|conn| inventory::inventory(conn, &checksum)))
+                .and_then(|p| p.with(|conn| inventory::inventory(conn, &checksum, &page)))
             {
                 Ok(v) => v,
                 Err(e) => {
@@ -318,7 +322,19 @@ impl<C: Connector> SqlModule<C> {
                 format!("sql: no database {}", only.unwrap_or("declared")),
             );
         }
-        (ok, dl_json::to_string(&Value::Object(out)))
+        let text = dl_json::to_string(&Value::Object(out));
+        if text.len() > crate::command::MAX_OUTPUT {
+            // A cut answer is not JSON any more: refuse it whole and say how to page.
+            return (
+                false,
+                format!(
+                    "sql: inventory_too_large ({} bytes): ask one database and one section \
+                     with limit (sql.inventory {{database, section, limit, after}})",
+                    text.len()
+                ),
+            );
+        }
+        (ok, text)
     }
 
     fn ping(&self, args: &Value) -> (bool, String) {
