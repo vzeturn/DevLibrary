@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- agent-hub `/mcp` can require a Cloudflare Access service token on top of its Bearer (`MCP_ACCESS_REQUIRED`, `MCP_ACCESS_AUD`, fails closed): a leaked `MCP_TOKEN` alone no longer opens the ops console (ADR 0008, RT-0781). The installer and agent routes stay public.
+
 ### Fixed
 
 - agent-hub accepts `update.state = "deferred"` (dl-agent <= 1.3.32 sent it while an update waited for its window and every heartbeat got a 400), and dl-agent now reports a deferred update as `idle` with the reason in `update.detail`; an agent that boots on a version it once rolled back reports `idle`, not `rolled_back` of itself, so the canary gate's `no_rollback` is not misread (RT-0818).
