@@ -25,6 +25,10 @@
     "GATE_SOAK_HOURS_MAJOR": "72",
     "MINOR_RAMP": "0:10,24:50,48:100",
     // Hub hosts handed to agents, primary first; the fallback serves /v1, /install and /healthz only.
+    // RT-0781: /mcp needs the Access service token of the hub (ADR 0008); the audience is public, not a secret.
+    "ACCESS_TEAM_DOMAIN": "wnzapp.cloudflareaccess.com",
+    "MCP_ACCESS_REQUIRED": "true",
+    "MCP_ACCESS_AUD": "73a5d4b5a122f49e9ee2a0c56945b007f751571c53f62f45d993dba53217a1f9",
     "HUB_URLS": "https://agent.pms.id.vn,https://agent-hub.vutq-sense.workers.dev"
   },
   // /mcp behind Access (ADR 0008, RT-0781): set MCP_ACCESS_AUD and "MCP_ACCESS_REQUIRED": "true" in vars once its Access app exists; ACCESS_TEAM_DOMAIN is shared with /admin.
