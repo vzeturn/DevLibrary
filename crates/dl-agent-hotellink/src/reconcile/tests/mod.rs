@@ -74,6 +74,8 @@ pub(crate) struct State {
     pub folio_log_err: Option<String>,
     /// `AgentCancelledFolioNums` returns these (RT-0702).
     pub agent_cancelled: Vec<f64>,
+    /// When set, `AgentCancelledFolioNums` fails with it.
+    pub agent_cancelled_err: Option<String>,
     /// When set, `GetFolios` fails with it (RT-0651).
     pub get_folios_err: Option<String>,
     /// Replaces `folios` after an insert.
@@ -253,7 +255,11 @@ impl PmsRepo for FakeRepo {
         Ok(())
     }
     fn agent_cancelled_folio_nums(&self, _booker: &str, _booking_id: &str) -> Result<Vec<f64>> {
-        Ok(self.st().agent_cancelled.clone())
+        let s = self.st();
+        if let Some(e) = &s.agent_cancelled_err {
+            return Err(Error::other(e.clone()));
+        }
+        Ok(s.agent_cancelled.clone())
     }
     fn get_global_param_int(&self, name: &str) -> Result<i64> {
         Ok(self.st().global_params.get(name).copied().unwrap_or(0))

@@ -116,6 +116,18 @@ fn split_items_modify_increase_creates_only_missing() {
     let s = repo.st();
     assert_eq!(s.inserted.len(), 2);
     assert!(s.cancelled.is_empty());
+    // RT-0702: each added room logs its own HL:Create, marked as added by a modification.
+    let creates: Vec<_> = s
+        .folio_logs
+        .iter()
+        .filter(|l| l.field == "HL:Create")
+        .collect();
+    assert_eq!(creates.len(), 2, "{:?}", s.folio_logs);
+    assert!(
+        creates
+            .iter()
+            .all(|l| l.old == "room added by modification")
+    );
 }
 
 #[test]
@@ -128,4 +140,11 @@ fn split_items_modify_decrease_cancels_surplus_once() {
     let total: usize = s.cancelled.iter().map(Vec::len).sum();
     assert_eq!(total, 2);
     assert!(s.inserted.is_empty());
+    // RT-0702: one HL:Cancel row per cancelled folio, naming why.
+    assert_eq!(s.folio_logs_any.len(), 2, "{:?}", s.folio_logs_any);
+    assert!(
+        s.folio_logs_any
+            .iter()
+            .all(|l| l.field == "HL:Cancel" && l.new.contains("HL reduced the room count"))
+    );
 }

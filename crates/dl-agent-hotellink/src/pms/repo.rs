@@ -559,7 +559,7 @@ FROM Folio WHERE FolioNum = @p5 ORDER BY Id DESC",
                     Param::new("p1", clip_chars(field, FOLIO_LOG_FIELD_MAX)),
                     Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
                     Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
-                    Param::new("p4", AGENT_CLERK_ID),
+                    Param::new("p4", AGENT_CANCEL_CLERK_ID),
                     Param::new("p5", folio_num),
                 ],
             )

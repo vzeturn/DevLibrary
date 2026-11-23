@@ -721,7 +721,10 @@ fn append_folio_log_any_reaches_a_cancelled_folio() {
     run(&db.repo, "DROP TABLE FolioLog");
     assert_eq!(
         got.expect("read"),
-        vec![("HL:Cancel".to_owned(), super::AGENT_CLERK_ID.to_owned())]
+        vec![(
+            "HL:Cancel".to_owned(),
+            super::AGENT_CANCEL_CLERK_ID.to_owned()
+        )]
     );
 }
 

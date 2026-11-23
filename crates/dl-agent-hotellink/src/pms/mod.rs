@@ -117,7 +117,9 @@ pub trait PmsRepo: Send + Sync {
     /// (FolioRate). Best-effort at the caller (RT-0651).
     fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()>;
     /// Like [`PmsRepo::append_folio_log`] for a folio in any state, so a cancel can be
-    /// logged after the folio is cancelled (RT-0702).
+    /// logged after the folio is cancelled; `ChangedClerk` is the cancel clerk
+    /// [`AGENT_CANCEL_CLERK_ID`], like the row SMILE's trigger writes for the same UPDATE
+    /// (RT-0702).
     fn append_folio_log_any(&self, folio_num: f64, field: &str, old: &str, new: &str)
     -> Result<()>;
     /// Folios of this booking that the agent itself cancelled earlier, used to log a

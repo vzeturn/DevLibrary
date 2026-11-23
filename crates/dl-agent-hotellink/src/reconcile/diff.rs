@@ -365,16 +365,6 @@ impl Reconciler {
         if !set.is_empty() {
             self.repo.update_folio_fields(f.folio_num, &set)?;
             let fields: Vec<&str> = set.keys().copied().collect();
-            let name_chg = ["LastName", "MailM", "ArrivalDate", "DepartureDate"]
-                .iter()
-                .any(|k| set.contains_key(k));
-            let (old_v, new_v) = update_summary(f, &set, name_chg);
-            self.log_folio(
-                f.folio_num,
-                FOLIO_LOG_UPDATE,
-                &old_v,
-                &format!("hl={}: {new_v}", job.booking_id),
-            );
             log::info(
                 "cập nhật folio (field đổi)",
                 &[
@@ -403,6 +393,16 @@ impl Reconciler {
         // a child row did, stamp it separately so the folio still records the change.
         if set.is_empty() && (rates_changed || name_changed) {
             self.repo.stamp_folio_change(f.folio_num)?;
+        }
+        // HISTORY: one HL:Update summary row, once every write of this folio succeeded.
+        if !set.is_empty() {
+            let (old_v, new_v) = update_summary(f, &set, name_changed);
+            self.log_folio(
+                f.folio_num,
+                FOLIO_LOG_UPDATE,
+                &old_v,
+                &format!("hl={}: {new_v}", job.booking_id),
+            );
         }
         Ok(())
     }

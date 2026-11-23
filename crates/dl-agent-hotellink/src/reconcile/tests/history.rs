@@ -151,3 +151,34 @@ fn agent_cancel_clerk_fits_varchar3() {
     assert_eq!(AGENT_CLERK_ID.len(), 3);
     assert_ne!(AGENT_CANCEL_CLERK_ID, AGENT_CLERK_ID);
 }
+
+#[test]
+fn modify_with_changed_dates_marks_additional_name_updated() {
+    let repo = repo_with(vec![Folio {
+        room_code: String::new(),
+        ..existing_folio()
+    }]);
+    let mut job = save_job();
+    job.check_out = "2026-06-15".into();
+    rates0(&mut job).push(rn("2026-06-14", 1700000.0));
+    new_reconciler(&repo).apply(&job).expect("apply");
+    let s = repo.st();
+    let l = s
+        .folio_logs
+        .iter()
+        .find(|l| l.field == FOLIO_LOG_UPDATE)
+        .expect("HL:Update row");
+    assert!(l.new.contains("DepartureDate=2026-06-15"), "{}", l.new);
+    assert!(l.new.ends_with("AdditionalName=updated"), "{}", l.new);
+}
+
+#[test]
+fn recovery_lookup_error_fails_the_job() {
+    let repo = FakeRepo::new();
+    repo.st().agent_cancelled_err = Some("pms down".into());
+    let err = new_reconciler(&repo)
+        .apply(&save_job())
+        .expect_err("a failed recovery lookup must not create blindly");
+    assert!(err.message().contains("pms down"), "{}", err.message());
+    assert!(repo.st().inserted.is_empty());
+}
