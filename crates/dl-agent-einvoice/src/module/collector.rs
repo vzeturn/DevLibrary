@@ -117,7 +117,7 @@ impl Shared {
     }
 }
 
-/// The collect / push loop (and write-back, unless a [`super::writeback::WritebackWorker`]
+/// The collect / push loop (and write-back, unless a `WritebackWorker`
 /// took it over). The runner is shared with that worker, which locks it only to apply.
 pub struct Collector {
     runner: Arc<Mutex<Runner>>,
