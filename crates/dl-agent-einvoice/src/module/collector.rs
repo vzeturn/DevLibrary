@@ -117,9 +117,10 @@ impl Shared {
     }
 }
 
-/// The collect / push / write-back loop.
+/// The collect / push loop (and write-back, unless a `WritebackWorker`
+/// took it over). The runner is shared with that worker, which locks it only to apply.
 pub struct Collector {
-    runner: Runner,
+    runner: Arc<Mutex<Runner>>,
     interval: Duration,
     stop: StopSignal,
     shared: Arc<Shared>,
@@ -129,7 +130,7 @@ pub struct Collector {
 impl Collector {
     /// A collector running `runner` every `interval` until `stop`.
     pub fn new(
-        runner: Runner,
+        runner: Arc<Mutex<Runner>>,
         interval: Duration,
         stop: StopSignal,
         shared: Arc<Shared>,
@@ -145,7 +146,7 @@ impl Collector {
     }
 
     /// Runs until stopped or replaced.
-    pub fn run(mut self) {
+    pub fn run(self) {
         let Some(_one) = exclusive(&COLLECTOR_BUSY, &self.stop) else {
             return;
         };
@@ -153,8 +154,10 @@ impl Collector {
         while !self.stop.is_stopped() {
             let due = Instant::now() >= next;
             if due || self.shared.collect_now.swap(false, Ordering::Relaxed) {
-                let res = self.runner.run_cycle();
-                self.record(&res);
+                let mut runner = self.runner.lock().unwrap_or_else(PoisonError::into_inner);
+                let res = runner.run_cycle();
+                self.record(&mut runner, &res);
+                drop(runner);
                 if res.replaced() {
                     self.shared.replaced.store(true, Ordering::Relaxed);
                     return;
@@ -172,31 +175,31 @@ impl Collector {
         }
     }
 
-    fn record(&self, res: &CycleResult) {
+    fn record(&self, runner: &mut Runner, res: &CycleResult) {
         let s = &self.shared.stats;
         Stats::bump(&s.cycles, 1);
         Stats::bump(&s.read_total, count(res.read));
         Stats::bump(&s.pushed_total, count(res.pushed));
         Stats::bump(&s.errored_total, count(res.errored));
-        Stats::set(&s.outbox_pending, self.runner.outbox.len() as u64);
+        Stats::set(&s.outbox_pending, runner.outbox.len() as u64);
         let now = dl_agent::now();
         Stats::set(&s.last_cycle_at, now);
         if res.pushed + res.errored > 0 {
             Stats::set(&s.last_push_at, now);
         }
-        for step in self.runner.sql.take_step_downs() {
+        for step in runner.sql.take_step_downs() {
             report_step_down(&self.ctx, &step);
         }
         self.shared.set_effective(Effective {
-            cfg: self.runner.cfg.clone(),
-            pos_item_name: self.runner.sql.pos_item_name(),
+            cfg: runner.cfg.clone(),
+            pos_item_name: runner.sql.pos_item_name(),
         });
         *self
             .shared
             .sql
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = self.runner.sql.describe();
-        let problem = report_cycle(&self.ctx, res, self.runner.config_stale_streak());
+            .unwrap_or_else(PoisonError::into_inner) = runner.sql.describe();
+        let problem = report_cycle(&self.ctx, res, runner.config_stale_streak());
         write_last_cycle(&self.ctx, res, now, problem.as_deref());
         self.shared.set_problem(problem);
     }

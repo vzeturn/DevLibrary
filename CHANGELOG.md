@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- dl-agent: the e-invoice module writes invoice numbers back on arrival (MMEI RT-0785): a new `einvoice-writeback` worker thread long-polls the hub (`POST /api/v1/agent/poll?wait=10`, honoured when the answer carries `X-MMEI-Long-Poll`) and applies each batch at once instead of once per collect cycle, so a number reaches SMILE about a second after issuing. The collector no longer polls write-back itself; its cycle log reports the worker's counts plus `select_ms`, `push_ms` and `writeback_ms`. A hub without long-poll support is polled once per interval, as before; `device_replaced` stops the worker and the module.
+
 ### Added
 
 - dl-agent: pda-sync bootstrap gains step `sequence_grants` (script 100): `pda_sync` gets `UPDATE` on the per-RVC counters `dbo.LastCheck<n>`/`dbo.LastTrn<n>` that the vendor proc `GetRVCSeqNumber` reads, and the grants probe reports a missing one (`UPDATE dbo.LastCheck4`). Without it order.check_open failed on a store whose counters are sequences (`permission was denied on the object LastCheck4`) while the probe said all OK (Muine Bay spa, RT-0654). Stores already enrolled pick it up through the service's grants self-repair.
