@@ -234,7 +234,7 @@ fn pending(sql: &Arc<Sql>, cfg: &Arc<AgentConfig>, source: &'static str) -> Chec
     Check::bounded(NAME, &id, &title, PROBE_TIMEOUT * 2, move || {
         let limit = cfg.batch_size.max(1);
         let timeout = PROBE_TIMEOUT.min(cfg.cycle_timeout.max(Duration::from_secs(1)));
-        match sql.select_pending(source, limit, cfg.collect_from, timeout) {
+        match sql.peek_pending(source, limit, cfg.collect_from, timeout) {
             Ok(keys) if keys.len() as i64 >= limit => Outcome::pass(format!(
                 "{limit}+ pending (one batch read, nothing collected)"
             )),

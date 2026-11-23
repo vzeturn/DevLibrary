@@ -8,9 +8,90 @@
 -- sparser: zero rows this period). The real check list with real money lives
 -- on dbo.Invoice, so the pending set is driven off dbo.Invoice directly and
 -- keyed by CheckNo (not BillSeri/BillNo, which are frequently NULL).
-CREATE OR ALTER PROCEDURE dbo.sp_SelectPendingPOS @Limit int = 50, @CollectFrom datetime = NULL AS
+--
+-- @Mode: same contract as sp_SelectPendingFO (RT-0784). 0 (default, old
+-- agents) = the original combined query; 1 = never sent; 2 = sent, dated
+-- >= @ChangedFrom and edited; 3 = sweep page below CheckNo @After returning
+-- ID, Changed. Modes 2/3 hash only a table variable of cheap-filtered candidates.
+CREATE OR ALTER PROCEDURE dbo.sp_SelectPendingPOS @Limit int = 50, @CollectFrom datetime = NULL,
+    @Mode tinyint = 0, @ChangedFrom datetime = NULL, @After varchar(64) = NULL AS
 BEGIN
     SET NOCOUNT ON;
+    IF @Mode = 1
+    BEGIN
+        SELECT TOP (@Limit) ID = CAST(i.CheckNo AS varchar(64))
+        FROM dbo.Invoice i
+        LEFT JOIN dbo.MMEI_Collected c
+            ON c.Source = 'POS'
+           AND c.ID = CAST(i.CheckNo AS varchar(64))
+           AND c.Ok = 1
+           AND c.SourceHash IS NOT NULL
+        WHERE i.InvStatus = 0
+          AND i.Status = 1
+          AND (i.Refund = 0 OR i.Refund IS NULL)
+          AND i.CheckNo IS NOT NULL
+          AND ISNULL(i.FolioNum, 0) = 0
+          AND (@CollectFrom IS NULL OR ISNULL(i.CloseTime, i.OpenTime) >= @CollectFrom)
+          AND c.ID IS NULL
+        ORDER BY i.CheckNo DESC;
+        RETURN;
+    END;
+
+    IF @Mode IN (2, 3)
+    BEGIN
+        DECLARE @cand TABLE (CheckNo numeric(38, 0) NOT NULL, SourceHash varbinary(32) NOT NULL);
+        DECLARE @AfterNo numeric(38, 0);
+        IF @Mode = 3 SET @AfterNo = CONVERT(numeric(38, 0), @After);
+
+        IF @Mode = 2
+            INSERT @cand (CheckNo, SourceHash)
+            SELECT i.CheckNo, c.SourceHash
+            FROM dbo.Invoice i
+            JOIN dbo.MMEI_Collected c
+                ON c.Source = 'POS'
+               AND c.ID = CAST(i.CheckNo AS varchar(64))
+               AND c.Ok = 1
+               AND c.SourceHash IS NOT NULL
+            WHERE i.InvStatus = 0
+              AND i.Status = 1
+              AND (i.Refund = 0 OR i.Refund IS NULL)
+              AND i.CheckNo IS NOT NULL
+              AND ISNULL(i.FolioNum, 0) = 0
+              AND (@CollectFrom IS NULL OR ISNULL(i.CloseTime, i.OpenTime) >= @CollectFrom)
+              AND (@ChangedFrom IS NULL OR ISNULL(i.CloseTime, i.OpenTime) >= @ChangedFrom);
+        ELSE
+            INSERT @cand (CheckNo, SourceHash)
+            SELECT TOP (@Limit) i.CheckNo, c.SourceHash
+            FROM dbo.Invoice i
+            JOIN dbo.MMEI_Collected c
+                ON c.Source = 'POS'
+               AND c.ID = CAST(i.CheckNo AS varchar(64))
+               AND c.Ok = 1
+               AND c.SourceHash IS NOT NULL
+            WHERE i.InvStatus = 0
+              AND i.Status = 1
+              AND (i.Refund = 0 OR i.Refund IS NULL)
+              AND i.CheckNo IS NOT NULL
+              AND ISNULL(i.FolioNum, 0) = 0
+              AND (@CollectFrom IS NULL OR ISNULL(i.CloseTime, i.OpenTime) >= @CollectFrom)
+              AND (@AfterNo IS NULL OR i.CheckNo < @AfterNo)
+            ORDER BY i.CheckNo DESC;
+
+        IF @Mode = 2
+            SELECT TOP (@Limit) ID = CAST(x.CheckNo AS varchar(64))
+            FROM @cand x
+            WHERE x.SourceHash <> dbo.MMEI_SourceHash('POS', CAST(x.CheckNo AS varchar(64)))
+            ORDER BY x.CheckNo DESC;
+        ELSE
+            SELECT ID = CAST(x.CheckNo AS varchar(64)),
+                   Changed = CAST(CASE WHEN x.SourceHash <> dbo.MMEI_SourceHash('POS', CAST(x.CheckNo AS varchar(64)))
+                                       THEN 1 ELSE 0 END AS bit)
+            FROM @cand x
+            ORDER BY x.CheckNo DESC;
+        RETURN;
+    END;
+
+    -- Mode 0 (old agents) below.
     -- Change-aware pending set: same contract as sp_SelectPendingFO. Select a
     -- check when it was never pushed OK, OR when its current source
     -- fingerprint differs from the one last pushed.

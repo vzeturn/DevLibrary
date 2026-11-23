@@ -171,7 +171,17 @@ impl Runner {
             self.cfg.collect_from,
             timeout,
         ) {
-            Ok(k) => k,
+            Ok(p) => {
+                if let Some(e) = p.edit_error {
+                    // Edit detection failed; the never-sent keys are still valid.
+                    log::error(
+                        "read: select pending collect failed",
+                        &[("source", V::S(source)), ("error", V::S(&e))],
+                    );
+                    failed.sql.push(e);
+                }
+                p.keys
+            }
             Err(e) => {
                 log::error(
                     "read: select pending collect failed",
