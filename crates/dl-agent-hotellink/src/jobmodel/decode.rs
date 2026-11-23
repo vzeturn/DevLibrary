@@ -199,6 +199,10 @@ impl PmsResult {
             })
             .unwrap_or_default(),
             synced_at: s(v, "syncedAt"),
+            audit_gaps: list(v, "auditGaps", |x| {
+                x.as_str().unwrap_or_default().to_owned()
+            })
+            .unwrap_or_default(),
         }
     }
 }

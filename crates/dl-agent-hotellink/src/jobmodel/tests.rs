@@ -355,3 +355,23 @@ fn cancel_policy_empty() {
     let p = policy_from_value(&dl_json::parse("{}").unwrap());
     assert_eq!(p, CancelPolicy::default());
 }
+
+/// RT-0702: `auditGaps` is omitted when empty and round-trips when set (Go `omitempty`).
+#[test]
+fn pms_result_audit_gaps_are_omitted_when_empty_and_round_trip() {
+    let mut r = PmsResult {
+        action: "save".into(),
+        completed: true,
+        synced_at: "2026-06-15T03:04:05Z".into(),
+        ..Default::default()
+    };
+    assert!(!r.to_json().contains("auditGaps"), "{}", r.to_json());
+    r.audit_gaps = vec!["FolioLog HL:Create folio 100001: \"x\" locked".into()];
+    let s = r.to_json();
+    assert!(
+        s.ends_with(r#","auditGaps":["FolioLog HL:Create folio 100001: \"x\" locked"]}"#),
+        "{s}"
+    );
+    let back = PmsResult::from_value(&dl_json::parse(&s).unwrap());
+    assert_eq!(back.audit_gaps, r.audit_gaps);
+}

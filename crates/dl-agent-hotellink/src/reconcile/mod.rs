@@ -4,6 +4,7 @@
 
 mod build;
 mod diff;
+mod history;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -76,6 +77,7 @@ fn manual_result(reason: String, synced_at: String) -> PmsResult {
         reason,
         folios: Vec::new(),
         synced_at,
+        ..PmsResult::default()
     }
 }
 
@@ -156,8 +158,19 @@ impl Reconciler {
         Ok(Vec::new())
     }
 
-    /// `Apply`.
+    /// `Apply`. FolioLog rows that could not be written are reported in
+    /// `PmsResult.audit_gaps` (RT-0702).
     pub fn apply(&self, job: &Job) -> Result<PmsResult> {
+        history::reset_gaps();
+        let res = self.apply_inner(job);
+        let gaps = history::take_gaps();
+        res.map(|mut r| {
+            r.audit_gaps = gaps;
+            r
+        })
+    }
+
+    fn apply_inner(&self, job: &Job) -> Result<PmsResult> {
         match job.action.as_str() {
             ACTION_SAVE => self.apply_save(job),
             ACTION_CANCEL => self.apply_cancel(job),
@@ -171,6 +184,7 @@ impl Reconciler {
                 ),
                 folios: Vec::new(),
                 synced_at: self.now_utc_rfc3339(),
+                ..PmsResult::default()
             }),
             ACTION_IGNORE => Ok(PmsResult {
                 action: "ignore".into(),
@@ -213,10 +227,11 @@ impl Reconciler {
                 ),
                 folios: folios_to_pms(&folios),
                 synced_at,
+                ..PmsResult::default()
             });
         }
         let mut snapshot = folios.clone();
-        self.repo.cancel_folios(&folios)?;
+        self.cancel_folios_logged(job, &folios, "HL cancel")?;
         for f in &mut snapshot {
             if f.cancel_num == 0.0 {
                 f.cancel_num = f.folio_num;
@@ -274,6 +289,20 @@ impl Reconciler {
                 );
                 return Ok(manual_result(reason, self.now_utc_rfc3339()));
             }
+            // RECOVERY: a booking the agent itself cancelled earlier (HL cancelled it, then
+            // reinstated it) is created again; FolioLog names the old folios (RT-0702).
+            let prev_cancelled = self
+                .repo
+                .agent_cancelled_folio_nums(&job.booker, &job.booking_id)?;
+            if !prev_cancelled.is_empty() {
+                log::info(
+                    "khôi phục booking do agent hủy trước đó",
+                    &[
+                        ("bookingId", V::S(&job.booking_id)),
+                        ("cancelledFolios", V::I(prev_cancelled.len() as i64)),
+                    ],
+                );
+            }
             let confirm_num = self.repo.get_new_confirm_num()?;
             self.log_merge_conflicts(job);
             self.create_rooms(
@@ -286,6 +315,7 @@ impl Reconciler {
                 sts.as_ref(),
                 None,
                 true,
+                &history::CreateLog::new(&prev_cancelled),
             )?;
         } else {
             if self.lock_by_room_skip(&existing, self.op_modify())? {

@@ -2,6 +2,7 @@
 //! repository and the reconciler cases.
 
 mod cancel;
+mod history;
 mod lookup;
 mod modify;
 mod policy;
@@ -66,8 +67,13 @@ pub(crate) struct State {
     pub stamped: Vec<f64>,
     /// `AppendFolioLog` calls (RT-0651).
     pub folio_logs: Vec<FolioLogCall>,
-    /// When set, `AppendFolioLog` fails with it (best-effort at the caller).
+    /// `AppendFolioLogAny` calls (cancel rows, RT-0702).
+    pub folio_logs_any: Vec<FolioLogCall>,
+    /// When set, `AppendFolioLog` and `AppendFolioLogAny` fail with it (best-effort at
+    /// the caller).
     pub folio_log_err: Option<String>,
+    /// `AgentCancelledFolioNums` returns these (RT-0702).
+    pub agent_cancelled: Vec<f64>,
     /// When set, `GetFolios` fails with it (RT-0651).
     pub get_folios_err: Option<String>,
     /// Replaces `folios` after an insert.
@@ -226,6 +232,28 @@ impl PmsRepo for FakeRepo {
             new: new.into(),
         });
         Ok(())
+    }
+    fn append_folio_log_any(
+        &self,
+        folio_num: f64,
+        field: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<()> {
+        let mut s = self.st();
+        if let Some(e) = &s.folio_log_err {
+            return Err(Error::other(e.clone()));
+        }
+        s.folio_logs_any.push(FolioLogCall {
+            folio_num,
+            field: field.into(),
+            old: old.into(),
+            new: new.into(),
+        });
+        Ok(())
+    }
+    fn agent_cancelled_folio_nums(&self, _booker: &str, _booking_id: &str) -> Result<Vec<f64>> {
+        Ok(self.st().agent_cancelled.clone())
     }
     fn get_global_param_int(&self, name: &str) -> Result<i64> {
         Ok(self.st().global_params.get(name).copied().unwrap_or(0))

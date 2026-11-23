@@ -19,6 +19,16 @@ use super::{AdditionalName, Folio, FolioRate, FullRepo, PmsRepo, SqlRepo, Val};
 use crate::reconcile::tests::day;
 
 const ENV: &str = "HL_AGENT_TEST_SQL";
+/// Optional scratch database name (default `SMILE_FO`); a shared test server must use its own
+/// `CT_<request>_FO` and drop it afterwards.
+const ENV_DB: &str = "HL_AGENT_TEST_SQL_DB";
+
+fn test_db_name() -> String {
+    std::env::var(ENV_DB)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "SMILE_FO".into())
+}
 const SCHEMA: &str = include_str!("../../tests/fixtures/smile-schema.sql");
 const TABLES: [&str; 9] = [
     "Folio",
@@ -50,8 +60,9 @@ fn smile_fo(master: &str) -> String {
         .find("database=master")
         .unwrap_or_else(|| panic!("{ENV} must contain database=master"));
     format!(
-        "{}database=SMILE_FO{}",
+        "{}database={}{}",
         &master[..at],
+        test_db_name(),
         &master[at + "database=master".len()..]
     )
 }
@@ -64,7 +75,10 @@ fn db() -> Option<Db> {
         .with_conn(|c| {
             exec(
                 c,
-                "IF DB_ID('SMILE_FO') IS NULL CREATE DATABASE SMILE_FO",
+                &format!(
+                    "IF DB_ID('{0}') IS NULL CREATE DATABASE [{0}]",
+                    test_db_name()
+                ),
                 &[],
             )
         })
@@ -533,6 +547,62 @@ fn has_user_cancelled_folio_distinguishes_origin() {
     );
 }
 
+/// RT-0702: the cancel stamp is the 3-character `HLC`, fits `varchar(3)` installs, is
+/// still told apart from a user's cancel, and the old 14-character stamp stays recognised.
+#[test]
+fn cancel_stamps_hlc_and_recognises_the_legacy_stamp() {
+    let Some(db) = db() else { return };
+    insert(&db.repo, &sample_folio(100010.0));
+    let folios = db.repo.get_folios("123456").expect("get");
+    db.repo.cancel_folios(&folios).expect("cancel");
+    assert_eq!(
+        last_change(&db.repo, 100010.0).0,
+        super::AGENT_CANCEL_CLERK_ID
+    );
+    assert_eq!(
+        super::AGENT_CANCEL_CLERK_ID,
+        "HLC",
+        "fits varchar(3) installs"
+    );
+    assert!(
+        !db.repo
+            .has_user_cancelled_folio("123456", "")
+            .expect("system cancel")
+    );
+    assert_eq!(
+        db.repo
+            .agent_cancelled_folio_nums("123456", "")
+            .expect("agent cancelled"),
+        vec![100010.0]
+    );
+    run(
+        &db.repo,
+        "UPDATE Folio SET LastChangeClerkID = 'HLAGENT-CANCEL' WHERE FolioNum = 100010",
+    );
+    assert!(
+        !db.repo
+            .has_user_cancelled_folio("123456", "")
+            .expect("legacy system cancel")
+    );
+    assert_eq!(
+        db.repo
+            .agent_cancelled_folio_nums("123456", "")
+            .expect("legacy agent cancelled"),
+        vec![100010.0]
+    );
+    run(
+        &db.repo,
+        "UPDATE Folio SET LastChangeClerkID = 'frontdesk1' WHERE FolioNum = 100010",
+    );
+    assert!(
+        db.repo
+            .agent_cancelled_folio_nums("123456", "")
+            .expect("user cancelled")
+            .is_empty(),
+        "a user's cancel is not a recovery candidate"
+    );
+}
+
 /// One `(clerk, LastChangeTime)` of the folio.
 fn last_change(repo: &SqlRepo, folio_num: f64) -> (String, dl_time::DateTime) {
     repo.with_conn(|c| {
@@ -607,6 +677,51 @@ fn modify_stamps_last_change_and_moves_additional_name_dates() {
     assert!(
         clerk == super::AGENT_CLERK_ID && at.year() >= 2026,
         "stamp_folio_change: clerk={clerk} time={at:?}"
+    );
+}
+
+/// RT-0702: `append_folio_log_any` also logs on a cancelled folio, `append_folio_log` does not.
+#[test]
+fn append_folio_log_any_reaches_a_cancelled_folio() {
+    let Some(db) = db() else { return };
+    run(
+        &db.repo,
+        "IF OBJECT_ID('FolioLog') IS NULL CREATE TABLE FolioLog (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    FolioID INT NOT NULL,
+    FolioNum DECIMAL(18,2) NOT NULL,
+    FolioSubNum DECIMAL(18,2) NOT NULL,
+    FieldName VARCHAR(50) NOT NULL,
+    OldValue NVARCHAR(1000) NULL,
+    NewValue NVARCHAR(1000) NULL,
+    ChangedClerk NVARCHAR(50) NULL,
+    ChangedTime DATETIME NOT NULL
+)",
+    );
+    run(&db.repo, "DELETE FROM FolioLog");
+    insert(&db.repo, &sample_folio(910003.0));
+    let folios = db.repo.get_folios("123456").expect("get");
+    db.repo.cancel_folios(&folios).expect("cancel");
+    db.repo
+        .append_folio_log(910003.0, "HL:Update", "a", "b")
+        .expect("live-only call is a no-op on a cancelled folio");
+    db.repo
+        .append_folio_log_any(910003.0, "HL:Cancel", "live", "cancelled: test")
+        .expect("any-state call");
+    let got = db.repo.with_conn(|c| {
+        let r = rows(
+            c,
+            "SELECT FieldName, ChangedClerk FROM FolioLog WHERE FolioNum = @p1",
+            &[Param::new("p1", 910003.0)],
+        )?;
+        r.iter()
+            .map(|row| Ok((row.get::<String>(0)?, row.get::<String>(1)?)))
+            .collect::<crate::error::Result<Vec<_>>>()
+    });
+    run(&db.repo, "DROP TABLE FolioLog");
+    assert_eq!(
+        got.expect("read"),
+        vec![("HL:Cancel".to_owned(), super::AGENT_CLERK_ID.to_owned())]
     );
 }
 

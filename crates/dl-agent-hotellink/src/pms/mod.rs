@@ -22,8 +22,28 @@ use crate::error::Result;
 use crate::jobmodel::{AvailRow, MappingRow};
 
 /// `LastChangeClerkID` the agent writes when it cancels a folio, so a later
-/// [`PmsRepo::has_user_cancelled_folio`] tells a user's cancel from its own.
-pub const AGENT_CANCEL_CLERK_ID: &str = "HLAGENT-CANCEL";
+/// [`PmsRepo::has_user_cancelled_folio`] tells a user's cancel from its own. Three
+/// characters like [`AGENT_CLERK_ID`]: `Folio.LastChangeClerkID` (and the
+/// `FolioLog.ChangedClerk` the trigger copies from it) is varchar(3) on some SMILE
+/// installs, where the old 14-character value either failed the cancel or was cut to
+/// `HLA`, so a system cancel looked like a user cancel and blocked recovery (RT-0702).
+pub const AGENT_CANCEL_CLERK_ID: &str = "HLC";
+
+/// The cancel clerk the agent wrote before RT-0702; still recognised as a system cancel.
+pub const LEGACY_AGENT_CANCEL_CLERK_ID: &str = "HLAGENT-CANCEL";
+
+/// `FolioLog.FieldName` values the agent writes for changes SMILE's `triggerFolioUpdate`
+/// cannot see (it fires only on Folio UPDATE and only for `FolioLogDef.LogIfChanged`
+/// columns). The `HL:` prefix keeps them apart from the column names the trigger logs.
+pub const FOLIO_LOG_CREATE: &str = "HL:Create";
+/// A booking re-created after the agent had cancelled it.
+pub const FOLIO_LOG_RECREATE: &str = "HL:Recreate";
+/// Summary of the Folio columns one modification changed.
+pub const FOLIO_LOG_UPDATE: &str = "HL:Update";
+/// A folio the agent cancelled.
+pub const FOLIO_LOG_CANCEL: &str = "HL:Cancel";
+/// Nightly rates replaced (the FolioRate table).
+pub const FOLIO_LOG_RATES: &str = "FolioRate";
 
 /// `LastChangeClerkID` the agent stamps on a folio it updates (Go `AgentClerkID`). Three
 /// characters: `Folio.LastChangeClerkID` is varchar(3) on some SMILE installs, and the
@@ -96,6 +116,13 @@ pub trait PmsRepo: Send + Sync {
     /// Appends one SMILE `FolioLog` row for a change the Folio trigger cannot see
     /// (FolioRate). Best-effort at the caller (RT-0651).
     fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()>;
+    /// Like [`PmsRepo::append_folio_log`] for a folio in any state, so a cancel can be
+    /// logged after the folio is cancelled (RT-0702).
+    fn append_folio_log_any(&self, folio_num: f64, field: &str, old: &str, new: &str)
+    -> Result<()>;
+    /// Folios of this booking that the agent itself cancelled earlier, used to log a
+    /// re-creation ("recovery": HL reinstated a booking the agent had cancelled).
+    fn agent_cancelled_folio_nums(&self, booker: &str, booking_id: &str) -> Result<Vec<f64>>;
     /// `GlobalParameter.ParaString` as an integer (0 when absent).
     fn get_global_param_int(&self, name: &str) -> Result<i64>;
     /// Inserts the global parameter unless it exists.

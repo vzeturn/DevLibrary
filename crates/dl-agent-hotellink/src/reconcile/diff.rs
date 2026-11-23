@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use dl_time::DateTime;
 
 use super::build::{rates_equal, room_rates};
+use super::history::{CreateLog, create_summary, update_summary};
 use super::{
     Reconciler, build_folio, item_key, manual_conflict_err, merge_rooms_by_item, next_seq,
     pick_to_cancel, room_item_key,
@@ -14,7 +15,9 @@ use crate::error::{Error, Result};
 use crate::gofmt::f0;
 use crate::jobmodel::{Job, Room};
 use crate::log::{self, V};
-use crate::pms::{ClientSts, Folio, FolioRate, SmileClient, Val, ymd};
+use crate::pms::{
+    ClientSts, FOLIO_LOG_RATES, FOLIO_LOG_UPDATE, Folio, FolioRate, SmileClient, Val, ymd,
+};
 
 fn protected_reason(f: &Folio) -> String {
     format!(
@@ -46,6 +49,7 @@ impl Reconciler {
         sts: Option<&ClientSts>,
         seq_start_by_item: Option<&HashMap<String, i64>>,
         guard_create: bool,
+        hist: &CreateLog,
     ) -> Result<()> {
         if guard_create {
             let live = self.find_existing_folios(job)?;
@@ -86,6 +90,12 @@ impl Reconciler {
                 )?;
                 f.user_info1 = format!("{key}#{}", seq_start + i);
                 self.repo.insert_folio_with_rates(&f, &rates, &an)?;
+                self.log_folio(
+                    folio_num,
+                    hist.field,
+                    &hist.old_val,
+                    &create_summary(job, &f, &rates),
+                );
                 log::info(
                     "đã tạo folio",
                     &[
@@ -224,6 +234,7 @@ impl Reconciler {
                     sts,
                     Some(&seq_start_by_item),
                     false,
+                    &CreateLog::added_by_modify(),
                 )?;
             }
         }
@@ -234,22 +245,24 @@ impl Reconciler {
                 if let Some(cancellable) = reduce_cancel_by_item.get(key)
                     && !cancellable.is_empty()
                 {
-                    self.repo.cancel_folios(cancellable).map_err(|e| {
-                        e.context(format!(
-                            "booking {}: hủy folio dư thất bại: ",
-                            job.booking_id
-                        ))
-                    })?;
+                    self.cancel_folios_logged(job, cancellable, "HL reduced the room count")
+                        .map_err(|e| {
+                            e.context(format!(
+                                "booking {}: hủy folio dư thất bại: ",
+                                job.booking_id
+                            ))
+                        })?;
                 }
             } else if let Some(cancellable) = cancel_by_item.get(key)
                 && !cancellable.is_empty()
             {
-                self.repo.cancel_folios(cancellable).map_err(|e| {
-                    e.context(format!(
-                        "booking {}: hủy folio item rời khỏi booking thất bại: ",
-                        job.booking_id
-                    ))
-                })?;
+                self.cancel_folios_logged(job, cancellable, "room item removed by HL")
+                    .map_err(|e| {
+                        e.context(format!(
+                            "booking {}: hủy folio item rời khỏi booking thất bại: ",
+                            job.booking_id
+                        ))
+                    })?;
                 log::info(
                     "hủy folio item rời khỏi booking",
                     &[
@@ -352,6 +365,16 @@ impl Reconciler {
         if !set.is_empty() {
             self.repo.update_folio_fields(f.folio_num, &set)?;
             let fields: Vec<&str> = set.keys().copied().collect();
+            let name_chg = ["LastName", "MailM", "ArrivalDate", "DepartureDate"]
+                .iter()
+                .any(|k| set.contains_key(k));
+            let (old_v, new_v) = update_summary(f, &set, name_chg);
+            self.log_folio(
+                f.folio_num,
+                FOLIO_LOG_UPDATE,
+                &old_v,
+                &format!("hl={}: {new_v}", job.booking_id),
+            );
             log::info(
                 "cập nhật folio (field đổi)",
                 &[
@@ -396,20 +419,12 @@ impl Reconciler {
             return Ok(false);
         }
         self.repo.replace_folio_rates(folio_num, &want)?;
-        if let Err(e) = self.repo.append_folio_log(
+        self.log_folio(
             folio_num,
-            "FolioRate",
+            FOLIO_LOG_RATES,
             &rates_summary(&cur),
             &rates_summary(&want),
-        ) {
-            log::warn(
-                "không ghi được FolioLog cho thay đổi giá đêm (giá đã cập nhật)",
-                &[
-                    ("folioNum", V::S(&f0(folio_num))),
-                    ("error", V::S(e.message())),
-                ],
-            );
-        }
+        );
         Ok(true)
     }
 }
