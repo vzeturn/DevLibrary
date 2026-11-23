@@ -122,11 +122,18 @@ runs it after the dl-agent enrolment, with the arguments from `DL_AGENT_SETUP_AR
   A dropped session fails that call and reconnects on the next. Enrolment keeps the Go
   agent's own fallback (TLS 1.0, then `encrypt=disable` for any host), so an old server the
   Go agent reached in clear is sealed `encrypt=disable` and stays on that one rung.
-- **Enrolled**: the collector (a cycle at once, then every interval) and the relay worker
-  run on their own threads; the module is `running` once both are up and `degraded` while
+- **Enrolled**: the collector (a cycle at once, then every interval), the write-back
+  worker and the relay worker run on their own threads; the module is `running` once they
+  are up and `degraded` while
   the last cycle failed to push, read SQL or write the outbox. Blocking calls cannot be
   interrupted, so a stop waits up to 5 s for the workers and leaves one that is still
   inside a call to finish on its own; a new start waits for it.
+- **Write-back on arrival** (MMEI RT-0785): the write-back worker long-polls the hub
+  (`POST /poll?wait=10`) and applies each batch as soon as it arrives, so an issued invoice
+  number reaches SMILE about a second after issuing. It shares the collector's runner and
+  locks it only to apply. Its counts are reported in the next cycle's log line (with
+  `select_ms`, `push_ms`, `writeback_ms`), heartbeat and problems. A hub that answers
+  without `X-MMEI-Long-Poll` (built before the change) is polled once per interval.
 - **Replaced device** (the platform gave the key to another machine): the workers stop,
   the module stays `degraded` and files `einvoice_device_replaced` (critical).
 - **State**: the outbox is `<data>/modules/einvoice/outbox.json`.

@@ -10,7 +10,7 @@ use crate::platform::{ApiError, Heartbeat, Platform};
 use crate::sql::{CollectKey, Sql, WritebackApply};
 
 /// Errors of one cycle, and whether the platform said this install was replaced.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Errors {
     /// Messages, in the order they happened.
     pub list: Vec<String>,
@@ -29,7 +29,7 @@ impl Errors {
 
 /// `CycleResult`, flattened, plus the failures sorted by kind for problem reports (the
 /// Go fields keep their meaning, so the heartbeat's `last_error` is unchanged).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CycleResult {
     /// Invoices read from SQL.
     pub read: i64,
@@ -65,6 +65,12 @@ pub struct CycleResult {
     pub push_failed: Option<String>,
     /// The write-back poll or ack failure.
     pub poll_failed: Option<String>,
+    /// Time spent reading SQL (select + build).
+    pub select_ms: i64,
+    /// Time spent pushing to the hub.
+    pub push_ms: i64,
+    /// Time spent polling and applying write-back commands.
+    pub writeback_ms: i64,
 }
 
 impl CycleResult {
@@ -78,6 +84,22 @@ impl CycleResult {
         [&self.read_errors, &self.push_errors, &self.writeback_errors]
             .into_iter()
             .find_map(|e| e.list.first().map(String::as_str))
+    }
+
+    /// Adds `w`'s write-back outcome (counts, errors, time) to this result.
+    fn absorb_writeback(&mut self, w: CycleResult) {
+        self.polled += w.polled;
+        self.applied += w.applied;
+        self.skipped += w.skipped;
+        self.acked += w.acked;
+        self.writeback_errors.list.extend(w.writeback_errors.list);
+        self.writeback_errors.replaced |= w.writeback_errors.replaced;
+        self.sql_errors.extend(w.sql_errors);
+        self.outbox_errors.extend(w.outbox_errors);
+        if w.poll_failed.is_some() {
+            self.poll_failed = w.poll_failed;
+        }
+        self.writeback_ms += w.writeback_ms;
     }
 }
 
@@ -134,6 +156,10 @@ pub struct Runner {
     /// Whether every collected database has the agent's write-back procedure (checked
     /// until it succeeds once per run).
     writeback_ensured: bool,
+    /// Write-back runs on its own worker thread (RT-0785): the cycle only reports it.
+    writeback_worker: bool,
+    /// What the write-back worker did since the last cycle.
+    writeback_pending: CycleResult,
 }
 
 const CONFIG_STALE_ESCALATE_AFTER: u32 = 5;
@@ -149,6 +175,8 @@ impl Runner {
             device_name: device_name(),
             config_stale_streak: 0,
             writeback_ensured: false,
+            writeback_worker: false,
+            writeback_pending: CycleResult::default(),
         }
     }
 
@@ -443,7 +471,17 @@ impl Runner {
                 return;
             }
         };
-        res.polled = cmds.len() as i64;
+        self.apply_commands(cmds, deadline, res);
+    }
+
+    /// Applies polled write-back commands to SQL Server and acks the applied ones.
+    fn apply_commands(
+        &mut self,
+        cmds: Vec<crate::platform::WritebackCommand>,
+        deadline: Instant,
+        res: &mut CycleResult,
+    ) {
+        res.polled += cmds.len() as i64;
         let mut to_ack = Vec::new();
         for cmd in cmds {
             let id = cmd.id.to_string();
@@ -487,7 +525,7 @@ impl Runner {
         }
         if !to_ack.is_empty() {
             match self.cli.ack(&to_ack, deadline) {
-                Ok(()) => res.acked = to_ack.len() as i64,
+                Ok(()) => res.acked += to_ack.len() as i64,
                 Err(e) => {
                     if e != ApiError::DeviceReplaced {
                         res.poll_failed = Some(e.to_string());
@@ -502,10 +540,55 @@ impl Runner {
     pub fn run_once(&mut self) -> CycleResult {
         let t = self.cfg.cycle_timeout;
         let mut res = CycleResult::default();
-        self.read_cycle(Instant::now() + t, &mut res);
-        self.push_cycle(Instant::now() + t, &mut res);
-        self.writeback_cycle(Instant::now() + t, &mut res);
+        let started = Instant::now();
+        self.read_cycle(started + t, &mut res);
+        res.select_ms = ms_since(started);
+        let started = Instant::now();
+        self.push_cycle(started + t, &mut res);
+        res.push_ms = ms_since(started);
+        if self.writeback_worker {
+            res.absorb_writeback(std::mem::take(&mut self.writeback_pending));
+        } else {
+            let started = Instant::now();
+            self.writeback_cycle(started + t, &mut res);
+            res.writeback_ms = ms_since(started);
+        }
         res
+    }
+
+    /// Hands write-back to a dedicated worker (RT-0785): from now on the cycle reports
+    /// what the worker did instead of polling itself.
+    pub fn hand_writeback_to_worker(&mut self) {
+        self.writeback_worker = true;
+    }
+
+    /// Applies commands the write-back worker polled, under the cycle timeout. The
+    /// outcome is returned and also kept for the next cycle's log, heartbeat and problems.
+    pub fn apply_polled_writeback(
+        &mut self,
+        cmds: Vec<crate::platform::WritebackCommand>,
+    ) -> CycleResult {
+        let started = Instant::now();
+        let mut res = CycleResult::default();
+        self.apply_commands(cmds, started + self.cfg.cycle_timeout, &mut res);
+        res.writeback_ms = ms_since(started);
+        self.writeback_pending.absorb_writeback(res.clone());
+        res
+    }
+
+    /// What the write-back worker did since the last cycle (tests).
+    #[cfg(test)]
+    pub fn take_writeback_pending(&mut self) -> CycleResult {
+        std::mem::take(&mut self.writeback_pending)
+    }
+
+    /// Records a failed write-back poll of the worker for the next cycle's report.
+    pub fn note_writeback_poll_error(&mut self, e: ApiError) {
+        let w = &mut self.writeback_pending;
+        if e != ApiError::DeviceReplaced {
+            w.poll_failed = Some(e.to_string());
+        }
+        w.writeback_errors.api(e);
     }
 
     /// `refreshHubConfig`.
@@ -623,6 +706,9 @@ impl Runner {
                 ("polled", V::I(res.polled)),
                 ("applied", V::I(res.applied)),
                 ("acked", V::I(res.acked)),
+                ("select_ms", V::I(res.select_ms)),
+                ("push_ms", V::I(res.push_ms)),
+                ("writeback_ms", V::I(res.writeback_ms)),
             ],
         );
         self.send_heartbeat(&res);
@@ -634,6 +720,10 @@ impl Runner {
         }
         res
     }
+}
+
+fn ms_since(t: Instant) -> i64 {
+    i64::try_from(t.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
 /// The `agent_version` the platform sees: the host binary, not this crate.

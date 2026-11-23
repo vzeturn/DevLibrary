@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- dl-agent: the e-invoice module writes invoice numbers back on arrival (MMEI RT-0785): a new `einvoice-writeback` worker thread long-polls the hub (`POST /api/v1/agent/poll?wait=10`, honoured when the answer carries `X-MMEI-Long-Poll`) and applies each batch at once instead of once per collect cycle, so a number reaches SMILE about a second after issuing. The collector no longer polls write-back itself; its cycle log reports the worker's counts plus `select_ms`, `push_ms` and `writeback_ms`. A hub without long-poll support is polled once per interval, as before; `device_replaced` stops the worker and the module.
+
 ### Added
 
 - dl-agent: einvoice stops re-hashing every sent bill on every 30-second cycle (RT-0784, port of MM-EINVOICE). `sp_SelectPendingFO`/`POS` take an optional `@Mode` (default 0 = the original combined query, so a module without this change keeps working on the new SP); the module probes `sys.parameters` and, when the SP has it, selects never-sent bills every cycle without hashing (mode 1), re-hashes bills dated in the last 48 h every 2 minutes (mode 2) and pages through every sent bill once a Vietnam night from 02:00, 500 per cycle (mode 3). A site whose SP predates the change keeps the single legacy call until it re-enrols. An edit-detection failure keeps the never-sent keys and counts as a SQL failure of the cycle; the self-test reads with `peek_pending` and leaves the schedule alone.

@@ -16,6 +16,8 @@ use crate::relay::wire::{MAX_REQUEST_BODY, Poll, RelayRequest, RelayResult};
 use crate::sql::TrnTypeInfo;
 
 const AGENT_API_PREFIX: &str = "/api/v1/agent";
+/// Set by a hub that honoured `/poll?wait=` (MMEI RT-0785).
+pub const LONG_POLL_HEADER: &str = "X-MMEI-Long-Poll";
 const MAX_ATTEMPTS: u32 = 5;
 const BASE_DELAY: Duration = Duration::from_millis(200);
 const MAX_DELAY: Duration = Duration::from_secs(5);
@@ -224,6 +226,17 @@ impl Platform {
         body: Option<&str>,
         deadline: Instant,
     ) -> Result<Vec<u8>, ApiError> {
+        self.call_resp(method, path, body, deadline).map(|r| r.body)
+    }
+
+    /// `call` returning the whole response (headers too).
+    fn call_resp(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&str>,
+        deadline: Instant,
+    ) -> Result<dl_http::Response, ApiError> {
         let m = if method == Method::Get { "GET" } else { "POST" };
         let mut last = ApiError::Deadline;
         for attempt in 1..=MAX_ATTEMPTS {
@@ -244,7 +257,7 @@ impl Platform {
                 Ok(resp) => {
                     let code = resp.status.as_u16();
                     if (200..300).contains(&code) {
-                        return Ok(resp.body);
+                        return Ok(resp);
                     }
                     let text = String::from_utf8_lossy(&resp.body).into_owned();
                     if !retryable(code) {
@@ -346,7 +359,25 @@ impl Platform {
     /// `POST /poll`.
     pub fn poll(&self, deadline: Instant) -> Result<Vec<WritebackCommand>, ApiError> {
         let resp = self.call(Method::Post, "/poll", None, deadline)?;
-        let v = Self::parse(&resp, "poll")?;
+        Self::parse_commands(&resp)
+    }
+
+    /// `POST /poll?wait=N` (MMEI RT-0785): the hub holds the request up to `wait` while
+    /// no command is pending. The flag is true when the hub honoured the wait (its answer
+    /// carries `X-MMEI-Long-Poll`); a hub built before it answers at once without it.
+    pub fn poll_wait(
+        &self,
+        wait: Duration,
+        deadline: Instant,
+    ) -> Result<(Vec<WritebackCommand>, bool), ApiError> {
+        let path = format!("/poll?wait={}", wait.as_secs());
+        let resp = self.call_resp(Method::Post, &path, None, deadline)?;
+        let long_poll = resp.headers.get(LONG_POLL_HEADER).is_some();
+        Ok((Self::parse_commands(&resp.body)?, long_poll))
+    }
+
+    fn parse_commands(resp: &[u8]) -> Result<Vec<WritebackCommand>, ApiError> {
+        let v = Self::parse(resp, "poll")?;
         let mut out = Vec::new();
         for c in v
             .get("commands")
