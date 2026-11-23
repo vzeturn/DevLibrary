@@ -100,7 +100,7 @@ end (exit 1) after the service is back with the products it had.
 ```json
 {"agent_id":"…","product":"dl-agent","version":"1.4.0","channel":"canary","target":"windows-x86_64",
  "hostname":"FO-SERVER","started_at":1763460000,"uptime_seconds":3600,
- "config_version":7,"update":{"state":"idle|probation|rolled_back","version":"1.4.0"},
+ "config_version":7,"update":{"state":"idle|probation|rolled_back","version":"1.4.0","detail":"why a held update waits"},
  "modules":[{"name":"pda-sync","state":"running|starting|degraded|stopped|disabled",
              "detail":"…","restarts":0,"last_error":"…","metrics":{"rows_out":120}}],
  "survey":{"host":{…},"databases":{"SMILE_FO":{…}}}}

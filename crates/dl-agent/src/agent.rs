@@ -177,8 +177,9 @@ impl Agent {
         let current = opts.version.to_string();
         let update_status = match (&update.pending, update.failed_versions().last()) {
             (Some(p), _) => ("probation", p.version.to_string()),
-            (None, Some(f)) => ("rolled_back", f.to_string()),
-            (None, None) => ("idle", current),
+            // A version that failed and is running again was committed by hand or republished: not a rollback.
+            (None, Some(f)) if f.to_string() != current => ("rolled_back", f.to_string()),
+            (None, _) => ("idle", current),
         };
         Ok(Agent {
             hub: HubClient::new(transport, identity),
@@ -461,12 +462,19 @@ impl Agent {
             .iter()
             .map(|s| s.to_json())
             .collect();
+        // `deferred` is an internal state; the hub only knows idle|probation|rolled_back, so the reason travels as detail.
+        let update = match self.update_status.0 {
+            "deferred" => {
+                json!({"state": "idle", "version": self.opts.version.to_string(), "detail": self.update_status.1})
+            }
+            state => json!({"state": state, "version": self.update_status.1}),
+        };
         let mut body = json!({
             "agent_id": id.agent_id, "product": self.opts.product, "version": self.opts.version.to_string(),
             "channel": self.channel,
             "target": current_target(), "hostname": self.hostname, "started_at": self.started_at,
             "uptime_seconds": now.saturating_sub(self.started_at), "config_version": self.config.current.version,
-            "update": {"state": self.update_status.0, "version": self.update_status.1}, "modules": modules,
+            "update": update, "modules": modules,
         });
         if let Some(map) = body.as_object_mut() {
             for (k, v) in crate::optout::heartbeat_fields(&self.opts.data_dir) {

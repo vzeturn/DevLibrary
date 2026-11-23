@@ -515,6 +515,16 @@ fn update_window_holds_the_check_and_update_now_overrides_it() {
     assert_eq!(std::fs::read(&a.opts.exe).unwrap(), b"old");
     assert_eq!(a.update_status.0, "deferred");
     assert!(a.update_status.1.contains("22:00–05:00"));
+    // The hub knows no `deferred` state (RT-0818): the heartbeat says idle and carries the reason as detail.
+    let beat = a.heartbeat_body(1000);
+    assert_eq!(beat["update"]["state"], "idle");
+    assert_eq!(beat["update"]["version"], a.opts.version.to_string());
+    assert!(
+        beat["update"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("22:00–05:00")
+    );
     assert!(!urls(&hub).iter().any(|u| u.contains("/artifacts/")));
 
     hub.push(
@@ -567,6 +577,28 @@ fn corrupt_downloads_count_towards_the_cap_and_retry_update_clears_it() {
     assert!(a.update.failures.is_empty());
     assert_eq!(a.update_status.0, "idle");
     a.supervisor.stop_all(STOP_WAIT);
+}
+
+#[test]
+fn a_failed_version_that_runs_again_boots_idle_not_rolled_back() {
+    let d = TestDir::new("agent-reboot-failed");
+    let hub = FakeHub::default();
+    let mut a = agent(&d, &hub, Vec::new());
+    let running = a.opts.version.clone();
+    let other: crate::Version = "0.0.1".parse().unwrap();
+    // A different failed version still reads as a rollback of that version.
+    a.update.record_failure(&other, 10);
+    a.update.save(&a.opts.data_dir).unwrap();
+    drop(a);
+    let a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.update_status, ("rolled_back", "0.0.1".to_string()));
+    // The failed version is the one running now: nothing to report.
+    let mut a = a;
+    a.update.record_failure(&running, 20);
+    a.update.save(&a.opts.data_dir).unwrap();
+    drop(a);
+    let a = agent(&d, &hub, Vec::new());
+    assert_eq!(a.update_status, ("idle", running.to_string()));
 }
 
 #[test]

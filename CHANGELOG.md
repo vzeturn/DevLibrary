@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- agent-hub accepts `update.state = "deferred"` (dl-agent <= 1.3.32 sent it while an update waited for its window and every heartbeat got a 400), and dl-agent now reports a deferred update as `idle` with the reason in `update.detail`; an agent that boots on a version it once rolled back reports `idle`, not `rolled_back` of itself, so the canary gate's `no_rollback` is not misread (RT-0818).
+
 ### Changed
 
 - dl-agent: the e-invoice module writes invoice numbers back on arrival (MMEI RT-0785): a new `einvoice-writeback` worker thread long-polls the hub (`POST /api/v1/agent/poll?wait=10`, honoured when the answer carries `X-MMEI-Long-Poll`) and applies each batch at once instead of once per collect cycle, so a number reaches SMILE about a second after issuing. The collector no longer polls write-back itself; its cycle log reports the worker's counts plus `select_ms`, `push_ms` and `writeback_ms`. A hub without long-poll support is polled once per interval, as before; `device_replaced` stops the worker and the module.
