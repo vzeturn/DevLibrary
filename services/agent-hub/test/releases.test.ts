@@ -105,6 +105,12 @@ describe('releases', () => {
     expect(await failing()).toEqual(['no_rollback']);
   });
 
+  it('heartbeat: a deferred update is accepted, never a 400 (RT-0818)', async () => {
+    const other = await enrollAgent(env, 'demo3', { demo: true });
+    const hb = heartbeatBody(other, '1.0.0', { update: { state: 'deferred', version: 'x'.repeat(200), detail: 'outside window' } });
+    expect((await signed(env, other, 'POST', '/v1/heartbeat', hb)).status).toBe(200);
+  });
+
   it('promote: 409 with failing checks while the gate fails', async () => {
     const res = await promote({});
     expect(res.status).toBe(409);
