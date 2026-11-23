@@ -12,10 +12,11 @@ pub mod collector;
 mod commands;
 pub mod selftest;
 pub mod settings;
+mod writeback;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -35,6 +36,7 @@ use crate::runner::Runner;
 use collector::{Collector, Effective, RELAY_BUSY, Shared, exclusive};
 use commands::Env;
 use settings::Settings;
+use writeback::WritebackWorker;
 
 /// The module name: config section, report module and command prefix.
 pub const NAME: &str = "einvoice";
@@ -229,6 +231,7 @@ fn run_enrolled(
     })?;
     let relay_hub = Platform::new(&cfg.platform_base_url, &cfg.api_key, cfg.device_id);
     let cli = Platform::new(&cfg.platform_base_url, &cfg.api_key, cfg.device_id);
+    let wb_hub = Platform::new(&cfg.platform_base_url, &cfg.api_key, cfg.device_id);
     let sql = settings.open_sql(ctx, &cfg).map_err(|e| {
         let mut m = Map::new();
         m.insert("config_dir", settings.config_dir.display().to_string());
@@ -242,14 +245,30 @@ fn run_enrolled(
         pos_item_name: sql.pos_item_name(),
     });
     *shared.sql.lock().unwrap_or_else(PoisonError::into_inner) = sql.describe();
-    let runner = Runner::new(sql, cli, outbox, cfg);
+    let mut runner = Runner::new(sql, cli, outbox, cfg);
+    runner.hand_writeback_to_worker();
+    let runner = Arc::new(Mutex::new(runner));
 
     let stop = StopSignal::new();
-    let collector = Collector::new(runner, interval, stop.clone(), shared.clone(), ctx.clone());
+    let collector = Collector::new(
+        runner.clone(),
+        interval,
+        stop.clone(),
+        shared.clone(),
+        ctx.clone(),
+    );
     let mut workers = vec![(
         "collector",
         spawn("einvoice-collector", move || collector.run())?,
     )];
+    let writeback = WritebackWorker::new(runner, wb_hub, interval, stop.clone(), shared.clone());
+    match spawn("einvoice-writeback", move || writeback.run()) {
+        Ok(h) => workers.push(("writeback", h)),
+        Err(e) => {
+            stop.stop();
+            return Err(e);
+        }
+    }
     let (rstop, rshared, rctx) = (stop.clone(), shared.clone(), ctx.clone());
     let relay = spawn("einvoice-relay", move || {
         let Some(_one) = exclusive(&RELAY_BUSY, &rstop) else {
@@ -268,7 +287,10 @@ fn run_enrolled(
             return Err(e);
         }
     }
-    let running = format!("collecting every {} s; relay on", interval.as_secs());
+    let running = format!(
+        "collecting every {} s; write-back on arrival; relay on",
+        interval.as_secs()
+    );
     ctx.set_running(&running);
     log::info("einvoice module started", &[("detail", V::S(&running))]);
 
