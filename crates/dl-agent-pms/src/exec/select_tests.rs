@@ -144,12 +144,13 @@ fn a_select_op_returns_rows() {
 #[test]
 fn the_embedded_manifest_still_loads() {
     let m = Manifest::load().unwrap();
-    // RT-0614: SMILE-PMS RT-0474 S9 declares the seven tables read by fo.availability.source.
+    // RT-0614 + RT-0776: the tables read by fo.availability.source, fo.reservation.listFigures and fo.departures.onDate.
     let mut tables: Vec<&str> = m.tables.iter().map(|t| t.name.as_str()).collect();
     tables.sort_unstable();
     assert_eq!(
         tables,
         [
+            "AdditionalName",
             "AllotmentContract",
             "AllotmentContractWeekday",
             "Folio",

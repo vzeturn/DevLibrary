@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- dl-agent-pms carries SMILE-PMS manifest ops `fo.reservation.listFigures@1` and `fo.departures.onDate@1` (select calls on `Folio` and `AdditionalName`), so agent tenants answer the reservations figures and the departures report (RT-0776).
+
 ### Security
 
 - agent-hub `/mcp` can require a Cloudflare Access service token on top of its Bearer (`MCP_ACCESS_REQUIRED`, `MCP_ACCESS_AUD`, fails closed): a leaked `MCP_TOKEN` alone no longer opens the ops console (ADR 0008, RT-0781). The installer and agent routes stay public.
