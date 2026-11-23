@@ -50,6 +50,42 @@
       ]
     },
     {
+      "name": "CashierDef",
+      "columns": [
+        "FullName",
+        "Initial",
+        "IsDisable",
+        "Security",
+        "Status",
+        "TouchID"
+      ]
+    },
+    {
+      "name": "CashierRVC",
+      "columns": [
+        "Cashier",
+        "RVC"
+      ]
+    },
+    {
+      "name": "ClerkPermission",
+      "columns": [
+        "ClerkID",
+        "FunctionID"
+      ]
+    },
+    {
+      "name": "DefRVCList",
+      "columns": [
+        "DeptCode",
+        "isBOShop",
+        "RVCName",
+        "RVCNo",
+        "RVCType",
+        "Status"
+      ]
+    },
+    {
       "name": "Folio",
       "columns": [
         "AllotmentContract",
@@ -1257,6 +1293,122 @@
       ]
     },
     {
+      "name": "pos.cashier.byInitial",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "CashierDef",
+            "columns": [
+              "Initial",
+              "FullName",
+              "Security",
+              "IsDisable",
+              "Status"
+            ],
+            "where": [
+              {
+                "column": "Initial",
+                "op": "=",
+                "param": {
+                  "name": "initial",
+                  "type": "varchar",
+                  "arg": "initial",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "CashierRVC",
+            "columns": [
+              "Cashier"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.cashier.login",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "CashierDef",
+            "columns": [
+              "Initial",
+              "FullName",
+              "Security",
+              "IsDisable",
+              "Status"
+            ],
+            "where": [
+              {
+                "column": "TouchID",
+                "op": "=",
+                "param": {
+                  "name": "pin",
+                  "type": "nvarchar",
+                  "arg": "pin",
+                  "size": 100
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "CashierRVC",
+            "columns": [
+              "Cashier"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
       "name": "pos.checkVersion.get",
       "contract_ver": 1,
       "kind": "read",
@@ -1265,6 +1417,68 @@
       "timeout_ms": 15000,
       "idempotent": true,
       "calls": []
+    },
+    {
+      "name": "pos.clerk.permissions",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 10000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ClerkPermission",
+            "columns": [
+              "FunctionID"
+            ],
+            "where": [
+              {
+                "column": "ClerkID",
+                "op": "=",
+                "param": {
+                  "name": "clerkId",
+                  "type": "varchar",
+                  "arg": "clerkId",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.outlets.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 10000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "DefRVCList",
+            "columns": [
+              "RVCNo",
+              "RVCName",
+              "Status",
+              "RVCType",
+              "DeptCode",
+              "isBOShop"
+            ],
+            "where": [],
+            "order_by": [
+              "RVCNo"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
     }
   ]
 }
