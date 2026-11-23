@@ -25,6 +25,10 @@ export interface Env {
   ACCESS_AUD?: string;
   /** Bearer token of the read-only ops MCP console at /mcp (secret, RT-0300); /mcp is locked without it. */
   MCP_TOKEN?: string;
+  /** Audience tag of the Access application in front of /mcp (its own app, service-token policy; RT-0781). */
+  MCP_ACCESS_AUD?: string;
+  /** "true" makes /mcp refuse any call without a valid Access token for MCP_ACCESS_AUD (fails closed when the config is missing). */
+  MCP_ACCESS_REQUIRED?: string;
 }
 
 export interface AgentRow {

@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { constantTimeEqual } from '../lib/crypto';
+import { accessConfig, verifyAccessJwt } from '../lib/accessJwt';
 import { logError } from '../lib/http';
+import { nowSeconds } from '../env';
 import { callTool, toolList, ToolError, type AdminGet } from '../services/mcpTools';
 
 /** Protocol revision answered when the client names none. */
@@ -25,6 +27,24 @@ const rpcResult = (id: unknown, result: unknown) => ({ jsonrpc: '2.0', id, resul
  */
 export function mcpRoutes(adminGetFor: (origin: string, env: AppEnv['Bindings']) => AdminGet): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
+
+  // RT-0781: with MCP_ACCESS_REQUIRED the Bearer alone is not enough; the call must also carry an Access
+  // token (service token of the hub) minted for the /mcp application. Fails closed when Access is not configured.
+  routes.use('*', async (c, next) => {
+    if (c.env.MCP_ACCESS_REQUIRED?.trim().toLowerCase() !== 'true') return next();
+    const cfg = accessConfig({ ACCESS_TEAM_DOMAIN: c.env.ACCESS_TEAM_DOMAIN, ACCESS_AUD: c.env.MCP_ACCESS_AUD });
+    if (!cfg) {
+      logError('mcp_access_not_configured', new Error('MCP_ACCESS_REQUIRED without ACCESS_TEAM_DOMAIN and MCP_ACCESS_AUD'));
+      return c.json({ error: 'access_required' }, 403);
+    }
+    try {
+      const who = await verifyAccessJwt(c.req.header('Cf-Access-Jwt-Assertion'), cfg, nowSeconds());
+      if (who) return next();
+    } catch (err) {
+      logError('mcp_access_verify_failed', err);
+    }
+    return c.json({ error: 'access_required' }, 403);
+  });
 
   routes.use('*', async (c, next) => {
     const expected = c.env.MCP_TOKEN;

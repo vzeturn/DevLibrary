@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { READ_TOOLS } from '../src/services/mcpTools';
+import { accessSigner } from './accessSigner';
+import { clearAccessKeyCache } from '../src/lib/accessJwt';
 import { admin, enrollAgent, heartbeatBody, setNow, signed, T0, testEnv, type TestEnv } from './helpers';
 
 const MCP = 'test-mcp-token';
@@ -236,5 +238,48 @@ describe('/mcp ops console', () => {
     });
     expect(got.survey).toEqual(survey);
     expect((await call('agent_survey', { agent_id: '../x' })).isError).toBe(true);
+  });
+});
+
+describe('/mcp behind Cloudflare Access (RT-0781)', () => {
+  const TEAM = 'team.cloudflareaccess.com';
+  const ping = (headers: Record<string, string>) =>
+    Promise.resolve(
+      app.request(
+        'https://hub.test/mcp',
+        { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${MCP}`, ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) },
+        env,
+      ),
+    );
+
+  beforeEach(() => {
+    clearAccessKeyCache();
+    env = testEnv({ MCP_TOKEN: MCP, MCP_ACCESS_REQUIRED: 'true', ACCESS_TEAM_DOMAIN: TEAM, MCP_ACCESS_AUD: 'mcp-aud' });
+  });
+
+  it('refuses a leaked Bearer on its own, a forged token and a token of another application', async () => {
+    const signer = await accessSigner();
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ keys: [signer.jwk] })));
+    expect((await ping({})).status).toBe(403);
+    expect((await ping({ 'Cf-Access-Jwt-Assertion': 'forged.jwt.token' })).status).toBe(403);
+    const other = await signer.sign({ aud: ['admin-aud'], iss: `https://${TEAM}`, exp: T0 + 300, common_name: 'x' });
+    expect((await ping({ 'Cf-Access-Jwt-Assertion': other })).status).toBe(403);
+  });
+
+  it('answers a call that carries both the Bearer and a service-token JWT for the /mcp application', async () => {
+    const signer = await accessSigner();
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ keys: [signer.jwk] })));
+    const jwt = await signer.sign({ aud: ['mcp-aud'], iss: `https://${TEAM}`, exp: T0 + 300, common_name: 'hub-client-id' });
+    expect((await ping({ 'Cf-Access-Jwt-Assertion': jwt })).status).toBe(200);
+    // Access alone is not enough either: the Bearer is still checked.
+    const res = await app.request('https://hub.test/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cf-Access-Jwt-Assertion': jwt }, body: '{}' }, env);
+    expect(res.status).toBe(401);
+  });
+
+  it('fails closed when Access is required but not configured, and changes nothing when it is off', async () => {
+    env = testEnv({ MCP_TOKEN: MCP, MCP_ACCESS_REQUIRED: 'true' });
+    expect((await ping({})).status).toBe(403);
+    env = testEnv({ MCP_TOKEN: MCP });
+    expect((await ping({})).status).toBe(200);
   });
 });

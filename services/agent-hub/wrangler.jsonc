@@ -27,6 +27,7 @@
     // Hub hosts handed to agents, primary first; the fallback serves /v1, /install and /healthz only.
     "HUB_URLS": "https://agent.pms.id.vn,https://agent-hub.vutq-sense.workers.dev"
   },
+  // /mcp behind Access (ADR 0008, RT-0781): set MCP_ACCESS_AUD and "MCP_ACCESS_REQUIRED": "true" in vars once its Access app exists; ACCESS_TEAM_DOMAIN is shared with /admin.
   // Secrets (never in git): `wrangler secret put ADMIN_TOKEN`; `BENCH_KEY` (base64 of 32 random bytes) enables /admin/bench; `MCP_TOKEN` opens the read-only ops console /mcp.
   "observability": { "enabled": true }
 }
