@@ -25,6 +25,13 @@ use crate::jobmodel::{AvailRow, MappingRow};
 /// [`PmsRepo::has_user_cancelled_folio`] tells a user's cancel from its own.
 pub const AGENT_CANCEL_CLERK_ID: &str = "HLAGENT-CANCEL";
 
+/// `LastChangeClerkID` the agent stamps on a folio it updates (Go `AgentClerkID`). Three
+/// characters: `Folio.LastChangeClerkID` is varchar(3) on some SMILE installs, and the
+/// trigger `triggerFolioUpdate` concatenates it into its FolioLog insert as
+/// `ChangedClerk`, so a NULL clerk writes no history row at all (RT-0651). It differs
+/// from [`AGENT_CANCEL_CLERK_ID`], so [`PmsRepo::has_user_cancelled_folio`] is unaffected.
+pub const AGENT_CLERK_ID: &str = "HLA";
+
 /// The columns `UpdateFolioFields` may set.
 pub const ALLOWED_UPDATE_COLS: &[&str] = &[
     "ArrivalDate",
@@ -66,14 +73,29 @@ pub trait PmsRepo: Send + Sync {
     ) -> Result<()>;
     /// Cancels the folios in one transaction.
     fn cancel_folios(&self, folios: &[Folio]) -> Result<()>;
-    /// Updates the given columns of a live folio.
+    /// Updates the given columns of a live folio, stamping `LastChangeTime` and
+    /// `LastChangeClerkID` ([`AGENT_CLERK_ID`]).
     fn update_folio_fields(&self, folio_num: f64, set: &BTreeMap<&'static str, Val>) -> Result<()>;
     /// The folio's nightly rates, by date.
     fn get_folio_rates(&self, folio_num: f64) -> Result<Vec<FolioRate>>;
     /// Replaces the folio's nightly rates in one transaction.
     fn replace_folio_rates(&self, folio_num: f64, rates: &[FolioRate]) -> Result<()>;
-    /// Updates the guest name and e-mail of the folio's additional name.
-    fn update_additional_name(&self, folio_num: f64, last_name: &str, email: &str) -> Result<()>;
+    /// Updates the guest name, e-mail and stay dates of the folio's additional name. The
+    /// dates are written explicitly: SMILE's Folio trigger only narrows them (RT-0651).
+    fn update_additional_name(
+        &self,
+        folio_num: f64,
+        last_name: &str,
+        email: &str,
+        arrival: DateTime,
+        departure: DateTime,
+    ) -> Result<()>;
+    /// Stamps `LastChangeTime`/`LastChangeClerkID` on a live folio when only a child row
+    /// (FolioRate, AdditionalName) changed and no Folio column did (RT-0651).
+    fn stamp_folio_change(&self, folio_num: f64) -> Result<()>;
+    /// Appends one SMILE `FolioLog` row for a change the Folio trigger cannot see
+    /// (FolioRate). Best-effort at the caller (RT-0651).
+    fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()>;
     /// `GlobalParameter.ParaString` as an integer (0 when absent).
     fn get_global_param_int(&self, name: &str) -> Result<i64>;
     /// Inserts the global parameter unless it exists.

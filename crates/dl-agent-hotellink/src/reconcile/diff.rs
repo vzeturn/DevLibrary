@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::gofmt::f0;
 use crate::jobmodel::{Job, Room};
 use crate::log::{self, V};
-use crate::pms::{ClientSts, Folio, SmileClient, Val};
+use crate::pms::{ClientSts, Folio, FolioRate, SmileClient, Val, ymd};
 
 fn protected_reason(f: &Folio) -> String {
     format!(
@@ -263,8 +263,8 @@ impl Reconciler {
         Ok(skip_message(&skipped))
     }
 
-    /// `updateFolioDiff`. `LastName`, `TelNumM` and `MailM` are not read back by the folio
-    /// query, so (as in Go) they compare against "" and are rewritten on every modify.
+    /// `updateFolioDiff`. The folio query reads `LastName`, `TelNumM` and `MailM`, so the
+    /// guest fields are only written when they changed (RT-0651).
     fn update_folio_diff(
         &self,
         job: &Job,
@@ -361,21 +361,64 @@ impl Reconciler {
                 ],
             );
         }
-        self.diff_rates(room, f.folio_num)?;
-        if set.contains_key("LastName") || set.contains_key("MailM") {
-            self.repo
-                .update_additional_name(f.folio_num, &job.guest_name, &job.guest_email)?;
+        let rates_changed = self.diff_rates(room, f.folio_num)?;
+        // AdditionalName: name, e-mail or dates changed. The dates are written explicitly
+        // because SMILE's Folio trigger only narrows them, never extends (RT-0651).
+        let name_changed = ["LastName", "MailM", "ArrivalDate", "DepartureDate"]
+            .iter()
+            .any(|k| set.contains_key(k));
+        if name_changed {
+            self.repo.update_additional_name(
+                f.folio_num,
+                &job.guest_name,
+                &job.guest_email,
+                check_in,
+                check_out,
+            )?;
+        }
+        // LAST CHANGE: update_folio_fields stamped it when a Folio column changed; when only
+        // a child row did, stamp it separately so the folio still records the change.
+        if set.is_empty() && (rates_changed || name_changed) {
+            self.repo.stamp_folio_change(f.folio_num)?;
         }
         Ok(())
     }
 
-    /// `diffRates`: replace the folio's rates only when a date or amount differs.
-    fn diff_rates(&self, room: &Room, folio_num: f64) -> Result<()> {
+    /// `diffRates`: replace the folio's rates only when a date or amount differs; true when
+    /// they were replaced. Nightly rates live outside the Folio table, so SMILE's FolioLog
+    /// trigger cannot see them: one "FolioRate" FolioLog row (old → new) records it. A
+    /// failed log write does not stop the booking sync (the rates are right; only one
+    /// history row is missing), it is logged as a warning.
+    fn diff_rates(&self, room: &Room, folio_num: f64) -> Result<bool> {
         let cur = self.repo.get_folio_rates(folio_num)?;
         let want = room_rates(room, folio_num)?;
         if rates_equal(&cur, &want) {
-            return Ok(());
+            return Ok(false);
         }
-        self.repo.replace_folio_rates(folio_num, &want)
+        self.repo.replace_folio_rates(folio_num, &want)?;
+        if let Err(e) = self.repo.append_folio_log(
+            folio_num,
+            "FolioRate",
+            &rates_summary(&cur),
+            &rates_summary(&want),
+        ) {
+            log::warn(
+                "không ghi được FolioLog cho thay đổi giá đêm (giá đã cập nhật)",
+                &[
+                    ("folioNum", V::S(&f0(folio_num))),
+                    ("error", V::S(e.message())),
+                ],
+            );
+        }
+        Ok(true)
     }
+}
+
+/// `ratesSummary`: "yyyy-mm-dd=amount;..." in date order, for FolioLog. The amount is the
+/// shortest decimal form, like Go's `strconv.FormatFloat(x, 'f', -1, 64)`.
+pub(super) fn rates_summary(rs: &[FolioRate]) -> String {
+    rs.iter()
+        .map(|x| format!("{}={}", ymd(x.h_date), x.rate_amount))
+        .collect::<Vec<_>>()
+        .join(";")
 }

@@ -11,7 +11,10 @@ use dl_time::{Date, DateTime};
 use super::entities::{Folio, Val, ymd};
 use super::insert::{build_insert, truncation_message};
 use super::rows::{AdditionalName, ClientContact, ClientSts, FolioRate, SmileClient};
-use super::{AGENT_CANCEL_CLERK_ID, ALLOWED_UPDATE_COLS, FullRepo, PmsRepo, compute_available};
+use super::{
+    AGENT_CANCEL_CLERK_ID, AGENT_CLERK_ID, ALLOWED_UPDATE_COLS, FullRepo, PmsRepo,
+    compute_available,
+};
 use crate::error::{Error, Result};
 use crate::gofmt::{f0, scan_int};
 use crate::jobmodel::{AvailRow, MappingRow};
@@ -41,6 +44,18 @@ pub(super) fn count(c: &mut Client, sql: &str, params: &[Param]) -> Result<i64> 
     match r.first() {
         Some(row) => Ok(row.get::<i64>(0)?),
         None => Err(Error::other("sql: no rows in result set")),
+    }
+}
+
+/// `FolioLog` column sizes (`FieldName varchar(50)`, `OldValue`/`NewValue nvarchar(1000)`).
+pub(super) const FOLIO_LOG_FIELD_MAX: usize = 50;
+pub(super) const FOLIO_LOG_VALUE_MAX: usize = 1000;
+
+/// `clipRunes`: at most `n` characters of `s` (avoids SQL Server's truncation error).
+pub(super) fn clip_chars(s: &str, n: usize) -> &str {
+    match s.char_indices().nth(n) {
+        Some((at, _)) => &s[..at],
+        None => s,
     }
 }
 
@@ -85,7 +100,8 @@ impl SqlRepo {
         let sql = format!(
             "SELECT Id, FolioNum, ConfirmNum, BookStatus, RoomCode, FolioStatus, Booker,
        UserInfo1, RoomTypeCode, ArrivalDate, DepartureDate,
-       NumAdult, NumChild, RateAmount, IncludeBF, BreakfastCode, NumGuestBF, NumChildBF
+       NumAdult, NumChild, RateAmount, IncludeBF, BreakfastCode, NumGuestBF, NumChildBF,
+       LastName, TelNumM, MailM
 FROM Folio
 WHERE {key_col} = @p1
   AND ISNULL(CancelNum, 0) = 0"
@@ -113,6 +129,11 @@ WHERE {key_col} = @p1
                         breakfast_code: opt_str(r, 15)?,
                         num_guest_bf: r.get(16)?,
                         num_child_bf: r.get(17)?,
+                        // The guest columns, so the modify diff compares for real
+                        // instead of rewriting them on every modify (RT-0651).
+                        last_name: opt_str(r, 18)?,
+                        tel_num_m: opt_str(r, 19)?,
+                        mail_m: opt_str(r, 20)?,
                         ..Folio::default()
                     })
                 })
@@ -348,14 +369,18 @@ WHERE (Booker IN ({ph})
                 )));
             }
         }
-        // BTreeMap iterates in sorted order, like Go's sort.Strings(cols).
-        let mut sql = String::from("UPDATE Folio SET LastChangeTime = GETDATE()");
-        let mut params = Vec::with_capacity(set.len() + 1);
+        // BTreeMap iterates in sorted order, like Go's sort.Strings(cols). The clerk is
+        // never NULL: triggerFolioUpdate concatenates it into its FolioLog insert, and a
+        // NULL turns the whole statement NULL so no history row is written (RT-0651).
+        let mut sql =
+            String::from("UPDATE Folio SET LastChangeTime = GETDATE(), LastChangeClerkID = @p1");
+        let mut params = Vec::with_capacity(set.len() + 2);
+        params.push(Param::new("p1", AGENT_CLERK_ID));
         for (i, (col, v)) in set.iter().enumerate() {
-            sql.push_str(&format!(", {col} = @p{}", i + 1));
-            params.push(v.param(&format!("p{}", i + 1)));
+            sql.push_str(&format!(", {col} = @p{}", i + 2));
+            params.push(v.param(&format!("p{}", i + 2)));
         }
-        let n = set.len() + 1;
+        let n = set.len() + 2;
         sql.push_str(&format!(
             " WHERE FolioNum = @p{n} AND ISNULL(CancelNum, 0) = 0"
         ));
@@ -404,20 +429,67 @@ WHERE (Booker IN ({ph})
         })
     }
 
-    fn update_additional_name(&self, folio_num: f64, last_name: &str, email: &str) -> Result<()> {
+    fn update_additional_name(
+        &self,
+        folio_num: f64,
+        last_name: &str,
+        email: &str,
+        arrival: DateTime,
+        departure: DateTime,
+    ) -> Result<()> {
+        // The dates are explicit: triggerFolioUpdate only narrows ArrivalTime/DepartureTime,
+        // so an extended stay kept the old departure (RT-0651).
         self.with_conn(|c| {
             exec(
                 c,
-                "UPDATE AdditionalName SET LastName = @p1, Email = @p2 WHERE FolioNum = @p3 AND ACancelNum = 0",
+                "UPDATE AdditionalName SET LastName = @p1, Email = @p2, ArrivalTime = @p3, DepartureTime = @p4 WHERE FolioNum = @p5 AND ACancelNum = 0",
                 &[
                     Param::new("p1", last_name),
                     Param::new("p2", email),
-                    Param::new("p3", folio_num),
+                    Val::Time(arrival).param("p3"),
+                    Val::Time(departure).param("p4"),
+                    Param::new("p5", folio_num),
                 ],
             )
         })
         .map(|_| ())
         .map_err(|e| e.context(format!("update additionalname {}: ", f0(folio_num))))
+    }
+
+    fn stamp_folio_change(&self, folio_num: f64) -> Result<()> {
+        self.with_conn(|c| {
+            exec(
+                c,
+                "UPDATE Folio SET LastChangeTime = GETDATE(), LastChangeClerkID = @p1 WHERE FolioNum = @p2 AND ISNULL(CancelNum, 0) = 0",
+                &[
+                    Param::new("p1", AGENT_CLERK_ID),
+                    Param::new("p2", folio_num),
+                ],
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.context(format!("stamp folio {}: ", f0(folio_num))))
+    }
+
+    fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()> {
+        // Same row shape as triggerFolioUpdate writes, for the live folio only.
+        self.with_conn(|c| {
+            exec(
+                c,
+                "INSERT INTO FolioLog (FolioID, FolioNum, FolioSubNum, FieldName, OldValue, NewValue, ChangedClerk, ChangedTime)
+SELECT Id, FolioNum, ISNULL(FolioSubNum, 0), @p1, @p2, @p3, @p4, GETDATE()
+FROM Folio WHERE FolioNum = @p5 AND ISNULL(CancelNum, 0) = 0",
+                &[
+                    Param::new("p1", clip_chars(field, FOLIO_LOG_FIELD_MAX)),
+                    Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
+                    Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
+                    Param::new("p4", AGENT_CLERK_ID),
+                    Param::new("p5", folio_num),
+                ],
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.context(format!("append FolioLog {} {field}: ", f0(folio_num))))
     }
 
     fn get_global_param_int(&self, name: &str) -> Result<i64> {
@@ -674,5 +746,19 @@ impl FullRepo for SqlRepo {
 
     fn delete_mapping(&self, orig: &MappingRow) -> Result<()> {
         self.delete_mapping_sql(orig)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clip_chars;
+
+    #[test]
+    fn clip_chars_counts_characters_not_bytes() {
+        assert_eq!(clip_chars("abc", 5), "abc");
+        assert_eq!(clip_chars("abc", 3), "abc");
+        assert_eq!(clip_chars("abcdef", 3), "abc");
+        assert_eq!(clip_chars("ĐặtPhòng", 4), "ĐặtP");
+        assert_eq!(clip_chars("", 0), "");
     }
 }
