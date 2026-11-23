@@ -498,6 +498,10 @@ mod tests {
                 "fo.inhouse.list@1",
                 "fo.reservation.list@1",
                 "fo.reservation.listFigures@1",
+                "pos.cashier.byInitial@1",
+                "pos.cashier.login@1",
+                "pos.clerk.permissions@1",
+                "pos.outlets.list@1",
             ]
         );
         // RT-0528: the clerk login is a keyless, non-idempotent write on vendor LogIn; its

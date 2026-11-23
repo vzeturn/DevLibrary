@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-pms embeds the SMILE-PMS manifest with four POS ops (`pos.cashier.byInitial@1`, `pos.cashier.login@1`, `pos.clerk.permissions@1`, `pos.outlets.list@1`), so POS PIN login works on agent tenants (RT-0907, SMILE-PMS RT-0810).
 - dl-agent `sql.inventory {ranges, by_year?}`: min/max/count (and per-year counts) of every date column of up to 20 named tables, so the date span of a site's data can be checked without exporting rows (PROTOCOL §9.8, RT-0878).
 - dl-agent `sql.inventory` paging: `section` (`tables`/`modules`), `limit` and `after` with a `next` cursor, and an answer over the 60,000-byte result limit now fails with `inventory_too_large` instead of arriving as cut JSON (PROTOCOL §9.8, RT-0813).
 - dl-agent `sql.inventory {database?, checksum?}`: per-table catalog row counts and column-layout hashes, per-module definition hashes, and optional data checksums, so a site database can be compared with its cloud copy without moving data (PROTOCOL §9.8, RT-0813).
