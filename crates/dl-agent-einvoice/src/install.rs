@@ -254,6 +254,60 @@ pub fn install(dsn: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolves the FO tokens and, for a 2008-level database, applies the legacy rewrite.
+fn prepare_script(c: &mut Client, name: &str, body: &str, legacy: bool) -> Result<String, String> {
+    let mut body = body.to_owned();
+    if body.contains(FO_STATIC_PRED) {
+        let rs = c
+            .query(PROBE_SQL, &[])
+            .map_err(|e| format!("agent: probe FO schema for hash templating: {e}"))?;
+        let r = rs
+            .rows()
+            .first()
+            .ok_or("agent: probe FO schema for hash templating: no row")?;
+        let g = |i: usize| {
+            r.get::<bool>(i)
+                .map_err(|e| format!("agent: probe FO schema for hash templating: {e}"))
+        };
+        let p = FoProbe {
+            has_trn_group: g(0)?,
+            has_folio_balance: g(1)?,
+            has_is_hk_post: g(2)?,
+            has_tax_rate: g(3)?,
+        };
+        body = substitute_fo_tokens(&body, p);
+    }
+    if legacy {
+        body = crate::legacy::legacy_sql(name, &body)?;
+    }
+    Ok(body)
+}
+
+/// RT-0784: the embedded script of the agent's own select procedure for `source`,
+/// when `sp` names it (bare or `dbo.`, any case). Any other name is DBA-owned.
+pub fn own_select_script(source: &str, sp: &str) -> Option<&'static str> {
+    let (own, script) = if source == "POS" {
+        ("sp_selectpendingpos", "sp_SelectPendingPOS.sql")
+    } else {
+        ("sp_selectpendingfo", "sp_SelectPendingFO.sql")
+    };
+    let lower = sp.to_ascii_lowercase();
+    (lower.strip_prefix("dbo.").unwrap_or(&lower) == own).then_some(script)
+}
+
+/// Installs one embedded script into the open connection's database, with the same
+/// token resolution and 2008 rewrite as [`install_into`]. Used to upgrade a select
+/// procedure installed before RT-0784 in place.
+pub fn install_script_into(c: &mut Client, name: &str) -> Result<(), String> {
+    let (_, body) = SCRIPTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .ok_or_else(|| format!("agent: no embedded script {name}"))?;
+    let legacy = crate::legacy::needs_legacy_sql(c)?;
+    let body = prepare_script(c, name, body, legacy)?;
+    run_script(c, name, &body)
+}
+
 /// `installCollectSQLInto`: installs every embedded script into the open connection's
 /// database, in deploy order. Idempotent. A database on SQL Server 2008, or at a
 /// compatibility level below 110, gets the 2008 rewrite ([`crate::legacy`]), applied
@@ -267,30 +321,7 @@ pub fn install_into(c: &mut Client) -> Result<(), String> {
         );
     }
     for (name, body) in SCRIPTS {
-        let mut body = (*body).to_owned();
-        if body.contains(FO_STATIC_PRED) {
-            let rs = c
-                .query(PROBE_SQL, &[])
-                .map_err(|e| format!("agent: probe FO schema for hash templating: {e}"))?;
-            let r = rs
-                .rows()
-                .first()
-                .ok_or("agent: probe FO schema for hash templating: no row")?;
-            let g = |i: usize| {
-                r.get::<bool>(i)
-                    .map_err(|e| format!("agent: probe FO schema for hash templating: {e}"))
-            };
-            let p = FoProbe {
-                has_trn_group: g(0)?,
-                has_folio_balance: g(1)?,
-                has_is_hk_post: g(2)?,
-                has_tax_rate: g(3)?,
-            };
-            body = substitute_fo_tokens(&body, p);
-        }
-        if legacy {
-            body = crate::legacy::legacy_sql(name, &body)?;
-        }
+        let body = prepare_script(c, name, body, legacy)?;
         run_script(c, name, &body)?;
     }
     // The write-back procedure updates the marker table the collect set just created,
@@ -320,6 +351,31 @@ pub fn install_writeback_into(c: &mut Client) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_select_script_matches_only_the_agents_names() {
+        assert_eq!(
+            own_select_script("FO", "sp_SelectPendingFO"),
+            Some("sp_SelectPendingFO.sql")
+        );
+        assert_eq!(
+            own_select_script("FO", "dbo.SP_SELECTPENDINGFO"),
+            Some("sp_SelectPendingFO.sql")
+        );
+        assert_eq!(
+            own_select_script("POS", "dbo.sp_SelectPendingPOS"),
+            Some("sp_SelectPendingPOS.sql")
+        );
+        assert_eq!(own_select_script("POS", "sp_SelectPendingFO"), None);
+        assert_eq!(own_select_script("FO", "dbo.sp_SelectPendingFO_Site"), None);
+        assert_eq!(own_select_script("FO", "sp_GetPendingInvoices"), None);
+        for script in ["sp_SelectPendingFO.sql", "sp_SelectPendingPOS.sql"] {
+            assert!(
+                SCRIPTS.iter().any(|(n, _)| *n == script),
+                "{script} embedded"
+            );
+        }
+    }
 
     #[test]
     fn scripts_list_matches_the_directory() {

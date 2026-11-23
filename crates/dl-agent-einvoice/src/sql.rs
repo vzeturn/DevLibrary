@@ -134,6 +134,50 @@ struct SelectQuerier<'a> {
     timeout: Duration,
 }
 
+impl SelectQuerier<'_> {
+    /// RT-0784: the collect SPs are installed at enrolment, so a site enrolled before
+    /// the pending split keeps the old two-parameter select SP, whose one query
+    /// re-hashes every sent bill each cycle. The agent's own procedure is upgraded in
+    /// place (only the select scripts changed; they need only the marker table and
+    /// hash function every install has). A DBA-owned name is never touched, and a
+    /// failed upgrade keeps the old call.
+    fn upgrade_select_sp(&self, source: &str, sp: &str) -> Result<bool, String> {
+        let attrs = [("procedure", V::S(sp)), ("source", V::S(source))];
+        let Some(script) = crate::install::own_select_script(source, sp) else {
+            crate::log::info(
+                "agent: select procedure has no @Mode and is not the agent's own; keeping the single old call",
+                &attrs,
+            );
+            return Ok(false);
+        };
+        crate::log::warn(
+            "agent: select procedure predates the pending split; upgrading it",
+            &attrs,
+        );
+        let installed = self
+            .sql
+            .conn(source)
+            .with(INSTALL_TIMEOUT, |c| {
+                Ok(crate::install::install_script_into(c, script))
+            })
+            .map_err(|e| err(&format!("agent: upgrade select sp ({source})"), e))
+            .and_then(|r| r);
+        if let Err(e) = installed {
+            crate::log::error(
+                "agent: select procedure upgrade failed; keeping the single old call until the next start",
+                &[
+                    ("procedure", V::S(sp)),
+                    ("source", V::S(source)),
+                    ("error", V::S(&e)),
+                ],
+            );
+            return Ok(false);
+        }
+        crate::log::info("agent: select procedure upgraded", &attrs);
+        Ok(true)
+    }
+}
+
 impl PendingQuerier for SelectQuerier<'_> {
     fn supports_split(&self, source: &str) -> Result<bool, String> {
         let sp = self.sql.select_sp(source);
@@ -154,7 +198,10 @@ impl PendingQuerier for SelectQuerier<'_> {
             .transpose()
             .map_err(|e| err("agent: scan select sp probe", e))?
             .unwrap_or(0);
-        Ok(n > 0)
+        if n > 0 {
+            return Ok(true);
+        }
+        self.upgrade_select_sp(source, sp)
     }
 
     fn query(&self, source: &str, call: &PendingCall) -> Result<Vec<PendingRow>, String> {

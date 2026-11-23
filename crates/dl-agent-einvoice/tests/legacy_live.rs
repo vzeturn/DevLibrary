@@ -254,18 +254,56 @@ fn pending_split(db: &mut Client, dsn: &str) {
         "night sweep finds the old POS edit"
     );
 
-    exec(
-        db,
-        "ALTER PROCEDURE dbo.sp_SelectPendingFO @Limit int = 50, @CollectFrom datetime = NULL AS
+    const OLD_BODY: &str = "@Limit int = 50, @CollectFrom datetime = NULL AS
          SELECT TOP (@Limit) ID = CAST(b.BillID AS varchar(64)) FROM dbo.BillInfor b
          LEFT JOIN dbo.MMEI_Collected c ON c.Source = 'FO' AND c.ID = CAST(b.BillID AS varchar(64)) AND c.Ok = 1 AND c.SourceHash IS NOT NULL
          WHERE b.Printed = 1 AND (@CollectFrom IS NULL OR b.InvDate >= @CollectFrom)
            AND (c.ID IS NULL OR c.SourceHash <> dbo.MMEI_SourceHash('FO', CAST(b.BillID AS varchar(64))))
-         ORDER BY b.BillID DESC",
+         ORDER BY b.BillID DESC";
+    let has_mode = |db: &mut Client, sp: &str| -> bool {
+        let rs = db
+            .query(
+                "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID(@sp) AND name = '@Mode'",
+                &[Param::new("sp", sp)],
+            )
+            .expect("probe @Mode");
+        rs.rows()[0].get::<i32>(0).expect("count") > 0
+    };
+
+    // A DBA-owned old select SP (its own name in the config) is never altered: the
+    // new agent keeps the old call, which still finds the old edit at 01:00.
+    exec(
+        db,
+        &format!("CREATE PROCEDURE dbo.sp_SelectPendingFO_Site {OLD_BODY}"),
+    );
+    let mut site = defaults.sp_names();
+    site.select_fo = "dbo.sp_SelectPendingFO_Site".to_owned();
+    let dba = Sql::new(dsn, "", site).with_pending_clock(Box::new(move || vn(1)));
+    assert_eq!(ids(&dba, "FO"), ["7"], "DBA-owned old SP: the legacy call");
+    assert!(
+        !has_mode(db, "dbo.sp_SelectPendingFO_Site"),
+        "DBA-owned SP left alone"
+    );
+
+    // The agent's own old SP (a site enrolled before RT-0784) is upgraded in place
+    // at compatibility level 100 and split from then on: at 01:00 the old edit waits
+    // for the sweep, at 03:00 the sweep finds it.
+    exec(
+        db,
+        &format!("ALTER PROCEDURE dbo.sp_SelectPendingFO {OLD_BODY}"),
+    );
+    assert!(!has_mode(db, "dbo.sp_SelectPendingFO"), "old SP fixture");
+    assert!(
+        ids(&at(1), "FO").is_empty(),
+        "upgraded SP: old edit waits for the sweep"
+    );
+    assert!(
+        has_mode(db, "dbo.sp_SelectPendingFO"),
+        "SP upgraded in place"
     );
     assert_eq!(
-        ids(&at(1), "FO"),
+        ids(&at(3), "FO"),
         ["7"],
-        "old SP: the legacy call still finds the edit"
+        "upgraded SP: the sweep finds the old edit"
     );
 }

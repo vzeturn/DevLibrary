@@ -6,7 +6,8 @@
 //! through every sent bill (key below `@After`) reporting which ones changed. The
 //! planner calls mode 1 every cycle, mode 2 every [`RECENT_SCAN_EVERY`] over the last
 //! [`RECENT_WINDOW`], and runs one full mode-3 sweep a night. An install whose SP has
-//! no `@Mode` (the SP is only installed at enrolment) keeps the single mode-0 call.
+//! no `@Mode` (the SP is installed at enrolment) gets the agent's own SP upgraded in
+//! place; a DBA-owned SP, or a failed upgrade, keeps the single mode-0 call.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, PoisonError};
