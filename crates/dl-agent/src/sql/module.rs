@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use dl_json::{Map, Value, json};
 
 use super::bundle::Bundle;
-use super::{Connector, Pools, SqlPools, install, inventory, probe, survey};
+use super::{Connector, Pools, SqlPools, install, inventory, inventory_ranges, probe, survey};
 use crate::Error;
 use crate::manifest::TrustedKeys;
 use crate::report::Severity;
@@ -296,6 +296,10 @@ impl<C: Connector> SqlModule<C> {
             Ok(p) => p,
             Err(e) => return (false, format!("sql: {e}")),
         };
+        let ranges = match inventory_ranges::Ranges::from_args(args) {
+            Ok(r) => r,
+            Err(e) => return (false, format!("sql: {e}")),
+        };
         let only = args.get("database").and_then(Value::as_str);
         let mut out = Map::new();
         let mut ok = true;
@@ -303,11 +307,12 @@ impl<C: Connector> SqlModule<C> {
             if only.is_some_and(|o| o != name) {
                 continue;
             }
-            let answer = match self
-                .pools
-                .get(&name)
-                .and_then(|p| p.with(|conn| inventory::inventory(conn, &checksum, &page)))
-            {
+            let answer = match self.pools.get(&name).and_then(|p| {
+                p.with(|conn| match &ranges {
+                    Some(r) => inventory_ranges::ranges(conn, r),
+                    None => inventory::inventory(conn, &checksum, &page),
+                })
+            }) {
                 Ok(v) => v,
                 Err(e) => {
                     ok = false;

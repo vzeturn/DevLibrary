@@ -523,7 +523,7 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
   `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6);
   `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7);
-  `sql.inventory {database?, checksum?, section?, after?, limit?}` → `{"<name>":inventory}` (§9.8). There is
+  `sql.inventory {database?, checksum?, section?, after?, limit?, ranges?, by_year?}` → `{"<name>":inventory}` (§9.8). There is
   deliberately no command that runs arbitrary SQL sent by the hub: a bundle must carry a
   release signature, and projects otherwise reach their databases through their own modules.
 
@@ -679,3 +679,11 @@ object names only, never a row.
   `section` (`"tables"` or `"modules"`) lists only that part; `limit` (1–1000) and `after`
   (a key) page it in key order, and `next` is the `after` for the following page while more
   remain. Only tables in the page are checksummed; `totals` always cover the whole database.
+- **`ranges`**: a list of 1–20 `schema.table` names replaces the inventory with the date span
+  of those tables: for every date-typed column (`date`, `datetime`, `datetime2`,
+  `smalldatetime`, `datetimeoffset`) its `min` and `max` (`yyyy-mm-dd`) and `count` of
+  non-null values; `by_year: true` adds `years` (`{"2026": n, …}`). Answer per database:
+  `{"ranges": {"dbo.Folio": {"ArrivalDate": {min, max, count, years?}}}, "ranges_missing": []}`
+  (tables not found or without a date column). Aggregates of date columns only, so the
+  span of a site's bookings can be checked without reading a guest row; a failed column
+  read only marks that column (`error` / `years_error`).

@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent `sql.inventory {ranges, by_year?}`: min/max/count (and per-year counts) of every date column of up to 20 named tables, so the date span of a site's data can be checked without exporting rows (PROTOCOL §9.8, RT-0878).
 - dl-agent `sql.inventory` paging: `section` (`tables`/`modules`), `limit` and `after` with a `next` cursor, and an answer over the 60,000-byte result limit now fails with `inventory_too_large` instead of arriving as cut JSON (PROTOCOL §9.8, RT-0813).
 - dl-agent `sql.inventory {database?, checksum?}`: per-table catalog row counts and column-layout hashes, per-module definition hashes, and optional data checksums, so a site database can be compared with its cloud copy without moving data (PROTOCOL §9.8, RT-0813).
 - dl-agent-pms carries SMILE-PMS manifest ops `fo.reservation.listFigures@1` and `fo.departures.onDate@1` (select calls on `Folio` and `AdditionalName`), so agent tenants answer the reservations figures and the departures report (RT-0776).

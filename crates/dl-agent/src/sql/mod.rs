@@ -18,6 +18,7 @@
 pub mod bundle;
 pub mod install;
 pub mod inventory;
+pub mod inventory_ranges;
 pub mod module;
 pub mod pool;
 pub mod probe;
