@@ -493,9 +493,11 @@ mod tests {
                 "fo.clerk.login@1",
                 "fo.clerk.rights.get@1",
                 "fo.departures.expected@1",
+                "fo.departures.onDate@1",
                 "fo.hotelDate.get@1",
                 "fo.inhouse.list@1",
                 "fo.reservation.list@1",
+                "fo.reservation.listFigures@1",
             ]
         );
         // RT-0528: the clerk login is a keyless, non-idempotent write on vendor LogIn; its
