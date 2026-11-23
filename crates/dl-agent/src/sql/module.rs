@@ -1,5 +1,5 @@
 //! The built-in `sql` module: watches every declared database and answers `sql.ping`,
-//! `sql.status`, `sql.survey`, `sql.probe` and `sql.install`.
+//! `sql.status`, `sql.survey`, `sql.probe`, `sql.install` and `sql.inventory`.
 //!
 //! It is added only when the site declares databases. A database that stops answering
 //! turns the module `degraded` (so the canary gate sees it) and files one `sql_unreachable`
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use dl_json::{Map, Value, json};
 
 use super::bundle::Bundle;
-use super::{Connector, Pools, SqlPools, install, probe, survey};
+use super::{Connector, Pools, SqlPools, install, inventory, probe, survey};
 use crate::Error;
 use crate::manifest::TrustedKeys;
 use crate::report::Severity;
@@ -285,6 +285,42 @@ impl<C: Connector> SqlModule<C> {
         (ok, dl_json::to_string(&Value::Object(out)))
     }
 
+    /// `sql.inventory {database?, checksum?}`: row counts, column-layout and definition
+    /// hashes per object, plus data checksums when asked (§9.8). No row leaves the server.
+    fn inventory_now(&self, args: &Value) -> (bool, String) {
+        let checksum = match inventory::Checksum::from_arg(args.get("checksum")) {
+            Ok(c) => c,
+            Err(e) => return (false, format!("sql: {e}")),
+        };
+        let only = args.get("database").and_then(Value::as_str);
+        let mut out = Map::new();
+        let mut ok = true;
+        for name in self.pools.names() {
+            if only.is_some_and(|o| o != name) {
+                continue;
+            }
+            let answer = match self
+                .pools
+                .get(&name)
+                .and_then(|p| p.with(|conn| inventory::inventory(conn, &checksum)))
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    ok = false;
+                    json!({"code": super::problem_code(&e, "sql_error"), "error": e.to_string()})
+                }
+            };
+            out.insert(name, answer);
+        }
+        if out.is_empty() {
+            return (
+                false,
+                format!("sql: no database {}", only.unwrap_or("declared")),
+            );
+        }
+        (ok, dl_json::to_string(&Value::Object(out)))
+    }
+
     fn ping(&self, args: &Value) -> (bool, String) {
         let only = args.get("database").and_then(Value::as_str);
         let mut out = Map::new();
@@ -319,6 +355,7 @@ impl<C: Connector> SqlModule<C> {
                 "sql.survey" => self.survey_now(ctx, &cmd.args),
                 "sql.probe" => self.probe_now(&cmd.args),
                 "sql.install" => self.install_now(ctx, &cmd.args),
+                "sql.inventory" => self.inventory_now(&cmd.args),
                 other => (false, format!("sql: unknown command {other}")),
             };
             ctx.complete(&cmd.id, ok, &output);

@@ -522,7 +522,8 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `timeouts`, `discarded`, `down_since`, `last_error`, `transport {rung, lock_timeout_ms}`);
   `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
   `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6);
-  `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7). There is
+  `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7);
+  `sql.inventory {database?, checksum?}` → `{"<name>":inventory}` (§9.8). There is
   deliberately no command that runs arbitrary SQL sent by the hub: a bundle must carry a
   release signature, and projects otherwise reach their databases through their own modules.
 
@@ -654,3 +655,22 @@ against its baked-in release keys, so neither the hub nor the network can push S
   "unreadable"?, "probe"?, "error"?}`.
 - Modules call `install::with_repair(conn, bundle, …, f)`: when `f` fails with
   `sql_missing_object`, the bundle is verified and installed and `f` runs once more.
+
+### 9.8 Database inventory
+
+`sql.inventory {database?, checksum?}` lets two copies of a database (a site and its cloud
+twin) be compared without moving data. Read-only, built from the catalog; counts, hashes and
+object names only, never a row.
+
+- **Tables**: `rows` (catalog count from `sys.partitions`, no scan), `columns`, and `layout`
+  (`CHECKSUM_AGG` over column name, type, length, precision, scale, nullability, order).
+- **Modules** (procedures, views, functions, triggers): `type` and `definition`
+  (`CHECKSUM(OBJECT_DEFINITION)`; `null` without `VIEW DEFINITION` or when encrypted).
+- **`checksum`**: `true` adds `checksum` (`CHECKSUM_AGG(BINARY_CHECKSUM(*))`, which ignores
+  `text`/`ntext`/`image` columns) and `exact_rows` (`COUNT_BIG(*)`) for every table up to
+  2,000,000 catalog rows (larger ones get `checksum_skipped: "too_large"`); a list of up to
+  500 `schema.table` names reads only those, and names not found come back in
+  `checksum_missing`. These read the table under the session's lock and query timeouts; a
+  failure only marks that table (`checksum_error`).
+- Answer per database: `{"totals": {tables, rows, modules}, "tables": {"dbo.x": {…}},
+  "modules": {"dbo.p": {…}}, "checksum_missing": []}`.
