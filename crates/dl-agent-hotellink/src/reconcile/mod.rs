@@ -136,7 +136,7 @@ impl Reconciler {
 
     /// `findExistingFolios`: by `ExternalConfirmNumber` (Booker, then BookingID), then by
     /// `Booker` for each distinct key.
-    fn find_existing_folios(&self, job: &Job) -> Result<Vec<Folio>> {
+    pub(crate) fn find_existing_folios(&self, job: &Job) -> Result<Vec<Folio>> {
         let folios = self.repo.get_folios(&job.booker)?;
         if !folios.is_empty() {
             return Ok(folios);

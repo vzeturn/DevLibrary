@@ -9,7 +9,8 @@ use super::{Runner, rfc3339_now};
 use crate::error::{Error, Kind, Result};
 use crate::gofmt::quote;
 use crate::jobmodel::{
-    Job, MAPPING_DELETE, MAPPING_INSERT, MAPPING_UPDATE, MappingCmd, PmsResult, mapping_hash,
+    ACTION_SAVE, Job, MAPPING_DELETE, MAPPING_INSERT, MAPPING_UPDATE, MappingCmd, PmsResult,
+    mapping_hash,
 };
 use crate::log::{self, V};
 
@@ -118,35 +119,36 @@ impl Runner {
         }
     }
 
-    /// `processJob`.
+    /// `pastModifyHasFolio`: the booking's arrival is before the hotel date but the PMS
+    /// still holds a live folio of it. That is a CHANGE of an existing booking (stay
+    /// extended, late arrival, new rate), not a back-dated create, so it is reconciled as
+    /// usual (the modify policy's check-in / room-assigned guards still apply in the
+    /// reconciler). Before RT-0651 every such change was skipped silently. A PMS read error
+    /// goes back to the caller: the job stays pending, neither skipped (would hide the
+    /// change) nor applied (a later empty read would book a back-dated folio).
+    fn past_modify_has_folio(&self, job: &Job) -> Result<bool> {
+        if job.action != ACTION_SAVE {
+            return Ok(false);
+        }
+        let folios = self.rec.find_existing_folios(job)?;
+        if folios.is_empty() {
+            return Ok(false);
+        }
+        log::info(
+            "past-arrival booking still has folios: reconciling the change",
+            &[
+                ("jobId", V::S(&job.job_id)),
+                ("folios", V::I(folios.len() as i64)),
+            ],
+        );
+        Ok(true)
+    }
+
+    /// `processJob`: applies one job when the breaker allows, then acks it. Breaker open
+    /// keeps the job pending in the queue (not applied, not dropped).
     pub(super) fn process_job(&self, job: &Job, hotel_date: Option<DateTime>) {
         self.stats
             .with_status(|s| s.last_job_at = rfc3339_now(&self.now));
-        if let Some(hd) = hotel_date
-            && !job.check_in.is_empty()
-            && let Ok(ci) = Date::parse_iso(&job.check_in)
-            && ci < hd.date()
-        {
-            let skip = PmsResult {
-                action: "skip".into(),
-                completed: false,
-                reason: "arrival < HotelDate (booking quá khứ)".into(),
-                folios: Vec::new(),
-                synced_at: rfc3339_now(&self.now),
-                ..PmsResult::default()
-            };
-            log::info(
-                "past booking skipped",
-                &[
-                    ("jobId", V::S(&job.job_id)),
-                    ("checkIn", V::S(&job.check_in)),
-                ],
-            );
-            self.mark_applied(&job.job_id, true, "", Some(&skip));
-            self.ack_job(&job.job_id, true, "", Some(&skip));
-            return;
-        }
-
         if !self.breaker.allow() {
             self.set_pms_ok(false);
             log::warn(
@@ -154,6 +156,48 @@ impl Runner {
                 &[("jobId", V::S(&job.job_id))],
             );
             return;
+        }
+
+        // Past booking: skipped, UNLESS the PMS still has a folio of it (RT-0651).
+        if let Some(hd) = hotel_date
+            && !job.check_in.is_empty()
+            && let Ok(ci) = Date::parse_iso(&job.check_in)
+            && ci < hd.date()
+        {
+            match self.past_modify_has_folio(job) {
+                Err(e) => {
+                    log::warn(
+                        "reading folios of a past-arrival booking failed: kept pending, retried later",
+                        &[("jobId", V::S(&job.job_id)), ("error", V::S(e.message()))],
+                    );
+                    if e.is_pms_down() {
+                        self.breaker.on_failure();
+                        self.set_pms_ok(false);
+                    }
+                    return; // no ack: the job stays pending locally and on the hub
+                }
+                Ok(false) => {
+                    let skip = PmsResult {
+                        action: "skip".into(),
+                        completed: false,
+                        reason: "arrival < HotelDate (booking quá khứ)".into(),
+                        folios: Vec::new(),
+                        synced_at: rfc3339_now(&self.now),
+                        ..PmsResult::default()
+                    };
+                    log::info(
+                        "past booking skipped",
+                        &[
+                            ("jobId", V::S(&job.job_id)),
+                            ("checkIn", V::S(&job.check_in)),
+                        ],
+                    );
+                    self.mark_applied(&job.job_id, true, "", Some(&skip));
+                    self.ack_job(&job.job_id, true, "", Some(&skip));
+                    return;
+                }
+                Ok(true) => {}
+            }
         }
 
         let res = self.rec.apply(job);

@@ -7,7 +7,9 @@ use std::time::Duration;
 use super::*;
 use crate::jobmodel::{ACTION_CANCEL, MAPPING_DELETE, MAPPING_INSERT, MAPPING_UPDATE};
 use crate::pms::Folio;
-use crate::reconcile::tests::{day, save_job};
+use std::collections::HashMap;
+
+use crate::reconcile::tests::{day, existing_folio, rn, save_job};
 
 fn one_ack(hub: &Hub, msg: &str) -> Ack {
     wait_until(|| hub.st().acks.len() == 1, msg);
@@ -204,6 +206,88 @@ fn skips_past_booking() {
     let a = one_ack(&hub, "one ack (skip)");
     assert!(a.ok && a.pms_action == "skip", "{a:?}");
     assert!(repo.st().inserted.is_empty(), "skip must not apply");
+}
+
+/// RT-0651 (`TestRunnerAppliesModifyOfPastArrivalWithLiveFolio`): a Hotel Link change of
+/// a booking whose arrival is already before the hotel date (stay extended, late arrival)
+/// still reaches its live folio. Before the fix every such job was skipped.
+#[test]
+fn applies_modify_of_past_arrival_with_live_folio() {
+    let hub = Hub::new();
+    let mut job = save_job(); // check-in 2026-06-12 < hotel date
+    job.check_out = "2026-06-16".into();
+    if let Some(rates) = job.rooms.as_mut().and_then(|r| r[0].rates.as_mut()) {
+        rates.push(rn("2026-06-14", 1600000.0));
+        rates.push(rn("2026-06-15", 1600000.0));
+    }
+    let booker = job.booker.clone();
+    hub.st().jobs = vec![job];
+    let repo = with_hotel_date(Some(day(2026, 6, 15)));
+    let mut f = existing_folio();
+    f.room_code = String::new(); // not assigned, not checked in → modify allowed
+    repo.st().folios_by_ext = Some(HashMap::from([(booker, vec![f])]));
+    let _run = start(runner(&hub.fake.url, &repo));
+    let a = one_ack(&hub, "one ack");
+    assert!(
+        a.ok && a.pms_action != "skip",
+        "a past-arrival modify with a live folio is reconciled, not skipped: {a:?}"
+    );
+    let s = repo.st();
+    assert!(
+        s.updates.len() == 1 && s.updates[0].1.contains_key("DepartureDate"),
+        "the live folio's DepartureDate is updated: {:?}",
+        s.updates
+    );
+    assert!(s.inserted.is_empty(), "no new folio");
+}
+
+/// `TestRunnerKeepsPastArrivalPendingOnReadError`: a PMS read error on a past-arrival job
+/// neither skips it (would hide the change) nor applies it (a later empty read would book
+/// a back-dated folio): no ack, the job stays pending.
+#[test]
+fn keeps_past_arrival_pending_on_read_error() {
+    let hub = Hub::new();
+    hub.st().jobs = vec![save_job()];
+    let repo = with_hotel_date(Some(day(2026, 6, 15)));
+    repo.st().get_folios_err = Some("sql: lock timeout".into());
+    let run = start(runner(&hub.fake.url, &repo));
+    wait_until(|| hub.st().poll_count >= 2, "polls past the job");
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(hub.st().acks.is_empty(), "no ack: {:?}", hub.st().acks);
+    assert!(repo.st().inserted.is_empty(), "no back-dated folio");
+    assert_eq!(run.r.queue.pending().len(), 1, "job stays pending");
+}
+
+/// A PMS-down read on a past-arrival job counts against the breaker, like a failed apply.
+#[test]
+fn past_arrival_read_pms_down_trips_breaker() {
+    let repo = with_hotel_date(Some(day(2026, 6, 15)));
+    repo.st().get_folios_err = Some("dial tcp 10.0.0.5:1433: connection refused".into());
+    let r = runner(&testhub_dead(), &repo);
+    let job = save_job();
+    r.queue.enqueue(&job).expect("enqueue");
+    for _ in 0..5 {
+        r.process_job(&job, Some(day(2026, 6, 15)));
+    }
+    assert_eq!(r.breaker.state(), "open", "PMS down opens the breaker");
+    assert!(r.stats.pms_bad.load(Ordering::SeqCst), "pmsOk false");
+    assert_eq!(r.queue.pending().len(), 1, "job stays pending");
+}
+
+/// A past-arrival job while the breaker is open is held, not skipped: the breaker is
+/// checked before the PMS is read (Go 3.5.12 order).
+#[test]
+fn past_arrival_held_when_breaker_open() {
+    let repo = with_hotel_date(Some(day(2026, 6, 15)));
+    let r = runner(&testhub_dead(), &repo);
+    for _ in 0..5 {
+        r.breaker.on_failure();
+    }
+    let job = save_job();
+    r.queue.enqueue(&job).expect("enqueue");
+    r.process_job(&job, Some(day(2026, 6, 15)));
+    assert!(r.queue.unacked().is_empty(), "not skipped");
+    assert_eq!(r.queue.pending().len(), 1, "held pending");
 }
 
 #[test]

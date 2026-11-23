@@ -29,6 +29,15 @@ pub(crate) struct Inserted {
     pub an: AdditionalName,
 }
 
+/// `folioLogCall`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FolioLogCall {
+    pub folio_num: f64,
+    pub field: String,
+    pub old: String,
+    pub new: String,
+}
+
 /// `fakeRepo`'s fields. Maps keyed by a folio number use `n as i64`.
 #[derive(Default)]
 pub(crate) struct State {
@@ -51,7 +60,16 @@ pub(crate) struct State {
     pub confirm_num_calls: usize,
     pub updates: Vec<(f64, BTreeMap<&'static str, Val>)>,
     pub replaced_rates: HashMap<i64, Vec<FolioRate>>,
-    pub updated_names: Vec<(f64, String, String)>,
+    /// `UpdateAdditionalName`: (folio, last name, e-mail, arrival, departure).
+    pub updated_names: Vec<(f64, String, String, DateTime, DateTime)>,
+    /// `StampFolioChange` calls (RT-0651).
+    pub stamped: Vec<f64>,
+    /// `AppendFolioLog` calls (RT-0651).
+    pub folio_logs: Vec<FolioLogCall>,
+    /// When set, `AppendFolioLog` fails with it (best-effort at the caller).
+    pub folio_log_err: Option<String>,
+    /// When set, `GetFolios` fails with it (RT-0651).
+    pub get_folios_err: Option<String>,
     /// Replaces `folios` after an insert.
     pub folios_after_insert: Option<Vec<Folio>>,
     /// `HasUserCancelledFolio` is true for these keys (Booker or BookingID).
@@ -92,6 +110,9 @@ impl FakeRepo {
 impl PmsRepo for FakeRepo {
     fn get_folios(&self, ext: &str) -> Result<Vec<Folio>> {
         let s = self.st();
+        if let Some(e) = &s.get_folios_err {
+            return Err(Error::other(e.clone()));
+        }
         Ok(match &s.folios_by_ext {
             Some(m) => m.get(ext).cloned().unwrap_or_default(),
             None => s.folios.clone(),
@@ -172,10 +193,38 @@ impl PmsRepo for FakeRepo {
             .insert(folio_num as i64, rates.to_vec());
         Ok(())
     }
-    fn update_additional_name(&self, folio_num: f64, last_name: &str, email: &str) -> Result<()> {
-        self.st()
-            .updated_names
-            .push((folio_num, last_name.into(), email.into()));
+    fn update_additional_name(
+        &self,
+        folio_num: f64,
+        last_name: &str,
+        email: &str,
+        arrival: DateTime,
+        departure: DateTime,
+    ) -> Result<()> {
+        self.st().updated_names.push((
+            folio_num,
+            last_name.into(),
+            email.into(),
+            arrival,
+            departure,
+        ));
+        Ok(())
+    }
+    fn stamp_folio_change(&self, folio_num: f64) -> Result<()> {
+        self.st().stamped.push(folio_num);
+        Ok(())
+    }
+    fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()> {
+        let mut s = self.st();
+        if let Some(e) = &s.folio_log_err {
+            return Err(Error::other(e.clone()));
+        }
+        s.folio_logs.push(FolioLogCall {
+            folio_num,
+            field: field.into(),
+            old: old.into(),
+            new: new.into(),
+        });
         Ok(())
     }
     fn get_global_param_int(&self, name: &str) -> Result<i64> {

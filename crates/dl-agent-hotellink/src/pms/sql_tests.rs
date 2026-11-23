@@ -532,3 +532,137 @@ fn has_user_cancelled_folio_distinguishes_origin() {
             .expect("user cancel")
     );
 }
+
+/// One `(clerk, LastChangeTime)` of the folio.
+fn last_change(repo: &SqlRepo, folio_num: f64) -> (String, dl_time::DateTime) {
+    repo.with_conn(|c| {
+        let r = rows(
+            c,
+            "SELECT LastChangeClerkID, LastChangeTime FROM Folio WHERE FolioNum = @p1",
+            &[Param::new("p1", folio_num)],
+        )?;
+        let row = r.first().expect("one row");
+        Ok((row.get::<String>(0)?, row.get::<dl_time::DateTime>(1)?))
+    })
+    .expect("last change")
+}
+
+/// RT-0651 (`TestModifyStampsLastChangeAndMovesAdditionalNameDates`): an update stamps
+/// `LastChangeClerkID` (never NULL: SMILE's FolioLog trigger needs it), the guest columns
+/// are read back for the diff, and the AdditionalName dates follow the new stay.
+#[test]
+fn modify_stamps_last_change_and_moves_additional_name_dates() {
+    let Some(db) = db() else { return };
+    let mut s = sample_folio(910001.0);
+    s.0.tel_num_m = "0901".into();
+    s.0.mail_m = "a@b.c".into();
+    insert(&db.repo, &s);
+    let f = &s.0;
+    let got = db.repo.get_folios("123456").expect("get_folios");
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (
+            got[0].last_name.as_str(),
+            got[0].tel_num_m.as_str(),
+            got[0].mail_m.as_str()
+        ),
+        ("NGUYEN VAN DUC", "0901", "a@b.c"),
+        "guest columns are read back"
+    );
+    let new_out = day(2026, 6, 16);
+    let mut set = BTreeMap::new();
+    set.insert("DepartureDate", Val::Time(new_out));
+    db.repo
+        .update_folio_fields(f.folio_num, &set)
+        .expect("update");
+    db.repo
+        .update_additional_name(
+            f.folio_num,
+            &f.last_name,
+            &f.mail_m,
+            f.arrival_date,
+            new_out,
+        )
+        .expect("update additional name");
+    assert_eq!(last_change(&db.repo, f.folio_num).0, super::AGENT_CLERK_ID);
+    let dep = db
+        .repo
+        .with_conn(|c| {
+            let r = rows(
+                c,
+                "SELECT DepartureTime FROM AdditionalName WHERE FolioNum = @p1",
+                &[Param::new("p1", f.folio_num)],
+            )?;
+            Ok(r.first().expect("one row").get::<dl_time::DateTime>(0)?)
+        })
+        .expect("departure");
+    assert_eq!(dep, new_out, "AdditionalName.DepartureTime");
+    // only a child row changed → stamped separately
+    run(
+        &db.repo,
+        "UPDATE Folio SET LastChangeClerkID = 'X', LastChangeTime = '2000-01-01' WHERE FolioNum = 910001",
+    );
+    db.repo.stamp_folio_change(f.folio_num).expect("stamp");
+    let (clerk, at) = last_change(&db.repo, f.folio_num);
+    assert!(
+        clerk == super::AGENT_CLERK_ID && at.year() >= 2026,
+        "stamp_folio_change: clerk={clerk} time={at:?}"
+    );
+}
+
+/// `AppendFolioLog` writes one row for the live folio, clipped to the column sizes. The
+/// fixture has no FolioLog table, so the test creates one shaped like SMILE's and drops it.
+#[test]
+fn append_folio_log_writes_one_clipped_row() {
+    let Some(db) = db() else { return };
+    run(
+        &db.repo,
+        "IF OBJECT_ID('FolioLog') IS NULL CREATE TABLE FolioLog (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    FolioID INT NOT NULL,
+    FolioNum DECIMAL(18,2) NOT NULL,
+    FolioSubNum DECIMAL(18,2) NOT NULL,
+    FieldName VARCHAR(50) NOT NULL,
+    OldValue NVARCHAR(1000) NULL,
+    NewValue NVARCHAR(1000) NULL,
+    ChangedClerk NVARCHAR(50) NULL,
+    ChangedTime DATETIME NOT NULL
+)",
+    );
+    run(&db.repo, "DELETE FROM FolioLog");
+    insert(&db.repo, &sample_folio(910002.0));
+    let long = "đ".repeat(1200);
+    let res = db
+        .repo
+        .append_folio_log(910002.0, "FolioRate", "2026-06-12=1500000", &long);
+    let got = res.and_then(|()| {
+        db.repo.with_conn(|c| {
+            let r = rows(
+                c,
+                "SELECT FieldName, OldValue, CAST(LEN(NewValue) AS BIGINT), ChangedClerk FROM FolioLog WHERE FolioNum = @p1",
+                &[Param::new("p1", 910002.0)],
+            )?;
+            r.iter()
+                .map(|row| {
+                    Ok((
+                        row.get::<String>(0)?,
+                        row.get::<String>(1)?,
+                        row.get::<i64>(2)?,
+                        row.get::<String>(3)?,
+                    ))
+                })
+                .collect::<crate::error::Result<Vec<_>>>()
+        })
+    });
+    run(&db.repo, "DROP TABLE FolioLog");
+    let got = got.expect("append + read FolioLog");
+    assert_eq!(
+        got,
+        vec![(
+            "FolioRate".to_owned(),
+            "2026-06-12=1500000".to_owned(),
+            1000,
+            super::AGENT_CLERK_ID.to_owned()
+        )]
+    );
+}

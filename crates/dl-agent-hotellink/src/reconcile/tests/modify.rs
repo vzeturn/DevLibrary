@@ -376,3 +376,163 @@ fn modify_empty_rates_returns_error() {
         "empty rates → error"
     );
 }
+
+/// `mustDay`.
+fn must_day(s: &str) -> DateTime {
+    parse_day(s).expect("day")
+}
+
+/// Nights 12 and 13 at the given amounts.
+fn cur_rates(folio_num: f64, a: f64, b: f64) -> Vec<FolioRate> {
+    let rate = |d: &str, amount| FolioRate {
+        folio_num,
+        h_date: must_day(d),
+        rate_amount: amount,
+        ..FolioRate::default()
+    };
+    vec![rate("2026-06-12", a), rate("2026-06-13", b)]
+}
+
+/// RT-0651 (`TestModifyDatesUpdateAdditionalNameDates`): changing the stay dates moves the
+/// AdditionalName dates too; SMILE's Folio trigger only narrows them.
+#[test]
+fn modify_dates_update_additional_name_dates() {
+    let repo = FakeRepo::new();
+    repo.st().folios = vec![unassigned()];
+    let mut job = save_job();
+    job.check_out = "2026-06-15".into();
+    rates0(&mut job).push(rn("2026-06-14", 1600000.0));
+    new_reconciler(&repo).apply(&job).expect("apply");
+    let s = repo.st();
+    assert_eq!(
+        s.updated_names.len(),
+        1,
+        "AdditionalName must follow a date change: {:?}",
+        s.updated_names
+    );
+    let n = &s.updated_names[0];
+    assert_eq!(
+        (n.3, n.4),
+        (must_day("2026-06-12"), must_day("2026-06-15")),
+        "AdditionalName dates: {n:?}"
+    );
+}
+
+/// RT-0651 (`TestModifyRatesOnlyStampsLastChange`): only a nightly rate changes, so no
+/// Folio column does, yet the folio gets its last-change stamp and one FolioLog row.
+#[test]
+fn modify_rates_only_stamps_last_change() {
+    let f = unassigned();
+    let repo = FakeRepo::new();
+    {
+        let mut s = repo.st();
+        s.folio_rates.insert(
+            f.folio_num as i64,
+            cur_rates(f.folio_num, 1500000.0, 1500000.0),
+        );
+        s.folios = vec![f.clone()];
+    }
+    // night 13 = 1,600,000 → rates differ, folio columns equal
+    new_reconciler(&repo).apply(&save_job()).expect("apply");
+    let s = repo.st();
+    assert!(
+        s.updates.is_empty(),
+        "no Folio column changed: {:?}",
+        s.updates
+    );
+    assert!(
+        s.replaced_rates.contains_key(&(f.folio_num as i64)),
+        "FolioRate replaced"
+    );
+    assert_eq!(s.stamped, vec![f.folio_num], "last change stamped");
+    assert_eq!(
+        s.folio_logs,
+        vec![FolioLogCall {
+            folio_num: f.folio_num,
+            field: "FolioRate".into(),
+            old: "2026-06-12=1500000;2026-06-13=1500000".into(),
+            new: "2026-06-12=1500000;2026-06-13=1600000".into(),
+        }]
+    );
+}
+
+/// `TestModifyNoChangeDoesNotStamp`: a re-sent notification touches nothing.
+#[test]
+fn modify_no_change_does_not_stamp() {
+    let f = unassigned();
+    let repo = FakeRepo::new();
+    {
+        let mut s = repo.st();
+        s.folio_rates.insert(
+            f.folio_num as i64,
+            cur_rates(f.folio_num, 1500000.0, 1600000.0),
+        );
+        s.folios = vec![f];
+    }
+    new_reconciler(&repo).apply(&save_job()).expect("apply");
+    let s = repo.st();
+    assert!(
+        s.updates.is_empty()
+            && s.stamped.is_empty()
+            && s.folio_logs.is_empty()
+            && s.updated_names.is_empty(),
+        "no change, no write: upd={:?} stamp={:?} log={:?} names={:?}",
+        s.updates,
+        s.stamped,
+        s.folio_logs,
+        s.updated_names
+    );
+}
+
+/// `TestModifyFolioLogFailureDoesNotFailJob`: the FolioLog row is best-effort.
+#[test]
+fn modify_folio_log_failure_does_not_fail_job() {
+    let f = unassigned();
+    let repo = FakeRepo::new();
+    {
+        let mut s = repo.st();
+        s.folios = vec![f.clone()];
+        s.folio_log_err = Some("FolioLog missing".into());
+    }
+    let res = new_reconciler(&repo).apply(&save_job()).expect("apply");
+    assert!(
+        res.completed,
+        "job succeeds although FolioLog failed: {res:?}"
+    );
+    let s = repo.st();
+    assert!(
+        s.replaced_rates.contains_key(&(f.folio_num as i64)),
+        "FolioRate still replaced"
+    );
+    assert!(s.folio_logs.is_empty());
+}
+
+/// A guest-field change updates the Folio columns (which stamp the clerk themselves), so
+/// no separate stamp is written.
+#[test]
+fn modify_guest_phone_updates_folio_without_extra_stamp() {
+    let repo = repo_with(vec![unassigned()]);
+    let mut job = save_job();
+    job.guest_phone = "0912".into();
+    new_reconciler(&repo).apply(&job).expect("apply");
+    let s = repo.st();
+    assert_eq!(s.updates.len(), 1);
+    let keys: Vec<&str> = s.updates[0].1.keys().copied().collect();
+    assert_eq!(keys, vec!["TelNumM"], "only the changed guest field");
+    assert!(s.stamped.is_empty(), "UpdateFolioFields already stamps");
+    assert!(s.updated_names.is_empty(), "phone is not on AdditionalName");
+}
+
+/// `ratesSummary` writes Go's shortest decimal form of each amount, in date order.
+#[test]
+fn rates_summary_matches_go_format() {
+    use crate::reconcile::diff::rates_summary;
+    assert_eq!(rates_summary(&[]), "");
+    let mut rs = cur_rates(1.0, 1500000.0, 1250000.5);
+    assert_eq!(
+        rates_summary(&rs),
+        "2026-06-12=1500000;2026-06-13=1250000.5"
+    );
+    rs[0].rate_amount = 0.0;
+    assert_eq!(rates_summary(&rs[..1]), "2026-06-12=0");
+}
