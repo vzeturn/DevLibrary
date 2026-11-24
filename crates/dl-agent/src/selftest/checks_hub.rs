@@ -143,9 +143,10 @@ pub(crate) fn hub(
         Box::new(HttpTransport::with_timeout(PROBE_TIMEOUT)),
         id,
     ));
-    let via_service = trigger == Trigger::Command || service == Some(Service::Running);
+    let in_service = matches!(trigger, Trigger::Command | Trigger::Update);
+    let via_service = in_service || service == Some(Service::Running);
     let (outcome, link) = if via_service {
-        let wait = if trigger == Trigger::Command {
+        let wait = if in_service {
             Duration::ZERO
         } else {
             BEAT_WAIT

@@ -9,7 +9,7 @@ use dl_json::{Value, json};
 
 use super::{
     CORE, Check, MODULE_TIMEOUT, Outcome, PROBE_TIMEOUT, Run, Status, Trigger, checks_core,
-    checks_hub, checks_state, legacy, run_id, runner,
+    checks_hub, checks_state, legacy, post_install, run_id, runner,
 };
 use crate::cli::App;
 use crate::command::MAX_OUTPUT;
@@ -132,16 +132,25 @@ pub fn upload(run: &Run, dir: &Path) -> Result<bool, Error> {
 
 /// Upload result in a few words, logged when it fails (a self-test still reports locally).
 pub fn upload_note(run: &Run, dir: &Path) -> String {
-    match upload(run, dir) {
-        Ok(true) => "uploaded".into(),
+    upload_outcome(run, &upload(run, dir)).1
+}
+
+/// `(reached the hub, note)` for an upload `result`: a hub too old to take the run counts as
+/// reached (nothing to retry), a missing enrolment or a failed call does not.
+pub(super) fn upload_outcome(run: &Run, result: &Result<bool, Error>) -> (bool, String) {
+    match result {
+        Ok(true) => (true, "uploaded".into()),
         Ok(false) => {
             dl_log::info!("selftest: the hub has no self-test endpoint yet"; run_id = %run.run_id);
-            "not uploaded: the hub has no self-test endpoint yet".into()
+            (
+                true,
+                "not uploaded: the hub has no self-test endpoint yet".into(),
+            )
         }
-        Err(Error::NotEnrolled) => "not uploaded: not enrolled".into(),
+        Err(Error::NotEnrolled) => (false, "not uploaded: not enrolled".into()),
         Err(e) => {
             dl_log::warn!("selftest: upload failed"; run_id = %run.run_id, error = %e);
-            format!("upload failed: {e}")
+            (false, format!("upload failed: {e}"))
         }
     }
 }
@@ -177,9 +186,18 @@ pub fn hook(app: &App, dir: &Path) -> SelfTestHook {
     let dir = dir.to_path_buf();
     SelfTestHook(Arc::new(move |args: &Value| {
         let only = args.get("module").and_then(Value::as_str);
-        let run = execute(&app, &dir, Trigger::Command, only, args);
+        // The agent itself asks for `update` after a start with a new version.
+        let post = args
+            .get("trigger")
+            .and_then(Value::as_str)
+            .and_then(Trigger::parse)
+            .filter(|t| post_install::is_post_install(*t));
+        let run = execute(&app, &dir, post.unwrap_or(Trigger::Command), only, args);
         save_last(&run, &dir);
-        let note = upload_note(&run, &dir);
+        let (reached, note) = upload_outcome(&run, &upload(&run, &dir));
+        if post.is_some() && reached {
+            post_install::mark_done(&dir, &run.agent_version);
+        }
         dl_log::info!("selftest finished"; run_id = %run.run_id, summary = %dl_json::to_string(&run.summary()), upload = %note);
         (!run.failed(), command_output(&run, &note))
     }))

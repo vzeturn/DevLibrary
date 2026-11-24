@@ -16,6 +16,7 @@ mod checks_state;
 pub mod cli;
 mod execute;
 mod legacy;
+pub mod post_install;
 mod runner;
 mod sanitize;
 #[cfg(test)]
@@ -233,6 +234,9 @@ pub enum Trigger {
     Command,
     /// The installer (`dl-agent selftest --trigger install`).
     Install,
+    /// The service, by itself, on the first start of a version it has not reported yet (a fresh
+    /// install or an upgrade, RT-1104).
+    Update,
 }
 
 impl Trigger {
@@ -242,6 +246,7 @@ impl Trigger {
             Trigger::Cli => "cli",
             Trigger::Command => "command",
             Trigger::Install => "install",
+            Trigger::Update => "update",
         }
     }
 
@@ -251,6 +256,7 @@ impl Trigger {
             "cli" => Some(Trigger::Cli),
             "command" => Some(Trigger::Command),
             "install" => Some(Trigger::Install),
+            "update" => Some(Trigger::Update),
             _ => None,
         }
     }
