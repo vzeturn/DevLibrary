@@ -217,10 +217,14 @@
       "columns": [
         "AmountBase",
         "AmountORG",
+        "Cashier",
         "CheckNo",
         "CrCode",
         "PaymentNo",
-        "PmtApp"
+        "PayTime",
+        "PmtApp",
+        "RVC",
+        "TrnNo"
       ]
     },
     {
@@ -228,8 +232,15 @@
       "columns": [
         "Interface",
         "IntFolio",
+        "isActive",
+        "PDesc",
         "PMode",
-        "PNo"
+        "PNo",
+        "POrder",
+        "PType",
+        "TrnCode",
+        "TrnSub",
+        "ZeroPayment"
       ]
     },
     {
@@ -273,6 +284,72 @@
       ]
     },
     {
+      "name": "TmpInvoice",
+      "columns": [
+        "CheckNo",
+        "Discount",
+        "FolioNum",
+        "LastChgTime",
+        "NChild",
+        "NGuest",
+        "OpenBy",
+        "OpenTime",
+        "PONumber",
+        "RoomCode",
+        "RVC",
+        "STaxTotal",
+        "SubTotal",
+        "SurCharge",
+        "TableNo",
+        "TaxTotal",
+        "TotalBase",
+        "TotalPaid"
+      ]
+    },
+    {
+      "name": "TmpPayment",
+      "columns": [
+        "AmountBase",
+        "Cashier",
+        "CheckNo",
+        "PaymentNo",
+        "PayTime",
+        "RVC",
+        "TrnNo"
+      ]
+    },
+    {
+      "name": "TmpTrn",
+      "columns": [
+        "BaseSrc",
+        "BaseSub",
+        "BaseTax",
+        "BaseTTL",
+        "Cashier",
+        "CheckNo",
+        "ClassCode",
+        "ItemCode",
+        "ItemPrice",
+        "OrderNo",
+        "Rsv2",
+        "RVC",
+        "TrnBase",
+        "TrnCode",
+        "TrnDesc",
+        "TrnQty",
+        "TrnSeq",
+        "TrnSub",
+        "TrnTime"
+      ]
+    },
+    {
+      "name": "TransactionCode",
+      "columns": [
+        "TrnCode",
+        "TrnType"
+      ]
+    },
+    {
       "name": "Trn",
       "columns": [
         "BaseSrc",
@@ -280,14 +357,17 @@
         "BaseSub",
         "BaseTax",
         "BaseTTL",
+        "Cashier",
         "CheckNo",
         "ClassCode",
         "ItemCode",
+        "RVC",
         "StsCode2",
         "TrnCode",
         "TrnDesc",
         "TrnSeq",
-        "TrnSub"
+        "TrnSub",
+        "TrnTime"
       ]
     },
     {
@@ -299,6 +379,20 @@
         "RVC",
         "TrnCode",
         "TrnSubCode"
+      ]
+    },
+    {
+      "name": "VoidTrn",
+      "columns": [
+        "BaseTTL",
+        "Cashier",
+        "CheckNo",
+        "RVC",
+        "StsCode3",
+        "TrnDesc",
+        "TrnQty",
+        "TrnSeq",
+        "TrnTime"
       ]
     }
   ],
@@ -1614,6 +1708,185 @@
       ]
     },
     {
+      "name": "pos.check.detail",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "TmpInvoice",
+            "columns": [
+              "CheckNo",
+              "RVC",
+              "TableNo",
+              "OpenBy",
+              "NGuest",
+              "NChild",
+              "SubTotal",
+              "Discount",
+              "SurCharge",
+              "TaxTotal",
+              "STaxTotal",
+              "TotalBase",
+              "TotalPaid",
+              "OpenTime",
+              "LastChgTime",
+              "RoomCode",
+              "FolioNum",
+              "PONumber"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": "=",
+                "param": {
+                  "name": "checkNo",
+                  "type": "bigint",
+                  "arg": "checkNo"
+                }
+              },
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TmpTrn",
+            "columns": [
+              "TrnSeq",
+              "CheckNo",
+              "TrnCode",
+              "ItemCode",
+              "TrnDesc",
+              "TrnQty",
+              "ItemPrice",
+              "BaseSub",
+              "BaseTax",
+              "BaseSrc",
+              "TrnBase",
+              "TrnSub",
+              "OrderNo",
+              "Cashier",
+              "ClassCode",
+              "Rsv2",
+              "TrnTime"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": "=",
+                "param": {
+                  "name": "checkNo",
+                  "type": "bigint",
+                  "arg": "checkNo"
+                }
+              },
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [
+              "OrderNo",
+              "TrnSeq"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TrnCode"
+            ],
+            "where": [
+              {
+                "column": "TrnType",
+                "op": "=",
+                "param": {
+                  "name": "itemType",
+                  "type": "int",
+                  "value": 0
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.check.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "TmpInvoice",
+            "columns": [
+              "CheckNo",
+              "RVC",
+              "TableNo",
+              "OpenBy",
+              "NGuest",
+              "NChild",
+              "SubTotal",
+              "Discount",
+              "SurCharge",
+              "TaxTotal",
+              "STaxTotal",
+              "TotalBase",
+              "TotalPaid",
+              "OpenTime",
+              "LastChgTime",
+              "RoomCode",
+              "FolioNum",
+              "PONumber"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
       "name": "pos.checkVersion.get",
       "contract_ver": 1,
       "kind": "read",
@@ -2123,6 +2396,379 @@
             "where": [],
             "order_by": [
               "RVCNo"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.shift.payments",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Payment",
+            "columns": [
+              "PaymentNo",
+              "TrnNo",
+              "CheckNo",
+              "PayTime",
+              "AmountBase"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "Cashier",
+                "op": "=",
+                "param": {
+                  "name": "cashier",
+                  "type": "nvarchar",
+                  "size": 30,
+                  "arg": "cashier"
+                }
+              },
+              {
+                "column": "PayTime",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "PayTime",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [
+              "PaymentNo"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TmpPayment",
+            "columns": [
+              "PaymentNo",
+              "TrnNo",
+              "CheckNo",
+              "PayTime",
+              "AmountBase"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "Cashier",
+                "op": "=",
+                "param": {
+                  "name": "cashier",
+                  "type": "nvarchar",
+                  "size": 30,
+                  "arg": "cashier"
+                }
+              },
+              {
+                "column": "PayTime",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "PayTime",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [
+              "PaymentNo"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Trn",
+            "columns": [
+              "CheckNo",
+              "TrnSeq",
+              "TrnCode",
+              "TrnSub",
+              "TrnTime",
+              "BaseTTL"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "Cashier",
+                "op": "=",
+                "param": {
+                  "name": "cashier",
+                  "type": "nvarchar",
+                  "size": 30,
+                  "arg": "cashier"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo",
+              "TrnSeq"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TmpTrn",
+            "columns": [
+              "CheckNo",
+              "TrnSeq",
+              "TrnCode",
+              "TrnSub",
+              "TrnTime",
+              "BaseTTL"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "Cashier",
+                "op": "=",
+                "param": {
+                  "name": "cashier",
+                  "type": "nvarchar",
+                  "size": 30,
+                  "arg": "cashier"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo",
+              "TrnSeq"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TrnCode"
+            ],
+            "where": [
+              {
+                "column": "TrnType",
+                "op": "=",
+                "param": {
+                  "name": "discountType",
+                  "type": "int",
+                  "value": 1
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "PaymentMode",
+            "columns": [
+              "PNo",
+              "PMode",
+              "TrnCode",
+              "TrnSub"
+            ],
+            "where": [],
+            "order_by": [
+              "PNo"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "VoidTrn",
+            "columns": [
+              "CheckNo",
+              "TrnSeq",
+              "TrnDesc",
+              "TrnQty",
+              "BaseTTL",
+              "TrnTime",
+              "Cashier",
+              "StsCode3"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "Cashier",
+                "op": "=",
+                "param": {
+                  "name": "cashier",
+                  "type": "nvarchar",
+                  "size": 30,
+                  "arg": "cashier"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": ">=",
+                "param": {
+                  "name": "voidStartDate",
+                  "type": "date",
+                  "arg": "voidStartDate"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo",
+              "TrnSeq"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.tender.modes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "PaymentMode",
+            "columns": [
+              "PNo",
+              "PMode",
+              "PDesc",
+              "PType",
+              "POrder",
+              "ZeroPayment",
+              "TrnCode",
+              "IntFolio"
+            ],
+            "where": [
+              {
+                "column": "isActive",
+                "op": "=",
+                "param": {
+                  "name": "active",
+                  "type": "int",
+                  "value": 1
+                }
+              }
+            ],
+            "order_by": [
+              "POrder",
+              "PNo"
             ],
             "max_rows": 10000
           }

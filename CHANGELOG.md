@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash e2eb5188...) with the POS bill read ops `pos.check.list@1`, `pos.check.detail@1` (open checks and bill detail from `TmpInvoice`/`TmpTrn`/`TransactionCode`), `pos.tender.modes@1` (`PaymentMode`) and `pos.shift.payments@1` (shift tenders and report from `Payment`/`TmpPayment`/`Trn`/`TmpTrn`/`VoidTrn`), table selects only (RT-1069).
 - dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash e2eb5188...) with `pos.menu.tree@1` (outlet menu tree from `ItemMenu`, POS on agent tenants) and `fo.pos.post@1` (`SMILE_Fo_PostPosBatch`, POS bill to FO folio); the FO site script for `fo.pos.post` still has to be installed on the site (SMILE-PMS RT-0810, RT-0889).
 - dl-agent `sql.aggregate` (fixed allow-list: `distinct`, `count_by`, `sign_sum`, `daily_total`; any other query refused), `sql.perf` (own-session DMV counters and blocked requests) and `sql.inventory {section: "indexes"}` (catalog only), so a site can be measured without free SQL (PROTOCOL §9.9, RT-1001).
 - dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash e8cedaf9...) with the POS outbox ops `pos.outbox.claim@1`, `pos.outbox.complete@1` and `pos.outbox.source@1` (RT-0914, RT-0889); the site script `smile_pos_outbox.sql` still has to be installed on the site.
