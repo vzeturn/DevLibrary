@@ -29,6 +29,10 @@ pub const RECENT_SCAN_EVERY: Duration = Duration::from_seconds(2 * 60);
 pub const RECENT_WINDOW: Duration = Duration::from_seconds(48 * 60 * 60);
 /// Sent bills per sweep page (one page per cycle).
 pub const SWEEP_PAGE_SIZE: i64 = 500;
+/// Smallest sweep page a failing page is shrunk to (RT-1071).
+pub const SWEEP_MIN_PAGE_SIZE: i64 = 25;
+/// How long a sweep that fails even at the smallest page waits before the next try.
+pub const SWEEP_RETRY_EVERY: Duration = Duration::from_seconds(10 * 60);
 /// Vietnam-time hour from which the nightly sweep may start; it runs once per
 /// Vietnam calendar day, one page per cycle.
 pub const SWEEP_START_HOUR: u8 = 2;
@@ -75,7 +79,6 @@ pub struct Selection {
     pub edit_error: Option<String>,
 }
 
-#[derive(Default)]
 struct SourceState {
     probed: bool,
     split: bool,
@@ -83,6 +86,25 @@ struct SourceState {
     sweep_done_day: Option<Date>,
     sweep_cursor: Option<String>,
     sweep_active: bool,
+    /// Current sweep page size: halved after a failed page so a slow page converges
+    /// instead of timing out on the same 500 bills every cycle (RT-1071).
+    sweep_page: i64,
+    sweep_retry_at: Option<OffsetDateTime>,
+}
+
+impl Default for SourceState {
+    fn default() -> Self {
+        SourceState {
+            probed: false,
+            split: false,
+            last_recent: None,
+            sweep_done_day: None,
+            sweep_cursor: None,
+            sweep_active: false,
+            sweep_page: SWEEP_PAGE_SIZE,
+            sweep_retry_at: None,
+        }
+    }
 }
 
 type Clock = Box<dyn Fn() -> OffsetDateTime + Send + Sync>;
@@ -188,16 +210,17 @@ impl PendingPlanner {
         if !st.sweep_active && st.sweep_done_day != Some(today) && now.hour() >= SWEEP_START_HOUR {
             st.sweep_active = true;
             st.sweep_cursor = None;
+            st.sweep_page = SWEEP_PAGE_SIZE;
+            st.sweep_retry_at = None;
         }
-        if st.sweep_active {
+        if st.sweep_active && st.sweep_retry_at.is_none_or(|t| now >= t) {
             let after = st.sweep_cursor.clone();
-            match q.query(
-                source,
-                &call(MODE_SWEEP, SWEEP_PAGE_SIZE, None, after.clone()),
-            ) {
+            let page = st.sweep_page;
+            match q.query(source, &call(MODE_SWEEP, page, None, after.clone())) {
                 Ok(rows) => {
+                    st.sweep_retry_at = None;
                     add(row_ids(&rows, true), &mut ids);
-                    if (rows.len() as i64) < SWEEP_PAGE_SIZE {
+                    if (rows.len() as i64) < page {
                         st.sweep_active = false;
                         st.sweep_cursor = None;
                         st.sweep_done_day = Some(today);
@@ -205,10 +228,17 @@ impl PendingPlanner {
                         st.sweep_cursor = rows.last().map(|r| r.id.clone());
                     }
                 }
-                Err(e) => errs.push(format!(
-                    "night sweep after {:?}: {e}",
-                    after.unwrap_or_default()
-                )),
+                Err(e) => {
+                    if page > SWEEP_MIN_PAGE_SIZE {
+                        st.sweep_page = (page / 2).max(SWEEP_MIN_PAGE_SIZE);
+                    } else {
+                        st.sweep_retry_at = Some(now + SWEEP_RETRY_EVERY);
+                    }
+                    errs.push(format!(
+                        "night sweep after {:?} (page {page}): {e}",
+                        after.unwrap_or_default()
+                    ));
+                }
             }
         }
         let edit_error = (!errs.is_empty()).then(|| {
@@ -467,5 +497,69 @@ mod tests {
 
         q.on(MODE_NEW, |_| Err("boom".into()));
         assert_eq!(p.select(&q, "FO", 50, None), Err("boom".to_owned()));
+    }
+
+    #[test]
+    fn failing_sweep_page_shrinks_then_backs_off() {
+        let q = Fake::split();
+        q.on(MODE_SWEEP, |c| {
+            if c.limit > 100 {
+                Err("timeout".into())
+            } else {
+                Ok((1..=40)
+                    .rev()
+                    .take(c.limit as usize)
+                    .map(|k| PendingRow {
+                        id: k.to_string(),
+                        changed: false,
+                    })
+                    .collect())
+            }
+        });
+        let (clk, p) = Clk::new(vn(23, 3, 0));
+        let mut limits = Vec::new();
+        for _ in 0..4 {
+            let _ = p.select(&q, "FO", 50, None).unwrap();
+            limits.extend(
+                q.take()
+                    .iter()
+                    .filter(|c| c.mode == MODE_SWEEP)
+                    .map(|c| c.limit),
+            );
+            clk.add(Duration::from_seconds(30));
+        }
+        assert_eq!(limits, [500, 250, 125, 62], "halved until a page fits");
+        clk.set(vn(24, 3, 0));
+        let _ = p.select(&q, "FO", 50, None).unwrap();
+        let next: Vec<i64> = q
+            .take()
+            .iter()
+            .filter(|c| c.mode == MODE_SWEEP)
+            .map(|c| c.limit)
+            .collect();
+        assert_eq!(next, [500], "a new night starts from the full page again");
+
+        // Even the smallest page failing waits SWEEP_RETRY_EVERY before the next try.
+        let q = Fake::split();
+        q.on(MODE_SWEEP, |_| Err("timeout".into()));
+        let (clk, p) = Clk::new(vn(23, 3, 0));
+        for _ in 0..8 {
+            let _ = p.select(&q, "FO", 50, None).unwrap();
+            clk.add(Duration::from_seconds(1));
+        }
+        let sizes: Vec<i64> = q
+            .take()
+            .iter()
+            .filter(|c| c.mode == MODE_SWEEP)
+            .map(|c| c.limit)
+            .collect();
+        assert_eq!(
+            sizes,
+            [500, 250, 125, 62, 31, 25],
+            "no further tries until the backoff"
+        );
+        clk.add(SWEEP_RETRY_EVERY);
+        let _ = p.select(&q, "FO", 50, None).unwrap();
+        assert_eq!(q.modes().iter().filter(|m| **m == MODE_SWEEP).count(), 1);
     }
 }
