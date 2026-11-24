@@ -20,6 +20,7 @@ pub mod cli_sql;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cli_uninstall;
 pub mod command;
+pub mod command_service;
 pub mod config;
 mod error;
 pub mod fault;

@@ -16,6 +16,7 @@ mod checks_state;
 pub mod cli;
 mod execute;
 mod legacy;
+pub mod post_install;
 mod runner;
 mod sanitize;
 #[cfg(test)]

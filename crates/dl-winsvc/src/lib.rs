@@ -14,6 +14,7 @@ mod sys;
 mod sys;
 
 pub mod acl;
+pub mod control;
 pub mod dpapi;
 pub mod process;
 pub mod scm;
