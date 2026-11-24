@@ -74,6 +74,11 @@ its fingerprint. It does nothing when an identity exists unless `--force` is giv
 - `running` after the first answered poll; `degraded` when the cloud cannot be reached for longer
   than one back-off, at once when the cloud refuses the key or the envelope (`clock skew` when the
   clocks differ), and while the PMS is down.
+- PMS queue (RT-0755): interactive requests (reception, guests) are always taken first;
+  cache-warming requests (`background: true`) hold at most `min(2, MaxConcurrency - 1)` PMS
+  slots. A request with `deadlineMs` that waited longer than that in the queue is answered
+  `Failed` ("Request expired before the agent started it.") without touching the PMS. Answers
+  carry `queueMs`; `elapsedMs` is queue wait plus PMS run.
 - Stop: in-flight requests get 5 s to finish, queued ones are left for the cloud to ask again, the
   journal is flushed.
 - Metrics: `requests_ok`, `requests_failed`, `requests_refused`, `in_flight`, `snapshots`,

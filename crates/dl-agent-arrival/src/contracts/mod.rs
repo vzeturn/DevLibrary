@@ -29,6 +29,9 @@ pub mod errors {
     pub const LOCK_TIMEOUT: i32 = 1222;
     /// Client-side command timeout.
     pub const COMMAND_TIMEOUT: i32 = -2;
+    /// `PmsErrors.ExpiredMessage`: the agent skipped a request whose deadline passed before it
+    /// started (the caller already gave up).
+    pub const EXPIRED_MESSAGE: &str = "Request expired before the agent started it.";
 
     /// `PmsErrors.Describe`.
     pub fn describe(n: i32) -> String {

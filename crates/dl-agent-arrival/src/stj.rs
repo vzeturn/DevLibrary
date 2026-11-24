@@ -228,6 +228,18 @@ pub fn opt_str(map: &Map, name: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// A boolean property: `None` for null or absent.
+///
+/// # Errors
+/// When the value is neither a boolean nor null.
+pub fn opt_bool(map: &Map, name: &str) -> Result<Option<bool>, String> {
+    match get_ci(map, name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(format!("'{name}' is not a boolean")),
+    }
+}
+
 /// An integer property (numbers may be quoted, like STJ's web defaults): `None` for null or absent.
 ///
 /// # Errors

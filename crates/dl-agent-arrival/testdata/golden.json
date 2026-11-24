@@ -112,8 +112,8 @@
       "message_id": "6f9619ff8b86d011b42d00c04fc964ff",
       "timestamp": 1795600000123,
       "nonce": "CQ4TGB0iJywxNjtA",
-      "plain": "{\"hello\":{\"agentVersion\":\"dl-agent-1.2.3\",\"catalogVersion\":4,\"machineName\":\"HOTEL-SRV\",\"pmsSchemaFingerprint\":\"0123456789abcdef.fedcba9876543210\",\"proceduresReport\":\"procedures: 2 PMS bundle batch(es) failed\",\"recentProblems\":null,\"installations\":null},\"responses\":[{\"requestId\":\"r-1\",\"status\":0,\"eTag\":\"etag-1\",\"resultSets\":[{\"index\":0,\"hash\":\"h0\",\"rows\":[{\"FolioNum\":120045,\"Amount\":1250000.0000,\"Neg\":-0.50,\"GuestName\":\"Nguy\\u1EC5n V\\u0103n \\u00C2n \\u003Cb\\u003E\\u0026\\u0027\\u002B\\u0022\\\\/\\n\\t\\r\\b\\f\\u0001\\u001F\\u007F\\u0085\\u20AC\\uD83D\\uDE00\\u0060~\",\"Arrival\":\"2026-11-19T00:00:00\",\"CheckInAt\":\"2026-11-19T08:30:15.997\",\"Precise\":\"2026-11-19T08:30:15.1234567\",\"Dur\":\"13:05:07.0000005\",\"Stamp\":\"2026-11-19T08:30:15\\u002B07:00\",\"Id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"Blob\":\"AAEC\\u002Bv8=\",\"Vip\":true,\"Rate\":0.1,\"Big\":1E+20,\"Small\":1E-07,\"F\":0.1,\"Count\":7,\"Long\":9007199254740993,\"Short\":-5,\"Byte\":200,\"Nothing\":null}],\"removedKeys\":null,\"keyOrder\":null}],\"error\":null,\"elapsedMs\":12},{\"requestId\":\"r-2\",\"status\":2,\"eTag\":\"etag-2\",\"resultSets\":[{\"index\":0,\"hash\":\"h1\",\"rows\":[{\"FolioNum\":1,\"Name\":\"A\"},{\"FolioNum\":2,\"Name\":\"B\"}],\"removedKeys\":[\"3\"],\"keyOrder\":[\"1\",\"2\"]}],\"error\":null,\"elapsedMs\":0},{\"requestId\":\"r-3\",\"status\":1,\"eTag\":\"etag-3\",\"resultSets\":[],\"error\":null,\"elapsedMs\":0},{\"requestId\":\"r-4\",\"status\":3,\"eTag\":null,\"resultSets\":[],\"error\":\"Parameter \\u0027FolioNum\\u0027 is required.\",\"elapsedMs\":0},{\"requestId\":\"r-5\",\"status\":4,\"eTag\":null,\"resultSets\":[],\"error\":\"PMS error 1222: record locked by another PMS session\",\"elapsedMs\":8001}],\"notices\":[{\"operation\":\"booking.list-checkin\",\"parametersHash\":\"abc\",\"newETag\":\"etag-9\",\"changedRows\":3}],\"updateCheck\":null}",
-      "envelope": "{\"v\":1,\"tenantId\":\"0f8fad5bd9cb469fa16570867728950e\",\"agentId\":\"agt-1\",\"kid\":\"kid-0\",\"messageId\":\"6f9619ff8b86d011b42d00c04fc964ff\",\"timestamp\":1795600000123,\"type\":\"agent.poll\",\"nonce\":\"CQ4TGB0iJywxNjtA\",\"ciphertext\":\"a\\u002Bv0wGUK8H07pXU\\u002BbESoH2GrqxPoQRvrjFaMvPDN35CpIRQ0RASAxG9sV2IvlLdgfC5IuC9jSgffG/O4OgS8tfHqDIwlPPVH3d3XmGYxvejpj3uETmQLyywO4/HDGHJhlpH5tidNlHpnqCvQEI2JLgZ0wgWqVWUEAZ9dRPM1b5z9\\u002B8zeaS52f9uqccO0Xp5Srp21wDFTIczcJVvN8QGb8j7HsBpPkLMCkWEcuT5Yo36BSUR7Pl1qsy09IV6lqDRzfVzdvjNofEz2W6W5lOJn/Mi9Xc7QNK50KdRjGEsCWzcs6xmi4uL0VPX9vEXt7A/TrDQEJbmlpOByZM9e\\u002BEac4JX\\u002Bm7gXIMA6IfiWFACDLz94zIaFFJ\\u002BLblhqEcajcElXdBBKFLnmAfeZedJQwGN2A3E20tyuTGIags9H/p6mWCcr4Qwh\\u002B660JD1KtsonMEGnmULhOM8E15VjsiHyjA92rJ/RK3lvgPeiBWZfc8YbYxiBnmpX9IIH7\\u002BzYmMNID0YE8YxLI1Irrxj1wHS6koULa\\u002B2x8D4KWfRY6pRspn1XgdOu4QQyIrIEI/OdLCXBmj2NDjwBfJ8EN/HZV6zVQUpa5mozeuh68olHGnlZQYMtoy5NlwAC5qCFNCVAEoqYh2s/W9nDBhKHR8NTKB1ztRUfD9NNFvhorhvRuzSf5pqpcRt7bv504HAeTDIHn1EkrAVFmX2WvsufpFIovJoKVAweH6V4xFIIXZ3PACUT\\u002BY69m5VccfZhqntZAL3mXh3mfHrhyBvuOogh11iOIuVKNJafZ55UiV\\u002B3dCDdXxGcbVmJpHMvgrvNbbQJdidm5orCxG3kBhh8dlZd2nj79z7/gc5lb92NBla0uSsd3UgsHO2b/hiiHbPxS/zxDsQNvYX2Ke591oM4j1BsGjX/HL2wTTHzljupIe\\u002BC8tutgS181ZPhxuVzo6buaAXrCQ7ZPWl0u9pEwkEqNnJLYdNLAbvPAT6sXz5RXVFlRoLiTzAWyLlUdT6Zg15mjEwhRZGwURkpdW/R7cuIjHMbYleyxRAsoY7QvgHV6pgtdlboE8/X155/SEqcBYjollzSzaPkXYNMrn/3EDRHl8G1UxYf6h2yb26grFeDTgUZ\\u002BfA8/rC/3YCBB70QIUzE\\u002BWN2c/pyDwnlGS/00Sn3moFkUeZs/X8FiMb9A/uo1CYdBih3qr\\u002BGxsC5vLF5fT3GP\\u002BHWe8xaaf8FpW50c8llSpw2t9LnXz19u5YKqumxDtxxfZBSjjlzsxAB59m9DvObKohigSznzoS2cNMlBU/p2NaFiHhlZw3S5lF9Pf6XARYpcpRhW3L9UwFQwdzBCSdnKnG2VtxG0JgxobJpAEl8Hjl/pQ\\u002B2WoIOb4mVT0wVf8Yb\\u002BYVsynpZNcR81LXb78N1IAAVj2mMILktRdjte9Ey0JMxKQrxZklMZ0Cr7hC38ETf9JiJnpIPS0QL/kK7HqAgeZP1W4ubJgbovdiB9YoMVZpia6n8/prXsnmLap1vONozS4hmh/OVmjAWtaV7HAKM5WCCssk2Ok3ZSJ6eUoTryxkzZhxbqnWJBedR8Jw74q2N2KvNPsWmBC1qu1FEMLUpFUdhvbcCNsXbIhUISGwC29JWQrs7ZIXCVmqrW4wnG39O30t4eF6s594s1XF\\u002BP7kFczo5flLt7Hr4M6rx\\u002BjDvHxQJfitmMQNrPGUB8k5Kvmx3fbCmjfi09ZLemkONCrwHxuH3\\u002BrdtQfTEQxiiuAbkWOzsW2oKNLdRY/y9NGuUaNBlxU20SzGMcVJTpgv8XJM7hC\\u002BltZnyDFjxOYMyECwyM57vIquxepCalCWDf2ZcZAzzRzJAV0wAjoEqj6YezXsLk\\u002Bi5jrQeXz5APy5H9kqS0eX3JZ7ZdHd\\u002BXWdqDiZzRiN0rc3mW2eQ46TI78eu9Qvs8hJzvCR2HgLdaD5Sne5eJG1rb2I8KNWIlsXUkpshv\\u002BTQcH7lMgpxk\\u002BpAHfY\\u002BSF65k7gCc1QpRVYXDWZ1JeAt\\u002BB/9s5ZTrCXWKgiavdlMLI/tSJRH\\u002BY0VZRQhdKPlJMbGztMxa2zmSMh/tTeKdIYD1wcI2N0xjxqOvOCyOoSmf1aob4o8OUJUEC796FXTCEa5o8QC20u0ASnaDg9GOPvcnXLqVWnXEK07uqjQQ226YJyNR8l/bzF2PJBfa5PERsHcBHuZG8Cm1N74Sa0HxsACPtGSciS4\\u002BX/anqdquDSZttOKJWbzeSnAX8CVxCLbbFsnZxFDrJDYBN4ECc2OweGVQbDueYLF8jd0liuYJWRJNNJaPcMwFg==\"}"
+      "plain": "{\"hello\":{\"agentVersion\":\"dl-agent-1.2.3\",\"catalogVersion\":4,\"machineName\":\"HOTEL-SRV\",\"pmsSchemaFingerprint\":\"0123456789abcdef.fedcba9876543210\",\"proceduresReport\":\"procedures: 2 PMS bundle batch(es) failed\",\"recentProblems\":null,\"installations\":null},\"responses\":[{\"requestId\":\"r-1\",\"status\":0,\"eTag\":\"etag-1\",\"resultSets\":[{\"index\":0,\"hash\":\"h0\",\"rows\":[{\"FolioNum\":120045,\"Amount\":1250000.0000,\"Neg\":-0.50,\"GuestName\":\"Nguy\\u1EC5n V\\u0103n \\u00C2n \\u003Cb\\u003E\\u0026\\u0027\\u002B\\u0022\\\\/\\n\\t\\r\\b\\f\\u0001\\u001F\\u007F\\u0085\\u20AC\\uD83D\\uDE00\\u0060~\",\"Arrival\":\"2026-11-19T00:00:00\",\"CheckInAt\":\"2026-11-19T08:30:15.997\",\"Precise\":\"2026-11-19T08:30:15.1234567\",\"Dur\":\"13:05:07.0000005\",\"Stamp\":\"2026-11-19T08:30:15\\u002B07:00\",\"Id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"Blob\":\"AAEC\\u002Bv8=\",\"Vip\":true,\"Rate\":0.1,\"Big\":1E+20,\"Small\":1E-07,\"F\":0.1,\"Count\":7,\"Long\":9007199254740993,\"Short\":-5,\"Byte\":200,\"Nothing\":null}],\"removedKeys\":null,\"keyOrder\":null}],\"error\":null,\"elapsedMs\":12,\"queueMs\":3},{\"requestId\":\"r-2\",\"status\":2,\"eTag\":\"etag-2\",\"resultSets\":[{\"index\":0,\"hash\":\"h1\",\"rows\":[{\"FolioNum\":1,\"Name\":\"A\"},{\"FolioNum\":2,\"Name\":\"B\"}],\"removedKeys\":[\"3\"],\"keyOrder\":[\"1\",\"2\"]}],\"error\":null,\"elapsedMs\":0,\"queueMs\":0},{\"requestId\":\"r-3\",\"status\":1,\"eTag\":\"etag-3\",\"resultSets\":[],\"error\":null,\"elapsedMs\":0,\"queueMs\":0},{\"requestId\":\"r-4\",\"status\":3,\"eTag\":null,\"resultSets\":[],\"error\":\"Parameter \\u0027FolioNum\\u0027 is required.\",\"elapsedMs\":0,\"queueMs\":0},{\"requestId\":\"r-5\",\"status\":4,\"eTag\":null,\"resultSets\":[],\"error\":\"PMS error 1222: record locked by another PMS session\",\"elapsedMs\":8001,\"queueMs\":0}],\"notices\":[{\"operation\":\"booking.list-checkin\",\"parametersHash\":\"abc\",\"newETag\":\"etag-9\",\"changedRows\":3}],\"updateCheck\":null}",
+      "envelope": "{\"v\":1,\"tenantId\":\"0f8fad5bd9cb469fa16570867728950e\",\"agentId\":\"agt-1\",\"kid\":\"kid-0\",\"messageId\":\"6f9619ff8b86d011b42d00c04fc964ff\",\"timestamp\":1795600000123,\"type\":\"agent.poll\",\"nonce\":\"CQ4TGB0iJywxNjtA\",\"ciphertext\":\"a\\u002Bv0wGUK8H07pXU\\u002BbESoH2GrqxPoQRvrjFaMvPDN35CpIRQ0RASAxG9sV2IvlLdgfC5IuC9jSgffG/O4OgS8tfHqDIwlPPVH3d3XmGYxvejpj3uETmQLyywO4/HDGHJhlpH5tidNlHpnqCvQEI2JLgZ0wgWqVWUEAZ9dRPM1b5z9\\u002B8zeaS52f9uqccO0Xp5Srp21wDFTIczcJVvN8QGb8j7HsBpPkLMCkWEcuT5Yo36BSUR7Pl1qsy09IV6lqDRzfVzdvjNofEz2W6W5lOJn/Mi9Xc7QNK50KdRjGEsCWzcs6xmi4uL0VPX9vEXt7A/TrDQEJbmlpOByZM9e\\u002BEac4JX\\u002Bm7gXIMA6IfiWFACDLz94zIaFFJ\\u002BLblhqEcajcElXdBBKFLnmAfeZedJQwGN2A3E20tyuTGIags9H/p6mWCcr4Qwh\\u002B660JD1KtsonMEGnmULhOM8E15VjsiHyjA92rJ/RK3lvgPeiBWZfc8YbYxiBnmpX9IIH7\\u002BzYmMNID0YE8YxLI1Irrxj1wHS6koULa\\u002B2x8D4KWfRY6pRspn1XgdOu4QQyIrIEI/OdLCXBmj2NDjwBfJ8EN/HZV6zVQUpa5mozeuh68olHGnlZQYMtoy5NlwAC5qCFNCVAEoqYh2s/W9nDBhKHR8NTKB1ztRUfD9NNFvhorhvRuzSf5pqpcRt7bv504HAeTDIHn1EkrAVFmX2WvsufpFIovJoKVAweH6V4xFIIXZ3PACUT\\u002BY69m5VccfZhqntZAL3mXh3mfHrhyBvuOogh11iOIuVKNJafZ55UiV\\u002B3dCDdXxGcbVmJpHMvgrvNbbQJdidm5orCxG3kBhh8dlZd2nj79z7/gc5lb92NBla0uSsd3UgsHO2b/hiiHbPxS/zxDsQNvYX2Ke591oM4j1BsGjX/HL2wTTHzljupIe\\u002BC8tutgS181ZPhxuVzo6buaAXrCQ7ZPWl0u9pEwkEqNnJLYdNLAbvPAT6sXz5RXVFlRoLiTzAWyLlUdT6Zg15mjEwhRZGwURkpdW/R7cuIjHMbYleyxRAsoY7QvgHV6pgtdlboE8/X155/SEqcBYjollzSzaPkXYNMrn/3EDRHl8G1UxYf6h2yb26grFeDTgUZ\\u002BfA8/rC/3YCBB70QIUzE\\u002BWN2c/pyDwnlGS/00Sn3moFkUeZs/X8FiMb9A/uo1CYdBih3qr\\u002BGxsC5vLF5fT3GP\\u002BHWe8xaaf8FpW50c8llSpw2t9LnXz19u5YKqumxDtxxfZBSjjlzsxAB59m9DvObKohigSznzoS2cNMlBU/p2NaFiHhlZw3S5lF9Pf6XARYpcpRhW3L9UwEBz9aWHjdzEmfnGKZf3tkxofoqVwAtGQR680DnCpUOYYfSaFkTKYlKvss/gXUOQ4k5hOqK/9tgFEhT3meUCad8Wdr9TcxkmYEnUBmyfE8KOBrh5QK38F7R8IOJnuscWCBIsFm7J6ZvYfK/Ve\\u002B6KwLi0ZfOlpJAVcMOTKv1tc\\u002B7hjbUfNRhXPs\\u002BT4IKyLz1gn9nu8loFArBqSek29ESZU2RdtHCBryjohcvbHETlTLIBYAm8MZ8t8DNnpPCQdPfQ246\\u002BAFUKIYhJAdv\\u002BqAcOMeKfR8wVyIUycoWWOk6ZJD6QDvlIsQnUChZhx0XJ17lo8J02yAuYPlcNCwZVlHt7Hrvavi0\\u002ByG\\u002BR1cPbisxZ0YUe3QmsRMz2WIwbKOzz7m0497Zk1zURK04wuX3vel7b/rcFhf8rFa0B/PsUnVSX7YfOK68fDv7N9AsgQDiTzfLPgQy90ySDYk1xWOivISrS1ngA5J8Xl0latnvNNKfItOLkyTON3dKZDnGVDQPCFYQkM1a2ORLjDkhiNe1lYlJCDloIzwQsxiU0Oe/Yr/Nb2R2XD0tUCRKX3I07J/EeXjbttrAruD5t16vsFdpu01gWUmKc2EC2\\u002Bxeeztvd3Y/eYrY95ST/Mpqv6/LYGfsU1shzKlIXflPX0\\u002B7xOcqWjFvAh5HEDliPe5fxji8opFS4W3CNxjN24ILfNDgUopP9cMIYwwxfPfUOJLUgoYeXiW2DepAiWXbK9cg8ztGn4NhhQTP/aHlbPP1LwnzMMhpZHMXUSv3\\u002BBzSFBX69/ANkUG2RAv2KUZaM6qV1n/rGC6cG6Z0prLGUw2qKsPWHJAgYT8lOZRYb7PSEJ6eCm7USsbrmpX6Tr0H0LkXecmnQze\\u002BryyXlfEx/XvP\\u002B5TBKGm8eyfWT7\\u002BZ2zSaPQE0GBFDqYHOBMcEPsCZ0cLWCLa5L8zZ\\u002Bn5E5G0PfMxR8ZO2x/paAtU5X2oMAC2j5QhWsDjS//XlJgV\\u002BgwnQwUgZspX01gI7gNuDp/EyGUlNUCXmnRZXSJwl44mx\\u002BCMzK1/00A==\"}"
     },
     {
       "secret": "ABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g8=",
@@ -138,8 +138,8 @@
       "message_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
       "timestamp": 1795600001000,
       "nonce": "AwwVHicwOUJLVF1m",
-      "plain": "{\"requests\":[{\"requestId\":\"q-1\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"120045\"},\"baseETag\":\"etag-1\",\"idempotencyKey\":null,\"projection\":null},{\"requestId\":\"q-2\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\",\"Extra\":null},\"baseETag\":null,\"idempotencyKey\":\"idem-1\",\"projection\":[[\"FolioNum\",\"Name\"],null]}],\"nextPollDelayMs\":250,\"update\":null,\"updateHint\":null}",
-      "envelope": "{\"v\":1,\"tenantId\":\"0f8fad5bd9cb469fa16570867728950e\",\"agentId\":\"agt-1\",\"kid\":\"kid-0\",\"messageId\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\",\"timestamp\":1795600001000,\"type\":\"cloud.poll-response\",\"nonce\":\"AwwVHicwOUJLVF1m\",\"ciphertext\":\"HwOD8tbdvPAPpzb/QQsn6Fx0dzEKKbeiYYN24B0kv5M5wKOeczmjlcpJWPME1S8B\\u002BLdiaaWLri2rRCifJdPoSMaZ\\u002Bb2IbuU2yeextl41AQ94rYnrDFVBt59mvDlvlmuKzJOb6y\\u002B385dP1AsBKyXkyvR6PBvwA1mbbQMu/P88mD3xW8h1ptVk6aMFTsTObe6QfIqDuirfQKjgyjXUHxWVPLOyezxvp7qj7ILyY6FLjDylUU/\\u002BdJCbI2YTiClcbZf4g/OrVdamwFr89Vy5jQFNE8dMPDkHeU7D5\\u002Bi5s\\u002BpMl8phnUqibzvAnpBGXD8G5Oe6sJcknlE9xKAhLESCfQN7EoRPa7PoODpoB\\u002BHXK9ReGXxqpN6N8SrtnUbfXBUg3/xG1jFGt9rsO17dy7lVsyDyk6JgNY5C37IHxiMg2mnMPmSmdDs7cp3W6nfC4l7TSjFRXV/o6UujHQl4rpuV3eL2jq9tVhTFwBN2nqq2oKT5DrPaiel25LUZOECeic1oe8dDghuk1wS/n3K\\u002Bp3XPwP1yM\\u002B8clA==\"}"
+      "plain": "{\"requests\":[{\"requestId\":\"q-1\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"120045\"},\"baseETag\":\"etag-1\",\"idempotencyKey\":null,\"projection\":null,\"background\":true,\"deadlineMs\":20000},{\"requestId\":\"q-2\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\",\"Extra\":null},\"baseETag\":null,\"idempotencyKey\":\"idem-1\",\"projection\":[[\"FolioNum\",\"Name\"],null],\"background\":false,\"deadlineMs\":null}],\"nextPollDelayMs\":250,\"update\":null,\"updateHint\":null}",
+      "envelope": "{\"v\":1,\"tenantId\":\"0f8fad5bd9cb469fa16570867728950e\",\"agentId\":\"agt-1\",\"kid\":\"kid-0\",\"messageId\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\",\"timestamp\":1795600001000,\"type\":\"cloud.poll-response\",\"nonce\":\"AwwVHicwOUJLVF1m\",\"ciphertext\":\"HwOD8tbdvPAPpzb/QQsn6Fx0dzEKKbeiYYN24B0kv5M5wKOeczmjlcpJWPME1S8B\\u002BLdiaaWLri2rRCifJdPoSMaZ\\u002Bb2IbuU2yeextl41AQ94rYnrDFVBt59mvDlvlmuKzJOb6y\\u002B385dP1AsBKyXkyvR6PBvwA1mbbQMu/P88mD3xW8h1ptVk6aMFTsTObe6QfIqDuirfQKjgyjXUThuMf6K8bTtloaCOqpq8M6UDkjztFkHqfYuUMkIPxDFUf8Sg1u3sR5r6ykXl\\u002BUGo5klNWYRPcGZAIQne5K/xqbxjl8gqyCa0anyZ18gKXnIt8PqmtJcy0lQw2rxga1KGfBUcfJ4KD\\u002BbqJDlKXq6cdZMCSz88hMia\\u002BgCq3gqQEhA5lrMJhmAP0P7/MxaCxrhQsGLywJ1eerhCx74G6y8GnTzMSieidXwLc8KBqjnv7WyVDTxATETWpB2UAk5SoI6xwY650bhxWHjR3RI1t\\u002BP676bgP/PUyf1l67MfMn2Zg5twJ8hanRL1nVe1I8XkiomG9iSAgUzz4r8IbAO7zj7cK5P2ZFjT4LZjeBzfSacXy5Pe94Kt4m5CcUmVMXcD7AmeACXvljDOIRhLng27ICfx4Qcr1fH9aDQpthH/8XulgLcj\"}"
     },
     {
       "secret": "ABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g8=",
@@ -7187,72 +7187,72 @@
   ],
   "requests": [
     {
-      "json": "{\"requestId\":\"v1\",\"operation\":\"no.such-op\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v1\",\"operation\":\"no.such-op\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Operation 'no.such-op' is not in the catalog."
     },
     {
-      "json": "{\"requestId\":\"v2\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":\"  \",\"projection\":null}",
+      "json": "{\"requestId\":\"v2\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":\"  \",\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Write operations require an idempotency key."
     },
     {
-      "json": "{\"requestId\":\"v3\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null}",
+      "json": "{\"requestId\":\"v3\",\"operation\":\"checkin.online\",\"parameters\":{\"FolioNum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": true,
       "error": null
     },
     {
-      "json": "{\"requestId\":\"v4\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"1\",\"Bogus\":\"x\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v4\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"1\",\"Bogus\":\"x\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'Bogus' is not allowed for 'folio.room-info'."
     },
     {
-      "json": "{\"requestId\":\"v5\",\"operation\":\"folio.room-info\",\"parameters\":{\"folionum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v5\",\"operation\":\"folio.room-info\",\"parameters\":{\"folionum\":\"1\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'FolioNum' is required."
     },
     {
-      "json": "{\"requestId\":\"v6\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":null},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v6\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":null},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'FolioNum' is required."
     },
     {
-      "json": "{\"requestId\":\"v7\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"abc\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v7\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"abc\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'FolioNum' is not a valid Decimal."
     },
     {
-      "json": "{\"requestId\":\"v8\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"120045\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v8\",\"operation\":\"folio.room-info\",\"parameters\":{\"FolioNum\":\"120045\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": true,
       "error": null
     },
     {
-      "json": "{\"requestId\":\"v9\",\"operation\":\"booking.search-by-confirm\",\"parameters\":{\"ConfirmNum\":\"9999999999999999999999999999999\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v9\",\"operation\":\"booking.search-by-confirm\",\"parameters\":{\"ConfirmNum\":\"9999999999999999999999999999999\"},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'ConfirmNum' is not a valid String."
     },
     {
-      "json": "{\"requestId\":\"v10\",\"operation\":\"booking.list-checkin\",\"parameters\":{\"ConfirmNum\":null},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null}",
+      "json": "{\"requestId\":\"v10\",\"operation\":\"booking.list-checkin\",\"parameters\":{\"ConfirmNum\":null},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": true,
       "error": null
     },
     {
-      "json": "{\"requestId\":\"v11\",\"operation\":\"booking.list-checkin\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":[[\"1bad\"]]}",
+      "json": "{\"requestId\":\"v11\",\"operation\":\"booking.list-checkin\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":[[\"1bad\"]],\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Projection column '1bad' is not a valid name."
     },
     {
-      "json": "{\"requestId\":\"v12\",\"operation\":\"booking.list-checkin\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":[null,null]}",
+      "json": "{\"requestId\":\"v12\",\"operation\":\"booking.list-checkin\",\"parameters\":{},\"baseETag\":null,\"idempotencyKey\":null,\"projection\":[null,null],\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Projection lists 2 result sets; 'booking.list-checkin' has 1."
     },
     {
-      "json": "{\"requestId\":\"v13\",\"operation\":\"guest.update-info\",\"parameters\":{\"FolioNum\":\"1\",\"XMLDetails\":\"\\u003Ca\\u003E\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null}",
+      "json": "{\"requestId\":\"v13\",\"operation\":\"guest.update-info\",\"parameters\":{\"FolioNum\":\"1\",\"XMLDetails\":\"\\u003Ca\\u003E\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": false,
       "error": "Parameter 'XMLDetails' is not a valid Xml."
     },
     {
-      "json": "{\"requestId\":\"v14\",\"operation\":\"guest.update-info\",\"parameters\":{\"FolioNum\":\"1\",\"XMLDetails\":\"\\u003Ca/\\u003E\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null}",
+      "json": "{\"requestId\":\"v14\",\"operation\":\"guest.update-info\",\"parameters\":{\"FolioNum\":\"1\",\"XMLDetails\":\"\\u003Ca/\\u003E\"},\"baseETag\":null,\"idempotencyKey\":\"k\",\"projection\":null,\"background\":false,\"deadlineMs\":null}",
       "ok": true,
       "error": null
     }
@@ -7430,8 +7430,8 @@
     "journal_at": "\"2026-11-19T01:02:03.4567+00:00\""
   },
   "bundle": {
-    "bytes": 155788,
-    "bundle_hash": "c75beb87788f7ada",
+    "bytes": 155769,
+    "bundle_hash": "9e43420bf65e64d1",
     "picture_hash": "26c979cd08417911",
     "batches": 225,
     "phases": {
@@ -7493,7 +7493,7 @@
       "pms:93831615e417a6d3",
       "pms:5d1c50d48295b457",
       "pms:3181445d9208abf7",
-      "pms:621ac963dbef91a6",
+      "pms:9641f704abd1cc69",
       "pms:77df54ba1e314113",
       "pms:e4c9f6af9818a2ec",
       "pms:3d1494da01f8bcf7",

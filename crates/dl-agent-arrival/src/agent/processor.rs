@@ -4,7 +4,9 @@
 //!
 //! PMS concurrency is bounded by the runtime's PMS lane (`MaxConcurrency` threads), the
 //! counterpart of the .NET semaphore; [`Processor::route`] sends everything that does not need
-//! the PMS to the fast lane, so a busy PMS never delays a rejection or a replay.
+//! the PMS to the fast lane, so a busy PMS never delays a rejection or a replay. Background
+//! requests hold only part of the PMS lane ([`PmsQueue`](crate::agent::pms_queue::PmsQueue)),
+//! and a request whose deadline passed while it queued is answered without a PMS call.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,10 +16,11 @@ use dl_json::Value;
 use crate::agent::executor::{ExecError, Executor};
 use crate::agent::health::Health;
 use crate::agent::journal::Journal;
+use crate::agent::pms_queue::Queued;
 use crate::agent::secrets::TenantKeyStore;
 use crate::agent::snapshots::{Snapshot, SnapshotStore};
 use crate::agent::vault::LegalVault;
-use crate::contracts::errors::{self, LOCK_TIMEOUT};
+use crate::contracts::errors::{self, EXPIRED_MESSAGE, LOCK_TIMEOUT};
 use crate::contracts::values::{parse_base64, to_base64};
 use crate::contracts::{
     OperationKind, PmsRequest, PmsResponse, PmsResultSet, PmsRow, Status, catalog, delta, hasher,
@@ -96,21 +99,30 @@ impl Processor {
         Some(replay)
     }
 
-    /// `HandleAsync`, counted in the metrics. Never fails: every request gets an answer.
+    /// `HandleAsync` for a request received just now, counted in the metrics. Never fails:
+    /// every request gets an answer.
     pub fn handle(&self, request: &PmsRequest) -> PmsResponse {
-        let response = self.answer(request);
+        let response = self.answer(request, Instant::now());
         self.health.count(response.status);
         response
     }
 
-    fn answer(&self, request: &PmsRequest) -> PmsResponse {
+    /// [`handle`](Self::handle) for a request that waited in a lane: queue and elapsed times,
+    /// and the deadline, count from `item.received`.
+    pub fn handle_queued(&self, item: &Queued) -> PmsResponse {
+        let response = self.answer(&item.request, item.received);
+        self.health.count(response.status);
+        response
+    }
+
+    fn answer(&self, request: &PmsRequest, received: Instant) -> PmsResponse {
         if key_vault::is_key_op(&request.operation) {
             return self.key_op(request);
         }
         if vault_ops::is_vault_op(&request.operation) {
             return self.vault_op(request);
         }
-        let started = Instant::now();
+        let queue_ms = millis(received);
         let cat = match catalog() {
             Ok(c) => c,
             Err(e) => {
@@ -136,6 +148,20 @@ impl Processor {
             return replay;
         }
 
+        // The caller gave up while this waited for a slot: do not load the PMS for nobody.
+        if request.deadline_ms.is_some_and(|ttl| queue_ms > ttl) {
+            dl_log::info!("Skipped expired PMS request after its time in the queue."; operation = %op.name, queue_ms = queue_ms);
+            return PmsResponse {
+                elapsed_ms: millis(received),
+                queue_ms,
+                ..PmsResponse::bare(
+                    &request.request_id,
+                    Status::Failed,
+                    Some(EXPIRED_MESSAGE.into()),
+                )
+            };
+        }
+
         let call = Instant::now();
         let sets = match self
             .executor
@@ -148,7 +174,7 @@ impl Processor {
             Err(e) => return self.failed(request, &op.name, &e, call),
         };
         let (etag, full) = delta::full(sets);
-        let elapsed = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
+        let elapsed = millis(received);
 
         if op.kind == OperationKind::Write {
             let written = PmsResponse {
@@ -158,6 +184,7 @@ impl Processor {
                 result_sets: full,
                 error: None,
                 elapsed_ms: elapsed,
+                queue_ms,
             };
             let key = request.idempotency_key.as_deref().unwrap_or("");
             if let Err(e) = self.journal.append(key, &written) {
@@ -194,6 +221,7 @@ impl Processor {
             result_sets: sets,
             error: None,
             elapsed_ms: elapsed,
+            queue_ms,
         };
         if let Some(base) = request.base_etag.as_deref() {
             if base == etag {
@@ -356,5 +384,11 @@ fn single_value(request: &PmsRequest, column: &str, value: Option<String>) -> Pm
         }],
         error: None,
         elapsed_ms: 0,
+        queue_ms: 0,
     }
+}
+
+/// Milliseconds since `from`, saturated.
+fn millis(from: Instant) -> i32 {
+    i32::try_from(from.elapsed().as_millis()).unwrap_or(i32::MAX)
 }

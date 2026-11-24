@@ -13,6 +13,7 @@ pub mod journal;
 pub mod layout;
 pub mod link_status;
 pub mod outbox;
+pub mod pms_queue;
 pub mod problems;
 pub mod processor;
 pub mod runtime;
