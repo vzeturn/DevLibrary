@@ -1,6 +1,6 @@
 {
   "manifest_version": 2,
-  "allowlist_hash": "e2eb5188af2751ee217ef64fcb74b1dd676151385d00184bc2abee19019c1aeb",
+  "allowlist_hash": "cffeca2399efcf1a42cd012bbeae5d6a20fe7e13fd7965f2b0088827acda81fa",
   "procs": [
     "AvailabilityChartNew",
     "GetHotelDate1",
@@ -10,8 +10,13 @@
     "LogIn",
     "rptReservMasterList",
     "SMILE_Fo_PostPosBatch",
+    "SMILE_Pos_AddPayment",
     "SMILE_Pos_ClaimPost",
+    "SMILE_Pos_CloseBill",
     "SMILE_Pos_CompletePost",
+    "SMILE_Pos_OpenCheck",
+    "SMILE_Pos_PostItem",
+    "SMILE_Pos_SendOrder",
     "UGetUserPermission"
   ],
   "tables": [
@@ -1708,6 +1713,38 @@
       ]
     },
     {
+      "name": "pos.check.close",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_CloseBill",
+          "params": [
+            {
+              "name": "CheckNo",
+              "type": "bigint",
+              "arg": "checkNo"
+            },
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo"
+            },
+            {
+              "name": "CloseBy",
+              "type": "varchar",
+              "arg": "closeBy",
+              "size": 50
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "pos.check.detail",
       "contract_ver": 1,
       "kind": "read",
@@ -1883,6 +1920,244 @@
             ],
             "max_rows": 10000
           }
+        }
+      ]
+    },
+    {
+      "name": "pos.check.open",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_OpenCheck",
+          "params": [
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo"
+            },
+            {
+              "name": "TableNo",
+              "type": "nvarchar",
+              "arg": "tableNo",
+              "size": 40
+            },
+            {
+              "name": "Cashier",
+              "type": "varchar",
+              "arg": "cashier",
+              "size": 10
+            },
+            {
+              "name": "NumGuest",
+              "type": "int",
+              "arg": "numGuest"
+            },
+            {
+              "name": "NumChild",
+              "type": "int",
+              "arg": "numChild"
+            },
+            {
+              "name": "Note",
+              "type": "nvarchar",
+              "arg": "note",
+              "size": 500,
+              "nullable": true
+            },
+            {
+              "name": "WSID",
+              "type": "varchar",
+              "value": "WEB",
+              "size": 20
+            },
+            {
+              "name": "RequestKey",
+              "type": "varchar",
+              "arg": "requestKey",
+              "size": 64
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pos.check.pay",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_AddPayment",
+          "params": [
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo"
+            },
+            {
+              "name": "CheckNo",
+              "type": "bigint",
+              "arg": "checkNo"
+            },
+            {
+              "name": "TenderNo",
+              "type": "bigint",
+              "arg": "tenderNo"
+            },
+            {
+              "name": "Amount",
+              "type": "varchar",
+              "arg": "amount",
+              "size": 32
+            },
+            {
+              "name": "Cashier",
+              "type": "varchar",
+              "arg": "cashier",
+              "size": 30
+            },
+            {
+              "name": "TenderRef",
+              "type": "nvarchar",
+              "arg": "tenderRef",
+              "size": 50,
+              "nullable": true
+            },
+            {
+              "name": "CashGiven",
+              "type": "varchar",
+              "arg": "cashGiven",
+              "size": 32,
+              "nullable": true
+            },
+            {
+              "name": "ChangeGiven",
+              "type": "varchar",
+              "arg": "changeGiven",
+              "size": 32,
+              "nullable": true
+            },
+            {
+              "name": "RequestKey",
+              "type": "varchar",
+              "arg": "requestKey",
+              "size": 64
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pos.check.postItem",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 30000,
+      "idempotent": false,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_PostItem",
+          "params": [
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo"
+            },
+            {
+              "name": "CheckNo",
+              "type": "bigint",
+              "arg": "checkNo"
+            },
+            {
+              "name": "Cashier",
+              "type": "varchar",
+              "arg": "cashier",
+              "size": 30
+            },
+            {
+              "name": "ItemCode",
+              "type": "varchar",
+              "arg": "itemCode",
+              "size": 30
+            },
+            {
+              "name": "ItemName",
+              "type": "nvarchar",
+              "arg": "itemName",
+              "size": 60
+            },
+            {
+              "name": "Price",
+              "type": "varchar",
+              "arg": "price",
+              "size": 32
+            },
+            {
+              "name": "Qty",
+              "type": "varchar",
+              "arg": "qty",
+              "size": 32
+            },
+            {
+              "name": "SeatNo",
+              "type": "int",
+              "arg": "seatNo"
+            },
+            {
+              "name": "MenuNo",
+              "type": "varchar",
+              "arg": "menuNo",
+              "size": 50
+            },
+            {
+              "name": "Note",
+              "type": "nvarchar",
+              "arg": "note",
+              "size": 500,
+              "nullable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pos.check.send",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_SendOrder",
+          "params": [
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo"
+            },
+            {
+              "name": "CheckNo",
+              "type": "bigint",
+              "arg": "checkNo"
+            },
+            {
+              "name": "Cashier",
+              "type": "varchar",
+              "arg": "cashier",
+              "size": 30
+            }
+          ]
         }
       ]
     },
