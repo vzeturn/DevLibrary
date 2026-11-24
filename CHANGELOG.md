@@ -17,6 +17,10 @@ All notable changes are listed here. The format follows
 - dl-agent `sql.inventory {database?, checksum?}`: per-table catalog row counts and column-layout hashes, per-module definition hashes, and optional data checksums, so a site database can be compared with its cloud copy without moving data (PROTOCOL §9.8, RT-0813).
 - dl-agent-pms carries SMILE-PMS manifest ops `fo.reservation.listFigures@1` and `fo.departures.onDate@1` (select calls on `Folio` and `AdditionalName`), so agent tenants answer the reservations figures and the departures report (RT-0776).
 
+### Fixed
+
+- dl-agent-einvoice: a night-sweep page that times out is halved (500 down to 25) and, at the smallest page, retried every 10 minutes instead of re-running the same 500-bill page every cycle, which kept the module degraded with `einvoice_sql_failed` (RT-1071).
+
 ### Security
 
 - agent-hub `/mcp` can require a Cloudflare Access service token on top of its Bearer (`MCP_ACCESS_REQUIRED`, `MCP_ACCESS_AUD`, fails closed): a leaked `MCP_TOKEN` alone no longer opens the ops console (ADR 0008, RT-0781). The installer and agent routes stay public.
