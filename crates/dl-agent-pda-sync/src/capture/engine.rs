@@ -149,6 +149,15 @@ impl CaptureEngine {
         InitialSnapshotRunner::new(&self.cx).run(&self.plan, &self.deadline(), ctx)
     }
 
+    /// Drops the remembered open-check signatures so the next cycle reads everything.
+    fn forget_signatures(&self) {
+        self.cx
+            .open_signatures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget();
+    }
+
     /// Forgets what was sent for every planned table (row and blob shadows, open-check
     /// hashes and miss counters, snapshot progress). Ledger watermarks are kept. Safe to repeat.
     pub fn reset(&self, ctx: &Ctx) -> Result<()> {
@@ -158,6 +167,7 @@ impl CaptureEngine {
             state.reset_table(&blob_table(p.name()), ctx)?;
         }
         state.reset_table(open_check::OPEN_TABLE, ctx)?;
+        self.forget_signatures();
         let mut commit = StateCommit::default();
         for p in &self.plan.ledger {
             for c in cursors_of(p) {
@@ -227,6 +237,7 @@ impl CaptureEngine {
             }
         }
         if open {
+            self.forget_signatures();
             state.reset_table(open_check::OPEN_TABLE, ctx)?;
             commit.cursors.insert(open_check::MISS_CURSOR, None);
         }

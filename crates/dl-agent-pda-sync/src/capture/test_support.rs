@@ -10,9 +10,9 @@ use super::engine::CaptureEngine;
 use super::error::{CaptureError, ErrorKind, Result};
 use super::options::CaptureOptions;
 use super::sinks::{BatchSink, BlobItem, BlobSink, EchoSuppressor};
-use super::source::{CaptureSource, SourceQuery, VendorRow, value_or_null};
+use super::source::{CaptureSource, CheckSignature, SourceQuery, VendorRow, value_or_null};
 use super::state::{CaptureState, InMemoryCaptureState};
-use super::util::{add_days, contains_ignore_case};
+use super::util::{DotNetDict, add_days, contains_ignore_case, invariant_string};
 use crate::config::time::{ManualClock, Timestamp};
 use crate::contracts::catalog::SyncCatalog;
 use crate::contracts::mapping::RawValue;
@@ -89,6 +89,12 @@ pub struct FakeCaptureSource {
     pub busy_after: Mutex<Option<usize>>,
     /// Reads of these tables fail with a marked schema error.
     pub schema_broken: Mutex<Vec<String>>,
+    /// Set to model a source that cannot compute signatures (another engine).
+    pub no_signatures: Mutex<bool>,
+    /// Signature reads run.
+    pub signature_queries: Mutex<usize>,
+    /// Per-table signatures reported instead of the live ones (a checksum collision).
+    pub frozen_signatures: Mutex<Vec<(String, DotNetDict<CheckSignature>)>>,
 }
 
 fn num(v: &RawValue) -> Option<f64> {
@@ -207,6 +213,50 @@ impl FakeCaptureSource {
         }
     }
 
+    /// The live signatures of `table`: per check, its rows rendered with sorted columns,
+    /// sorted and joined (`CheckSignaturesAsync` of the C# fake).
+    pub fn live_signatures(&self, table: &str, check_column: &str) -> DotNetDict<CheckSignature> {
+        let mut groups: DotNetDict<(RawValue, Vec<String>)> = DotNetDict::new();
+        for r in lock(&self.db).table(table).iter() {
+            let value = value_or_null(r, check_column);
+            let Some(key) = invariant_string(&value) else {
+                continue;
+            };
+            let mut cols: Vec<(String, String)> = r
+                .iter()
+                .map(|(k, v)| (k.to_uppercase(), format!("{k}={v:?}")))
+                .collect();
+            cols.sort();
+            let line = cols
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect::<Vec<_>>()
+                .join(",");
+            match groups.get_mut(&key) {
+                Some((_, lines)) => lines.push(line),
+                None => groups.insert(&key, (value, vec![line])),
+            }
+        }
+        let mut out = DotNetDict::new();
+        for (key, (value, lines)) in groups.iter() {
+            let mut lines = lines.clone();
+            lines.sort();
+            out.insert(
+                key,
+                CheckSignature {
+                    value: value.clone(),
+                    signature: lines.join("|"),
+                },
+            );
+        }
+        out
+    }
+
+    /// Signature reads run.
+    pub fn signature_query_count(&self) -> usize {
+        *lock(&self.signature_queries)
+    }
+
     /// Number of queries run.
     pub fn query_count(&self) -> usize {
         lock(&self.queries).len()
@@ -225,6 +275,25 @@ fn schema_fault(table: &str, message: String) -> CaptureError {
 }
 
 impl CaptureSource for FakeCaptureSource {
+    fn check_signatures(
+        &self,
+        table: &str,
+        check_column: &str,
+        _ctx: &Ctx,
+    ) -> Result<Option<DotNetDict<CheckSignature>>> {
+        *lock(&self.signature_queries) += 1;
+        if *lock(&self.no_signatures) {
+            return Ok(None);
+        }
+        if let Some((_, frozen)) = lock(&self.frozen_signatures)
+            .iter()
+            .find(|(t, _)| eq_ignore_case(t, table))
+        {
+            return Ok(Some(frozen.clone()));
+        }
+        Ok(Some(self.live_signatures(table, check_column)))
+    }
+
     fn table_exists(&self, table: &str, _ctx: &Ctx) -> Result<bool> {
         Ok(lock(&self.db)
             .tables

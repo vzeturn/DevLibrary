@@ -23,9 +23,9 @@ use std::time::Duration;
 use dl_tds::{Client, Param, ParamValue};
 
 use super::error::{CaptureError, ErrorKind, Result};
-use super::source::{CaptureSource, SourceQuery, VendorRow};
+use super::source::{CaptureSource, CheckSignature, SourceQuery, VendorRow};
 use super::sql_builder::{self, ReadHintPolicy};
-use super::util::{contains_ignore_case, distinct_ignore_case};
+use super::util::{DotNetDict, contains_ignore_case, distinct_ignore_case, invariant_string};
 use crate::contracts::mapping::RawValue;
 use crate::contracts::time::{DateTime, DateTimeOffset};
 use crate::reporting::sql_error::{
@@ -404,6 +404,58 @@ impl SqlServerCaptureSource {
         Ok(!rcsi)
     }
 
+    /// The busy translation of [`Self::query_core`]: a timeout, lock timeout or deadlock
+    /// abandons the read (`SourceBusyException`).
+    fn busy_or(e: CaptureError, what: &str) -> CaptureError {
+        let number = e.sql.as_ref().map(|s| s.number());
+        match number {
+            Some(n @ (TIMEOUT_ERROR | LOCK_TIMEOUT_ERROR | DEADLOCK_VICTIM_ERROR)) => {
+                CaptureError::busy(format!("{what} abandoned (SQL error {n})."), Some(e))
+            }
+            _ => e,
+        }
+    }
+
+    /// `CheckSignaturesAsync` before the per-table error marking.
+    fn signatures_core(
+        &self,
+        table: &str,
+        check_column: &str,
+        ctx: &Ctx,
+    ) -> Result<DotNetDict<CheckSignature>> {
+        let col = sql_builder::quote(check_column)?;
+        let tbl = sql_builder::quote(table)?;
+        let no_lock = self.use_no_lock(ctx)?;
+        let sql = self.preamble(no_lock)
+            + &format!(
+                "SELECT {col}, COUNT_BIG(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)), \
+                 SUM(CAST(BINARY_CHECKSUM(*) AS bigint)) FROM dbo.{tbl} WHERE {col} IS NOT NULL GROUP BY {col}"
+            );
+        let set = match self.run_phased(&sql, &[], ctx) {
+            Ok(set) => set,
+            Err((e, true)) => return Err(e),
+            Err((e, false)) => {
+                return Err(Self::busy_or(e, &format!("Signature read of {table}")));
+            }
+        };
+        let mut result = DotNetDict::new();
+        for row in set.map(dl_tds::ResultSet::into_rows).unwrap_or_default() {
+            let v = row.values();
+            let value = v.first().map(RawValue::from_tds).unwrap_or(RawValue::Null);
+            let Some(key) = invariant_string(&value) else {
+                continue;
+            };
+            let int = |i: usize| match v.get(i).map(RawValue::from_tds) {
+                Some(RawValue::I64(n)) => n,
+                Some(RawValue::I32(n)) => i64::from(n),
+                _ => 0,
+            };
+            let signature = format!("{}:{}:{}", int(1), int(2), int(3));
+            result.insert(&key, CheckSignature { value, signature });
+        }
+        Ok(result)
+    }
+
     fn query_core(&self, query: &SourceQuery, ctx: &Ctx) -> Result<Vec<VendorRow>> {
         let (columns, bytes) = self.resolve_columns(query, ctx)?;
         let no_lock = self.use_no_lock(ctx)?;
@@ -417,20 +469,7 @@ impl SqlServerCaptureSource {
         match self.run_phased(&sql, &params, ctx) {
             Ok(set) => Ok(set.map(read_rows).unwrap_or_default()),
             Err((e, true)) => Err(e),
-            Err((e, false)) => {
-                let number = e.sql.as_ref().map(|s| s.number());
-                if matches!(
-                    number,
-                    Some(TIMEOUT_ERROR | LOCK_TIMEOUT_ERROR | DEADLOCK_VICTIM_ERROR)
-                ) {
-                    let n = number.unwrap_or_default();
-                    return Err(CaptureError::busy(
-                        format!("Read of {} abandoned (SQL error {n}).", query.table),
-                        Some(e),
-                    ));
-                }
-                Err(e)
-            }
+            Err((e, false)) => Err(Self::busy_or(e, &format!("Read of {}", query.table))),
         }
     }
 }
@@ -447,30 +486,43 @@ impl CaptureSource for SqlServerCaptureSource {
     }
 
     fn query(&self, query: &SourceQuery, ctx: &Ctx) -> Result<Vec<VendorRow>> {
-        match self.query_core(query, ctx) {
-            Err(mut e) if e.kind == ErrorKind::Sql => {
-                // Which capture table the failing read was for (AD1).
-                if e.table.is_none() {
-                    e.table = Some(query.table.clone());
-                }
-                // A missing column or object belongs to this table only: the strategies
-                // skip it and keep the others going.
-                let schema = e.sql.as_ref().is_some_and(|s| {
-                    s.errors.iter().any(|x| {
-                        matches!(
-                            x.number,
-                            INVALID_COLUMN | INVALID_OBJECT | MULTI_PART_NOT_BOUND
-                        )
-                    })
-                });
-                if schema {
-                    e.mark_schema_fault(&query.table);
-                }
-                Err(e)
-            }
-            other => other,
-        }
+        self.query_core(query, ctx)
+            .map_err(|e| mark_table(e, &query.table))
     }
+
+    fn check_signatures(
+        &self,
+        table: &str,
+        check_column: &str,
+        ctx: &Ctx,
+    ) -> Result<Option<DotNetDict<CheckSignature>>> {
+        self.signatures_core(table, check_column, ctx)
+            .map(Some)
+            .map_err(|e| mark_table(e, table))
+    }
+}
+
+/// A SQL error of a read names its capture table (AD1); a missing column or object belongs
+/// to this table only, so the strategies skip it and keep the others going.
+fn mark_table(mut e: CaptureError, table: &str) -> CaptureError {
+    if e.kind != ErrorKind::Sql {
+        return e;
+    }
+    if e.table.is_none() {
+        e.table = Some(table.to_owned());
+    }
+    let schema = e.sql.as_ref().is_some_and(|s| {
+        s.errors.iter().any(|x| {
+            matches!(
+                x.number,
+                INVALID_COLUMN | INVALID_OBJECT | MULTI_PART_NOT_BOUND
+            )
+        })
+    });
+    if schema {
+        e.mark_schema_fault(table);
+    }
+    e
 }
 
 #[cfg(test)]

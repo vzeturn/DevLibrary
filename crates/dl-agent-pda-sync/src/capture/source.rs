@@ -2,6 +2,7 @@
 //! `Source/SourceSchemaFault.cs`).
 
 use super::error::Result;
+use super::util::DotNetDict;
 use crate::contracts::mapping::RawValue;
 use crate::contracts::time::DateTime;
 use crate::util::ctx::Ctx;
@@ -19,6 +20,30 @@ pub trait CaptureSource: Send + Sync {
     /// Runs one bounded SELECT and returns the rows (column name to raw value; look
     /// columns up ignoring case).
     fn query(&self, query: &SourceQuery, ctx: &Ctx) -> Result<Vec<VendorRow>>;
+
+    /// A cheap change signature per check of an open-check table (one small row per
+    /// check, not the check's rows), keyed by the invariant string of the check value, or
+    /// `None` when the source cannot compute one: the caller then reads every row
+    /// (RT-0759, ADR 0153). Rows with a NULL check column are not reported.
+    fn check_signatures(
+        &self,
+        table: &str,
+        check_column: &str,
+        ctx: &Ctx,
+    ) -> Result<Option<DotNetDict<CheckSignature>>> {
+        let _ = (table, check_column, ctx);
+        Ok(None)
+    }
+}
+
+/// The raw check value (to filter a re-read with) and an opaque signature that changes
+/// when any row of the check changes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckSignature {
+    /// The check column value.
+    pub value: RawValue,
+    /// The signature.
+    pub signature: String,
 }
 
 /// One SELECT. All filters are ANDed: equality [`SourceQuery::where_`], a half-open date
