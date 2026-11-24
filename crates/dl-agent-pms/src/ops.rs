@@ -501,6 +501,9 @@ mod tests {
                 "pos.cashier.byInitial@1",
                 "pos.cashier.login@1",
                 "pos.clerk.permissions@1",
+                "pos.outbox.claim@1",
+                "pos.outbox.complete@1",
+                "pos.outbox.source@1",
                 "pos.outlets.list@1",
             ]
         );

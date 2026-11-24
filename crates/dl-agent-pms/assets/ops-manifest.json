@@ -1,6 +1,6 @@
 {
   "manifest_version": 2,
-  "allowlist_hash": "d52a7d4f6508016cdd49cff19324065247bfb36b0d7a26402e19839cabe0d701",
+  "allowlist_hash": "e8cedaf983a7d8f5ed62938e33b56ca5cfc8cb3bc1d5ca3443413764dfdf7d8f",
   "procs": [
     "AvailabilityChartNew",
     "GetHotelDate1",
@@ -9,6 +9,8 @@
     "HSKPDepartureExpected",
     "LogIn",
     "rptReservMasterList",
+    "SMILE_Pos_ClaimPost",
+    "SMILE_Pos_CompletePost",
     "UGetUserPermission"
   ],
   "tables": [
@@ -68,10 +70,28 @@
       ]
     },
     {
+      "name": "CCardDef",
+      "columns": [
+        "CCardNo",
+        "MidAccLink",
+        "PostAccLink"
+      ]
+    },
+    {
       "name": "ClerkPermission",
       "columns": [
         "ClerkID",
         "FunctionID"
+      ]
+    },
+    {
+      "name": "CurrencyDef",
+      "columns": [
+        "CrCode",
+        "DecDiv",
+        "MidAccLink",
+        "PostAccLink",
+        "PreAccLink"
       ]
     },
     {
@@ -83,6 +103,16 @@
         "RVCNo",
         "RVCType",
         "Status"
+      ]
+    },
+    {
+      "name": "DiscountDtl",
+      "columns": [
+        "ClsCode",
+        "DscCode",
+        "LinkCode",
+        "MealPeriod",
+        "RVC"
       ]
     },
     {
@@ -141,12 +171,121 @@
       ]
     },
     {
+      "name": "IClassDef",
+      "columns": [
+        "ClsCode",
+        "STaxClass",
+        "SurChgCls",
+        "TaxClass"
+      ]
+    },
+    {
+      "name": "Invoice",
+      "columns": [
+        "CheckNo",
+        "ExRate",
+        "MealPeriod",
+        "NGuest",
+        "PaymentMode",
+        "PONumber",
+        "PostedToInterface",
+        "RVC",
+        "StsCode1",
+        "StsCode2",
+        "StsCode3",
+        "StsCode4",
+        "StsCode5",
+        "StsCode6",
+        "StsCode7"
+      ]
+    },
+    {
+      "name": "Payment",
+      "columns": [
+        "AmountBase",
+        "AmountORG",
+        "CheckNo",
+        "CrCode",
+        "PaymentNo",
+        "PmtApp"
+      ]
+    },
+    {
+      "name": "PaymentMode",
+      "columns": [
+        "Interface",
+        "IntFolio",
+        "PMode",
+        "PNo"
+      ]
+    },
+    {
       "name": "RoomType",
       "columns": [
         "Description",
         "DisplayOrder",
         "NumRoom",
         "RoomTypeCode"
+      ]
+    },
+    {
+      "name": "RVCLinkCode",
+      "columns": [
+        "LinkCode",
+        "LinkItem",
+        "LinkType",
+        "MealPeriod",
+        "RVC"
+      ]
+    },
+    {
+      "name": "STaxDef",
+      "columns": [
+        "LinkCode",
+        "STaxCode"
+      ]
+    },
+    {
+      "name": "SurChgDef",
+      "columns": [
+        "PreAccLink",
+        "SurChgCode"
+      ]
+    },
+    {
+      "name": "TaxClassDef",
+      "columns": [
+        "PreAccLink",
+        "TaxCode"
+      ]
+    },
+    {
+      "name": "Trn",
+      "columns": [
+        "BaseSrc",
+        "BaseSTax",
+        "BaseSub",
+        "BaseTax",
+        "BaseTTL",
+        "CheckNo",
+        "ClassCode",
+        "ItemCode",
+        "StsCode2",
+        "TrnCode",
+        "TrnDesc",
+        "TrnSeq",
+        "TrnSub"
+      ]
+    },
+    {
+      "name": "TrnLinkByRVC",
+      "columns": [
+        "LinkCode",
+        "LinkFolio",
+        "LinkTaxCode",
+        "RVC",
+        "TrnCode",
+        "TrnSubCode"
       ]
     }
   ],
@@ -1442,6 +1581,411 @@
                   "type": "varchar",
                   "arg": "clerkId",
                   "size": 20
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.outbox.claim",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 15000,
+      "idempotent": false,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_ClaimPost",
+          "params": [
+            {
+              "name": "RVCNo",
+              "type": "int",
+              "arg": "rvcNo",
+              "nullable": true
+            },
+            {
+              "name": "StaleSeconds",
+              "type": "int",
+              "arg": "staleSeconds"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pos.outbox.complete",
+      "contract_ver": 1,
+      "kind": "write",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 20000,
+      "idempotent": false,
+      "calls": [
+        {
+          "proc": "SMILE_Pos_CompletePost",
+          "params": [
+            {
+              "name": "OutboxId",
+              "type": "bigint",
+              "arg": "outboxId"
+            },
+            {
+              "name": "ClaimToken",
+              "type": "varchar",
+              "arg": "claimToken",
+              "size": 36
+            },
+            {
+              "name": "Outcome",
+              "type": "varchar",
+              "arg": "outcome",
+              "size": 12
+            },
+            {
+              "name": "Reason",
+              "type": "nvarchar",
+              "arg": "reason",
+              "size": 400,
+              "nullable": true
+            },
+            {
+              "name": "FolioNum",
+              "type": "varchar",
+              "arg": "folioNum",
+              "size": 10,
+              "nullable": true
+            },
+            {
+              "name": "BalanceCode",
+              "type": "varchar",
+              "arg": "balanceCode",
+              "size": 5,
+              "nullable": true
+            },
+            {
+              "name": "GuestID",
+              "type": "bigint",
+              "arg": "guestId",
+              "nullable": true
+            },
+            {
+              "name": "OffsetAmount",
+              "type": "varchar",
+              "arg": "offsetAmount",
+              "size": 32,
+              "nullable": true
+            },
+            {
+              "name": "LinesJson",
+              "type": "nvarchar",
+              "arg": "linesJson",
+              "size": "max",
+              "nullable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pos.outbox.source",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Invoice",
+            "columns": [
+              "CheckNo",
+              "RVC",
+              "MealPeriod",
+              "NGuest",
+              "PONumber",
+              "ExRate",
+              "PostedToInterface",
+              "StsCode1",
+              "StsCode2",
+              "StsCode3",
+              "StsCode4",
+              "StsCode5",
+              "StsCode6",
+              "StsCode7",
+              "PaymentMode"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": "=",
+                "param": {
+                  "name": "checkNo",
+                  "type": "bigint",
+                  "arg": "checkNo"
+                }
+              },
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Trn",
+            "columns": [
+              "CheckNo",
+              "TrnSeq",
+              "TrnCode",
+              "TrnSub",
+              "ItemCode",
+              "TrnDesc",
+              "ClassCode",
+              "BaseSub",
+              "BaseTax",
+              "BaseSrc",
+              "BaseSTax",
+              "BaseTTL",
+              "StsCode2"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": "=",
+                "param": {
+                  "name": "checkNo",
+                  "type": "bigint",
+                  "arg": "checkNo"
+                }
+              }
+            ],
+            "order_by": [
+              "TrnSeq"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Payment",
+            "columns": [
+              "CheckNo",
+              "PaymentNo",
+              "CrCode",
+              "AmountBase",
+              "AmountORG",
+              "PmtApp"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": "=",
+                "param": {
+                  "name": "checkNo",
+                  "type": "bigint",
+                  "arg": "checkNo"
+                }
+              },
+              {
+                "column": "PmtApp",
+                "op": "=",
+                "param": {
+                  "name": "pmtApp",
+                  "type": "int",
+                  "value": 1
+                }
+              }
+            ],
+            "order_by": [
+              "PaymentNo"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TrnLinkByRVC",
+            "columns": [
+              "RVC",
+              "TrnCode",
+              "TrnSubCode",
+              "LinkCode",
+              "LinkFolio",
+              "LinkTaxCode"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "PaymentMode",
+            "columns": [
+              "PNo",
+              "PMode",
+              "Interface",
+              "IntFolio"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "CurrencyDef",
+            "columns": [
+              "CrCode",
+              "PreAccLink",
+              "MidAccLink",
+              "PostAccLink",
+              "DecDiv"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "CCardDef",
+            "columns": [
+              "CCardNo",
+              "MidAccLink",
+              "PostAccLink"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "IClassDef",
+            "columns": [
+              "ClsCode",
+              "TaxClass",
+              "STaxClass",
+              "SurChgCls"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TaxClassDef",
+            "columns": [
+              "TaxCode",
+              "PreAccLink"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "STaxDef",
+            "columns": [
+              "STaxCode",
+              "LinkCode"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "SurChgDef",
+            "columns": [
+              "SurChgCode",
+              "PreAccLink"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "RVCLinkCode",
+            "columns": [
+              "RVC",
+              "MealPeriod",
+              "LinkType",
+              "LinkItem",
+              "LinkCode"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              },
+              {
+                "column": "LinkType",
+                "op": "=",
+                "param": {
+                  "name": "linkType",
+                  "type": "int",
+                  "value": 0
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "DiscountDtl",
+            "columns": [
+              "RVC",
+              "MealPeriod",
+              "ClsCode",
+              "DscCode",
+              "LinkCode"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
                 }
               }
             ],
