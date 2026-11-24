@@ -22,6 +22,15 @@ pub use tds::{SmileTarget, TdsSmile, normalize_connection_string};
 use crate::folio::earn::EarnPair;
 use crate::wire::RoomTypeLine;
 
+/// `BackgroundRead.LockTimeoutMs` (RT-0756): the row-lock wait of every background read.
+/// A scan that waits behind a front-desk folio lock gives up after this and skips its tick,
+/// instead of holding the lock queue for up to the 30 s command timeout. No `NOLOCK`: a
+/// dirty read would make the occupancy fingerprint and the sold-room counts wrong.
+pub const BACKGROUND_LOCK_TIMEOUT_MS: i32 = 2_000;
+
+/// SQL Server 1222, "Lock request time out period exceeded".
+pub const LOCK_TIMEOUT_ERROR: i32 = 1222;
+
 /// The hotel's UTC offset (`HotelClock.Offset`): SMILE stores local wall-clock times.
 pub fn hotel_offset() -> Offset {
     Offset::VIETNAM
@@ -61,6 +70,12 @@ impl SmileError {
             SmileError::Server(n) => Some(*n),
             _ => None,
         }
+    }
+
+    /// `BackgroundRead.IsLockTimeout`: the read gave up on a row lock (SQL 1222). For a
+    /// background read this means "SMILE is busy, skip this tick", not a failure.
+    pub fn is_lock_timeout(&self) -> bool {
+        self.number() == Some(LOCK_TIMEOUT_ERROR)
     }
 
     /// Whether SMILE itself is down (as opposed to one statement failing).

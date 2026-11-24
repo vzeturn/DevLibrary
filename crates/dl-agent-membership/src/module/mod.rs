@@ -191,7 +191,8 @@ fn run_enrolled(ctx: &ModuleContext, cfg: AgentConfig, settings: &Settings) -> R
     let shared = Arc::new(Shared::default());
     let (health, probe, scan_src, write_smile): SmileHandles = match (
         TdsSmile::new(&cfg.smile_connection_string),
-        TdsSmile::new(&cfg.smile_connection_string),
+        // The scan thread only reads: its sessions carry the 2 s lock timeout (RT-0756).
+        TdsSmile::for_background_reads(&cfg.smile_connection_string),
     ) {
         (Ok(a), Ok(b)) => {
             let t = a.target();
@@ -364,7 +365,8 @@ fn checkout_pass(
     if !settings.checkout.enabled {
         return None;
     }
-    let smile = TdsSmile::new(&cfg.smile_connection_string).ok()?;
+    // The checkout scan only reads SMILE (earn goes to the hub): 2 s lock timeout (RT-0756).
+    let smile = TdsSmile::for_background_reads(&cfg.smile_connection_string).ok()?;
     Some(CheckoutPass {
         scanner: CheckoutScanner::new(
             settings.checkout.clone(),

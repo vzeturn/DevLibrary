@@ -24,6 +24,7 @@ All notable changes are listed here. The format follows
 
 ### Changed
 
+- dl-agent-membership background reads (availability, rooms, folio, checkout scans and the terms read) wait at most 2 s for a SMILE row lock (`SET LOCK_TIMEOUT 2000`, no `NOLOCK`); a read that gives up (SQL 1222) skips the tick with a warning instead of a `SCAN_FAILED` report, and writes keep `write_lock_timeout_ms`. The availability probe backs off 5 → 10 → 20 → 30 s while SMILE is idle (`availability_probe_idle_max_seconds`), back to 5 s on a change: the RT-0756 port of the .NET agent (RT-0771).
 - dl-agent: the e-invoice module writes invoice numbers back on arrival (MMEI RT-0785): a new `einvoice-writeback` worker thread long-polls the hub (`POST /api/v1/agent/poll?wait=10`, honoured when the answer carries `X-MMEI-Long-Poll`) and applies each batch at once instead of once per collect cycle, so a number reaches SMILE about a second after issuing. The collector no longer polls write-back itself; its cycle log reports the worker's counts plus `select_ms`, `push_ms` and `writeback_ms`. A hub without long-poll support is polled once per interval, as before; `device_replaced` stops the worker and the module.
 
 ### Added

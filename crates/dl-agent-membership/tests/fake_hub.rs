@@ -13,7 +13,7 @@ use dl_agent_membership::hub::gate::TokenGate;
 use dl_agent_membership::hub::{HubApi, HubClient};
 use dl_agent_membership::identity::Tracker;
 use dl_agent_membership::module::TOKEN_RETRY;
-use dl_agent_membership::module::scan::{ScanDeps, ScanLoop};
+use dl_agent_membership::module::scan::{LOCK_BUSY_SKIP, ScanDeps, ScanLoop};
 use dl_agent_membership::module::state::{PendingReport, Shared, codes};
 use dl_agent_membership::settings::Settings;
 use dl_agent_membership::sync::{SyncSettings, SyncWorker};
@@ -408,4 +408,80 @@ fn another_database_stops_the_scans_and_is_reported() {
     let before = r.hub.requests().len();
     r.scans().turn(Instant::now());
     assert_eq!(r.hub.requests().len(), before, "no scan posts while paused");
+}
+
+/// RT-0756: the availability probe slows down while SMILE stands still (5, 10, 20, 30 s and
+/// then the ceiling) and is back to 5 s on the tick after a change.
+#[test]
+fn the_availability_probe_backs_off_while_smile_is_idle() {
+    let r = rig();
+    r.sync(false).cycle(Instant::now());
+    let mut scans = r.scans();
+    let t0 = Instant::now();
+    scans.turn(t0);
+    let probes = || {
+        r.smile
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| **c == "probe_occupancy")
+            .count()
+    };
+    assert_eq!(probes(), 1);
+    // Unchanged probes: the next one is due after 5, 10, 20, 30, 30 s.
+    let mut at = t0;
+    for gap in [5, 10, 20, 30, 30] {
+        let before = probes();
+        scans.turn(at + Duration::from_secs(gap) - Duration::from_millis(500));
+        assert_eq!(probes(), before, "probed before the {gap} s gap ended");
+        at += Duration::from_secs(gap);
+        scans.turn(at);
+        assert_eq!(probes(), before + 1, "no probe after the {gap} s gap");
+    }
+    // A change is seen on the next probe and the pace is back to 5 s.
+    r.smile
+        .probe_salt
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    at += Duration::from_secs(30);
+    scans.turn(at);
+    let after_change = probes();
+    at += Duration::from_secs(5);
+    scans.turn(at);
+    assert_eq!(probes(), after_change + 1, "the pace did not reset to 5 s");
+}
+
+/// RT-0756: a read that gives up on a front-desk row lock (SQL 1222) skips the tick: no
+/// SCAN_FAILED report, no error counted, and the probe retries at the base pace.
+#[test]
+fn a_lock_busy_smile_skips_the_tick_without_an_error() {
+    let r = rig();
+    r.sync(false).cycle(Instant::now());
+    let mut scans = r.scans();
+    r.smile
+        .lock_busy
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let t0 = Instant::now();
+    let wait = scans.turn(t0);
+    assert!(wait <= Duration::from_secs(5), "retry waits {wait:?}");
+    assert!(
+        r.reports().is_empty(),
+        "1222 must not be reported as a failure"
+    );
+    let stats = r.shared.stats();
+    for scanner in ["availability", "rooms", "folio"] {
+        let s = &stats.scans[scanner];
+        assert_eq!(s.errors, 0, "{scanner}: {s:?}");
+    }
+    r.smile
+        .lock_busy
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    assert!(r.hub.to("/api/agent/availability").is_empty());
+    assert_eq!(r.shared.stats().scans["availability"].last, LOCK_BUSY_SKIP);
+    scans.turn(t0 + Duration::from_secs(5));
+    assert_eq!(
+        r.hub.to("/api/agent/availability").len(),
+        1,
+        "the probe did not catch up 5 s after the lock cleared"
+    );
 }

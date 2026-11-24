@@ -85,6 +85,8 @@ pub struct AvailabilityScanner {
     scans_since_full: i64,
     last_probe: Option<(Date, OccupancyFingerprint)>,
     last_scan_at: Option<Instant>,
+    /// Probes in a row that saw no change: feeds the adaptive pace (RT-0756).
+    idle_probes: u32,
 }
 
 impl AvailabilityScanner {
@@ -99,6 +101,7 @@ impl AvailabilityScanner {
             scans_since_full: 0,
             last_probe: None,
             last_scan_at: None,
+            idle_probes: 0,
         }
     }
 
@@ -133,13 +136,31 @@ impl AvailabilityScanner {
             .last_scan_at
             .is_none_or(|last| now.saturating_duration_since(last) >= self.settings.heartbeat);
         let probe = (today, fingerprint);
-        if !heartbeat_due && self.last_probe.as_ref() == Some(&probe) {
+        let changed = self.last_probe.as_ref() != Some(&probe);
+        // The pace follows real SMILE changes only; a heartbeat scan does not speed it up.
+        self.idle_probes = if changed {
+            0
+        } else {
+            self.idle_probes.saturating_add(1)
+        };
+        if !heartbeat_due && !changed {
             return Ok(TickOutcome::Unchanged);
         }
         let outcome = self.scan_once(src, hub, sync, tracker, today)?;
         self.last_probe = Some(probe);
         self.last_scan_at = Some(now);
         Ok(TickOutcome::Scanned(outcome))
+    }
+
+    /// The wait before the next probe (RT-0756): the probe interval while SMILE changes,
+    /// doubling per unchanged probe up to `probe_idle_max`.
+    pub fn next_probe_delay(&self) -> std::time::Duration {
+        self.settings.probe_delay_after_idle(self.idle_probes)
+    }
+
+    /// Back to the base pace: a skipped (lock-busy) tick catches up at once.
+    pub fn reset_pace(&mut self) {
+        self.idle_probes = 0;
     }
 
     /// `ScanOnceAsync`.
