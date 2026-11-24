@@ -1,7 +1,7 @@
 //! The agent runtime: boot and probation, supervisor ticks, heartbeat, remote config,
 //! commands, self-update and report delivery (PROTOCOL.md §3–§8).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use dl_hash::{Digest, Sha256};
@@ -146,6 +146,7 @@ pub struct Agent {
     sql: Site,
     host: Value,
     survey_sent: Option<(String, u64)>,
+    post_selftest: bool,
     hub_ok_at: u64,
     beat_at: u64,
     ignored_hub_urls: Vec<String>,
@@ -208,6 +209,7 @@ impl Agent {
             sql,
             host: crate::host::info(),
             survey_sent: None,
+            post_selftest: false,
             hub_ok_at: 0,
             beat_at: 0,
             ignored_hub_urls: Vec::new(),
@@ -528,6 +530,8 @@ impl Agent {
             self.hub_ok_at = now;
             self.put_beat(now); // tell the watchdog at once
         }
+        // After the beat: the self-test reads it to see that the service reached the hub.
+        self.post_install_selftest();
         if let Some((_, hash)) = survey {
             self.survey_sent = Some((hash, now));
         }
@@ -762,28 +766,6 @@ pub fn set_log_level(name: &str) -> bool {
     }
 }
 
-/// The last `lines` lines of the newest file in `dir`.
-pub fn log_tail(dir: &Path, lines: usize) -> Vec<String> {
-    let newest = std::fs::read_dir(dir).ok().and_then(|rd| {
-        rd.filter_map(Result::ok)
-            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
-            .filter(|(_, p)| p.is_file())
-            .max()
-            .map(|(_, p)| p)
-    });
-    let Some(path) = newest else {
-        return Vec::new();
-    };
-    let text = std::fs::read(&path)
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
-        .unwrap_or_default();
-    let all: Vec<&str> = text.lines().collect();
-    all[all.len().saturating_sub(lines)..]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
-}
-
 #[path = "agent_status.rs"]
 mod status;
 pub use status::local_status;
@@ -794,9 +776,12 @@ mod update_flow;
 #[path = "agent_hub.rs"]
 mod hub_list;
 
+#[path = "agent_post_install.rs"]
+mod post_install_run;
+
 #[path = "agent_diag.rs"]
 mod diag;
-pub use diag::{diagnostic_file_allowed, diagnostic_folder_allowed};
+pub use diag::{diagnostic_file_allowed, diagnostic_folder_allowed, log_tail};
 
 #[cfg(test)]
 #[path = "agent_tests.rs"]
@@ -809,3 +794,7 @@ mod lane_tests;
 #[cfg(test)]
 #[path = "agent_rollback_tests.rs"]
 mod rollback_tests;
+
+#[cfg(test)]
+#[path = "agent_post_install_tests.rs"]
+mod post_install_tests;

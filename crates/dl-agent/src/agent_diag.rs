@@ -330,3 +330,25 @@ impl Agent {
 #[cfg(test)]
 #[path = "agent_diag_tests.rs"]
 mod tests;
+
+/// The last `lines` lines of the newest file in `dir`.
+pub fn log_tail(dir: &Path, lines: usize) -> Vec<String> {
+    let newest = std::fs::read_dir(dir).ok().and_then(|rd| {
+        rd.filter_map(Result::ok)
+            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+            .filter(|(_, p)| p.is_file())
+            .max()
+            .map(|(_, p)| p)
+    });
+    let Some(path) = newest else {
+        return Vec::new();
+    };
+    let text = std::fs::read(&path)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(lines)..]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}

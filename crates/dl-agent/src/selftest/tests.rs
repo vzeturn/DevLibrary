@@ -105,7 +105,12 @@ fn run_body_stays_under_the_hub_caps() {
 
 #[test]
 fn trigger_names_round_trip() {
-    for t in [Trigger::Cli, Trigger::Command, Trigger::Install] {
+    for t in [
+        Trigger::Cli,
+        Trigger::Command,
+        Trigger::Install,
+        Trigger::Update,
+    ] {
         assert_eq!(Trigger::parse(t.as_str()), Some(t));
     }
     assert_eq!(Trigger::parse("cron"), None);
@@ -570,4 +575,18 @@ fn the_database_check_names_sign_in_tds_tls_level_instance_and_port() {
         "; sign-in NTLM, TDS 7.3B, encryption login_only, instance SMILE, port 49172"
     );
     assert_eq!(checks_core::signed_in(&json!({})), "");
+}
+
+#[test]
+fn upload_outcome_marks_only_runs_that_reached_the_hub() {
+    use super::execute::upload_outcome;
+    let r = run(Vec::new());
+    assert!(upload_outcome(&r, &Ok(true)).0);
+    assert!(upload_outcome(&r, &Ok(false)).0);
+    assert!(!upload_outcome(&r, &Err(crate::Error::NotEnrolled)).0);
+    let down = crate::Error::Status {
+        code: 503,
+        body: String::new(),
+    };
+    assert!(!upload_outcome(&r, &Err(down)).0);
 }
