@@ -35,6 +35,21 @@ CAST(CHECKSUM(OBJECT_DEFINITION(o.object_id)) AS nvarchar(20)) AS h \
 FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id \
 WHERE o.is_ms_shipped = 0 AND o.type IN ('P','V','FN','IF','TF','TR')";
 
+/// Indexes from the catalog only (`sys.indexes`, key columns in key order, then the
+/// included columns): no table or index is read.
+pub const INDEXES_SQL: &str = "SELECT s.name AS s, t.name AS n, i.name AS i, \
+CAST(i.type AS nvarchar(5)) AS ty, CAST(i.is_unique AS nvarchar(5)) AS u, \
+CAST(i.is_primary_key AS nvarchar(5)) AS pk, CAST(i.is_disabled AS nvarchar(5)) AS d, \
+STUFF((SELECT ',' + c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE '' END \
+FROM sys.index_columns ic JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id \
+WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0 \
+ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 1, '') AS k, \
+STUFF((SELECT ',' + c.name FROM sys.index_columns ic JOIN sys.columns c ON c.object_id = ic.object_id \
+AND c.column_id = ic.column_id WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id \
+AND ic.is_included_column = 1 ORDER BY c.column_id FOR XML PATH('')), 1, 1, '') AS inc \
+FROM sys.indexes i JOIN sys.tables t ON t.object_id = i.object_id JOIN sys.schemas s ON s.schema_id = t.schema_id \
+WHERE t.is_ms_shipped = 0 AND i.index_id > 0 AND i.is_hypothetical = 0";
+
 /// What `sql.inventory` was asked for.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum Checksum {
@@ -131,6 +146,8 @@ pub enum Section {
     Tables,
     /// Procedures, views, functions and triggers.
     Modules,
+    /// Indexes (catalog only), keyed `schema.table.index`.
+    Indexes,
 }
 
 /// Largest `limit` one call accepts.
@@ -148,7 +165,12 @@ impl Page {
             Some(v) => match v.as_str() {
                 Some("tables") => Some(Section::Tables),
                 Some("modules") => Some(Section::Modules),
-                _ => return Err(bad("section must be \"tables\" or \"modules\"")),
+                Some("indexes") => Some(Section::Indexes),
+                _ => {
+                    return Err(bad(
+                        "section must be \"tables\", \"modules\" or \"indexes\"",
+                    ));
+                }
             },
         };
         let after = match args.get("after") {
@@ -177,7 +199,11 @@ impl Page {
     }
 
     fn wants(&self, s: Section) -> bool {
-        self.section.is_none_or(|x| x == s)
+        // Indexes are a section of their own: the default listing stays what it was.
+        match self.section {
+            None => s != Section::Indexes,
+            Some(x) => x == s,
+        }
     }
 
     /// Sorted entries of one section that fall in the page, and the key to continue from.
@@ -265,6 +291,28 @@ pub fn inventory(
         }
         out.insert("modules", Value::Object(in_page.into_iter().collect()));
     }
+    if page.section == Some(Section::Indexes) {
+        let mut idx = Vec::new();
+        for row in conn.query_json(INDEXES_SQL, &[])? {
+            let (Some(s), Some(n), Some(i)) = (text(&row, "s"), text(&row, "n"), text(&row, "i"))
+            else {
+                continue;
+            };
+            let flag = |k: &str| text(&row, k) == Some("1");
+            idx.push((
+                format!("{s}.{n}.{i}"),
+                json!({
+                    "type": num(&row, "ty").unwrap_or(0),
+                    "unique": flag("u"), "primary_key": flag("pk"), "disabled": flag("d"),
+                    "keys": text(&row, "k").unwrap_or(""),
+                    "included": text(&row, "inc").unwrap_or(""),
+                }),
+            ));
+        }
+        let (in_page, more) = page.cut(idx);
+        next = more;
+        out.insert("indexes", Value::Object(in_page.into_iter().collect()));
+    }
     let missing: Vec<Value> = asked.into_iter().map(Value::from).collect();
     out.insert(
         "totals",
@@ -339,7 +387,7 @@ mod tests {
         }
         fn query_json(&mut self, sql: &str, _: &[(&str, &str)]) -> Result<Vec<Value>, Error> {
             self.queries.push(sql.to_string());
-            if sql.starts_with("SELECT s.name AS s, t.name") {
+            if sql.contains("FROM sys.tables t JOIN") {
                 return Ok(vec![
                     json!({"s": "dbo", "n": "HoaDon", "r": "120", "c": "5", "h": "-77"}),
                     json!({"s": "dbo", "n": "Big]Log", "r": "9000000", "c": "3", "h": "4"}),
@@ -349,6 +397,12 @@ mod tests {
                 return Ok(vec![
                     json!({"s": "dbo", "n": "usp_GetBill", "t": "P", "h": "123"}),
                     json!({"s": "dbo", "n": "v_Secret", "t": "V", "h": null}),
+                ]);
+            }
+            if sql.contains("FROM sys.indexes i") {
+                return Ok(vec![
+                    json!({"s": "dbo", "n": "Folio", "i": "IX_Folio_Date", "ty": "2", "u": "0", "pk": "0", "d": "0", "k": "ArrivalDate,Id DESC", "inc": "Status"}),
+                    json!({"s": "dbo", "n": "Folio", "i": "PK_Folio", "ty": "1", "u": "1", "pk": "1", "d": "0", "k": "Id", "inc": null}),
                 ]);
             }
             if sql.contains("FROM [dbo].[HoaDon]") {
@@ -420,6 +474,27 @@ mod tests {
         assert!(v.get("tables").is_none());
         assert_eq!(v["modules"].as_object().map(|m| m.len()), Some(2));
         assert!(v.get("next").is_none());
+    }
+
+    #[test]
+    fn indexes_section_lists_keys_from_the_catalog_only() {
+        let mut c = Cat { queries: vec![] };
+        let p = Page::from_args(&json!({"section": "indexes"})).unwrap();
+        let v = inventory(&mut c, &Checksum::None, &p).unwrap();
+        let ix = &v["indexes"]["dbo.Folio.IX_Folio_Date"];
+        assert_eq!(ix["keys"].as_str(), Some("ArrivalDate,Id DESC"));
+        assert_eq!(ix["included"].as_str(), Some("Status"));
+        assert_eq!(ix["unique"].as_bool(), Some(false));
+        assert_eq!(
+            v["indexes"]["dbo.Folio.PK_Folio"]["primary_key"].as_bool(),
+            Some(true)
+        );
+        assert!(v.get("tables").is_none());
+        // the default listing does not carry indexes (and does not query them)
+        let mut c = Cat { queries: vec![] };
+        let v = inventory(&mut c, &Checksum::None, &Page::default()).unwrap();
+        assert!(v.get("indexes").is_none());
+        assert!(!c.queries.iter().any(|q| q.contains("sys.indexes")));
     }
 
     #[test]

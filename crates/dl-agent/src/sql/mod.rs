@@ -15,11 +15,13 @@
 //! Passwords are kept sealed beside the string and `auth` names the login mode
 //! ([`secret`]); `sql-setup` ([`setup`]) writes such entries after testing them.
 
+pub mod aggregate;
 pub mod bundle;
 pub mod install;
 pub mod inventory;
 pub mod inventory_ranges;
 pub mod module;
+pub mod perf;
 pub mod pool;
 pub mod probe;
 pub mod secret;

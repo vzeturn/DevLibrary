@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent `sql.aggregate` (fixed allow-list: `distinct`, `count_by`, `sign_sum`, `daily_total`; any other query refused), `sql.perf` (own-session DMV counters and blocked requests) and `sql.inventory {section: "indexes"}` (catalog only), so a site can be measured without free SQL (PROTOCOL §9.9, RT-1001).
 - dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash e8cedaf9...) with the POS outbox ops `pos.outbox.claim@1`, `pos.outbox.complete@1` and `pos.outbox.source@1` (RT-0914, RT-0889); the site script `smile_pos_outbox.sql` still has to be installed on the site.
 - dl-agent-pms embeds the SMILE-PMS manifest with four POS ops (`pos.cashier.byInitial@1`, `pos.cashier.login@1`, `pos.clerk.permissions@1`, `pos.outlets.list@1`), so POS PIN login works on agent tenants (RT-0907, SMILE-PMS RT-0810).
 - dl-agent `sql.inventory {ranges, by_year?}`: min/max/count (and per-year counts) of every date column of up to 20 named tables, so the date span of a site's data can be checked without exporting rows (PROTOCOL §9.8, RT-0878).

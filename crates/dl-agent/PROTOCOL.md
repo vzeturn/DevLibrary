@@ -523,7 +523,8 @@ The agent is the one bridge between hub-side projects and the site's SQL Server 
   `sql.survey {database?}` → `{"host":…,"databases":{"<name>":survey}}` (re-runs it now);
   `sql.probe {requirement, database?}` → `{"<name>":probe}` (§9.6);
   `sql.install {bundle, database?, dry_run?, force?}` → `{"<name>":install}` (§9.7);
-  `sql.inventory {database?, checksum?, section?, after?, limit?, ranges?, by_year?}` → `{"<name>":inventory}` (§9.8). There is
+  `sql.inventory {database?, checksum?, section?, after?, limit?, ranges?, by_year?}` → `{"<name>":inventory}` (§9.8);
+  `sql.aggregate {query, table, …}` and `sql.perf` (§9.9). There is
   deliberately no command that runs arbitrary SQL sent by the hub: a bundle must carry a
   release signature, and projects otherwise reach their databases through their own modules.
 
@@ -676,9 +677,12 @@ object names only, never a row.
   "modules": {"dbo.p": {…}}, "checksum_missing": []}`.
 - **Paging**: a full answer for a large database does not fit one result (60,000 bytes), so
   an answer over that limit fails whole with `inventory_too_large` instead of arriving cut.
-  `section` (`"tables"` or `"modules"`) lists only that part; `limit` (1–1000) and `after`
+  `section` (`"tables"`, `"modules"` or `"indexes"`) lists only that part; `limit` (1–1000) and `after`
   (a key) page it in key order, and `next` is the `after` for the following page while more
   remain. Only tables in the page are checksummed; `totals` always cover the whole database.
+- **Indexes** (`section: "indexes"`, never part of the default answer): per `schema.table.index`
+  `type` (`sys.indexes.type`), `unique`, `primary_key`, `disabled`, `keys` (comma list in key
+  order, ` DESC` marks a descending key) and `included`; catalog only, no index is read.
 - **`ranges`**: a list of 1–20 `schema.table` names replaces the inventory with the date span
   of those tables: for every date-typed column (`date`, `datetime`, `datetime2`,
   `smalldatetime`, `datetimeoffset`) its `min` and `max` (`yyyy-mm-dd`) and `count` of
@@ -687,3 +691,28 @@ object names only, never a row.
   (tables not found or without a date column). Aggregates of date columns only, so the
   span of a site's bookings can be checked without reading a guest row; a failed column
   read only marks that column (`error` / `years_error`).
+### 9.9 Aggregate and performance measures
+
+So a site can be measured without anyone typing SQL, two read-only commands answer per
+database (`{"<name>":{"ok":true,…}}`; a refusal is `{"ok":false,"code","error"}`).
+
+- **`sql.aggregate {database?, query, table, …}`** runs one query of a fixed allow-list that
+  is compiled into the agent (so it is covered by the release signature of the build): any
+  other `query` is refused with `aggregate: query … is not in the allow-list` and no SQL
+  runs; `{"list": true}` lists the allow-list. The table and columns are matched against the
+  catalog and quoted from its spelling, dates are bound as parameters. Answer
+  `{"query","table","rows":[…]}`, at most 400 groups (more is refused, never cut); a group of fewer than 5 rows is left out
+  of every answer, so no single row or amount can be read back (a quiet day is missing from
+  `daily_total`). `amount_column` must be `decimal`, `numeric`, `money`, `smallmoney`, `float` or `real`.
+  - `distinct {column}` → `[{v, n}]` distinct values of a code column with their counts
+    (e.g. `CashierShift.ShiftStatus`). Code columns are integer/bit types or `char`/`varchar`/
+    `nchar`/`nvarchar` of at most 40 bytes, so a name or address column is refused.
+  - `count_by {columns: [1–3 code columns]}` → `[{c0, c1, …, n}]`.
+  - `sign_sum {type_column, amount_column}` → per type `sign` (`SIGN(SUM(amount))`),
+    `negative`/`positive` row counts and `n`.
+  - `daily_total {date_column, amount_column, from?, to?}` → per day
+    (`yyyy-mm-dd`; never split by another column, so two answers cannot be subtracted to isolate a row) `total` and `n`: the numbers of a Z report.
+- **`sql.perf {database?}`** reads DMVs for the agent's own sessions (program name `dl-agent`): `sessions` (`logical_reads`, `physical_reads`, `cpu_ms`,
+  `elapsed_ms`) and `blocked` (requests blocked by another session: ids, wait type and
+  time). No SQL text. A refused DMV (`VIEW SERVER STATE`) only marks that part `ok: false`.
+
