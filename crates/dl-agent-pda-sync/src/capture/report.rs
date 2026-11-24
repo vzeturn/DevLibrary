@@ -45,6 +45,11 @@ pub struct CaptureReport {
     pub unstable_checks_deferred: i32,
     /// Duplicate keys seen.
     pub duplicate_keys: i32,
+    /// Open-check rows read from the vendor database this pass (full read, or only the
+    /// changed checks).
+    pub open_rows_read: i32,
+    /// The open-check pass read everything instead of only the changed checks.
+    pub open_full_read: bool,
     /// Store-wide rows (NULL key defaulted, ADR 0106) not sent because an explicit row of
     /// the same key wins.
     pub null_keys_shadowed: i32,
@@ -88,6 +93,8 @@ impl CaptureReport {
         self.echoes_suppressed += other.echoes_suppressed;
         self.unstable_checks_deferred += other.unstable_checks_deferred;
         self.duplicate_keys += other.duplicate_keys;
+        self.open_rows_read += other.open_rows_read;
+        self.open_full_read |= other.open_full_read;
         self.null_keys_shadowed += other.null_keys_shadowed;
         for t in &other.missing_tables {
             self.table_missing(t);

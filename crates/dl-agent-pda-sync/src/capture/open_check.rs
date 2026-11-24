@@ -3,8 +3,14 @@
 //! the shadow. A changed check is re-read until two consecutive reads agree (NOLOCK can
 //! see half-written checks). A check missing for several polls is tombstoned with the
 //! reason found in Invoice (closed) or InvoiceCxl/VoidTrn (void).
+//!
+//! Two-phase detection (RT-0759, ADR 0153): between full reads, phase 1 reads one tiny
+//! signature row per check and table, and phase 2 reads only the checks whose signature
+//! moved (or that are new). A full read runs every `open_full_read_every` cycles, when the
+//! source has no signatures, and after a reset.
 
 use std::collections::HashSet;
+use std::sync::PoisonError;
 
 use dl_hash::{Digest, Sha256};
 
@@ -14,7 +20,7 @@ use super::error::{CaptureError, ErrorKind, Result};
 use super::pipeline::{self, CapturedRow, ChangeSet, TombChange};
 use super::plan::PlanTable;
 use super::report::CaptureReport;
-use super::source::{SourceQuery, value_or_null};
+use super::source::{CheckSignature, SourceQuery, value_or_null};
 use super::state::{Shadow, ShadowEntry, ShadowWrite, StateCommit};
 use super::util::{DotNetDict, invariant_string};
 use crate::contracts::hashing::ordinal_cmp;
@@ -95,6 +101,22 @@ fn save_misses(misses: &DotNetDict<i32>) -> String {
     w.finish()
 }
 
+/// The per-check signatures of the last committed cycle and the cycles since the last
+/// full read (`_lastSignatures`, `_cyclesSinceFull`). `last: None` makes the next cycle a
+/// full read.
+#[derive(Debug, Default)]
+pub struct SignatureMemory {
+    last: Option<DotNetDict<String>>,
+    cycles_since_full: i32,
+}
+
+impl SignatureMemory {
+    /// `ForgetSignatures`: the next cycle reads everything (state was reset, ADR 0102).
+    pub fn forget(&mut self) {
+        self.last = None;
+    }
+}
+
 /// The open-check strategy.
 pub struct OpenCheckCapture<'a> {
     cx: &'a CaptureContext,
@@ -121,29 +143,117 @@ impl<'a> OpenCheckCapture<'a> {
             return Ok(report);
         }
 
-        let current = self.read(&tables, None, &mut report, ctx)?;
+        let signatures = self.signatures(&tables, ctx)?;
+        let mut memory = self
+            .cx
+            .open_signatures
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let full = signatures.is_none() || memory.last.is_none() || {
+            memory.cycles_since_full += 1;
+            memory.cycles_since_full >= self.cx.options.open_full_read_every
+        };
+        report.open_full_read = full;
         let shadow = self.cx.state.get_shadow(OPEN_TABLE, None, ctx)?;
 
-        let mut accepted: Vec<CheckState> = Vec::new();
-        for (_, check) in current.iter() {
-            if shadow.get(&check.key) == Some(check.hash.as_str()) {
-                continue;
+        let changed = |c: &CheckState| shadow.get(&c.key) != Some(c.hash.as_str());
+        let mut candidates: Vec<CheckState> = Vec::new();
+        let present: Vec<String>;
+        if let (false, Some(sigs), Some(last)) = (full, &signatures, &memory.last) {
+            // Phase 2 reads only the checks whose phase-1 signature moved (or that are new).
+            present = sigs.keys().map(str::to_owned).collect();
+            for (key, sig) in sigs.iter() {
+                if last.get(key) == Some(&sig.signature) {
+                    continue;
+                }
+                let mut one = self.read(&tables, Some(&sig.value), &mut report, ctx)?;
+                if let Some(check) = one.take(key)
+                    && changed(&check)
+                {
+                    candidates.push(check);
+                }
             }
+        } else {
+            let mut current = self.read(&tables, None, &mut report, ctx)?;
+            present = current.keys().map(str::to_owned).collect();
+            for key in &present {
+                if let Some(check) = current.take(key)
+                    && changed(&check)
+                {
+                    candidates.push(check);
+                }
+            }
+            memory.cycles_since_full = 0;
+        }
+
+        let mut accepted: Vec<CheckState> = Vec::new();
+        let mut deferred: HashSet<String> = HashSet::new();
+        for check in &candidates {
             match self.stabilize(&tables, check, &mut report, ctx)? {
                 Some(stable) => accepted.push(stable),
-                None => report.unstable_checks_deferred += 1,
+                None => {
+                    report.unstable_checks_deferred += 1;
+                    deferred.insert(check.key.clone());
+                }
             }
         }
 
+        let present_set: HashSet<&str> = present.iter().map(String::as_str).collect();
         let missing: Vec<String> = shadow
             .keys()
-            .filter(|k| !current.contains_key(k))
+            .filter(|k| !present_set.contains(k))
             .map(str::to_owned)
             .collect();
-        let present: Vec<&str> = current.keys().collect();
+        let present: Vec<&str> = present.iter().map(String::as_str).collect();
         let vanished = self.vanished(&missing, &present, ctx)?;
         self.emit(&tables, &accepted, &vanished, &mut report, ctx)?;
+
+        // Remembered only after the cycle committed; a deferred check keeps no signature so
+        // it is read again next cycle.
+        memory.last = signatures.map(|sigs| {
+            let mut kept = DotNetDict::new();
+            for (key, sig) in sigs.iter() {
+                if !deferred.contains(key) {
+                    kept.insert(key, sig.signature.clone());
+                }
+            }
+            kept
+        });
         Ok(report)
+    }
+
+    /// Phase 1: one aggregate row per check and table, merged per check as
+    /// `{table}={signature};` in plan order. `None` (so a full read) when two-phase
+    /// detection is disabled or any table's source cannot produce signatures.
+    fn signatures(
+        &self,
+        tables: &[&PlanTable],
+        ctx: &Ctx,
+    ) -> Result<Option<DotNetDict<CheckSignature>>> {
+        if self.cx.options.open_full_read_every <= 1 {
+            return Ok(None);
+        }
+        let mut merged: DotNetDict<CheckSignature> = DotNetDict::new();
+        for p in tables {
+            let col = p.check_column.as_deref().unwrap_or("CheckNo");
+            let Some(per) = self.cx.source.check_signatures(p.name(), col, ctx)? else {
+                return Ok(None);
+            };
+            for (key, sig) in per.iter() {
+                let part = format!("{}={};", p.name(), sig.signature);
+                match merged.get_mut(key) {
+                    Some(m) => m.signature.push_str(&part),
+                    None => merged.insert(
+                        key,
+                        CheckSignature {
+                            value: sig.value.clone(),
+                            signature: part,
+                        },
+                    ),
+                }
+            }
+        }
+        Ok(Some(merged))
     }
 
     fn read(
@@ -161,6 +271,7 @@ impl<'a> OpenCheckCapture<'a> {
                 q.where_ = Some(vec![(col.to_owned(), v.clone())]);
             }
             let raw = self.cx.source.query(&q, ctx)?;
+            report.open_rows_read += i32::try_from(raw.len()).unwrap_or(i32::MAX);
             for mut row in pipeline::capture(&self.cx.mapper, p, raw, report)? {
                 let value = value_or_null(&row.raw, col);
                 let Some(key) = invariant_string(&value) else {

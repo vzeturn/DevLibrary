@@ -41,6 +41,11 @@ pub struct CaptureOptions {
     pub tail_rescan_rows: i32,
     /// Re-reads of an open check whose rows changed under a NOLOCK read before it is deferred (3).
     pub stable_read_retries: i32,
+    /// Open-check cycles between full reads (30). Between them only checks whose
+    /// server-side signature changed are read (two-phase detection, ADR 0153); a full read
+    /// re-verifies everything, so a signature collision heals within this many cycles.
+    /// 1 disables two-phase detection (every cycle reads everything).
+    pub open_full_read_every: i32,
     /// Polls an open check must be missing before it is tombstoned (2).
     pub vanish_confirm_polls: i32,
     /// Snapshot window in months (24).
@@ -77,6 +82,7 @@ impl CaptureOptions {
             rescan_days: 3,
             tail_rescan_rows: 2000,
             stable_read_retries: 3,
+            open_full_read_every: 30,
             vanish_confirm_polls: 2,
             snapshot_window_months: 24,
             log_snapshot_window_months: 6,

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use super::codecs::{key_codec, value_codec};
 use super::error::Result;
+use super::open_check::SignatureMemory;
 use super::options::CaptureOptions;
 use super::pipeline::{self, CapturedRow, ChangeSet};
 use super::plan::PlanTable;
@@ -45,6 +46,9 @@ pub struct CaptureContext {
     pub src_ver: SrcVerClock,
     /// Table existence cache (upper-cased name).
     exists: Mutex<HashMap<String, bool>>,
+    /// What the open-check strategy remembers between cycles (ADR 0153); shared by the
+    /// engine's cycles and the snapshot, like the one C# `OpenCheckCapture` instance.
+    pub open_signatures: Mutex<SignatureMemory>,
 }
 
 impl std::fmt::Debug for CaptureContext {
@@ -77,6 +81,7 @@ impl CaptureContext {
             echo,
             clock,
             exists: Mutex::new(HashMap::new()),
+            open_signatures: Mutex::new(SignatureMemory::default()),
         }
     }
 

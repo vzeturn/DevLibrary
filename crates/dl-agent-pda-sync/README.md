@@ -7,7 +7,11 @@ and diagnostics; this crate brings everything that reads or writes `SMILE_POS`.
 
 - **Capture** (`capture`): SELECT-only reads of `SMILE_POS` as the `pda_sync` login: open
   checks every 2 s, masters every 120 s, the closed ledger by keyset, shadow hashes in
-  `capture.db`, batches into `outbox.db` (ADR 0016).
+  `capture.db`, batches into `outbox.db` (ADR 0016). Open checks are read in two phases
+  (PDAOrder ADR 0153, RT-0759): one `COUNT_BIG`/`CHECKSUM_AGG`/`SUM(BINARY_CHECKSUM)` row
+  per check and table, then only the checks whose signature moved; every 30th cycle
+  (`open_full_read_every`, 1 disables it), after a reset and on a source without
+  signatures the whole open set is read.
 - **Upload** (`outbox`): signed batches, blobs and the 15 s heartbeat to the PDA cloud,
   parent-pending parking (HTTP 424) and resnapshots (ADR 0102/0109).
 - **Commands** (`commands`): the cloud's site commands (KDS, reservations, order verbs,
