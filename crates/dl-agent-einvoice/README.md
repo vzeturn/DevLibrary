@@ -40,6 +40,10 @@ A site whose SP predates RT-0784 keeps the single combined call (mode 0); the SP
 changes at enrolment. An edit-detection failure keeps the never-sent keys and is reported
 as a SQL failure of the cycle. Port of MM-EINVOICE `internal/agentcollector/collectsource_pending.go`.
 
+The FO trn-types catalog (`sp_ListTrnTypes` + publish) and `sp_ProbeFOSchema` (which scans
+`FolioTransaction` only for a diagnostic log line) run on the first cycle and then at most
+once every 6 hours (MMEI RT-0758), not every cycle.
+
 `tests/golden_drift.rs` fails when `testdata/golden.json` differs from MM-EINVOICE's copy
 and `$MMEI_REPO` points at that checkout (skipped otherwise).
 

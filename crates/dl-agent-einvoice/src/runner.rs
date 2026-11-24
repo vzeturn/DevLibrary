@@ -160,9 +160,27 @@ pub struct Runner {
     writeback_worker: bool,
     /// What the write-back worker did since the last cycle.
     writeback_pending: CycleResult,
+    /// When the FO catalog + schema probe last ran (None = never): startup, then
+    /// every `CATALOG_EVERY` (RT-0758; the probe scans FolioTransaction).
+    catalog_at: Option<Instant>,
 }
 
 const CONFIG_STALE_ESCALATE_AFTER: u32 = 5;
+
+/// Gap between two FO catalog (trn-types) / schema-probe runs after the first.
+const CATALOG_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// True when the FO catalog and schema probe should run at `now`; records the
+/// attempt in `last` so a failing probe is not retried every cycle either.
+fn catalog_due(last: &mut Option<Instant>, now: Instant) -> bool {
+    if let Some(at) = *last
+        && now.saturating_duration_since(at) < CATALOG_EVERY
+    {
+        return false;
+    }
+    *last = Some(now);
+    true
+}
 
 impl Runner {
     /// `NewRunner`.
@@ -177,6 +195,7 @@ impl Runner {
             writeback_ensured: false,
             writeback_worker: false,
             writeback_pending: CycleResult::default(),
+            catalog_at: None,
         }
     }
 
@@ -299,7 +318,7 @@ impl Runner {
             );
             res.sql_errors.push(e);
         }
-        if fo_ok {
+        if fo_ok && catalog_due(&mut self.catalog_at, Instant::now()) {
             match self.sql.list_trn_types(timeout) {
                 Err(e) => {
                     log::error("read: list trn-types failed", &[("error", V::S(&e))]);
@@ -777,6 +796,23 @@ mod tests {
         let v = heartbeat_version();
         assert_eq!(v, format!("dl-agent-{}", dl_agent::agent_version()));
         assert!(!v.contains("rust-"));
+    }
+
+    #[test]
+    fn catalog_runs_at_startup_then_every_six_hours() {
+        let t0 = Instant::now();
+        let mut last = None;
+        assert!(catalog_due(&mut last, t0), "first cycle runs the catalog");
+        assert!(!catalog_due(&mut last, t0 + Duration::from_secs(30)));
+        assert!(!catalog_due(
+            &mut last,
+            t0 + CATALOG_EVERY - Duration::from_secs(1)
+        ));
+        assert!(catalog_due(&mut last, t0 + CATALOG_EVERY));
+        assert!(!catalog_due(
+            &mut last,
+            t0 + CATALOG_EVERY + Duration::from_secs(30)
+        ));
     }
 
     #[test]
