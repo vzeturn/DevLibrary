@@ -56,8 +56,13 @@ pub fn apportion(total: i64, weights: &[i64]) -> Result<Vec<i64>, String> {
     Ok(shares)
 }
 
-/// The legal VAT percent {0,5,8,10} from a row's raw |tax|/|net| ratio, with the 1 VND
-/// lower-edge margin of the Go rule. Out-of-band ratios are errors.
+/// Largest VAT rounding step seen at a source (VND), mirrored from the Go agent.
+const FO_VAT_STEP_VND: i64 = 50;
+/// Smallest base (VND) the wider 50-VND margin applies to.
+const FO_VAT_STEP_MIN_BASE: i64 = 20000;
+
+/// The legal VAT percent {0,5,8,10} from a row's raw |tax|/|net| ratio, with the lower-edge margin of the Go rule
+/// (1 VND, or 50 VND on a base of at least 20000 VND). Out-of-band ratios are errors.
 pub fn derive_legal_rate(base_sub: i64, base_tax: i64) -> Result<i64, String> {
     let an = abs64(base_sub);
     let at = abs64(base_tax);
@@ -70,9 +75,18 @@ pub fn derive_legal_rate(base_sub: i64, base_tax: i64) -> Result<i64, String> {
     if at.wrapping_mul(1000) < an {
         return Ok(0);
     }
-    const ROUND_VND: i64 = 100;
+    // 1 VND, scaled by the x100 in the lower-bound compare. Some SMILE FO sites
+    // round the stored VAT down to a 50-VND step (RT-1002, e.g. 8% of 162050 =
+    // 12964 stored as 12950). On a base of at least 20000 VND, 50 VND is under
+    // 0.25% of the base, far below the gap to the neighbouring rate, so the wider
+    // floor cannot turn one rate into another. Small bases keep the 1-VND margin.
+    let round_vnd: i64 = if an >= FO_VAT_STEP_MIN_BASE {
+        FO_VAT_STEP_VND * 100
+    } else {
+        100
+    };
     for r in [5i64, 8, 10] {
-        let lo = (100i64.wrapping_mul(at)).wrapping_add(ROUND_VND) >= r.wrapping_mul(an);
+        let lo = (100i64.wrapping_mul(at)).wrapping_add(round_vnd) >= r.wrapping_mul(an);
         let hi = 10000i64.wrapping_mul(at) <= r.wrapping_mul(an).wrapping_mul(115);
         if lo && hi {
             return Ok(r);
@@ -171,6 +185,13 @@ mod tests {
         assert_eq!(derive_legal_rate(100, 0).unwrap(), 0);
         assert!(derive_legal_rate(100, 30).is_err());
         assert!(derive_legal_rate(0, 1).is_err());
+        // RT-1002: VAT rounded down to a 50-VND step on a large enough base.
+        assert_eq!(derive_legal_rate(162050, 12950).unwrap(), 8);
+        assert_eq!(derive_legal_rate(-162050, -12950).unwrap(), 8);
+        // A small base keeps the 1-VND margin: 50 VND short is out of band.
+        assert!(derive_legal_rate(10000, 750).is_err());
+        // Still 1 VND short is accepted at any base.
+        assert_eq!(derive_legal_rate(10012, 800).unwrap(), 8);
     }
 
     #[test]

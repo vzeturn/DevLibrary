@@ -22,6 +22,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent-einvoice accepts FO VAT rounded down to a 50-VND step on a base of at least 20,000 VND (port of MMEI RT-1002): such bills were rejected as "VAT ratio not in legal band" and never reached the portal (RT-1017, 2,109 hits on the SR demo). Golden vectors refreshed from MM-EINVOICE.
 - agent-hub accepts `update.state = "deferred"` (dl-agent <= 1.3.32 sent it while an update waited for its window and every heartbeat got a 400), and dl-agent now reports a deferred update as `idle` with the reason in `update.detail`; an agent that boots on a version it once rolled back reports `idle`, not `rolled_back` of itself, so the canary gate's `no_rollback` is not misread (RT-0818).
 
 ### Changed
