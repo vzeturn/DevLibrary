@@ -69,6 +69,7 @@ fn request(
         base_etag: base_etag.map(str::to_string),
         idempotency_key: key.map(str::to_string),
         projection: None,
+        ..PmsRequest::default()
     }
 }
 

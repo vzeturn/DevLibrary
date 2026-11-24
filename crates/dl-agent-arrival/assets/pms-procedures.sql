@@ -604,17 +604,24 @@ BEGIN
     ELSE
         SET @SConfirmNum = CASE WHEN ISNUMERIC(@TrimmedConfirmNum) = 1 THEN CAST(@TrimmedConfirmNum AS DECIMAL(18,0)) END;
 
+    -- Every folio the typed value points at, found in ONE read of Folio: the confirmation number or the
+    -- external (OTA) reference. The reference match wraps the column in UPPER/LTRIM/RTRIM so it cannot
+    -- seek; with a ConfirmNum index the optimizer may still seek that half, without one this is a single
+    -- scan. (Before, the same predicate was repeated in four statements, i.e. up to four Folio reads.)
+    -- No speed-up beyond that is claimed: it needs an index on ExternalConfirmNumber, which we do not own.
+    DECLARE @Hit TABLE (FolioNum DECIMAL(18,0) NOT NULL);
+    INSERT INTO @Hit (FolioNum)
+    SELECT DISTINCT F.FolioNum FROM dbo.Folio F WITH (NOLOCK)
+    WHERE F.ConfirmNum = @SConfirmNum
+       OR (@ExtNum <> '' AND UPPER(LTRIM(RTRIM(F.ExternalConfirmNumber))) COLLATE Latin1_General_CI_AS = @ExtNum COLLATE Latin1_General_CI_AS);
+
     -- Folio-number fallback: hotels hand guests the folio number as often as the confirmation
     -- number. It applies only when the typed number is no booking's confirmation (or external)
-    -- number, so a confirmation number never also pulls in an unrelated booking whose folio
-    -- number happens to be the same. NULL (the usual case) matches nothing below.
-    DECLARE @SFolioNum DECIMAL(18,0) = NULL;
-    IF ISNULL(@SConfirmNum, 0) > 0
-       AND NOT EXISTS (
-            SELECT 1 FROM dbo.Folio F WITH (NOLOCK)
-            WHERE F.ConfirmNum = @SConfirmNum
-               OR (@ExtNum <> '' AND UPPER(LTRIM(RTRIM(F.ExternalConfirmNumber))) COLLATE Latin1_General_CI_AS = @ExtNum COLLATE Latin1_General_CI_AS) )
-        SET @SFolioNum = @SConfirmNum;
+    -- number (no hit above), so a confirmation number never also pulls in an unrelated booking whose
+    -- folio number happens to be the same.
+    IF ISNULL(@SConfirmNum, 0) > 0 AND NOT EXISTS (SELECT 1 FROM @Hit)
+        INSERT INTO @Hit (FolioNum)
+        SELECT F.FolioNum FROM dbo.Folio F WITH (NOLOCK) WHERE F.FolioNum = @SConfirmNum;
 
     -- One row per folio: guest (AdditionalName) list is fetched separately via
     -- fetchGuestNames(folioNum) when the guest selects a folio, so it must NOT
@@ -641,9 +648,7 @@ BEGIN
     LEFT JOIN dbo.RoomType RT WITH (NOLOCK) ON RT.RoomTypeCode = F.RoomTypeCode
     CROSS APPLY (SELECT ISNULL(NULLIF(LTRIM(RTRIM(F.RoomTypeBooked)), ''), F.RoomTypeCode) AS RoomTypeBooked) RB
     LEFT JOIN dbo.RoomType RTB WITH (NOLOCK) ON RTB.RoomTypeCode = RB.RoomTypeBooked
-    WHERE ( F.ConfirmNum = @SConfirmNum
-            OR F.FolioNum = @SFolioNum
-            OR (@ExtNum <> '' AND UPPER(LTRIM(RTRIM(F.ExternalConfirmNumber))) COLLATE Latin1_General_CI_AS = @ExtNum COLLATE Latin1_General_CI_AS) )
+    WHERE F.FolioNum IN (SELECT FolioNum FROM @Hit)
       AND F.RoomTypeCode <> '**'
       AND F.FolioStatus = 1
       AND ISNULL(F.CancelNum, 0) = 0
@@ -660,17 +665,10 @@ BEGIN
     -- would otherwise fall through to a bare 'not_found' instead of a real status, even
     -- though the confirm number is valid and the guest typed it correctly.
     SELECT
+        CASE WHEN EXISTS (SELECT 1 FROM @Hit) THEN 1 ELSE 0 END AS ConfirmExists,
         CASE WHEN EXISTS (
             SELECT 1 FROM dbo.Folio WITH (NOLOCK)
-            WHERE ( ConfirmNum = @SConfirmNum
-                    OR FolioNum = @SFolioNum
-                    OR (@ExtNum <> '' AND UPPER(LTRIM(RTRIM(ExternalConfirmNumber))) COLLATE Latin1_General_CI_AS = @ExtNum COLLATE Latin1_General_CI_AS) )
-        ) THEN 1 ELSE 0 END AS ConfirmExists,
-        CASE WHEN EXISTS (
-            SELECT 1 FROM dbo.Folio WITH (NOLOCK)
-            WHERE ( ConfirmNum = @SConfirmNum
-                    OR FolioNum = @SFolioNum
-                    OR (@ExtNum <> '' AND UPPER(LTRIM(RTRIM(ExternalConfirmNumber))) COLLATE Latin1_General_CI_AS = @ExtNum COLLATE Latin1_General_CI_AS) )
+            WHERE FolioNum IN (SELECT FolioNum FROM @Hit)
               AND RoomTypeCode <> '**'
               AND FolioStatus IN (2,3) AND ISNULL(CancelNum,0) = 0
         ) THEN 1 ELSE 0 END AS HasCheckedIn;

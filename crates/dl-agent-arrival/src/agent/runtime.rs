@@ -27,6 +27,7 @@ use crate::agent::journal::Journal;
 use crate::agent::layout::Layout;
 use crate::agent::link_status::{self, LinkStatus, LinkStatusFile};
 use crate::agent::outbox::{self, Batching, Outbox, Pacer};
+use crate::agent::pms_queue::{PmsQueue, Queued};
 use crate::agent::problems::{self, ProblemJournal};
 use crate::agent::processor::{Lane, Processor};
 use crate::agent::secrets::{Identity, TenantKeyStore};
@@ -196,7 +197,7 @@ impl Parts {
             journal,
             link_status,
             fast: Outbox::new(None),
-            pms: Outbox::new(None),
+            pms: PmsQueue::new(pms_threads),
             results: Outbox::new(None),
             notices: Arc::clone(&notices),
             stop: StopSignal::new(),
@@ -247,8 +248,8 @@ struct Link {
     clock: Arc<dyn Clock>,
     journal: Arc<Journal>,
     link_status: LinkStatusFile,
-    fast: Outbox<PmsRequest>,
-    pms: Outbox<PmsRequest>,
+    fast: Outbox<Queued>,
+    pms: PmsQueue,
     results: Outbox<PmsResponse>,
     notices: Arc<Outbox<PmsChangeNotice>>,
     /// Set when the module stops: no new polls, no new requests.
@@ -296,14 +297,13 @@ impl Link {
     ) -> Result<(), Error> {
         for i in 0..FAST_LANE_THREADS {
             let me = Arc::clone(self);
-            t.lanes.push(spawn(format!("arrival-fast-{i}"), move || {
-                me.lane(&me.fast)
-            })?);
+            t.lanes
+                .push(spawn(format!("arrival-fast-{i}"), move || me.fast_lane())?);
         }
         for i in 0..pms_threads {
             let me = Arc::clone(self);
             t.lanes
-                .push(spawn(format!("arrival-pms-{i}"), move || me.lane(&me.pms))?);
+                .push(spawn(format!("arrival-pms-{i}"), move || me.pms_lane())?);
         }
         let me = Arc::clone(self);
         t.uplinks.push(spawn("arrival-results".into(), move || {
@@ -336,7 +336,7 @@ impl Link {
         let deadline = Instant::now() + GRACE;
         let _ = self.deadline.set(deadline);
         self.stop.stop();
-        let dropped = self.fast.drain(usize::MAX).len() + self.pms.drain(usize::MAX).len();
+        let dropped = self.fast.drain(usize::MAX).len() + self.pms.clear();
         if dropped > 0 {
             dl_log::warn!("requests not started before the stop were dropped; the cloud asks again"; count = dropped);
         }
@@ -525,36 +525,51 @@ impl Link {
             return;
         }
         for request in requests {
-            match self.processor.route(&request) {
-                Lane::Fast => self.fast.push(request),
-                Lane::Pms => self.pms.push(request),
-            };
+            let lane = self.processor.route(&request);
+            let item = Queued::now(request);
+            match lane {
+                Lane::Fast => {
+                    self.fast.push(item);
+                }
+                Lane::Pms => self.pms.push(item),
+            }
         }
     }
 
-    /// One worker of a lane: answers requests until the stop.
-    fn lane(&self, queue: &Outbox<PmsRequest>) {
-        while queue.wait(&self.stop) && !self.stop.is_stopped() {
-            let Some(request) = queue.drain(1).pop() else {
-                continue;
-            };
-            let in_flight = &self.health.metrics.in_flight;
-            in_flight.fetch_add(1, Ordering::Relaxed);
-            let response = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                self.processor.handle(&request)
-            }))
-            .unwrap_or_else(|_| {
-                dl_log::error!("answering a request panicked"; operation = %request.operation);
-                self.health.count(Status::Failed);
-                PmsResponse::bare(
-                    &request.request_id,
-                    Status::Failed,
-                    Some("Agent error".into()),
-                )
-            });
-            self.results.push(response);
-            in_flight.fetch_sub(1, Ordering::Relaxed);
+    /// One worker of the fast lane: answers requests until the stop.
+    fn fast_lane(&self) {
+        while self.fast.wait(&self.stop) && !self.stop.is_stopped() {
+            if let Some(item) = self.fast.drain(1).pop() {
+                self.answer(&item);
+            }
         }
+    }
+
+    /// One worker of the PMS lane: interactive requests first, background ones only while a
+    /// background slot is free ([`PmsQueue`]).
+    fn pms_lane(&self) {
+        while let Some(taken) = self.pms.take(&self.stop) {
+            self.answer(&taken.item);
+        }
+    }
+
+    fn answer(&self, item: &Queued) {
+        let request = &item.request;
+        let in_flight = &self.health.metrics.in_flight;
+        in_flight.fetch_add(1, Ordering::Relaxed);
+        let response =
+            std::panic::catch_unwind(AssertUnwindSafe(|| self.processor.handle_queued(item)))
+                .unwrap_or_else(|_| {
+                    dl_log::error!("answering a request panicked"; operation = %request.operation);
+                    self.health.count(Status::Failed);
+                    PmsResponse::bare(
+                        &request.request_id,
+                        Status::Failed,
+                        Some("Agent error".into()),
+                    )
+                });
+        self.results.push(response);
+        in_flight.fetch_sub(1, Ordering::Relaxed);
     }
 
     /// `UplinkLoopAsync`.

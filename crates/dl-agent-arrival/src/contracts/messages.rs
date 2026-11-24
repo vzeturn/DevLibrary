@@ -102,6 +102,15 @@ pub struct PmsRequest {
     pub idempotency_key: Option<String>,
     /// Columns to keep per set.
     pub projection: Option<Projection>,
+    /// Cache warming and other work no one waits on: it may use only part of the PMS slots,
+    /// so interactive requests (the default, also what an older cloud sends) never queue
+    /// behind it.
+    pub background: bool,
+    /// How long the caller still waits, in ms, counted from the moment the agent receives the
+    /// request (relative, so the hotel PC's clock never matters). A request not started by then
+    /// is skipped with [`errors::EXPIRED_MESSAGE`](super::errors::EXPIRED_MESSAGE). `None` = no
+    /// deadline (older cloud).
+    pub deadline_ms: Option<i32>,
 }
 
 /// `PmsResultSet`.
@@ -132,8 +141,10 @@ pub struct PmsResponse {
     pub result_sets: Vec<PmsResultSet>,
     /// Why it was rejected or failed.
     pub error: Option<String>,
-    /// Time spent answering.
+    /// Agent time from receiving the request to answering it (queue wait + PMS run).
     pub elapsed_ms: i32,
+    /// Part of `elapsed_ms` spent waiting for a free PMS slot (older agents send 0).
+    pub queue_ms: i32,
 }
 
 impl PmsResponse {
@@ -146,6 +157,7 @@ impl PmsResponse {
             result_sets: Vec::new(),
             error,
             elapsed_ms: 0,
+            queue_ms: 0,
         }
     }
 }
@@ -338,6 +350,8 @@ impl PmsResponse {
         opt_string(out, self.error.as_deref());
         out.push_str(",\"elapsedMs\":");
         out.push_str(&self.elapsed_ms.to_string());
+        out.push_str(",\"queueMs\":");
+        out.push_str(&self.queue_ms.to_string());
         out.push('}');
     }
 
@@ -370,6 +384,9 @@ impl PmsResponse {
             result_sets,
             error: stj::opt_str(m, "error")?,
             elapsed_ms: stj::opt_i64(m, "elapsedMs")?
+                .and_then(|n| i32::try_from(n).ok())
+                .unwrap_or(0),
+            queue_ms: stj::opt_i64(m, "queueMs")?
                 .and_then(|n| i32::try_from(n).ok())
                 .unwrap_or(0),
         })
@@ -484,6 +501,13 @@ impl PmsRequest {
                 out.push(']');
             }
         }
+        out.push_str(",\"background\":");
+        out.push_str(if self.background { "true" } else { "false" });
+        out.push_str(",\"deadlineMs\":");
+        match self.deadline_ms {
+            None => out.push_str("null"),
+            Some(ms) => out.push_str(&ms.to_string()),
+        }
         out.push('}');
     }
 
@@ -535,6 +559,10 @@ impl PmsRequest {
             base_etag: stj::opt_str(m, "baseETag")?,
             idempotency_key: stj::opt_str(m, "idempotencyKey")?,
             projection,
+            background: stj::opt_bool(m, "background")?.unwrap_or(false),
+            deadline_ms: stj::opt_i64(m, "deadlineMs")?
+                .map(|n| i32::try_from(n).map_err(|_| "'deadlineMs' is out of range"))
+                .transpose()?,
         })
     }
 }

@@ -5,12 +5,14 @@ mod common;
 
 use std::path::Path;
 use std::sync::{Arc, PoisonError};
+use std::time::{Duration, Instant};
 
 use common::{TempDir, folios, new_tenant_key};
 use dl_agent_arrival::agent::clock::SystemClock;
 use dl_agent_arrival::agent::executor::{ExecError, FakeExecutor};
 use dl_agent_arrival::agent::health::{self, Health, RecordingSink};
 use dl_agent_arrival::agent::journal::Journal;
+use dl_agent_arrival::agent::pms_queue::Queued;
 use dl_agent_arrival::agent::processor::{Lane, Processor};
 use dl_agent_arrival::agent::secrets::TenantKeyStore;
 use dl_agent_arrival::agent::vault::LegalVault;
@@ -63,6 +65,7 @@ fn request(id: &str, operation: &str, params: &[(&str, Option<&str>)]) -> PmsReq
         base_etag: None,
         idempotency_key: None,
         projection: None,
+        ..PmsRequest::default()
     }
 }
 
@@ -264,4 +267,47 @@ fn pms_failures_carry_only_the_error_number() {
         rig.processor.handle(&read(None)).error.as_deref(),
         Some("Agent error")
     );
+}
+
+#[test]
+fn a_request_whose_deadline_passed_in_the_queue_is_skipped_without_a_pms_call() {
+    let dir = TempDir::new("proc");
+    let rig = make(dir.path());
+    let mut late = read(None);
+    late.deadline_ms = Some(50);
+    let waited = Queued {
+        request: late,
+        received: Instant::now() - Duration::from_millis(120),
+    };
+
+    let r = rig.processor.handle_queued(&waited);
+
+    assert_eq!(r.status, Status::Failed);
+    assert_eq!(r.error.as_deref(), Some(errors::EXPIRED_MESSAGE));
+    assert!(r.queue_ms >= 120 && r.elapsed_ms >= r.queue_ms, "{r:?}");
+    assert_eq!(rig.pms.call_count(), 0);
+}
+
+#[test]
+fn a_request_inside_its_deadline_runs_and_reports_its_queue_time() {
+    let dir = TempDir::new("proc");
+    let rig = make(dir.path());
+    let mut on_time = read(None);
+    on_time.deadline_ms = Some(20_000);
+    let waited = Queued {
+        request: on_time,
+        received: Instant::now() - Duration::from_millis(80),
+    };
+
+    let r = rig.processor.handle_queued(&waited);
+
+    assert_eq!(r.status, Status::Ok);
+    assert!(r.queue_ms >= 80 && r.elapsed_ms >= r.queue_ms, "{r:?}");
+    assert_eq!(rig.pms.call_count(), 1);
+    // No deadline (an older cloud): never skipped, however long it waited.
+    let old = Queued {
+        request: read(None),
+        received: Instant::now() - Duration::from_secs(60),
+    };
+    assert_eq!(rig.processor.handle_queued(&old).status, Status::Ok);
 }

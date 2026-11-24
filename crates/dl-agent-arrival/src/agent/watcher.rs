@@ -169,6 +169,8 @@ impl Watcher {
             base_etag: None,
             idempotency_key: None,
             projection: None,
+            background: false,
+            deadline_ms: None,
         };
         if let Err(error) = validator::validate(self.catalog, &request) {
             return Tick::Misconfigured(error);

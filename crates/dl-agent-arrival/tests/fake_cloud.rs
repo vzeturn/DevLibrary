@@ -22,7 +22,7 @@ use dl_agent_arrival::agent::runtime::{Parts, Wiring};
 use dl_agent_arrival::agent::secrets::Identity;
 use dl_agent_arrival::agent::settings::Settings;
 use dl_agent_arrival::contracts::values::to_base64;
-use dl_agent_arrival::contracts::{Params, PmsRequest, Status};
+use dl_agent_arrival::contracts::{Params, PmsRequest, PmsResponse, Status, errors};
 use dl_time::Offset;
 use dl_winsvc::StopSignal;
 
@@ -49,6 +49,7 @@ fn request(id: &str, operation: &str, params: &[(&str, &str)], key: Option<&str>
         base_etag: None,
         idempotency_key: key.map(str::to_string),
         projection: None,
+        ..PmsRequest::default()
     }
 }
 
@@ -63,6 +64,17 @@ struct Agent {
 impl Agent {
     fn start(dir: &Path, url: &str, id: &Identity, clock: Arc<dyn Clock>) -> Agent {
         let pms = FakeExecutor::new(vec![Ok(vec![folios(&[(7, "Guest")])])]);
+        Agent::start_with(dir, url, id, clock, pms)
+    }
+
+    /// [`start`](Self::start) over `pms`, with two PMS slots.
+    fn start_with(
+        dir: &Path,
+        url: &str,
+        id: &Identity,
+        clock: Arc<dyn Clock>,
+        pms: Arc<FakeExecutor>,
+    ) -> Agent {
         let settings = Settings {
             cloud_base_url: url.to_string(),
             tenant_key: new_tenant_key(),
@@ -331,4 +343,90 @@ fn an_unreachable_cloud_is_degraded_after_one_backoff() {
         "{state:?}"
     );
     agent.stop();
+}
+
+/// One poll carrying three cache-warm reads, then a reception read, then a warm read with a
+/// 300 ms deadline, against a PMS that takes 400 ms a call and two PMS slots. Returns the
+/// answers once all five are back.
+fn warm_then_reception(dir: &Path, background: bool) -> Vec<PmsResponse> {
+    let id = identity();
+    let sent = Arc::new(AtomicBool::new(false));
+    let s = Arc::clone(&sent);
+    let cloud = FakeCloud::start(&id, move |seen| {
+        let first = seen.exchange.path.ends_with("/poll") && !s.swap(true, Ordering::SeqCst);
+        Reply::Requests(if first {
+            let mut batch: Vec<PmsRequest> = ["w1", "w2", "w3", "reception", "w-late"]
+                .iter()
+                .map(|r| request(r, "booking.list-checkin", &[], None))
+                .collect();
+            for r in &mut batch {
+                r.background = background && r.request_id != "reception";
+                r.deadline_ms = Some(20_000);
+            }
+            batch[4].deadline_ms = Some(300);
+            batch
+        } else {
+            Vec::new()
+        })
+    });
+    let pms = Arc::new(FakeExecutor {
+        answers: std::sync::Mutex::new(vec![Ok(vec![folios(&[(7, "Guest")])])]),
+        delay: Duration::from_millis(400),
+        ..FakeExecutor::default()
+    });
+    let agent = Agent::start_with(dir, &cloud.url, &id, Arc::new(SystemClock), pms);
+    assert!(
+        cloud.wait(LIMIT, |c| c.answered().len() >= 5),
+        "{:?}",
+        cloud.answered()
+    );
+    let answers = cloud.answered();
+    agent.stop();
+    answers
+}
+
+fn by_id<'a>(answers: &'a [PmsResponse], id: &str) -> &'a PmsResponse {
+    answers
+        .iter()
+        .find(|r| r.request_id == id)
+        .expect("answered")
+}
+
+/// RT-0755: cache warming holds at most `min(2, MaxConcurrency - 1)` PMS slots, so reception
+/// never waits for a slot behind it; a request whose deadline passed in the queue is skipped.
+#[test]
+fn reception_never_queues_behind_cache_warming() {
+    let before_dir = TempDir::new("cloud-prio-old");
+    let before = warm_then_reception(before_dir.path(), false);
+    let after_dir = TempDir::new("cloud-prio");
+    let after = warm_then_reception(after_dir.path(), true);
+
+    let old = by_id(&before, "reception");
+    let new = by_id(&after, "reception");
+    eprintln!(
+        "reception queue wait: no background flag (older cloud) {} ms, flagged warming {} ms",
+        old.queue_ms, new.queue_ms
+    );
+    assert_eq!(new.status, Status::Ok);
+    assert!(new.queue_ms < 200, "reception waited {} ms", new.queue_ms);
+    assert!(
+        old.queue_ms >= 300,
+        "the unflagged run did not queue: {old:?}"
+    );
+    assert!(new.elapsed_ms >= new.queue_ms + 350, "{new:?}");
+
+    // Warming ran one at a time (one background slot of two): each waited for the one before.
+    let waits: Vec<i32> = ["w1", "w2", "w3"]
+        .iter()
+        .map(|w| by_id(&after, w).queue_ms)
+        .collect();
+    eprintln!("warm queue waits (one background slot): {waits:?} ms");
+    assert!(waits[1] >= 350 && waits[2] >= 750, "{waits:?}");
+
+    for answers in [&before, &after] {
+        let late = by_id(answers, "w-late");
+        assert_eq!(late.status, Status::Failed, "{late:?}");
+        assert_eq!(late.error.as_deref(), Some(errors::EXPIRED_MESSAGE));
+        assert!(late.queue_ms > 300, "{late:?}");
+    }
 }
