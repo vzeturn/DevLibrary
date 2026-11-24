@@ -24,6 +24,8 @@ use crate::wire::parse::SyncConfig;
 
 /// `ErrorBackoff` of the availability scanner.
 pub const ERROR_BACKOFF: Duration = Duration::from_secs(30);
+/// What a scan records when it skipped its tick on a SMILE row lock (SQL 1222).
+pub const LOCK_BUSY_SKIP: &str = "skipped: SMILE row lock busy (SQL 1222)";
 /// The wait while there is nothing to do (no sync-config yet, or scans paused).
 pub const IDLE: Duration = Duration::from_secs(1);
 
@@ -109,10 +111,7 @@ impl ScanLoop {
             folio,
             checkout: None,
             next_checkout: None,
-            probe_every: settings
-                .availability
-                .probe_interval
-                .max(Duration::from_secs(1)),
+            probe_every: settings.availability.resolved_probe_interval(),
             rooms_every: settings.rooms.interval.max(Duration::from_secs(1)),
             folio_every: settings.folio.interval.max(Duration::from_secs(1)),
             next_availability: None,
@@ -200,7 +199,7 @@ impl ScanLoop {
             today,
             now,
         ) {
-            Ok(TickOutcome::Unchanged) => self.probe_every,
+            Ok(TickOutcome::Unchanged) => self.availability.next_probe_delay(),
             Ok(TickOutcome::Scanned(o)) => {
                 let (rows, what) = match o {
                     availability::ScanOutcome::SyncOff => {
@@ -219,6 +218,12 @@ impl ScanLoop {
                     ),
                 };
                 d.shared.record_scan("availability", Ok((rows, what)));
+                self.availability.next_probe_delay()
+            }
+            Err(AvailabilityError::Smile(s)) if s.is_lock_timeout() => {
+                // The cache is untouched, so the next tick catches up; back to the base pace.
+                self.availability.reset_pace();
+                self.lock_busy("availability");
                 self.probe_every
             }
             Err(e) => {
@@ -324,8 +329,21 @@ impl ScanLoop {
         }
     }
 
+    /// A pass that gave up on a SMILE row lock (SQL 1222, RT-0756): the front desk holds a
+    /// folio longer than the background lock timeout. The tick is skipped; it is not an error
+    /// (no `SCAN_FAILED` report) and each scanner's own state (cursor, cache) is unchanged.
+    fn lock_busy(&self, scanner: &'static str) {
+        log::warn(
+            "scan skipped: SMILE row lock busy (SQL 1222), retried next tick",
+            &[("scanner", V::S(scanner))],
+        );
+        self.deps
+            .shared
+            .record_scan(scanner, Ok((0, LOCK_BUSY_SKIP.into())));
+    }
+
     /// Records a failed pass; reports it unless it is the token gate (the sync thread
-    /// reports that one).
+    /// reports that one). A lock-busy SMILE read is a skipped tick, not a failure.
     fn failed(
         &self,
         scanner: &'static str,
@@ -333,6 +351,10 @@ impl ScanLoop {
         smile: Option<&SmileError>,
         hub: Option<&HubError>,
     ) {
+        if smile.is_some_and(SmileError::is_lock_timeout) {
+            self.lock_busy(scanner);
+            return;
+        }
         let shared = &self.deps.shared;
         shared.record_scan(scanner, Err(msg.to_owned()));
         if hub.is_some_and(HubError::is_auth) {

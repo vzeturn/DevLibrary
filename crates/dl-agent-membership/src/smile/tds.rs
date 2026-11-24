@@ -3,7 +3,9 @@
 //! (`SmileDbIdentityProbe`) and the health ping.
 //!
 //! The module opens two of these, one for the sync thread (ping, identity) and one for the
-//! scan thread, so a slow scan never delays a heartbeat.
+//! scan thread, so a slow scan never delays a heartbeat. The scan and checkout connections
+//! are opened with [`TdsSmile::for_background_reads`] (RT-0756): every session they open gets
+//! `SET LOCK_TIMEOUT 2000` first, so a scan never queues behind (or ahead of) the front desk.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -11,7 +13,7 @@ use std::time::Duration;
 
 use dl_tds::{Client, Config, Encrypt, Param, ResultSet, Row, TlsVersion};
 
-use super::{SmileError, SmileHealth, rows};
+use super::{BACKGROUND_LOCK_TIMEOUT_MS, SmileError, SmileHealth, rows};
 use crate::identity::{ForeignState, IdentityProbe, Snapshot};
 use crate::wire::DbIdentity;
 
@@ -194,6 +196,8 @@ pub fn normalize_connection_string(raw: &str) -> Result<Config, SmileError> {
 pub struct TdsSmile {
     cfg: Config,
     command_timeout: Duration,
+    /// `SET LOCK_TIMEOUT` sent on every new session (background-read connections only).
+    lock_timeout_ms: Option<i32>,
     client: Mutex<Option<Client>>,
     warned: Mutex<HashSet<&'static str>>,
 }
@@ -213,9 +217,24 @@ impl TdsSmile {
         Ok(TdsSmile {
             command_timeout: cfg.timeout().unwrap_or(DEFAULT_COMMAND_TIMEOUT),
             cfg,
+            lock_timeout_ms: None,
             client: Mutex::new(None),
             warned: Mutex::new(HashSet::new()),
         })
+    }
+
+    /// `OpenBackgroundReadAsync` (RT-0756): a source whose sessions only run background
+    /// reads (scans), each opened with `SET LOCK_TIMEOUT` [`BACKGROUND_LOCK_TIMEOUT_MS`].
+    /// Never hand it to a writer: its row-lock waits would be cut to 2 s.
+    pub fn for_background_reads(connection_string: &str) -> Result<TdsSmile, SmileError> {
+        let mut s = TdsSmile::new(connection_string)?;
+        s.lock_timeout_ms = Some(BACKGROUND_LOCK_TIMEOUT_MS);
+        Ok(s)
+    }
+
+    /// The lock timeout this source sets on every session (`None` = SQL Server's default, wait).
+    pub fn lock_timeout_ms(&self) -> Option<i32> {
+        self.lock_timeout_ms
     }
 
     /// Host and database, for logs.
@@ -255,7 +274,13 @@ impl TdsSmile {
             *slot = None;
         }
         if slot.is_none() {
-            *slot = Some(Client::connect(&self.cfg).map_err(|e| SmileError::from_tds(&e))?);
+            let mut client = Client::connect(&self.cfg).map_err(|e| SmileError::from_tds(&e))?;
+            if let Some(ms) = self.lock_timeout_ms {
+                client
+                    .batch(&lock_timeout_sql(ms))
+                    .map_err(|e| SmileError::from_tds(&e))?;
+            }
+            *slot = Some(client);
         }
         let Some(client) = slot.as_mut() else {
             return Err(SmileError::Unavailable("connection not open".into()).into());
@@ -273,6 +298,43 @@ impl TdsSmile {
             *slot = None;
         }
         out
+    }
+
+    /// [`Self::session`] for one background read on a connection that also writes (the
+    /// terms read on the writer's session): `SET LOCK_TIMEOUT` [`BACKGROUND_LOCK_TIMEOUT_MS`]
+    /// before `f`, back to `-1` (wait) after it. A session whose reset fails is dropped, so a
+    /// later booking write never inherits the 2 s wait.
+    pub(crate) fn background_session<T, E: From<SmileError>>(
+        &self,
+        f: impl FnOnce(&mut Client) -> Result<T, E>,
+    ) -> Result<T, E> {
+        if self.lock_timeout_ms.is_some() {
+            return self.session(None, f);
+        }
+        let mut reset_failed = false;
+        let out = self.session(None, |c| {
+            c.batch(&lock_timeout_sql(BACKGROUND_LOCK_TIMEOUT_MS))
+                .map_err(|e| E::from(SmileError::from_tds(&e)))?;
+            let out = f(c);
+            reset_failed = c.batch(&lock_timeout_sql(-1)).is_err();
+            out
+        });
+        if reset_failed {
+            crate::log::warn(
+                "could not reset LOCK_TIMEOUT after a background read; the SMILE session is reopened",
+                &[],
+            );
+            self.drop_session();
+        }
+        out
+    }
+
+    /// Closes the connection; the next call opens a fresh session.
+    fn drop_session(&self) {
+        *self
+            .client
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// The rows of the first result set.
@@ -414,9 +476,28 @@ impl IdentityProbe for TdsSmile {
     }
 }
 
+/// `SET LOCK_TIMEOUT n` (`SET` takes no parameter; `n` is a number we chose).
+fn lock_timeout_sql(ms: i32) -> String {
+    format!("SET LOCK_TIMEOUT {ms}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_read_sources_set_a_lock_timeout_of_at_most_two_seconds() {
+        let cs = "Server=.;Database=SMILE_FO;User Id=u;Password=p";
+        let bg = TdsSmile::for_background_reads(cs).unwrap();
+        assert_eq!(bg.lock_timeout_ms(), Some(2_000));
+        assert!(
+            bg.lock_timeout_ms()
+                .is_some_and(|ms| (1..=2_000).contains(&ms))
+        );
+        assert_eq!(TdsSmile::new(cs).unwrap().lock_timeout_ms(), None);
+        assert_eq!(lock_timeout_sql(2_000), "SET LOCK_TIMEOUT 2000");
+        assert_eq!(lock_timeout_sql(-1), "SET LOCK_TIMEOUT -1");
+    }
 
     #[test]
     fn dotnet_defaults_apply_only_when_not_declared() {

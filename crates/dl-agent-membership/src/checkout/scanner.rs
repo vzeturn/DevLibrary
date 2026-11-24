@@ -451,6 +451,8 @@ impl CheckoutScanner {
         {
             Ok(Some(p)) => p,
             Ok(None) => return Ok(0),
+            // SMILE busy (SQL 1222): the whole pass skips its tick, not an earn-config error.
+            Err(e) if e.is_lock_timeout() => return Err(e.into()),
             Err(e) => {
                 log::error(
                     "earn codes not readable from SMILE; walk-ins skipped this scan",

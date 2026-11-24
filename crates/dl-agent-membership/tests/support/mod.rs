@@ -294,6 +294,10 @@ fn read_request(stream: &mut TcpStream) -> Option<Seen> {
 /// reads exist; nothing in this fake can write.
 pub struct FakeSmile {
     pub down: AtomicBool,
+    /// Every read fails with SQL 1222 (a front-desk row lock outlived the lock timeout).
+    pub lock_busy: AtomicBool,
+    /// Added to the probe's folio hash: bump it to make SMILE look changed.
+    pub probe_salt: std::sync::atomic::AtomicI64,
     pub database: Mutex<String>,
     pub folios: Mutex<Vec<FolioRow>>,
     pub calls: Mutex<Vec<&'static str>>,
@@ -303,6 +307,8 @@ impl Default for FakeSmile {
     fn default() -> FakeSmile {
         FakeSmile {
             down: AtomicBool::new(false),
+            lock_busy: AtomicBool::new(false),
+            probe_salt: std::sync::atomic::AtomicI64::new(0),
             database: Mutex::new("SMILE_FO".into()),
             folios: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
@@ -315,6 +321,8 @@ impl FakeSmile {
         self.calls.lock().unwrap().push(name);
         if self.down.load(Ordering::SeqCst) {
             Err(SmileError::Unavailable("fake SMILE is down".into()))
+        } else if self.lock_busy.load(Ordering::SeqCst) {
+            Err(SmileError::Server(1222))
         } else {
             Ok(())
         }
@@ -430,7 +438,7 @@ impl AvailabilitySource for FakeSmile {
         self.call("probe_occupancy")?;
         Ok(OccupancyFingerprint {
             folio_count: 1,
-            folio_hash: 7,
+            folio_hash: 7 + self.probe_salt.load(Ordering::SeqCst),
             folio_sum: 7,
             room_count: 2,
             room_hash: 3,

@@ -206,7 +206,7 @@ pub fn read_both(
 
 impl TermsSource for TdsSmile {
     fn read(&self, hotel_id: Option<&str>, code: &str) -> Result<Readings, WriteError> {
-        self.session(None, |c| read_both(c, hotel_id, code))
+        self.background_session(|c| read_both(c, hotel_id, code))
     }
 }
 

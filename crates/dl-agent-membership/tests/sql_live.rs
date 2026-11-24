@@ -305,3 +305,66 @@ fn workers_over_real_smile(smile: Arc<TdsSmile>) {
         assert_eq!(stats.scans[scanner].errors, 0, "{scanner}");
     }
 }
+
+/// RT-0756 before/after: a front-desk transaction holds the Folio table. The writer-style
+/// read (no lock timeout) waits for the whole hold; a background read gives up after about
+/// 2 s with SQL 1222 and the scan skips its tick.
+#[test]
+fn a_background_read_gives_up_on_a_held_folio_lock_after_two_seconds() {
+    let Ok(conn) = std::env::var(ENV) else {
+        eprintln!("skipped: {ENV} is not set");
+        return;
+    };
+    let (db, cfg) = create(&conn);
+    let smile_cs = format!("{};Database={}", conn.trim_end_matches(';'), db.name);
+    let today = hotel_now().date();
+    let to = today.add_days(30);
+    let mut holder = connect(&cfg);
+    holder
+        .batch("BEGIN TRAN; SELECT TOP 0 * FROM Folio WITH (TABLOCKX, HOLDLOCK);")
+        .expect("hold Folio");
+
+    // After: the background source stops waiting at the 2 s lock timeout.
+    let bg = TdsSmile::for_background_reads(&smile_cs).expect("TdsSmile");
+    bg.ping().expect("ping");
+    let t = Instant::now();
+    let err = bg
+        .probe_occupancy(today, to)
+        .expect_err("a held Folio must stop a background read");
+    let after = t.elapsed();
+    assert!(err.is_lock_timeout(), "expected SQL 1222, got {err:?}");
+    assert!(
+        after >= Duration::from_millis(1_800) && after < Duration::from_secs(5),
+        "background read gave up after {after:?}"
+    );
+
+    // Before: a read without a lock timeout waits until the clerk's transaction ends.
+    const HOLD: Duration = Duration::from_secs(6);
+    let fg = Arc::new(TdsSmile::new(&smile_cs).expect("TdsSmile"));
+    fg.ping().expect("ping");
+    let reader = {
+        let fg = fg.clone();
+        std::thread::spawn(move || {
+            let t = Instant::now();
+            let r = fg.probe_occupancy(today, to);
+            (r.is_ok(), t.elapsed())
+        })
+    };
+    std::thread::sleep(HOLD);
+    holder.batch("ROLLBACK;").expect("release Folio");
+    let (ok, before) = reader.join().unwrap();
+    assert!(ok, "the unbounded read fails after the lock is released");
+    assert!(
+        before >= HOLD - Duration::from_millis(500),
+        "waited {before:?}"
+    );
+    eprintln!(
+        "RT-0756 lock wait on a held Folio: before {} ms (whole hold), after {} ms (SQL 1222)",
+        before.as_millis(),
+        after.as_millis()
+    );
+
+    // Once the lock is gone the background source reads again on the same session.
+    bg.probe_occupancy(today, to).expect("probe after the lock");
+    holder.close();
+}

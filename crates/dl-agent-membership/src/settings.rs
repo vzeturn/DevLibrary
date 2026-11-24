@@ -97,6 +97,11 @@ pub struct FolioSettings {
 pub struct AvailabilitySettings {
     /// `ProbeIntervalSeconds`.
     pub probe_interval: Duration,
+    /// `ProbeIdleMaxSeconds` (RT-0756): the probe interval doubles after each probe that saw
+    /// no change, up to this ceiling, and drops back to `probe_interval` on a change or a
+    /// skipped (lock-busy) tick. Clamped to `probe_interval`..=60 s; equal to it turns the
+    /// adaptive pace off.
+    pub probe_idle_max: Duration,
     /// `HeartbeatMinutes`, clamped to 1–5.
     pub heartbeat: Duration,
     /// `HorizonDays`.
@@ -105,6 +110,28 @@ pub struct AvailabilitySettings {
     pub full_push_every: u32,
     /// `MaxFolios`.
     pub max_folios: i64,
+}
+
+impl AvailabilitySettings {
+    /// `ResolvedProbeInterval`: at least 1 s.
+    pub fn resolved_probe_interval(&self) -> Duration {
+        self.probe_interval.max(Duration::from_secs(1))
+    }
+
+    /// `ResolvedProbeIdleMax`: `probe_idle_max` clamped to `resolved_probe_interval()..=60 s`.
+    pub fn resolved_probe_idle_max(&self) -> Duration {
+        let base = self.resolved_probe_interval();
+        self.probe_idle_max
+            .clamp(base, Duration::from_secs(60).max(base))
+    }
+
+    /// `ProbeDelayAfterIdle`: the next probe after `idle_probes` probes in a row saw no change
+    /// (`interval × 2^idle`, the exponent capped at 6, then at the idle ceiling).
+    pub fn probe_delay_after_idle(&self, idle_probes: u32) -> Duration {
+        self.resolved_probe_interval()
+            .saturating_mul(1 << idle_probes.min(6))
+            .min(self.resolved_probe_idle_max())
+    }
 }
 
 /// The room inventory scan.
@@ -248,6 +275,7 @@ impl Settings {
             },
             availability: AvailabilitySettings {
                 probe_interval: secs("availability_probe_seconds", 5),
+                probe_idle_max: secs("availability_probe_idle_max_seconds", 30),
                 heartbeat: Duration::from_secs(
                     60 * uint(v, "availability_heartbeat_minutes", 5).clamp(1, 5),
                 ),
@@ -330,6 +358,34 @@ mod tests {
         assert_eq!(s.capabilities, vec!["DB_IDENTITY".to_owned()]);
         assert_eq!(s.smile.earn_charge_codes, vec!["RM".to_owned()]);
         assert_eq!(s.smile.member_discount_code, "MD");
+    }
+
+    #[test]
+    fn probe_backs_off_when_smile_is_idle_and_stays_under_the_ceiling() {
+        let d = Settings::from_config(&Value::Null, Path::new("/data")).availability;
+        assert_eq!(d.probe_interval, Duration::from_secs(5));
+        assert_eq!(d.probe_idle_max, Duration::from_secs(30));
+        let delays: Vec<u64> = (0..8)
+            .map(|i| d.probe_delay_after_idle(i).as_secs())
+            .collect();
+        assert_eq!(delays, vec![5, 10, 20, 30, 30, 30, 30, 30]);
+        // A ceiling under the interval turns the adaptive pace off; over 60 s is cut to 60.
+        let off = Settings::from_config(
+            &json!({"availability_probe_idle_max_seconds": 2}),
+            Path::new("/d"),
+        )
+        .availability;
+        assert_eq!(off.probe_delay_after_idle(5), Duration::from_secs(5));
+        let high = Settings::from_config(
+            &json!({"availability_probe_idle_max_seconds": 600}),
+            Path::new("/d"),
+        )
+        .availability;
+        assert_eq!(high.probe_delay_after_idle(6), Duration::from_secs(60));
+        assert_eq!(
+            high.probe_delay_after_idle(u32::MAX),
+            Duration::from_secs(60)
+        );
     }
 
     #[test]

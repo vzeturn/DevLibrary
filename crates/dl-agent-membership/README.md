@@ -64,6 +64,7 @@ Optional keys mirror the .NET `appsettings.json` with the same defaults:
 | `report_interval_minutes` | `15` | the minimum gap between two problem reports with the same code |
 | `folio_scan_enabled`, `folio_interval_seconds`, `folio_max_per_scan`, `folio_overlap_minutes`, `folio_cold_start_lookback_days` | `true`, `60`, `500`, `15`, `7` | `FolioObservationScan` |
 | `availability_probe_seconds`, `availability_heartbeat_minutes`, `availability_horizon_days`, `availability_full_push_every`, `availability_max_folios` | `5`, `5`, `365`, `24`, `20000` | `AvailabilityScan` |
+| `availability_probe_idle_max_seconds` | `30` | the probe doubles its wait after each unchanged probe (5, 10, 20, 30 s) up to this ceiling (clamped to `availability_probe_seconds`..=60) and is back to the base on a change; equal to `availability_probe_seconds` turns it off (RT-0756) |
 | `rooms_interval_seconds`, `rooms_full_push_every` | `300`, `12` | room inventory |
 | `extra_bed_special_code`, `guest_phone_column`, `earn_charge_codes`, `member_discount_code` | `EB`, `MobileNum`, SMILE's catalog, none | `Smile` / `Earn` |
 | `write_lock_timeout_ms`, `default_payment_code`, `default_breakfast_code`, `extra_bed_write_mode` | `10000`, `1`, `BFF`, `SMILE_SPECIAL` | `SmileWriteOptions`; an empty code is not written; an unknown mode falls back to `FOLD_LEGACY` with a warning |
