@@ -2,7 +2,9 @@
 // lane for test machines; stable releases roll out by their semver bump.
 import { intVar, type AgentRow, type Channel, type Env } from '../env';
 import { bumpOf, inRollout, offeredPercent, parseRamp, type Bump, type LaneConfig, type RampStep } from '../domain/lanes';
+import { DEFAULT_CANARY_HEALTH, evaluateCanaryHealth, type CanaryHealthAgent, type CanaryHealthConfig, type CanaryHealthResult } from '../domain/canary-health';
 import type { HeartbeatBody } from '../domain/schemas';
+import { addPause, getPause } from '../repo/holds';
 import { HttpError, logError } from '../lib/http';
 import { addAllow, ALL_SITES, currentStable, isAllowed, latestPromotion, listAllows, removeAllow, type AllowRow } from '../repo/lanes';
 import { getRelease, type ReleaseRow } from '../repo/releases';
@@ -114,6 +116,86 @@ export async function allowRelease(env: Env, product: string, version: string, t
   const siteId = t.site_id ?? ALL_SITES;
   await addAllow(env.DB, product, version, t.tenant_id, siteId, now);
   return { tenant_id: t.tenant_id, site_id: siteId, created_at: now };
+}
+
+/** Canary health settings (RT-1054) as optional env vars, read here so Env stays untouched. */
+type HealthEnv = Env & {
+  CANARY_HEALTH_WINDOW_HOURS?: string;
+  CANARY_MAX_MISSED_BEATS?: string;
+  CANARY_MAX_ERRORS_PER_HOUR?: string;
+};
+
+export function canaryHealthConfig(env: Env): CanaryHealthConfig {
+  const e = env as HealthEnv;
+  return {
+    windowHours: intVar(e.CANARY_HEALTH_WINDOW_HOURS, DEFAULT_CANARY_HEALTH.windowHours),
+    maxMissedBeats: intVar(e.CANARY_MAX_MISSED_BEATS, DEFAULT_CANARY_HEALTH.maxMissedBeats),
+    maxErrorsPerHour: intVar(e.CANARY_MAX_ERRORS_PER_HOUR, DEFAULT_CANARY_HEALTH.maxErrorsPerHour),
+  };
+}
+
+/** Marks the pause an auto-rollback sets, so it stays distinguishable from an operator's pause. */
+export const AUTO_ROLLBACK_PREFIX = 'auto-rollback: ';
+
+/**
+ * Canary agents that reported `version` with the signals the health watch reads: last heartbeat,
+ * the latest selftest uploaded after the install, and error/critical report occurrences.
+ */
+async function canaryHealthAgents(env: Env, product: string, version: string): Promise<CanaryHealthAgent[]> {
+  const res = await env.DB
+    .prepare(
+      `SELECT v.agent_id, v.first_seen AS installed_at, v.rolled_back, a.heartbeat_seconds,
+              COALESCE(a.last_seen_at, v.last_seen) AS last_heartbeat,
+              (SELECT s.summary_json FROM selftest_runs s
+                 WHERE s.agent_id = v.agent_id AND s.agent_version = ?2 AND s.finished_at >= v.first_seen
+                 ORDER BY s.received_at DESC, s.id DESC LIMIT 1) AS selftest_summary,
+              (SELECT COALESCE(SUM(r.count), 0) FROM reports r
+                 WHERE r.agent_id = v.agent_id AND r.agent_version = ?2 AND r.severity IN ('error', 'critical')) AS error_count
+       FROM agent_versions v
+       JOIN agents a ON a.id = v.agent_id
+       JOIN tenants t ON t.id = a.tenant_id
+       WHERE v.product = ?1 AND v.version = ?2 AND a.revoked_at IS NULL
+         AND COALESCE(a.channel_override, CASE WHEN t.demo = 1 THEN 'canary' ELSE 'stable' END) = 'canary'`,
+    )
+    .bind(product, version)
+    .all<Record<string, unknown>>();
+  return res.results.map((r) => ({
+    agent_id: String(r.agent_id),
+    installed_at: Number(r.installed_at),
+    last_heartbeat: Number(r.last_heartbeat),
+    heartbeat_seconds: Number(r.heartbeat_seconds),
+    rolled_back: Number(r.rolled_back) === 1,
+    selftest: r.selftest_summary == null ? null : { fail: selftestFails(String(r.agent_id), String(r.selftest_summary)) },
+    error_count: Number(r.error_count),
+  }));
+}
+
+/** `fail` of a stored selftest summary; one that does not parse is an error, never a pass. */
+function selftestFails(agentId: string, summary: string): number {
+  const fail = (JSON.parse(summary) as { fail?: unknown }).fail;
+  if (typeof fail !== 'number') throw new Error(`selftest summary of agent ${agentId} has no fail count`);
+  return fail;
+}
+
+/**
+ * Watches a canary release: evaluates its heartbeat, selftest and error signals and, on bad
+ * metrics, rolls the lane back by pausing the release (the canary manifest then serves the
+ * previous version, PROTOCOL §5.3). The rollback is sticky: it blocks promotion until an
+ * operator resumes the release, even if the signals recover. Pass the result to `evaluateGate`
+ * as `canaryHealth` so promotion needs a healthy window.
+ */
+export async function watchCanary(env: Env, product: string, version: string, previous: string | null, now: number): Promise<CanaryHealthResult> {
+  const pause = await getPause(env.DB, product, version);
+  if (pause?.reason?.startsWith(AUTO_ROLLBACK_PREFIX)) {
+    return { verdict: 'rollback', reasons: [pause.reason.slice(AUTO_ROLLBACK_PREFIX.length)], rollbackTo: previous, promotable: false };
+  }
+  const agents = await canaryHealthAgents(env, product, version);
+  const result = evaluateCanaryHealth({ now, config: canaryHealthConfig(env), agents, previousVersion: previous });
+  if (result.verdict === 'rollback') {
+    await addPause(env.DB, product, version, `${AUTO_ROLLBACK_PREFIX}${result.reasons.join('; ')}`, now);
+    console.warn(JSON.stringify({ event: 'canary_auto_rollback', product, version, rollback_to: previous, reasons: result.reasons }));
+  }
+  return result;
 }
 
 export async function disallowRelease(env: Env, product: string, version: string, t: AllowTarget): Promise<void> {

@@ -466,6 +466,7 @@ fn run_agent(app: &App, dir: &Path, stop: &StopSignal) -> i32 {
             return EXIT_CONFIG;
         }
     };
+    crate::selftest::post_install::spawn_if_needed(app, dir);
     let mut opts = Options::new(dir.to_path_buf(), exe);
     opts.product = app.product.clone();
     opts.version = app.version.clone();

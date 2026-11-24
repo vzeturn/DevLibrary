@@ -1,6 +1,7 @@
 // Canary gate (PROTOCOL §5) as a pure function: the repo gathers facts, this decides.
+import type { CanaryHealthResult } from './canary-health';
 
-export type GateCheckName = 'min_agents' | 'soak' | 'modules_running' | 'no_new_errors' | 'no_rollback' | 'site_eligible';
+export type GateCheckName = 'min_agents' | 'soak' | 'modules_running' | 'no_new_errors' | 'no_rollback' | 'site_eligible' | 'canary_health';
 
 export interface GateAgent {
   agent_id: string;
@@ -28,6 +29,8 @@ export interface GateInput {
    * reasons; `null` when the product has none. A canary on an unready site proves nothing.
    */
   unreadySites?: ReadonlyArray<{ agent_id: string; reasons: ReadonlyArray<string> }> | null;
+  /** Canary health verdict (RT-1054); promotion needs `healthy`. Omitted: the check is not run. */
+  canaryHealth?: CanaryHealthResult | undefined;
 }
 
 export interface GateCheck {
@@ -97,5 +100,13 @@ export function evaluateGate(input: GateInput): GateResult {
             : `not ready: ${input.unreadySites.map((s) => `${s.agent_id} (${s.reasons.join('; ')})`).join(', ')}`,
     },
   ];
+  if (input.canaryHealth) {
+    const h = input.canaryHealth;
+    checks.push({
+      name: 'canary_health',
+      ok: h.promotable,
+      detail: h.promotable ? 'canary signals healthy for the whole window' : `${h.verdict}: ${h.reasons.join('; ')}`,
+    });
+  }
   return { pass: checks.every((c) => c.ok), checks };
 }

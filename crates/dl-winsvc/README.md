@@ -110,6 +110,24 @@ With `run_service_with_exit_code` the work returns a `u32`: 0 is a clean stop th
 recovery never restarts, any other value stops the service with Win32 code 1066 and that
 service-specific code, which triggers the recovery actions when the flag above is on.
 
+## A mockable control surface
+
+`control::ServiceControl` covers stop, start and set-start-type by service name, so code that
+operates services remotely can be tested without Windows. `control::system()` is the Service
+Control Manager on Windows and fails with `Error::Unsupported` elsewhere; `control::FakeControl`
+is an in-memory table that records each call.
+
+```rust
+use std::time::Duration;
+use dl_winsvc::control::{Call, FakeControl, ServiceControl};
+use dl_winsvc::scm::{StartType, State};
+
+let fake = FakeControl::new().with_service("MyAgent", State::Running, StartType::Automatic);
+fake.stop("MyAgent", Duration::from_secs(30)).unwrap();
+assert_eq!(fake.state("MyAgent").unwrap(), State::Stopped);
+assert_eq!(fake.calls(), [Call::Stop("MyAgent".into())]);
+```
+
 ## File and directory ACLs
 
 `acl::restrict(path)` makes Administrators the owner and sets a protected DACL that grants

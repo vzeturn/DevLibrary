@@ -272,7 +272,10 @@ pub fn main_install(app: &App, dir: &Path, m: &Matches) -> i32 {
         },
         Mode::Switch(t) => switch(app, dir, &t).unwrap_or_else(|f| f.print()),
         Mode::Service => match crate::cli::install(app, dir) {
-            Ok(()) => 0,
+            Ok(()) => {
+                announce_selftest();
+                0
+            }
             Err(e) => Failure::new(
                 e.to_string(),
                 "run as Administrator; enrol first if it says so",
@@ -316,6 +319,11 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// `install stable|canary|auto|x.y.z` on an installed machine.
+/// The new service runs the self-test on its first start (`selftest::post_install`).
+fn announce_selftest() {
+    println!("The agent runs a self-test on its first start and sends the result to the hub");
+}
+
 fn switch(app: &App, dir: &Path, t: &Target) -> Result<i32, Failure> {
     if !Identity::exists(dir) {
         return Err(Failure::new(
@@ -643,6 +651,7 @@ fn update(app: &App, dir: &Path, wait: Duration) -> Result<i32, Failure> {
         return Ok(0);
     }
     println!("Installing {} -> {}", r.from, r.to);
+    announce_selftest();
     if wait_version(dir, &r.to, RESTART_WAIT) {
         println!("Updated {} -> {}", r.from, r.to);
     } else {
