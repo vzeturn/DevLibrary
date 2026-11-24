@@ -77,6 +77,8 @@ pub struct Options {
     /// Answers the `attach` command, a product's enrol tool run from the hub (set by the CLI;
     /// `None` answers "cannot attach").
     pub attach: Option<crate::sys_module::SelfTestHook>,
+    /// The agent's own service name, which the `service` command never touches (set by the CLI).
+    pub own_service: Option<String>,
     /// How long each module gets to finish in-flight work before an update swaps the binary.
     pub drain_wait: Duration,
     /// A fault compiled in for the rollback smoke test ([`crate::fault`]); `None` normally.
@@ -95,6 +97,7 @@ impl Options {
             probation_seconds: PROBATION_SECONDS,
             selftest: None,
             attach: None,
+            own_service: None,
             drain_wait: DRAIN_WAIT,
             fault: crate::fault::COMPILED,
         }
@@ -160,9 +163,14 @@ impl Agent {
         let spool = Spool::open(opts.data_dir.join("reports.json"));
         let outbox = Outbox::default();
         let mut supervisor = Supervisor::new(opts.data_dir.clone(), outbox.clone(), spool.clone());
-        supervisor.add(crate::sys_module::factory_with_hooks(
+        supervisor.add(crate::sys_module::factory_with_service(
             opts.selftest.clone(),
             opts.attach.clone(),
+            Some(crate::sys_module::ServiceHook {
+                trusted: opts.trusted.clone(),
+                control: std::sync::Arc::new(crate::service_cmd::Scm),
+                own_service: opts.own_service.clone(),
+            }),
         ));
         let sql = Site::load(&opts.data_dir);
         supervisor.set_sql(sql.pools.clone());

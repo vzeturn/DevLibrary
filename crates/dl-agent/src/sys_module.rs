@@ -6,13 +6,15 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use dl_json::{Map, Value};
 
 use crate::Error;
 use crate::command::Command;
+use crate::manifest::TrustedKeys;
 use crate::report::Severity;
+use crate::service_cmd::{self, ServiceControl};
 use crate::supervisor::{Factory, Module, ModuleContext};
 
 /// How often the data directory is probed.
@@ -46,6 +48,26 @@ pub struct SysModule {
     busy: Arc<AtomicBool>,
     attach: Option<SelfTestHook>,
     attach_busy: Arc<AtomicBool>,
+    service: Option<ServiceHook>,
+    service_busy: Arc<AtomicBool>,
+}
+
+/// What the `service` command needs: the keys its signature is checked against and the
+/// service manager it drives (RT-1105).
+#[derive(Clone)]
+pub struct ServiceHook {
+    /// Release keys a command may be signed with.
+    pub trusted: TrustedKeys,
+    /// The service manager.
+    pub control: Arc<dyn ServiceControl>,
+    /// The agent's own service name, refused like `dl-agent`.
+    pub own_service: Option<String>,
+}
+
+impl std::fmt::Debug for ServiceHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ServiceHook")
+    }
 }
 
 /// Factory for [`SysModule`] without a self-test.
@@ -60,10 +82,20 @@ pub fn factory_with(hook: Option<SelfTestHook>) -> Factory {
 
 /// Factory for [`SysModule`] answering `selftest` with `selftest` and `attach` with `attach`.
 pub fn factory_with_hooks(selftest: Option<SelfTestHook>, attach: Option<SelfTestHook>) -> Factory {
+    factory_with_service(selftest, attach, None)
+}
+
+/// Factory for [`SysModule`] that also answers the signed `service` command with `service`.
+pub fn factory_with_service(
+    selftest: Option<SelfTestHook>,
+    attach: Option<SelfTestHook>,
+    service: Option<ServiceHook>,
+) -> Factory {
     Arc::new(move || {
         Box::new(SysModule {
             selftest: selftest.clone(),
             attach: attach.clone(),
+            service: service.clone(),
             ..SysModule::default()
         })
     })
@@ -71,7 +103,9 @@ pub fn factory_with_hooks(selftest: Option<SelfTestHook>, attach: Option<SelfTes
 
 /// `cmd` addressed to `sys` when it is a `selftest` or an `attach` without a module.
 pub fn route(mut cmd: Command) -> Command {
-    if cmd.module.is_none() && (cmd.kind == SELFTEST || cmd.kind == ATTACH) {
+    if cmd.module.is_none()
+        && (cmd.kind == SELFTEST || cmd.kind == ATTACH || cmd.kind == service_cmd::KIND)
+    {
         cmd.module = Some("sys".into());
     }
     cmd
@@ -111,6 +145,7 @@ impl SysModule {
                 "sys.ping" => ctx.complete(&cmd.id, true, "pong"),
                 SELFTEST => self.start_selftest(ctx, cmd),
                 ATTACH => self.start_attach(ctx, cmd),
+                service_cmd::KIND => self.start_service(ctx, cmd),
                 other => ctx.complete(&cmd.id, false, &format!("sys: unknown command {other}")),
             }
         }
@@ -123,6 +158,42 @@ impl SysModule {
             return;
         };
         spawn_hook(ctx, cmd, hook, &self.busy, "selftest", "a self-test");
+    }
+
+    /// Verifies and runs a signed `service` command on its own thread (a stop waits for the
+    /// service) and answers when done. Unsigned or invalid commands are answered `refused`.
+    fn start_service(&self, ctx: &ModuleContext, cmd: Command) {
+        let Some(hook) = self.service.clone() else {
+            ctx.complete(&cmd.id, false, "sys: this build cannot control services");
+            return;
+        };
+        if self.service_busy.swap(true, Ordering::SeqCst) {
+            ctx.complete(&cmd.id, false, "sys: a service command is already running");
+            return;
+        }
+        let id = cmd.id.clone();
+        let (worker, busy) = (ctx.clone(), Busy(self.service_busy.clone()));
+        let spawned = std::thread::Builder::new()
+            .name("service".into())
+            .spawn(move || {
+                let _busy = busy;
+                let (ok, out) = service_cmd::execute(
+                    &cmd,
+                    &hook.trusted,
+                    hook.control.as_ref(),
+                    hook.own_service.as_deref(),
+                    SystemTime::now(),
+                );
+                worker.complete(&cmd.id, ok, &out);
+            });
+        if let Err(e) = spawned {
+            self.service_busy.store(false, Ordering::SeqCst);
+            ctx.complete(
+                &id,
+                false,
+                &format!("sys: cannot start a service command: {e}"),
+            );
+        }
     }
 
     /// Runs a product's enrol tool on its own thread (it talks to the product cloud and SQL
@@ -226,6 +297,19 @@ mod tests {
         );
         assert_eq!(route(command("other", None)).module, None);
         assert_eq!(route(command(ATTACH, None)).module.as_deref(), Some("sys"));
+        assert_eq!(
+            route(command(service_cmd::KIND, None)).module.as_deref(),
+            Some("sys")
+        );
+    }
+
+    #[test]
+    fn service_command_without_a_hook_is_refused_and_leaves_the_module_free() {
+        let d = TestDir::new("sys-service");
+        let ctx = ModuleContext::standalone("sys", dl_json::Value::Null, d.0.clone());
+        let none = SysModule::default();
+        none.start_service(&ctx, command(service_cmd::KIND, None));
+        assert!(!none.service_busy.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -36,6 +36,7 @@ pub mod remote_attach;
 pub mod report;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod selftest;
+pub mod service_cmd;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod service_watch;
 pub mod sql;

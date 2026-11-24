@@ -471,6 +471,7 @@ fn run_agent(app: &App, dir: &Path, stop: &StopSignal) -> i32 {
     opts.version = app.version.clone();
     opts.selftest = Some(crate::selftest::hook(app, dir));
     opts.attach = Some(crate::remote_attach::hook(app, dir));
+    opts.own_service = Some(app.service.clone());
     match Agent::new(
         opts,
         identity,

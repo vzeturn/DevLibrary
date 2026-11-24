@@ -125,6 +125,25 @@ the failure cap; the output says why nothing was installed), `retry_update {vers
 passed to that module. Expired commands are answered `{ok:false, output:"expired"}`.
 Every command gets exactly one result.
 
+### 4.3 Signed service control (RT-1105)
+
+`{kind:"service", args:{action, service, startup?, key_id, signature}, expires_at}` stops or
+starts a Windows service, or sets its startup type, with nobody at the machine. The `sys`
+module answers it (no `module` needed). It is the one command the hub cannot send on its own
+authority: `signature` is an Ed25519 signature, made offline with a release key this binary
+was built with (`key_id`), over the compact JSON `{id, kind, action, service, startup?,
+expires_at}`. So a signature is bound to one command id, one service and one expiry.
+
+- `action`: `stop` (waits up to 30 s for the service to stop; already stopped is success),
+  `start` (waits for running), `set_startup` with `startup` `automatic`, `manual` or `disabled`.
+- Refused before the service manager is touched (`{ok:false, output:"service: refused: …"}`):
+  no `key_id`/`signature` (`unsigned command`), unknown key, malformed or bad signature,
+  `expires_at` missing, in the past or more than 24 h ahead, an unknown action, a bad
+  `startup`, a service name that is empty, over 256 characters or holds a control character,
+  `/` or `\`, and the agent's own service (`dl-agent` and the name the CLI installed it under).
+- A failure of the service manager is answered `{ok:false, output:"service: <name>: <error>"}`.
+- One service command runs at a time per agent. On other platforms the answer is an error.
+
 ### 4.1 Diagnostics bundle
 
 `collect_diagnostics` builds a zip and uploads it signed to
