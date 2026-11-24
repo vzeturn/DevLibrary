@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash cffeca23...) with the Dashboard read ops `fo.dashboard.today@1`, `fo.dashboard.houseMix@1` and `fo.dashboard.rooms@1` (select calls on `Folio`, `Profile` and `Room`), so agent tenants fill Today in detail, Room status and Needs attention (RT-1079).
 - dl-agent `service` command: stop, start or set the startup type of a Windows service from a command signed offline with a release key; unsigned, badly signed, expired and own-service commands are refused before the service manager is touched (PROTOCOL §4.3, RT-1105, part of RT-1054).
 - dl-agent runs its self-test by itself on the first start of a version (fresh install or upgrade), once the hub accepted a heartbeat, and uploads it with trigger `update`: version, signature/update state, service, hub heartbeat, SQL, permissions and every module check reach the hub without the hotel's IT confirming them. The run is repeated only when the version changes or the upload failed (`selftest.version` in the data directory; RT-1104, RT-1054).
 

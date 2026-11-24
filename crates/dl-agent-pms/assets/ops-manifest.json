@@ -132,21 +132,26 @@
         "CancelTime",
         "CheckInTime",
         "CheckOutTime",
+        "CompFlag",
+        "DelayCheckOutFlag",
         "DepartureDate",
         "FolioNum",
         "FolioStatus",
         "FolioSubNum",
         "GroupCode",
+        "HouseUseFlag",
         "NoShowFlag",
         "NumAdult",
         "NumChild",
         "OriginCode",
+        "ProfileNumber",
         "RateAmount",
         "ReservationTime",
         "RoomCode",
         "RoomTypeCode",
         "ShareNum",
         "SubGroupCode",
+        "UnexpectedDepartureFlag",
         "WalkInFlag"
       ]
     },
@@ -255,6 +260,22 @@
         "TrnCode",
         "TrnSub",
         "ZeroPayment"
+      ]
+    },
+    {
+      "name": "Profile",
+      "columns": [
+        "ProfileNumber",
+        "VIPLevelCode"
+      ]
+    },
+    {
+      "name": "Room",
+      "columns": [
+        "HSKPClean",
+        "HSKPOccupied",
+        "RoomCode",
+        "RoomTypeCode"
       ]
     },
     {
@@ -1201,6 +1222,508 @@
               "size": 30
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "fo.dashboard.houseMix",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "ProfileNumber",
+              "CancelNum",
+              "CompFlag",
+              "HouseUseFlag",
+              "NumAdult",
+              "NumChild"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "inHouse",
+                  "type": "int",
+                  "value": 2
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "ProfileNumber",
+              "CancelNum",
+              "NumAdult",
+              "NumChild"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "inHouse",
+                  "type": "int",
+                  "value": 2
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "nextDate",
+                  "type": "date",
+                  "arg": "nextDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Profile",
+            "columns": [
+              "ProfileNumber"
+            ],
+            "where": [
+              {
+                "column": "VIPLevelCode",
+                "op": ">",
+                "param": {
+                  "name": "noVip",
+                  "type": "varchar",
+                  "value": "0",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.dashboard.rooms",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Room",
+            "columns": [
+              "RoomCode",
+              "HSKPOccupied",
+              "HSKPClean"
+            ],
+            "where": [
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [
+              "RoomCode"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "inHouse",
+                  "type": "int",
+                  "value": 2
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "RoomCode",
+              "CancelNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "inHouse",
+                  "type": "int",
+                  "value": 2
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "ooi",
+                  "type": "int",
+                  "value": 4
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "RoomCode",
+              "CancelNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "ooi",
+                  "type": "int",
+                  "value": 4
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "ooo",
+                  "type": "int",
+                  "value": 5
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "RoomCode",
+              "CancelNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "ooo",
+                  "type": "int",
+                  "value": 5
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.dashboard.today",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "FolioStatus",
+              "NoShowFlag",
+              "CancelNum",
+              "RoomTypeCode",
+              "RoomCode",
+              "CheckInTime",
+              "WalkInFlag",
+              "NumAdult",
+              "NumChild"
+            ],
+            "where": [
+              {
+                "column": "ArrivalDate",
+                "op": ">=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<",
+                "param": {
+                  "name": "nextDate",
+                  "type": "date",
+                  "arg": "nextDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "FolioStatus",
+              "CancelNum",
+              "RoomTypeCode",
+              "CheckOutTime",
+              "UnexpectedDepartureFlag",
+              "DelayCheckOutFlag",
+              "NumAdult",
+              "NumChild"
+            ],
+            "where": [
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": "<",
+                "param": {
+                  "name": "nextDate",
+                  "type": "date",
+                  "arg": "nextDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "CancelNum",
+              "RoomTypeCode",
+              "NumAdult",
+              "NumChild"
+            ],
+            "where": [
+              {
+                "column": "CheckOutTime",
+                "op": ">=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "CheckOutTime",
+                "op": "<",
+                "param": {
+                  "name": "nextDate",
+                  "type": "date",
+                  "arg": "nextDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
         }
       ]
     },
