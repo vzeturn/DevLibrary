@@ -1,5 +1,5 @@
 //! The built-in `sql` module: watches every declared database and answers `sql.ping`,
-//! `sql.status`, `sql.survey`, `sql.probe`, `sql.install` and `sql.inventory`.
+//! `sql.status`, `sql.survey`, `sql.probe`, `sql.install`, `sql.inventory`, `sql.aggregate` and `sql.perf`.
 //!
 //! It is added only when the site declares databases. A database that stops answering
 //! turns the module `degraded` (so the canary gate sees it) and files one `sql_unreachable`
@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 use dl_json::{Map, Value, json};
 
 use super::bundle::Bundle;
-use super::{Connector, Pools, SqlPools, install, inventory, inventory_ranges, probe, survey};
+use super::{
+    Connector, Pools, SqlPools, aggregate, install, inventory, inventory_ranges, perf, probe,
+    survey,
+};
 use crate::Error;
 use crate::manifest::TrustedKeys;
 use crate::report::Severity;
@@ -342,6 +345,43 @@ impl<C: Connector> SqlModule<C> {
         (ok, text)
     }
 
+    /// `sql.aggregate` and `sql.perf`: runs `run` on every declared database (or the one named
+    /// by `database`) and answers `{"<name>":{"ok":true,…}}`; a refusal is that database's
+    /// `{"ok":false,"code","error"}` and makes the command fail.
+    fn per_database(
+        &self,
+        args: &Value,
+        run: impl Fn(&mut C::Conn) -> Result<Value, Error>,
+    ) -> (bool, String) {
+        let only = args.get("database").and_then(Value::as_str);
+        let mut out = Map::new();
+        let mut ok = true;
+        for name in self.pools.names() {
+            if only.is_some_and(|o| o != name) {
+                continue;
+            }
+            let answer = match self.pools.get(&name).and_then(|p| p.with(&run)) {
+                Ok(Value::Object(mut m)) => {
+                    m.insert("ok", true);
+                    Value::Object(m)
+                }
+                Ok(other) => json!({"ok": true, "result": other}),
+                Err(e) => {
+                    ok = false;
+                    json!({"ok": false, "code": super::problem_code(&e, "sql_error"), "error": e.to_string()})
+                }
+            };
+            out.insert(name, answer);
+        }
+        if out.is_empty() {
+            return (
+                false,
+                format!("sql: no database {}", only.unwrap_or("declared")),
+            );
+        }
+        (ok, dl_json::to_string(&Value::Object(out)))
+    }
+
     fn ping(&self, args: &Value) -> (bool, String) {
         let only = args.get("database").and_then(Value::as_str);
         let mut out = Map::new();
@@ -377,6 +417,10 @@ impl<C: Connector> SqlModule<C> {
                 "sql.probe" => self.probe_now(&cmd.args),
                 "sql.install" => self.install_now(ctx, &cmd.args),
                 "sql.inventory" => self.inventory_now(&cmd.args),
+                "sql.aggregate" => {
+                    self.per_database(&cmd.args, |c| aggregate::aggregate(c, &cmd.args))
+                }
+                "sql.perf" => self.per_database(&cmd.args, |c| perf::perf(c, perf::APP)),
                 other => (false, format!("sql: unknown command {other}")),
             };
             ctx.complete(&cmd.id, ok, &output);
