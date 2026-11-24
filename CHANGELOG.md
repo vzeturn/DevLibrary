@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent `service` command: stop, start or set the startup type of a Windows service from a command signed offline with a release key; unsigned, badly signed, expired and own-service commands are refused before the service manager is touched (PROTOCOL §4.3, RT-1105, part of RT-1054).
 - dl-agent-pms: POS bill write ops pos.check.open / postItem / send / pay / close (SMILE-PMS RT-1069), each one call of a SMILE_Pos_* site procedure installed by the signed smile-pos-bill bundle.
 
 - dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash e2eb5188...) with the POS bill read ops `pos.check.list@1`, `pos.check.detail@1` (open checks and bill detail from `TmpInvoice`/`TmpTrn`/`TransactionCode`), `pos.tender.modes@1` (`PaymentMode`) and `pos.shift.payments@1` (shift tenders and report from `Payment`/`TmpPayment`/`Trn`/`TmpTrn`/`VoidTrn`), table selects only (RT-1069).
