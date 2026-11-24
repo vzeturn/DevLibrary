@@ -509,6 +509,7 @@ mod tests {
                 "pos.check.postItem@1",
                 "pos.check.send@1",
                 "pos.clerk.permissions@1",
+                "pos.menu.items@1",
                 "pos.menu.tree@1",
                 "pos.outbox.claim@1",
                 "pos.outbox.complete@1",

@@ -206,6 +206,15 @@
       ]
     },
     {
+      "name": "ItemDef",
+      "columns": [
+        "IActive",
+        "ICode",
+        "IName",
+        "Price"
+      ]
+    },
+    {
       "name": "ItemMenu",
       "columns": [
         "HasSubMenu",
@@ -255,6 +264,15 @@
         "DisplayOrder",
         "NumRoom",
         "RoomTypeCode"
+      ]
+    },
+    {
+      "name": "RVCItemMenu",
+      "columns": [
+        "ItemCode",
+        "ItemMenu",
+        "ItemShow",
+        "RVC"
       ]
     },
     {
@@ -2199,6 +2217,59 @@
               }
             ],
             "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.menu.items",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "RVCItemMenu",
+            "columns": [
+              "ItemCode",
+              "ItemMenu",
+              "ItemShow"
+            ],
+            "where": [
+              {
+                "column": "RVC",
+                "op": "=",
+                "param": {
+                  "name": "rvcNo",
+                  "type": "int",
+                  "arg": "rvcNo"
+                }
+              }
+            ],
+            "order_by": [
+              "ItemMenu",
+              "ItemCode"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "ItemDef",
+            "columns": [
+              "ICode",
+              "IName",
+              "Price",
+              "IActive"
+            ],
+            "where": [],
+            "order_by": [
+              "ICode"
+            ],
             "max_rows": 10000
           }
         }
