@@ -144,7 +144,7 @@ fn a_select_op_returns_rows() {
 #[test]
 fn the_embedded_manifest_still_loads() {
     let m = Manifest::load().unwrap();
-    // RT-0614 + RT-0776 + RT-0907 + RT-0810 (pos.menu.tree) + RT-1069 (pos.menu.items: ItemDef, RVCItemMenu) + RT-1069 (pos.check.*, pos.tender.modes, pos.shift.payments): the tables read by fo.availability.source, fo.reservation.listFigures, fo.departures.onDate and the pos.* ops.
+    // RT-0614 + RT-0776 + RT-0907 + RT-0810 (pos.menu.tree) + RT-1069 (pos.menu.items: ItemDef, RVCItemMenu) + RT-1069 (pos.check.*, pos.tender.modes, pos.shift.payments) + RT-1079 (fo.dashboard.*: Profile, Room): the tables read by fo.availability.source, fo.reservation.listFigures, fo.departures.onDate and the pos.* ops.
     let mut tables: Vec<&str> = m.tables.iter().map(|t| t.name.as_str()).collect();
     tables.sort_unstable();
     assert_eq!(
@@ -170,8 +170,10 @@ fn the_embedded_manifest_still_loads() {
             "ItemMenu",
             "Payment",
             "PaymentMode",
+            "Profile",
             "RVCItemMenu",
             "RVCLinkCode",
+            "Room",
             "RoomType",
             "STaxDef",
             "SurChgDef",

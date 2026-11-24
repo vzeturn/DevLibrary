@@ -60,6 +60,9 @@ customer database (no `MM_OpLog`, no migrations, no retention job).
 | `fo.availability.contractStatus@1` (read) | `SMILE_FO` | one `select` on `AllotmentContract` (`TANo`, `ContractNo`, `ALMStatus`) for contracts overlapping `startDate`..`endDate` | the contract status rows; fails on a SMILE_FO without `ALMStatus`, which the cloud treats as "no status" (RT-0474). |
 | `fo.reservation.list@1` (read) | `SMILE_FO` | vendor `rptReservMasterList` (`fromDate`, `toDate`) | reservation rows (guest names). |
 | `fo.reservation.listFigures@1` (read) | `SMILE_FO` | three `select` calls (ADR 0007) on `Folio`: reservations made on `date`, cancellations on `date`, no-shows of the previous day (`date`, `nextDate`, `prevDate`) | `RoomTypeCode` (and `NoShowFlag`) per row; the cloud counts. |
+| `fo.dashboard.today@1` (read) | `SMILE_FO` | three `select` calls (ADR 0007) on `Folio`: arrivals, departures and check-outs of `date` (`date`, `nextDate`) | folio status, cancel, room type, flags and guest counts; the cloud counts rooms and guests (no names). |
+| `fo.dashboard.houseMix@1` (read) | `SMILE_FO` | three `select` calls: in-house `Folio` rows of `date`, those staying past it, and the `Profile` rows with a VIP level | counts only after the cloud's tally. |
+| `fo.dashboard.rooms@1` (read) | `SMILE_FO` | seven `select` calls: `Room` (housekeeping bits) and in-house, out-of-inventory (4) and out-of-order (5) `Folio` blocks of `date` | the cloud derives the GetCurrentStatus counts and the room board. |
 | `fo.departures.onDate@1` (read) | `SMILE_FO` | two `select` calls (ADR 0007): `AdditionalName` guests departing on `date` and the main `Folio` rows of that day | guest and folio columns the manifest declares; the cloud joins them. |
 | `fo.arrivals.expected@1`, `fo.departures.expected@1`, `fo.inhouse.list@1` (read) | `SMILE_FO` | vendor `HSKPArrivalExpected`, `HSKPDepartureExpected`, `HSKPCurrentOccupied` (`date`) | room/guest rows. |
 
