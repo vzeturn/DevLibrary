@@ -201,6 +201,7 @@ version = "0.2.1"
 dependencies = [
  "dl-encoding",
  "dl-hash",
+ "dl-json",
 ]
 
 [[package]]
