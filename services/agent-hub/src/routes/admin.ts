@@ -29,6 +29,8 @@ import { addCanarySite, canarySites, removeCanarySite } from '../services/watch'
 import { holdsView, holdTenant, pauseRelease, releaseHold, resumeRelease } from '../services/holds';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
+import { coverage, snapshotDetail, snapshotList } from '../services/schemaDict';
+import { coverageBody } from '../domain/schemaDict';
 import { MAX_TEST_RUN_BYTES, storeTestRun, suiteName, testRunBody, testRunsView } from '../services/testRuns';
 import { renderStatusPage } from './statusPage';
 
@@ -147,6 +149,9 @@ adminRoutes.post('/agents/:id/attach', async (c) => {
 });
 adminRoutes.get('/agents/:id/survey', async (c) => c.json(await surveyOf(c.env, c.req.param('id'))));
 adminRoutes.get('/agents/:id/selftest', async (c) => c.json(await selftestView(c.env, c.req.param('id'))));
+adminRoutes.get('/schema/snapshots', async (c) => c.json(await snapshotList(c.env, c.req.query('agent_id') ?? null)));
+adminRoutes.get('/schema/snapshots/:id', async (c) => c.json(await snapshotDetail(c.env, c.req.param('id'))));
+adminRoutes.post('/schema/coverage', async (c) => c.json(await coverage(c.env, validate(coverageBody, await jsonBody(c.req)))));
 adminRoutes.put('/agents/:id/config', async (c) => {
   const body = validate(configBody, await jsonBody(c.req));
   return c.json(await setConfig(c.env.DB, c.req.param('id'), body.body, nowSeconds()));
