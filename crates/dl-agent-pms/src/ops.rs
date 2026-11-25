@@ -470,6 +470,40 @@ impl Manifest {
 mod tests {
     use super::*;
 
+    /// SMILE-PMS manifest v2 gives these ops no `calls`, so the agent answers `in_process_only`:
+    /// `pos.checkVersion.get` uses `MM_` procedures (SMILE-PMS decision RT-0220,
+    /// `docs/decisions/2026-11-19-site-agent-smile-only-contract.md`); the three
+    /// `fo.folioLogDef.*` ops have `procs: []` (inline SQL in the SaaS) and fall under the same rule.
+    /// Every other op must have a call plan, so a new op cannot be added without a handler.
+    #[test]
+    fn ops_without_calls_are_exactly_the_in_process_only_set() {
+        let m = Manifest::load().unwrap();
+        let mut empty: Vec<&str> = m
+            .ops
+            .iter()
+            .filter(|op| op.calls.is_empty())
+            .map(|op| op.name.as_str())
+            .collect();
+        empty.sort_unstable();
+        assert_eq!(
+            empty,
+            [
+                "fo.folioLogDef.list",
+                "fo.folioLogDef.sync",
+                "fo.folioLogDef.update",
+                "pos.checkVersion.get",
+            ]
+        );
+        assert_eq!(m.implemented_ops().len(), m.ops.len() - empty.len());
+        let advertised = m.implemented_ops();
+        for name in empty {
+            assert!(
+                !advertised.contains(&format!("{name}@1")),
+                "{name} must not be advertised in hello"
+            );
+        }
+    }
+
     #[test]
     fn embedded_manifest_loads() {
         let m = Manifest::load().unwrap();
