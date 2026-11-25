@@ -3,6 +3,7 @@ import type { AgentRow, Env } from '../env';
 import { HttpError } from '../lib/http';
 import { ANY, addHold, addPause, getPause, isHeld, listHolds, removeHold, removePause, type HoldRow, type PauseRow } from '../repo/holds';
 import { getRelease } from '../repo/releases';
+import { clearWatch } from '../repo/watch';
 import { getTenant } from '../repo/tenants';
 
 /** How long after delivery an `update_now` keeps the manifest open to a held agent. */
@@ -21,6 +22,7 @@ export async function pauseRelease(env: Env, product: string, version: string, r
 
 export async function resumeRelease(env: Env, product: string, version: string): Promise<void> {
   if (!(await removePause(env.DB, product, version))) throw new HttpError(404, 'release_not_paused');
+  await clearWatch(env.DB, product, version);
 }
 
 export const releasePause = (env: Env, product: string, version: string): Promise<PauseRow | null> => getPause(env.DB, product, version);

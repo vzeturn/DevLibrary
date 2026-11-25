@@ -24,6 +24,7 @@
     "GATE_SOAK_HOURS_MINOR": "24",
     "GATE_SOAK_HOURS_MAJOR": "72",
     "MINOR_RAMP": "0:10,24:50,48:100",
+    "SITE_CANARY_HOURS": "4",
     // Hub hosts handed to agents, primary first; the fallback serves /v1, /install and /healthz only.
     // RT-0781: /mcp needs the Access service token of the hub (ADR 0008); the audience is public, not a secret.
     "ACCESS_TEAM_DOMAIN": "wnzapp.cloudflareaccess.com",

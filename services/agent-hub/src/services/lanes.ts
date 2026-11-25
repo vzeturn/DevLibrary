@@ -7,6 +7,7 @@ import { HttpError, logError } from '../lib/http';
 import { addAllow, ALL_SITES, currentStable, isAllowed, latestPromotion, listAllows, removeAllow, type AllowRow } from '../repo/lanes';
 import { getRelease, type ReleaseRow } from '../repo/releases';
 import { getTenant } from '../repo/tenants';
+import { siteCanaryGate } from './watch';
 
 /** Canary heartbeat cadence cap when CANARY_HEARTBEAT_SECONDS is unset. */
 export const DEFAULT_CANARY_HEARTBEAT_SECONDS = 15;
@@ -60,6 +61,12 @@ export async function stableOffered(env: Env, agent: AgentRow, release: ReleaseR
   if (bump === 'major') {
     const allowed = await isAllowed(env.DB, release.product, release.version, agent.tenant_id, agent.site_id);
     return allowed && inRollout(agent.id, release.product, release.version, ceiling);
+  }
+  // Site canary lane (RT-1106): the listed sites first, the rest only after a good watch.
+  if (promotion) {
+    const gate = await siteCanaryGate(env, agent, release, promotion.promoted_at, now);
+    if (gate === 'hold') return false;
+    if (gate === 'offer') return inRollout(agent.id, release.product, release.version, manifestCeiling(release));
   }
   const elapsed = now - (promotion?.promoted_at ?? now);
   const pct = offeredPercent(bump, laneConfig(env).ramp, elapsed, ceiling) ?? 0;
