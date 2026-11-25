@@ -79,7 +79,7 @@ Elsewhere:
 |---|---|
 | `~/.cargo/bin/cargo fmt --all` then `cargo fmt --all -- --check` | clean |
 | `~/.cargo/bin/cargo test -p dl-agent-pms-device -p dl-agent-bin` | 250 passed, 0 failed (62 unit + 188 integration; dl-agent-bin 0) |
-| `PMS_DEVICE_CONTRACT_DIR=~/Projects/SMILE-PMS/apps/device-agent/contract cargo test -p dl-agent-pms-device --test contract_drift` | passed (compared, not skipped) |
+| `PMS_DEVICE_CONTRACT_DIR=~/Projects/azolo-pms/apps/device-agent/contract cargo test -p dl-agent-pms-device --test contract_drift` | passed (compared, not skipped) |
 | `~/.cargo/bin/cargo clippy -p dl-agent-pms-device -p dl-agent-bin --all-targets -- -D warnings` | clean |
 | same with `--target x86_64-pc-windows-gnu` | clean |
 | same with `--target i686-pc-windows-gnu` | clean |

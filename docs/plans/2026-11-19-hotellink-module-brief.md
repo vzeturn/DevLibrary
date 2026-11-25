@@ -2,12 +2,12 @@
 
 ## Goal
 
-The SMILE Hotel Link site agent (Go, `~/Projects/SMILE-HLAPI/go`, Windows service `SmileHLAgent`,
+The SMILE Hotel Link site agent (Go, `~/Projects/sr-hotel-link-api/go`, Windows service `SmileHLAgent`,
 binary `smile-hl-agent.exe`) moves onto the shared `dl-agent` as module `hotellink`, following the
 pattern of `crates/dl-agent-einvoice` and `crates/dl-agent-pms` (read their READMEs and `module/`).
 This slice builds the **module only**, inside DevLibrary. Do not change SMILE-HLAPI, release, or deploy.
 
-## Source to port (Go is the reference; read `~/Projects/SMILE-HLAPI/CLAUDE.md` first)
+## Source to port (Go is the reference; read `~/Projects/sr-hotel-link-api/CLAUDE.md` first)
 
 - `go/internal/agent/`: `config.go` (LocalConfig, DPAPI `enc:` values, UTF-8 BOM strip, seed-once
   encrypt of plaintext), `hubclient.go` (Bearer token + `X-Hotel-Id`, `X-Agent-Version`,

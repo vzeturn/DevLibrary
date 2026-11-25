@@ -49,7 +49,7 @@ From GitHub:
 
 ```toml
 [dependencies]
-dl-decimal = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-decimal = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout (or inside the DevLibrary workspace):

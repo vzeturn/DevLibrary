@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.88"
 authors = ["vzeturn"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/vzeturn/DevLibrary"
+repository = "https://github.com/vzeturn/devlibrary"
 publish = false
 
 # Internal crates. Every crate in this workspace depends only on these

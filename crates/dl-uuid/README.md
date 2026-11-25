@@ -51,7 +51,7 @@ From GitHub:
 
 ```toml
 [dependencies]
-dl-uuid = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-uuid = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout (or inside the DevLibrary workspace):
@@ -66,7 +66,7 @@ random bytes and clock; needs `alloc`):
 
 ```toml
 [dependencies]
-dl-uuid = { git = "https://github.com/vzeturn/DevLibrary", default-features = false }
+dl-uuid = { git = "https://github.com/vzeturn/devlibrary", default-features = false }
 ```
 
 | Feature | Default | Enables |

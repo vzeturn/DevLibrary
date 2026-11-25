@@ -1,7 +1,7 @@
 # Brief E2c: E-Invoice console installs the shared dl-agent (RT-0164 task 557)
 
 Context: `docs/plans/2026-11-19-einvoice-e2-plan.md` (DevLibrary). Read decisions 4–6 there.
-Repo: `~/Projects/MM-EINVOICE` ("Azolo E-Invoice"). Read its `CLAUDE.md` Gotchas first.
+Repo: `~/Projects/azolo-einvoice` ("Azolo E-Invoice"). Read its `CLAUDE.md` Gotchas first.
 
 ## Goal
 

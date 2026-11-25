@@ -6,7 +6,7 @@ single-use recovery codes. HMAC-SHA-1, SHA-256 and SHA-512, 6 to 10 digits. Core
 generation and verification are `no_std` + `alloc`; no third-party dependencies, no
 `unsafe`, builds for `wasm32-unknown-unknown`.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary).
 
 ## Replaces
 
@@ -45,7 +45,7 @@ Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
 
 ```toml
 [dependencies]
-dl-otp = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-otp = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout of the repository:
@@ -61,7 +61,7 @@ Without the standard library (embedded, or a `no_std` WASM module):
 
 ```toml
 [dependencies]
-dl-otp = { git = "https://github.com/vzeturn/DevLibrary", default-features = false }
+dl-otp = { git = "https://github.com/vzeturn/devlibrary", default-features = false }
 ```
 
 `no_std` keeps HOTP, TOTP with explicit timestamps, `Secret::from_bytes` /
@@ -129,7 +129,7 @@ not be empty or start with a space; both are percent-encoded (`ACME%20Co`,
 ### 2. Show it as a QR code
 
 Use the sibling crate [dl-qr](../dl-qr) (add `dl-qr = { git =
-"https://github.com/vzeturn/DevLibrary" }`; dl-otp does not depend on it):
+"https://github.com/vzeturn/devlibrary" }`; dl-otp does not depend on it):
 
 ```text
 use dl_qr::{Ecc, QrCode, SvgOptions};

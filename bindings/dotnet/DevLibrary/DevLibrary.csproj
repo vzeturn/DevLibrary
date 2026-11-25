@@ -20,8 +20,8 @@
     <Authors>vzeturn</Authors>
     <Description>.NET binding for DevLibrary (Rust): Vietnamese amount in words, diacritics, VietQR. No dependencies.</Description>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/vzeturn/DevLibrary</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/vzeturn/DevLibrary</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/vzeturn/devlibrary</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/vzeturn/devlibrary</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

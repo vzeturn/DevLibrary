@@ -12,7 +12,7 @@ them. The switch must be in place: the dl-agent must continue as the same hub ag
 
 ## What to build (crate `crates/dl-agent-backup`, module `enroll/`)
 
-1. **Read the Go agent config** (read only; reference `~/Projects/SRBackup/agent/internal/config/config.go`,
+1. **Read the Go agent config** (read only; reference `~/Projects/sr-backup/agent/internal/config/config.go`,
    `internal/secret/secret.go`, `internal/hwid/hwid.go` — read only, the SRBackup main checkout has
    another session's uncommitted work, never write there):
    - Path search exactly as Go: `%ProgramData%\srbackup\agent.json`, then

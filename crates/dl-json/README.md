@@ -45,7 +45,7 @@ repository:
 
 ```toml
 [dependencies]
-dl-json = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-json = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 Pin a revision for reproducible builds: `{ git = "...", rev = "<commit>" }`.

@@ -114,7 +114,7 @@ describe('/mcp ops console', () => {
       return new Response('nope', { status: 404 });
     });
     expect(await (await call('repo_file', { path: 'README.md' })).json()).toMatchObject({ ref: 'main', text: '# DevLibrary\n' });
-    expect(seen[0]).toBe('https://raw.githubusercontent.com/vzeturn/DevLibrary/main/README.md');
+    expect(seen[0]).toBe('https://raw.githubusercontent.com/vzeturn/devlibrary/main/README.md');
     expect(await (await call('repo_list', { path: 'crates' })).json()).toMatchObject({ entries: [{ name: 'dl-agent', type: 'dir' }] });
     expect(await (await call('repo_commits', { limit: 1 })).json()).toEqual([{ sha: 'abc', date: '2026-11-20T00:00:00Z', subject: 'feat: x' }]);
     expect((await call('repo_file', { path: 'missing.md' })).isError).toBe(true);
@@ -122,7 +122,7 @@ describe('/mcp ops console', () => {
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
-      if (url.startsWith('https://data.jsdelivr.com/v1/packages/gh/vzeturn/DevLibrary@main')) {
+      if (url.startsWith('https://data.jsdelivr.com/v1/packages/gh/vzeturn/devlibrary@main')) {
         return Response.json({ files: [{ name: '/crates/dl-agent/README.md', size: 9 }, { name: '/crates/dl-agent/src/lib.rs', size: 5 }, { name: '/crates/Cargo.toml', size: 3 }, { name: '/README.md', size: 1 }] });
       }
       return new Response('nope', { status: 404 });
@@ -158,7 +158,7 @@ describe('/mcp ops console', () => {
     expect(pr).toMatchObject({ number: 65, merged: true, head: { sha: 'h1' }, base: { ref: 'main' } });
     expect(pr.files[0]?.path).toBe('docs/report.md');
     expect(pr.files[0]?.patch.endsWith('…[truncated]')).toBe(true);
-    expect(seen).toContain('https://api.github.com/repos/vzeturn/DevLibrary/pulls/65/files?per_page=100');
+    expect(seen).toContain('https://api.github.com/repos/vzeturn/devlibrary/pulls/65/files?per_page=100');
     expect(await (await call('repo_commit', { sha: 'f241daf' })).json()).toMatchObject({ sha: 'f241daf000', message: 'fix: y', parents: ['p1'], files: [{ path: 'a.rs', patch: '@@ -1 +1 @@' }] });
     expect((await call('repo_pull', { number: 9 })).isError).toBe(true);
     expect((await call('repo_pull', { number: 'x' })).isError).toBe(true);
@@ -184,9 +184,9 @@ describe('/mcp ops console', () => {
       const url = String(input);
       seen.push(url);
       if (url.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
-      if (url === 'https://github.com/vzeturn/DevLibrary/commits/main.atom') return new Response(feed);
-      if (url === 'https://patch-diff.githubusercontent.com/raw/vzeturn/DevLibrary/pull/65.patch') return new Response(patch);
-      if (url === 'https://github.com/vzeturn/DevLibrary/commit/f241daf.patch') return new Response(patch);
+      if (url === 'https://github.com/vzeturn/devlibrary/commits/main.atom') return new Response(feed);
+      if (url === 'https://patch-diff.githubusercontent.com/raw/vzeturn/devlibrary/pull/65.patch') return new Response(patch);
+      if (url === 'https://github.com/vzeturn/devlibrary/commit/f241daf.patch') return new Response(patch);
       return new Response('nope', { status: 404 });
     });
     expect(await (await call('repo_commits', { limit: 2 })).json()).toEqual([

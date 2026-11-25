@@ -47,7 +47,7 @@ repository:
 
 ```toml
 [dependencies]
-dl-jwt = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-jwt = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 Pin a revision for reproducible builds: `{ git = "...", rev = "<commit>" }`.
@@ -65,7 +65,7 @@ time to `decode` yourself:
 
 ```toml
 [dependencies]
-dl-jwt = { git = "https://github.com/vzeturn/DevLibrary", default-features = false }
+dl-jwt = { git = "https://github.com/vzeturn/devlibrary", default-features = false }
 ```
 
 The minimum supported Rust version is 1.88.

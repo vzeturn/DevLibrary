@@ -3,7 +3,7 @@
 SHA-1, SHA-2 (224/256/384/512), MD5, MD4 (for NTLM only), HMAC, PBKDF2, CRC-32 and constant-time comparison.
 `#![no_std]`, no dependencies, no `unsafe`, builds for `wasm32-unknown-unknown`.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary). Used by `dl-otp`, `dl-jwt`
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary). Used by `dl-otp`, `dl-jwt`
 and `dl-uuid`.
 
 ## Replaces
@@ -31,7 +31,7 @@ and `dl-uuid`.
 
 ```toml
 [dependencies]
-dl-hash = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-hash = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout: `dl-hash = { path = "../DevLibrary/crates/dl-hash" }`. Inside the

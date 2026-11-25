@@ -37,7 +37,7 @@ From GitHub:
 
 ```toml
 [dependencies]
-dl-time = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-time = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 Inside the DevLibrary workspace or from a local checkout:
@@ -52,7 +52,7 @@ For `no_std` (needs `alloc`), turn off the default `std` feature. This only remo
 
 ```toml
 [dependencies]
-dl-time = { git = "https://github.com/vzeturn/DevLibrary", default-features = false }
+dl-time = { git = "https://github.com/vzeturn/devlibrary", default-features = false }
 ```
 
 ## Quick start

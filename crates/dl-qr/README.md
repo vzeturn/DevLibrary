@@ -5,7 +5,7 @@ versions, the four error correction levels, numeric / alphanumeric / byte modes 
 mixed-mode segmentation, and automatic mask selection. `#![no_std]` + `alloc`, no
 dependencies, no `unsafe`, builds for `wasm32-unknown-unknown`.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary).
 
 ## Replaces
 
@@ -38,7 +38,7 @@ Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
 
 ```toml
 [dependencies]
-dl-qr = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-qr = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout of the repository:

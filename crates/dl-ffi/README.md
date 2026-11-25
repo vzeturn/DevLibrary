@@ -4,7 +4,7 @@ A C ABI over DevLibrary, so that .NET, Go (cgo), Flutter and WebAssembly hosts c
 Rust implementation directly instead of porting it. The business rules exist once, in
 Rust; a host only needs a thin binding.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary).
 
 ## Output
 

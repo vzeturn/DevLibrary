@@ -4,7 +4,7 @@ Command-line argument parser for Rust with flags, options, positional arguments,
 subcommands, environment-variable fallbacks, defaults, typed values, "did you mean"
 suggestions and generated help. No dependencies outside the standard library.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary), a set of zero-dependency Rust
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary), a set of zero-dependency Rust
 libraries.
 
 ## Replaces
@@ -42,7 +42,7 @@ From GitHub:
 
 ```toml
 [dependencies]
-dl-cli = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-cli = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout:

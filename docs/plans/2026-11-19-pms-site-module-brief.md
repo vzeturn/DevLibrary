@@ -9,7 +9,7 @@ SMILE-PMS, release anything, or deploy.
 
 ## Source to port
 
-- `~/Projects/SMILE-PMS/apps/site-agent/rust/`: the Rust port of the Go agent (`apps/site-agent`),
+- `~/Projects/azolo-pms/apps/site-agent/rust/`: the Rust port of the Go agent (`apps/site-agent`),
   about 13k lines, DevLibrary crates only (pinned to old rev `3b50836`). Read its README first.
   It covers enroll + keystore (`agent.key` DPAPI machine scope / 0600 file, `identity.json`),
   the signed token exchange and JWT refresh, the WebSocket stream (`/agent/v1/stream`: hello,

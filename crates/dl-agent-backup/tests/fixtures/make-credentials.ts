@@ -2,7 +2,7 @@
 // so the agent's decrypt is checked against an independent implementation (WebCrypto).
 // Test-only keys; nothing here is a production secret.
 //
-//   cd ~/Projects/SRBackup/hub && bun <this file> > <crate>/tests/fixtures/credentials.json
+//   cd ~/Projects/sr-backup/hub && bun <this file> > <crate>/tests/fixtures/credentials.json
 import { encryptCredential } from '../../../../../SRBackup/hub/src/lib/credentialCrypto.ts'
 
 const keys = ['test-agent-key-one', 'dGVzdC1hZ2VudC1rZXktdHdvLWJhc2U2NHVybA']

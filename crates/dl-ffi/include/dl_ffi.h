@@ -1,5 +1,5 @@
 /*
- * dl_ffi.h - C ABI of DevLibrary (https://github.com/vzeturn/DevLibrary), ABI version 1.
+ * dl_ffi.h - C ABI of DevLibrary (https://github.com/vzeturn/devlibrary), ABI version 1.
  *
  * Conventions for every function:
  *  - Text in and out is UTF-8 as pointer + length, no NUL terminator. A NULL pointer is

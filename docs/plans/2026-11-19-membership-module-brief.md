@@ -2,7 +2,7 @@
 
 ## Goal
 
-The Azolo Membership site agent (`~/Projects/MM-MEMBERSHIP/src/MM.Membership.Agent`, .NET 10,
+The Azolo Membership site agent (`~/Projects/azolo-victory-membership/src/MM.Membership.Agent`, .NET 10,
 ~19k lines, Windows service, live at two Victory hotels) moves onto the shared `dl-agent` as module
 `membership`, following the pattern of `crates/dl-agent-einvoice` and `crates/dl-agent-pms` (read
 their READMEs and `module/`). It is too large and too close to money for one slice:
@@ -14,7 +14,7 @@ their READMEs and `module/`). It is too large and too close to money for one sli
   ack it either, so the hub keeps it for the .NET agent / M2. M1 is therefore only ever run where
   the .NET agent still owns writes, or on the demo tenant.
 
-Do not change MM-MEMBERSHIP, release, or deploy. Read `~/Projects/MM-MEMBERSHIP/CLAUDE.md` first
+Do not change MM-MEMBERSHIP, release, or deploy. Read `~/Projects/azolo-victory-membership/CLAUDE.md` first
 (note its Gotchas, the `e2e-checkout-earn` gate and the SMILE test fixtures).
 
 ## Keep in place

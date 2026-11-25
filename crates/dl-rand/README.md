@@ -4,7 +4,7 @@ Random numbers from two sources: the operating system's CSPRNG for secrets, and 
 xoshiro256** generator for everything else. No dependencies, builds for Linux, macOS,
 Windows, BSD, WASI and the browser.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary). Used by `dl-uuid` and
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary). Used by `dl-uuid` and
 `dl-otp`.
 
 ## Replaces
@@ -31,7 +31,7 @@ state. Never use it for secrets.
 
 ```toml
 [dependencies]
-dl-rand = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-rand = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout: `dl-rand = { path = "../DevLibrary/crates/dl-rand" }`. Inside the

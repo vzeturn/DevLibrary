@@ -4,12 +4,12 @@
 
 M1 (merged, `crates/dl-agent-membership`, report `docs/plans/2026-11-19-membership-module-report.md`)
 ported the hub link and every read-only scanner of the Azolo Membership site agent
-(`~/Projects/MM-MEMBERSHIP/src/MM.Membership.Agent`). M2 ports the **write side** so dl-agent can
+(`~/Projects/azolo-victory-membership/src/MM.Membership.Agent`). M2 ports the **write side** so dl-agent can
 fully replace the .NET service: job executor + every SMILE writer. This touches folios, reservations
 and member earn at two live Victory hotels: **byte/semantic parity with .NET is the bar**, and
 nothing may write to SMILE unless the existing write gate allows it.
 
-Read first: `~/Projects/MM-MEMBERSHIP/CLAUDE.md` (Gotchas, `e2e-checkout-earn` gate, SMILE test
+Read first: `~/Projects/azolo-victory-membership/CLAUDE.md` (Gotchas, `e2e-checkout-earn` gate, SMILE test
 fixtures), the M1 brief + report (section "The M1/M2 seam"), and `crates/dl-agent-membership`.
 
 ## Port (from `src/MM.Membership.Agent`)
@@ -36,7 +36,7 @@ fixtures), the M1 brief + report (section "The M1/M2 seam"), and `crates/dl-agen
 
 ## Tests (mirror source structure, hand-written fakes, no mocking crates)
 
-- Port the .NET unit tests covering the ported code (`~/Projects/MM-MEMBERSHIP/tests`), at least
+- Port the .NET unit tests covering the ported code (`~/Projects/azolo-victory-membership/tests`), at least
   the job dispatcher, write gate, duplicate guard, room diff, walk-in checkout, earn pair.
 - **Golden SQL parity:** for each writer, a test that records the exact statements + parameters the
   Rust writer issues against a fake TDS session and compares with fixtures produced from the .NET

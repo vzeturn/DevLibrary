@@ -14,7 +14,7 @@ calls it after the dl-agent enrolment, with the arguments from env `DL_AGENT_SET
 
 ## Port
 
-Source: `~/Projects/MM-EINVOICE/rust/agent/src/enroll.rs` (850 lines with tests) and the
+Source: `~/Projects/azolo-einvoice/rust/agent/src/enroll.rs` (850 lines with tests) and the
 `-enroll` flag handling in its `main.rs` (read only; do not touch MM-EINVOICE). Go
 (`internal/agentcollector/enroll*.go`) is the reference where they disagree.
 
