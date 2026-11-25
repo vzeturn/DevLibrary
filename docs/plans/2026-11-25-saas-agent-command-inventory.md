@@ -67,7 +67,7 @@ Ghi chú:
 
 ## 3. PMS thiết bị (lock, POS device) qua `dl-agent-pms-device`
 
-Cloud đẩy lệnh qua hàng đợi claim/result (`contracts/api.rs`). Loại lệnh có handler: `lock.issue`, `lock.duplicate`, `lock.read`, `lock.extend`, `lock.erase`, `pos.print`, `pos.kick`, `pos.display`, `pos.read`, `pos.speak`; lệnh hub: `pms-device.status`, `pms-device.flush_outbox`. Còn mở theo ma trận parity (mục 5): enrolment thay cho token đặt tay (gap 12), OPOS nay mở két trong khi .NET từ chối (cần chủ dự án quyết), chưa có bench phần cứng.
+Cloud đẩy lệnh qua hàng đợi claim/result (`crates/dl-agent-pms-device/src/contracts/api.rs`). Loại lệnh có handler: `lock.issue`, `lock.duplicate`, `lock.read`, `lock.extend`, `lock.erase`, `lock.cancelAll`, `pos.print`, `pos.kick`, `pos.display`, `pos.read`, `pos.speak`; lệnh hub: `pms-device.status`, `pms-device.flush_outbox`. Còn mở theo ma trận parity (mục 5): enrolment thay cho token đặt tay (gap 12), OPOS nay mở két trong khi .NET từ chối (cần chủ dự án quyết), chưa có bench phần cứng.
 
 ## 4. PDAOrder SaaS: lệnh site gọi xuống `dl-agent-pda-sync`
 
@@ -96,7 +96,7 @@ Mã MS-n để theo dõi. Đầu vào/đầu ra của MS-1..4 chưa có trong ma
 | MS-1 | `fo.folioLogDef.list@1` (read, SMILE_FO) | `{}` (đề xuất: không tham số) | một set các dòng định nghĩa log folio của SMILE_FO (cột do SaaS chốt) | trung | Agent từ chối `in_process_only`. Nếu SaaS chạy trong cloud thì không cần làm; nếu SaaS gửi xuống agent SR thì mọi lần gọi hỏng. Cần SaaS xác nhận |
 | MS-2 | `fo.folioLogDef.sync@1` (write, idempotent, SMILE_FO) | `request_key` + danh sách định nghĩa cần đồng bộ (đề xuất) | số dòng thêm/sửa, qua journal | trung | Như MS-1, thêm là op ghi nên phải có `request_key` và journal |
 | MS-3 | `fo.folioLogDef.update@1` (write, idempotent, SMILE_FO) | `request_key` + khoá định nghĩa + giá trị mới (đề xuất) | dòng sau khi sửa / số dòng đổi | trung | Như MS-2 |
-| MS-4 | `pos.checkVersion.get@1` (read, target PMS, không DB) | `{}` | phiên bản hợp đồng POS mà agent chạy (đề xuất: `{contract_max, ops}` lấy từ `hello`) | thấp | Selftest dùng op này và coi `rejected` cũng là đạt (`module/selftest.rs`); SaaS có thể đọc `hello` thay thế |
+| MS-4 | `pos.checkVersion.get@1` (read, target PMS, không DB) | `{}` | phiên bản hợp đồng POS mà agent chạy (đề xuất: `{contract_max, ops}` lấy từ `hello`) | thấp | Chỉ `pms.op_dry_run` và test (`module_lifecycle.rs`, `ops.rs`) nhắc tới op này; selftest chạy `fo.hotelDate.get`. SaaS có thể đọc `hello` thay thế |
 
 Các khoảng trống vận hành không phải op nhưng chặn "100% yêu cầu từ SaaS" trên SR (từ parity matrix RT-0260, trạng thái 2026-11-20, chưa kiểm lại sau đó):
 
@@ -117,4 +117,4 @@ Các khoảng trống vận hành không phải op nhưng chặn "100% yêu cầ
 
 ## Kiểm chứng
 
-Đọc: `ops-manifest.json` (đếm 43 op bằng script, 39 có call), `exec/mod.rs:348-355`, `module/commands.rs`, `pda-sync/commands/executor.rs:244-275`, `pms-device/contracts/api.rs`, parity matrix. Không chạy test (RT chỉ thêm tài liệu).
+Đọc: `ops-manifest.json` (đếm 43 op bằng script, 39 có call), `exec/mod.rs:348-355`, `module/commands.rs`, `pda-sync/commands/executor.rs:244-275`, `crates/dl-agent-pms-device/src/contracts/api.rs`, parity matrix. Không chạy test (RT chỉ thêm tài liệu).
