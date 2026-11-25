@@ -8,6 +8,8 @@
 pub mod collect;
 pub mod model;
 pub mod queries;
+pub mod upload;
 
 pub use collect::{Error, MetaSource, collect_database};
 pub use model::{Column, Database, ForeignKey, Index, Routine, Snapshot, Table};
+pub use upload::upload_body;

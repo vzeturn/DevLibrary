@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 dl-hash.workspace = true
 dl-encoding.workspace = true
+dl-json.workspace = true
 
 [lints]
 workspace = true
