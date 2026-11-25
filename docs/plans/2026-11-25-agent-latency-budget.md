@@ -37,5 +37,24 @@ Các ngưỡng trên là điểm khởi đầu hợp lý, không phải kết qu
 
 ## 5. Việc còn lại
 
-- Chạy phép đo mục 4 ở SR (cần máy trong mạng SR; cloud không làm được).
+- Lần đo đầu đã có (mục 6); còn 3 lệnh và lượt giờ cao điểm.
 - Chủ dự án chốt ngưỡng p95 sau khi xem số đo (tiêu chí 3).
+
+## 6. Số đo lần 1 (RT-1232, 2026-11-25 16:52–16:55 UTC, ngoài giờ cao điểm)
+
+Đo từ iMac qua `azolo-demo-pms` (Fly) tới dl-agent 1.3.46 ở SR. Mỗi lệnh: 5 lần khởi động bỏ đi, rồi mẫu tuần tự và một lượt 10 lệnh song song. Đơn vị ms, đầu-cuối (gồm chặng iMac->Fly).
+
+| Lệnh | n | p50 | p95 | p99 | 10 song song p50 / p95 |
+|---|---|---|---|---|---|
+| `fo.hotelDate.get` | 60* | 250.7 | 327.9 | 476.7 | 480.7 / 529.7 |
+| `pos.menu.items` | 200 | 312.3 | 372.5 | 462.5 | 964.9 / 1138.5 |
+| `pos.check.list` | 200 | 232.5 | 239.4 | 247.0 | 484.5 / 548.8 |
+
+\* `fo.hotelDate.get` dừng ở 60 mẫu sau 5 lỗi liên tiếp 503 `SITE_OFFLINE`.
+
+- Mốc không qua agent: `/health` p50 159.3, p95 163.0 (n=200). Ping iMac->Fly trung bình 90.4 ms (min 83.5).
+- Metrics phía app trước lần đo: phần site (mạng + agent + SQL) trung bình ~107 ms trên 571 op; phần cloud ~4 ms.
+- Ước lượng: phần SaaS->SR (trừ chặng iMac->Fly ~160 ms) cho op đọc nhỏ khoảng 75–150 ms p50.
+- Bỏ qua `pos.check.pay`: không có chế độ dry-run (`pms.op_dry_run` chưa tồn tại), không ghi thử trên khách sạn thật.
+- Không ping được SR (không biết IP, agent không có probe mạng). Không tách được thời gian SQL: `sql.perf` chỉ thấy kết nối tên `dl-agent`, module PMS kết nối bằng `dl-agent-<version>`.
+- Còn lại: `fo.inhouse.list`, `fo.reservation.list`, `fo.dashboard.today`; một lượt đo giờ cao điểm; sửa tên kết nối để `sql.perf` tách được SQL.
