@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { nowSeconds, type AppEnv } from '../env';
+import { MAX_SCHEMA_BYTES, schemaSnapshotBody } from '../domain/schemaDict';
 import { attachBody, commandResultBody, enrollBody, heartbeatBody, MAX_SELFTEST_BYTES, reportsBody, selftestBody } from '../domain/schemas';
 import { HttpError, parseJson, validate } from '../lib/http';
 import { requireSignedAgent } from '../middleware/signature';
@@ -7,6 +8,7 @@ import { commandResult, heartbeat, reports } from '../services/agentApi';
 import { attach } from '../services/attach';
 import { DIAGNOSTICS_PREFIX, MAX_DIAGNOSTICS_BYTES, storeDiagnostics } from '../services/diagnostics';
 import { enroll } from '../services/enroll';
+import { storeSchemaSnapshot } from '../services/schemaDict';
 import { manifestText } from '../services/releases';
 import { storeSelftest } from '../services/selftest';
 
@@ -53,6 +55,14 @@ agentRoutes.post('/agent/selftest', async (c) => {
   if (new TextEncoder().encode(raw).byteLength > MAX_SELFTEST_BYTES) throw new HttpError(413, 'selftest_too_large');
   const body = validate(selftestBody, parseJson(raw));
   return c.json(await storeSelftest(c.env, c.get('agent'), body, nowSeconds()));
+});
+
+/** `dl-agent` schema collector uploads its structure-only snapshot here (RT-1215). */
+agentRoutes.post('/agent/schema-snapshot', async (c) => {
+  const raw = c.get('rawBody');
+  if (new TextEncoder().encode(raw).byteLength > MAX_SCHEMA_BYTES) throw new HttpError(413, 'schema_too_large');
+  const body = validate(schemaSnapshotBody, parseJson(raw));
+  return c.json(await storeSchemaSnapshot(c.env, c.get('agent'), body, nowSeconds()));
 });
 
 /** `collect_diagnostics` uploads its zip here (PROTOCOL.md §4.1), once per open command named by `?command_id=`. */
