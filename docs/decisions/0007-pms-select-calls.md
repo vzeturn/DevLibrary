@@ -74,3 +74,20 @@ and columns the signed agent binary declares, and values only through bind param
   needs them stays a vendor procedure, or a later ADR widens this one.
 - A table read sees the vendor's schema directly: a vendor rename of a declared column fails
   the op with a SQL error (`SQL_ERROR`, number 207) instead of silently changing meaning.
+
+## Addendum 2026-11-25 (RT-1129): aggregates and `GROUP BY`
+
+The owner chose to widen this ADR for the Dashboard reads (forecast, revenue, segments) so
+the agent returns small tallies instead of thousands of rows.
+
+- A select may carry `aggregates`: `{"fn": "sum"|"count", "column": "<declared>", "as": "<alias>"}`.
+  `sum` needs a declared column, `count` may omit it (`COUNT(*)`); `as` is a bare identifier,
+  unique among the aliases and the plain `columns`. No other function exists.
+- `group_by` lists declared columns. In a grouped select (any aggregate or `group_by`) every
+  plain `columns` entry and every `order_by` entry must be one of the `group_by` columns;
+  `columns` may be empty when aggregates exist (one total row).
+- `date_bucket` lists `group_by` columns taken as `CAST([col] AS date)` (day of a datetime),
+  also in `ORDER BY`. It is the only expression allowed, and its text is fixed.
+- The statement stays manifest-only text: `SELECT TOP (n) <cols>, SUM([c]) AS [a] FROM [dbo].[t]
+  WHERE ... GROUP BY ... ORDER BY ...`. Values still travel only as bind parameters.
+- Still not expressible: joins, `OR`, `IN`, `LIKE`, `HAVING`, other expressions.

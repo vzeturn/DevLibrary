@@ -39,6 +39,20 @@ pub struct Filter {
     pub param: Param,
 }
 
+/// The aggregate functions a select may compute (ADR 0007 addendum, RT-1129).
+pub const SELECT_AGGREGATES: [&str; 2] = ["sum", "count"];
+
+/// One aggregate output: `SUM([column]) AS [alias]` or `COUNT([column]|*) AS [alias]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Aggregate {
+    /// Lower-case function name, one of [`SELECT_AGGREGATES`].
+    pub func: String,
+    /// The declared column; empty only for `count` (meaning `COUNT(*)`).
+    pub column: String,
+    /// The output column name (a bare identifier).
+    pub alias: String,
+}
+
 /// A direct read of one declared table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Select {
@@ -52,6 +66,14 @@ pub struct Select {
     pub order_by: Vec<String>,
     /// `TOP (max_rows)`, 1..=[`DEFAULT_MAX_ROWS_PER_SET`].
     pub max_rows: i64,
+    /// Aggregate outputs, after `columns`; non-empty or `group_by` non-empty makes the
+    /// select grouped.
+    pub aggregates: Vec<Aggregate>,
+    /// `GROUP BY` columns; in a grouped select every plain output column and sort column
+    /// must be one of them.
+    pub group_by: Vec<String>,
+    /// Columns of `group_by` taken as `CAST([col] AS date)` (a day bucket of a datetime).
+    pub date_bucket: Vec<String>,
 }
 
 impl Select {
@@ -59,10 +81,34 @@ impl Select {
     /// `@name` placeholders only.
     pub fn sql(&self) -> String {
         let q = |c: &String| format!("[{c}]");
+        // A grouped column is a day bucket when listed in `date_bucket`.
+        let key = |c: &String| {
+            if self.date_bucket.iter().any(|d| d.eq_ignore_ascii_case(c)) {
+                format!("CAST([{c}] AS date)")
+            } else {
+                q(c)
+            }
+        };
+        let mut outs: Vec<String> = self
+            .columns
+            .iter()
+            .map(|c| match key(c) {
+                k if k == q(c) => k,
+                k => format!("{k} AS {}", q(c)),
+            })
+            .collect();
+        for a in &self.aggregates {
+            let arg = if a.column.is_empty() {
+                "*".to_owned()
+            } else {
+                q(&a.column)
+            };
+            outs.push(format!("{}({arg}) AS [{}]", a.func.to_uppercase(), a.alias));
+        }
         let mut sql = format!(
             "SELECT TOP ({}) {} FROM [dbo].[{}]",
             self.max_rows,
-            self.columns.iter().map(q).collect::<Vec<_>>().join(", "),
+            outs.join(", "),
             self.table
         );
         if !self.filters.is_empty() {
@@ -74,9 +120,13 @@ impl Select {
             sql.push_str(" WHERE ");
             sql.push_str(&conds.join(" AND "));
         }
+        if !self.group_by.is_empty() {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&self.group_by.iter().map(key).collect::<Vec<_>>().join(", "));
+        }
         if !self.order_by.is_empty() {
             sql.push_str(" ORDER BY ");
-            sql.push_str(&self.order_by.iter().map(q).collect::<Vec<_>>().join(", "));
+            sql.push_str(&self.order_by.iter().map(key).collect::<Vec<_>>().join(", "));
         }
         sql
     }
@@ -141,9 +191,31 @@ fn unique_bare(cols: &[String]) -> Result<HashSet<String>, String> {
 pub(super) fn parse_select(v: &Value) -> Result<Select, String> {
     let o = fields(
         obj_of(v, "select")?,
-        &["table", "columns", "where", "order_by", "max_rows"],
+        &[
+            "table",
+            "columns",
+            "where",
+            "order_by",
+            "max_rows",
+            "aggregates",
+            "group_by",
+            "date_bucket",
+        ],
         "select",
     )?;
+    let mut aggregates = Vec::new();
+    for a in arr(o, "aggregates")? {
+        let ao = fields(
+            obj_of(a, "aggregate")?,
+            &["fn", "column", "as"],
+            "aggregate",
+        )?;
+        aggregates.push(Aggregate {
+            func: s(ao, "fn")?.to_lowercase(),
+            column: s(ao, "column")?,
+            alias: s(ao, "as")?,
+        });
+    }
     let mut filters = Vec::new();
     for w in arr(o, "where")? {
         let wo = fields(obj_of(w, "where")?, &["column", "op", "param"], "where")?;
@@ -163,6 +235,9 @@ pub(super) fn parse_select(v: &Value) -> Result<Select, String> {
         filters,
         order_by: strings(o, "order_by", "select")?,
         max_rows: i(o, "max_rows")?,
+        aggregates,
+        group_by: strings(o, "group_by", "select")?,
+        date_bucket: strings(o, "date_bucket", "select")?,
     })
 }
 
@@ -176,10 +251,11 @@ pub(super) fn validate_select(sel: &Select, tables: &Tables) -> Result<(), Strin
         return Err(format!("select table {tq} is not declared in tables"));
     };
     let known = |c: &str| pat::is_bare_name(c) && cols.contains(&c.to_lowercase());
-    if sel.columns.is_empty() {
+    if sel.columns.is_empty() && sel.aggregates.is_empty() {
         return Err(format!("select on {tq} names no columns"));
     }
     unique_bare(&sel.columns).map_err(|c| format!("select on {tq}: column {c}"))?;
+    validate_grouping(sel, &tq, &known)?;
     let filtered = sel.filters.iter().map(|f| &f.column);
     for c in sel.columns.iter().chain(filtered).chain(&sel.order_by) {
         if !known(c) {
@@ -221,6 +297,71 @@ pub(super) fn validate_select(sel: &Select, tables: &Tables) -> Result<(), Strin
                 "select on {tq}: {}: exactly one of arg or value (no output)",
                 p.name
             ));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the aggregate, `group_by` and `date_bucket` parts of a select (ADR 0007 addendum).
+fn validate_grouping(sel: &Select, tq: &str, known: &dyn Fn(&str) -> bool) -> Result<(), String> {
+    let grouped = !sel.aggregates.is_empty() || !sel.group_by.is_empty();
+    let has = |list: &[String], c: &str| list.iter().any(|g| g.eq_ignore_ascii_case(c));
+    let mut names: HashSet<String> = sel
+        .columns
+        .iter()
+        .chain(&sel.group_by)
+        .map(|c| c.to_lowercase())
+        .collect();
+    for a in &sel.aggregates {
+        if !SELECT_AGGREGATES.contains(&a.func.as_str()) {
+            return Err(format!(
+                "select on {tq}: aggregate fn {} is not one of {}",
+                json::quote(&a.func),
+                SELECT_AGGREGATES.join(" ")
+            ));
+        }
+        let column_ok = if a.column.is_empty() {
+            a.func == "count"
+        } else {
+            known(&a.column)
+        };
+        if !column_ok {
+            return Err(format!(
+                "select on {tq}: aggregate {} column {} is not declared",
+                a.func,
+                json::quote(&a.column)
+            ));
+        }
+        if !pat::is_bare_name(&a.alias) || !names.insert(a.alias.to_lowercase()) {
+            return Err(format!(
+                "select on {tq}: aggregate alias {} is not a unique bare name",
+                json::quote(&a.alias)
+            ));
+        }
+    }
+    unique_bare(&sel.group_by).map_err(|c| format!("select on {tq}: group_by {c}"))?;
+    if sel.group_by.iter().any(|c| !known(c)) {
+        return Err(format!("select on {tq}: a group_by column is not declared"));
+    }
+    if !grouped && !sel.date_bucket.is_empty() {
+        return Err(format!("select on {tq}: date_bucket needs group_by"));
+    }
+    for c in &sel.date_bucket {
+        if !has(&sel.group_by, c) {
+            return Err(format!(
+                "select on {tq}: date_bucket column {} is not in group_by",
+                json::quote(c)
+            ));
+        }
+    }
+    if grouped {
+        for c in sel.columns.iter().chain(&sel.order_by) {
+            if !has(&sel.group_by, c) {
+                return Err(format!(
+                    "select on {tq}: column {} must be in group_by",
+                    json::quote(c)
+                ));
+            }
         }
     }
     Ok(())

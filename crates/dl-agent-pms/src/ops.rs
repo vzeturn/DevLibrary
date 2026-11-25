@@ -16,7 +16,7 @@ mod select;
 #[cfg(test)]
 mod select_tests;
 
-pub use select::{Filter, SELECT_OPS, Select, Table};
+pub use select::{Aggregate, Filter, SELECT_AGGREGATES, SELECT_OPS, Select, Table};
 
 /// The manifest this build carries.
 pub const EMBEDDED: &str = include_str!("../assets/ops-manifest.json");
@@ -492,8 +492,11 @@ mod tests {
                 "fo.availability.sourceV2@1",
                 "fo.clerk.login@1",
                 "fo.clerk.rights.get@1",
+                "fo.dashboard.forecast@1",
                 "fo.dashboard.houseMix@1",
+                "fo.dashboard.revenue@1",
                 "fo.dashboard.rooms@1",
+                "fo.dashboard.segments@1",
                 "fo.dashboard.today@1",
                 "fo.departures.expected@1",
                 "fo.departures.onDate@1",
@@ -512,6 +515,7 @@ mod tests {
                 "pos.check.postItem@1",
                 "pos.check.send@1",
                 "pos.clerk.permissions@1",
+                "pos.dashboard.revenue@1",
                 "pos.menu.items@1",
                 "pos.menu.tree@1",
                 "pos.outbox.claim@1",
