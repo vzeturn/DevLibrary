@@ -212,8 +212,11 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
             "fo.availability.sourceV2@1",
             "fo.clerk.login@1",
             "fo.clerk.rights.get@1",
+            "fo.dashboard.forecast@1",
             "fo.dashboard.houseMix@1",
+            "fo.dashboard.revenue@1",
             "fo.dashboard.rooms@1",
+            "fo.dashboard.segments@1",
             "fo.dashboard.today@1",
             "fo.departures.expected@1",
             "fo.departures.onDate@1",
@@ -232,6 +235,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
             "pos.check.postItem@1",
             "pos.check.send@1",
             "pos.clerk.permissions@1",
+            "pos.dashboard.revenue@1",
             "pos.menu.items@1",
             "pos.menu.tree@1",
             "pos.outbox.claim@1",
@@ -264,7 +268,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
     assert_eq!(journal.get("entries").and_then(Value::as_u64), Some(1));
     assert_eq!(journal.get("full").and_then(Value::as_bool), Some(false));
     let ops = status.get("ops").and_then(Value::as_array).expect("ops");
-    assert_eq!(ops.len(), 35);
+    assert_eq!(ops.len(), 39);
 
     // An op for a database outside SMILE_FO/POS/BO is a bad frame: the agent closes.
     assert!(r.command("pms.reconnect").ok);

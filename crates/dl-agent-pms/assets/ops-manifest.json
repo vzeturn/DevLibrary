@@ -140,6 +140,7 @@
         "FolioSubNum",
         "GroupCode",
         "HouseUseFlag",
+        "MarketSegmentCode",
         "NoShowFlag",
         "NumAdult",
         "NumChild",
@@ -153,6 +154,16 @@
         "SubGroupCode",
         "UnexpectedDepartureFlag",
         "WalkInFlag"
+      ]
+    },
+    {
+      "name": "FolioTransaction",
+      "columns": [
+        "TransactionAmount",
+        "TransactionCode",
+        "TransactionDate",
+        "TransactionSubCode",
+        "VoidTransactionFlag"
       ]
     },
     {
@@ -1226,6 +1237,269 @@
       ]
     },
     {
+      "name": "fo.dashboard.forecast",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": ">=",
+                "param": {
+                  "name": "stFrom",
+                  "type": "int",
+                  "value": 1
+                }
+              },
+              {
+                "column": "FolioStatus",
+                "op": "<=",
+                "param": {
+                  "name": "stTo",
+                  "type": "int",
+                  "value": 2
+                }
+              },
+              {
+                "column": "CancelNum",
+                "op": "=",
+                "param": {
+                  "name": "noCancel",
+                  "type": "int",
+                  "value": 0
+                }
+              },
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "from",
+                  "type": "date",
+                  "arg": "from"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "to",
+                  "type": "date",
+                  "arg": "to"
+                }
+              }
+            ],
+            "order_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "rooms"
+              },
+              {
+                "fn": "sum",
+                "column": "RateAmount",
+                "as": "rate"
+              }
+            ],
+            "group_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "date_bucket": [
+              "ArrivalDate",
+              "DepartureDate"
+            ]
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "stOoo",
+                  "type": "int",
+                  "value": 5
+                }
+              },
+              {
+                "column": "CancelNum",
+                "op": "=",
+                "param": {
+                  "name": "noCancel",
+                  "type": "int",
+                  "value": 0
+                }
+              },
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "from",
+                  "type": "date",
+                  "arg": "from"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "to",
+                  "type": "date",
+                  "arg": "to"
+                }
+              }
+            ],
+            "order_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "rooms"
+              },
+              {
+                "fn": "sum",
+                "column": "RateAmount",
+                "as": "rate"
+              }
+            ],
+            "group_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "date_bucket": [
+              "ArrivalDate",
+              "DepartureDate"
+            ]
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "stOoi",
+                  "type": "int",
+                  "value": 4
+                }
+              },
+              {
+                "column": "CancelNum",
+                "op": "=",
+                "param": {
+                  "name": "noCancel",
+                  "type": "int",
+                  "value": 0
+                }
+              },
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "from",
+                  "type": "date",
+                  "arg": "from"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "to",
+                  "type": "date",
+                  "arg": "to"
+                }
+              }
+            ],
+            "order_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "rooms"
+              },
+              {
+                "fn": "sum",
+                "column": "RateAmount",
+                "as": "rate"
+              }
+            ],
+            "group_by": [
+              "ArrivalDate",
+              "DepartureDate"
+            ],
+            "date_bucket": [
+              "ArrivalDate",
+              "DepartureDate"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "fo.dashboard.houseMix",
       "contract_ver": 1,
       "kind": "read",
@@ -1342,6 +1616,71 @@
             ],
             "order_by": [],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.dashboard.revenue",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "FolioTransaction",
+            "columns": [
+              "TransactionDate",
+              "TransactionCode",
+              "VoidTransactionFlag"
+            ],
+            "where": [
+              {
+                "column": "TransactionDate",
+                "op": ">=",
+                "param": {
+                  "name": "from",
+                  "type": "date",
+                  "arg": "from"
+                }
+              },
+              {
+                "column": "TransactionDate",
+                "op": "<",
+                "param": {
+                  "name": "toExclusive",
+                  "type": "date",
+                  "arg": "toExclusive"
+                }
+              }
+            ],
+            "order_by": [
+              "TransactionDate",
+              "TransactionCode"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "sum",
+                "column": "TransactionAmount",
+                "as": "amount"
+              },
+              {
+                "fn": "count",
+                "as": "postings"
+              }
+            ],
+            "group_by": [
+              "TransactionDate",
+              "TransactionCode",
+              "VoidTransactionFlag"
+            ],
+            "date_bucket": [
+              "TransactionDate"
+            ]
           }
         }
       ]
@@ -1601,6 +1940,92 @@
             ],
             "order_by": [],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.dashboard.segments",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "MarketSegmentCode"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "inHouse",
+                  "type": "int",
+                  "value": 2
+                }
+              },
+              {
+                "column": "CancelNum",
+                "op": "=",
+                "param": {
+                  "name": "noCancel",
+                  "type": "int",
+                  "value": 0
+                }
+              },
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">",
+                "param": {
+                  "name": "dateEnd",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [
+              "MarketSegmentCode"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "rooms"
+              },
+              {
+                "fn": "sum",
+                "column": "RateAmount",
+                "as": "rate"
+              }
+            ],
+            "group_by": [
+              "MarketSegmentCode"
+            ],
+            "date_bucket": []
           }
         }
       ]
@@ -2741,6 +3166,71 @@
             ],
             "order_by": [],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "pos.dashboard.revenue",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "POS",
+      "target_db": "SMILE_POS",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Trn",
+            "columns": [
+              "TrnTime",
+              "RVC",
+              "ClassCode"
+            ],
+            "where": [
+              {
+                "column": "TrnTime",
+                "op": ">=",
+                "param": {
+                  "name": "from",
+                  "type": "date",
+                  "arg": "from"
+                }
+              },
+              {
+                "column": "TrnTime",
+                "op": "<",
+                "param": {
+                  "name": "toExclusive",
+                  "type": "date",
+                  "arg": "toExclusive"
+                }
+              }
+            ],
+            "order_by": [
+              "TrnTime",
+              "RVC"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "sum",
+                "column": "BaseTTL",
+                "as": "amount"
+              },
+              {
+                "fn": "count",
+                "as": "lines"
+              }
+            ],
+            "group_by": [
+              "TrnTime",
+              "RVC",
+              "ClassCode"
+            ],
+            "date_bucket": [
+              "TrnTime"
+            ]
           }
         }
       ]

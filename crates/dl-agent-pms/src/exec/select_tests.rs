@@ -161,6 +161,7 @@ fn the_embedded_manifest_still_loads() {
             "DefRVCList",
             "DiscountDtl",
             "Folio",
+            "FolioTransaction",
             "GroupBlockDetail",
             "GroupFolio",
             "HotelParameter",

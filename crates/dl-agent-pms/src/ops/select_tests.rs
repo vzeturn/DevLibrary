@@ -282,3 +282,132 @@ fn refuses_bad_table_lists() {
         "the INFORMATION_SCHEMA floor is the whole name"
     );
 }
+
+const AGG_TABLES: &str = r#"[{"name":"Trn","columns":["TrnTime","RVC","BaseTTL","ClassCode"]}]"#;
+
+fn with_agg(sel: &str) -> Result<Manifest, String> {
+    manifest(AGG_TABLES, "read", &format!(r#"{{"select":{sel}}}"#))
+}
+
+fn agg_select(extra: &str) -> String {
+    format!(
+        r#"{{"table":"Trn","columns":["TrnTime","RVC"],"where":[],"order_by":["TrnTime"],"max_rows":100,
+          "aggregates":[{{"fn":"sum","column":"BaseTTL","as":"amount"}},{{"fn":"count","as":"lines"}}],
+          "group_by":["TrnTime","RVC"],"date_bucket":["TrnTime"]{extra}}}"#
+    )
+}
+
+#[test]
+fn golden_grouped_sql() {
+    let m = with_agg(&agg_select("")).unwrap();
+    let sel = m.ops[0].calls[0].select.as_ref().unwrap();
+    assert_eq!(
+        sel.sql(),
+        "SELECT TOP (100) CAST([TrnTime] AS date) AS [TrnTime], [RVC], SUM([BaseTTL]) AS [amount], COUNT(*) AS [lines] FROM [dbo].[Trn] GROUP BY CAST([TrnTime] AS date), [RVC] ORDER BY CAST([TrnTime] AS date)"
+    );
+    // A single total row: aggregates only, no columns, no group_by.
+    let total = r#"{"table":"Trn","columns":[],"where":[],"order_by":[],"max_rows":1,"aggregates":[{"fn":"count","column":"RVC","as":"n"}]}"#;
+    let m = with_agg(total).unwrap();
+    assert_eq!(
+        m.ops[0].calls[0].select.as_ref().unwrap().sql(),
+        "SELECT TOP (1) COUNT([RVC]) AS [n] FROM [dbo].[Trn]"
+    );
+}
+
+#[test]
+fn refuses_bad_grouping() {
+    let base = |agg: &str, gb: &str, cols: &str, order: &str, bucket: &str| {
+        format!(
+            r#"{{"table":"Trn","columns":{cols},"where":[],"order_by":{order},"max_rows":5,"aggregates":{agg},"group_by":{gb},"date_bucket":{bucket}}}"#
+        )
+    };
+    let sum = r#"[{"fn":"sum","column":"BaseTTL","as":"a"}]"#;
+    for (what, sel, needle) in [
+        (
+            "avg",
+            base(
+                r#"[{"fn":"avg","column":"BaseTTL","as":"a"}]"#,
+                "[]",
+                "[]",
+                "[]",
+                "[]",
+            ),
+            "aggregate fn",
+        ),
+        (
+            "sum star",
+            base(r#"[{"fn":"sum","as":"a"}]"#, "[]", "[]", "[]", "[]"),
+            "not declared",
+        ),
+        (
+            "sum unknown",
+            base(
+                r#"[{"fn":"sum","column":"Nope","as":"a"}]"#,
+                "[]",
+                "[]",
+                "[]",
+                "[]",
+            ),
+            "not declared",
+        ),
+        (
+            "alias injection",
+            base(
+                r#"[{"fn":"sum","column":"BaseTTL","as":"a] FROM x--"}]"#,
+                "[]",
+                "[]",
+                "[]",
+                "[]",
+            ),
+            "alias",
+        ),
+        (
+            "alias clashes with column",
+            base(sum, r#"["RVC"]"#, r#"["RVC"]"#, "[]", "[]")
+                .replace(r#""as":"a""#, r#""as":"rvc""#),
+            "alias",
+        ),
+        (
+            "column not grouped",
+            base(sum, r#"["RVC"]"#, r#"["RVC","ClassCode"]"#, "[]", "[]"),
+            "must be in group_by",
+        ),
+        (
+            "order not grouped",
+            base(sum, r#"["RVC"]"#, r#"["RVC"]"#, r#"["ClassCode"]"#, "[]"),
+            "must be in group_by",
+        ),
+        (
+            "unknown group column",
+            base(sum, r#"["Nope"]"#, "[]", "[]", "[]"),
+            "not declared",
+        ),
+        (
+            "duplicate group column",
+            base(sum, r#"["RVC","rvc"]"#, "[]", "[]", "[]"),
+            "group_by",
+        ),
+        (
+            "bucket not grouped",
+            base(sum, r#"["RVC"]"#, "[]", "[]", r#"["TrnTime"]"#),
+            "not in group_by",
+        ),
+        (
+            "bucket without group",
+            base("[]", "[]", r#"["RVC"]"#, "[]", r#"["RVC"]"#),
+            "needs group_by",
+        ),
+        (
+            "no output",
+            base("[]", "[]", "[]", "[]", "[]"),
+            "names no columns",
+        ),
+    ] {
+        let e = refused(with_agg(&sel), what);
+        assert!(e.contains(needle), "{what}: {e}");
+    }
+    assert!(
+        with_agg(&agg_select(r#","limit":1"#)).is_err(),
+        "unknown key refused"
+    );
+}
