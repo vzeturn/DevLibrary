@@ -37,7 +37,7 @@ Các ngưỡng trên là điểm khởi đầu hợp lý, không phải kết qu
 
 ## 5. Việc còn lại
 
-- Lần đo đầu đã có (mục 6); còn 3 lệnh và lượt giờ cao điểm.
+- Lần đo 1 (mục 6) và lần đo 2 (mục 7) đã có; còn lượt giờ cao điểm (chạy `scripts/latency-probe`, mục 7.3).
 - Chủ dự án chốt ngưỡng p95 sau khi xem số đo (tiêu chí 3).
 
 ## 6. Số đo lần 1 (RT-1232, 2026-11-25 16:52–16:55 UTC, ngoài giờ cao điểm)
@@ -58,3 +58,36 @@ Các ngưỡng trên là điểm khởi đầu hợp lý, không phải kết qu
 - Bỏ qua `pos.check.pay`: không có chế độ dry-run (`pms.op_dry_run` chưa tồn tại), không ghi thử trên khách sạn thật.
 - Không ping được SR (không biết IP, agent không có probe mạng). Không tách được thời gian SQL: `sql.perf` chỉ thấy kết nối tên `dl-agent`, module PMS kết nối bằng `dl-agent-<version>`.
 - Còn lại: `fo.inhouse.list`, `fo.reservation.list`, `fo.dashboard.today`; một lượt đo giờ cao điểm; sửa tên kết nối để `sql.perf` tách được SQL.
+
+## 7. Số đo lần 2 (RT-1232, 2026-11-25 18:45–19:07 UTC = 01:45–02:07 GMT+7, ngoài giờ cao điểm)
+
+Đo từ iMac qua `azolo-demo-pms` (Fly) tới dl-agent ở SR bằng `scripts/latency-probe/probe.mjs`. Mỗi route: 5 lần khởi động bỏ đi, mẫu tuần tự cách nhau 150 ms, rồi một lượt 10 lệnh song song. Đơn vị ms, đầu-cuối (gồm chặng iMac->Fly). `fo.dashboard.today` không có route riêng: `GET /dashboard` trả `AGENT_TENANT_UNSUPPORTED` trên tenant agent; op này được `GET /dashboard/overview` gọi cùng các op số liệu RT-1079 (`houseMix`, `rooms`, ... theo azolo-pms master), nên số của `fo.dashboard.today` là dòng `/dashboard/overview`.
+
+| Route (op dl-agent gọi) | Cache API | n | p50 | p95 | p99 | 10 song song p50 / p95 |
+|---|---|---|---|---|---|---|
+| `/health` (không qua agent) | - | 200 | 155.2 | 161.2 | 170.4 | 269.3 / 345.7 |
+| `/workspace/frontdesk/today?blocks=inHouse` (`fo.hotelDate.get`, `fo.inhouse.list`), mẫu cách 5.2 s | trượt | 40 | **233.5** | **297.3** | 302.6 | 591.3 / 656.7 † |
+| cùng route, mẫu cách 150 ms | phần lớn trúng (5 s) | 200 | 167.9 | 247.9 | 255.5 | 224.3 / 283.5 |
+| `/reservations` (`fo.hotelDate.get`, `fo.reservation.list`, `fo.inhouse.list`) | không | 200 | **647.4** | **770.4** | 849.8 | 1869.3 / 2410.0 |
+| `/workspace/frontdesk/today` (hotelDate, arrivals, departures, inhouse) | phần lớn trúng (5 s) | 200 | 163.1 | 255.6 | 277.9 | 186.8 / 235.7 |
+| `/dashboard/overview` (`fo.dashboard.today` + hotelDate, arrivals, departures, inhouse, op số liệu RT-1079; cache 10 s phần live) | một phần | 196 ‡ | 284.7 | 387.0 | 416.1 | 250.7 / 322.6 |
+
+† Lượt song song mở 10 kết nối TLS mới tới Fly, nên cộng thêm bắt tay TLS.
+‡ 4 lỗi 503 `SITE_OFFLINE` rải rác (giống lần 1), không có 5 lỗi liên tiếp.
+
+### 7.1 Đọc số
+
+- Phần SaaS->SR (trừ mốc `/health` ~155 ms của chặng iMac->Fly): `fo.inhouse.list` (233 phòng đang ở) khoảng **80 ms p50 / 140 ms p95**; `/reservations` (3 op) khoảng **490 ms p50 / 610 ms p95**, là màn nặng nhất đã đo và là ứng viên đầu tiên cho tối ưu (gộp op, phân trang).
+- Cache 5 s của workspace và 10 s của overview che phần lớn chi phí agent khi người dùng tải lại; số "trúng cache" không dùng để chốt ngưỡng agent.
+- Lần đo cách 5.2 s phải giữ kết nối ấm bằng `/health` không tính giờ: nếu không, keep-alive 4 s của undici đóng kết nối và mỗi mẫu cộng thêm ~180 ms bắt tay TLS (lượt thử đầu: p50 415 ms, đã bỏ).
+- `SITE_OFFLINE` lặp lại ở cả hai lần đo (5/65 lần 1, 4/200 lần 2): đáng một yêu cầu riêng để xem heartbeat/kết nối agent có chập chờn không.
+
+### 7.2 Vẫn chưa làm được
+
+- Tách thời gian SQL: `sql.perf` chưa thấy kết nối của module PMS (tên `dl-agent-<version>`).
+- Ping trực tiếp tới SR: không có IP/probe mạng.
+- `pos.check.pay`: không có dry-run, không ghi thử trên khách sạn thật.
+
+### 7.3 Chạy lại (giờ cao điểm hoặc sau tối ưu)
+
+Công cụ: `scripts/latency-probe/` (README ở đó). Khoá `AZOLO_DEMO_VIRTUAL_CLERK_*`, `AZOLO_DEMO_POS_CASHIER_PIN` đã có trong kit cloud của DevLibrary (RT-1232) và trong `~/.config/rt-kits/smile-pms.env` trên iMac. Đường đo là HTTPS công khai tới `azolo-demo-pms.pms.id.vn`, nên phiên cloud chạy được nếu proxy cho ra host đó; nếu bị chặn thì iMac chạy.
