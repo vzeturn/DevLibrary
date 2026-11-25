@@ -1,0 +1,17 @@
+[package]
+name = "dl-agent-schema"
+description = "Read-only SQL Server schema collector for dl-agent: tables, columns, keys, indexes, relations and programmable objects of the SMILE databases, never row data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+dl-hash.workspace = true
+dl-encoding.workspace = true
+
+[lints]
+workspace = true
