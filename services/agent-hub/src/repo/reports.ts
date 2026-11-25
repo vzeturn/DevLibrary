@@ -7,6 +7,7 @@ export interface ReportRow {
   severity: string;
   module: string;
   code: string;
+  command: string;
   message: string;
   context: string;
   first_seen: number;
@@ -42,14 +43,15 @@ export async function upsertReports(
   const stmts = reports.flatMap((r) => [
     db
       .prepare(
-        `INSERT INTO reports (agent_id, fingerprint, tenant_id, severity, module, code, message, context,
+        `INSERT INTO reports (agent_id, fingerprint, tenant_id, severity, module, code, command, message, context,
                               first_seen, last_seen, count, agent_version, os, hostname,
                               received_first_at, received_last_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
          ON CONFLICT (agent_id, fingerprint) DO UPDATE SET
            count = reports.count + excluded.count,
            last_seen = MAX(reports.last_seen, excluded.last_seen),
            severity = excluded.severity, module = excluded.module, code = excluded.code,
+           command = excluded.command,
            message = excluded.message, context = excluded.context,
            agent_version = excluded.agent_version, os = excluded.os, hostname = excluded.hostname,
            received_last_at = excluded.received_last_at`,
@@ -61,6 +63,7 @@ export async function upsertReports(
         r.severity,
         r.module,
         r.code,
+        r.command,
         r.message,
         JSON.stringify(r.context),
         r.first_seen,

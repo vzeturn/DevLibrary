@@ -93,6 +93,7 @@ fn a_fault_release_is_installed_rolled_back_at_the_end_of_probation_and_reported
         .iter()
         .find(|r| r["code"].as_str() == Some("update_rolled_back"))
         .unwrap_or_else(|| panic!("no rollback report in {reports:?}"));
+    assert_eq!(rolled["command"].as_str(), Some("update.rollback"));
     assert!(
         rolled["message"]
             .as_str()

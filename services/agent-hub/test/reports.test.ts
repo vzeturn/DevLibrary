@@ -34,7 +34,7 @@ describe('POST /v1/reports', () => {
     expect(await first.json()).toEqual({ accepted: 1 });
     setNow(T0 + 60);
     const second = await signed(env, agent, 'POST', '/v1/reports', {
-      reports: [report({ first_seen: T0 + 1, last_seen: T0 + 50, count: 2, agent_version: '1.1.0' })],
+      reports: [report({ first_seen: T0 + 1, last_seen: T0 + 50, count: 2, agent_version: '1.1.0', command: 'update.install' })],
     });
     expect(second.status).toBe(200);
 
@@ -47,12 +47,30 @@ describe('POST /v1/reports', () => {
       first_seen: T0 - 100,
       last_seen: T0 + 50,
       agent_version: '1.1.0',
+      command: 'update.install',
       received_first_at: T0,
       received_last_at: T0 + 60,
       context: { server: 'FO\\SQL2019' },
     });
     const pairs = env.DB.raw.prepare('SELECT version FROM report_versions ORDER BY version').all();
     expect(pairs).toEqual([{ version: '1.0.0' }, { version: '1.1.0' }]);
+  });
+
+  it('stores the failed command and shows an empty one for agents that send none', async () => {
+    await signed(env, agent, 'POST', '/v1/reports', {
+      reports: [
+        report({ fingerprint: 'aa11', command: 'restart_module', code: 'command_module_down' }),
+        report({ fingerprint: 'bb22' }),
+      ],
+    });
+    const res = await admin(env, 'GET', '/admin/reports?tenant_id=acme');
+    const { reports } = (await res.json()) as { reports: { fingerprint: string; command: string }[] };
+    const by = Object.fromEntries(reports.map((r) => [r.fingerprint, r.command]));
+    expect(by).toEqual({ aa11: 'restart_module', bb22: '' });
+    const bad = await signed(env, agent, 'POST', '/v1/reports', {
+      reports: [report({ fingerprint: 'cc33', command: 'x'.repeat(201) })],
+    });
+    expect(bad.status).toBe(400);
   });
 
   it('filters by severity, fingerprint and version', async () => {

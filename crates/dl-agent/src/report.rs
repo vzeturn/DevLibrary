@@ -9,6 +9,9 @@ use dl_json::{Map, Value, json};
 use crate::Error;
 use crate::store;
 
+/// Longest `command` kept: 100 characters stay within the hub's 200 UTF-16 unit limit.
+pub const MAX_COMMAND_CHARS: usize = 100;
+
 /// Most distinct reports kept on disk while the hub is unreachable; the oldest go first.
 pub const MAX_SPOOLED: usize = 500;
 
@@ -59,6 +62,9 @@ pub struct ProblemReport {
     pub code: String,
     /// Human message (latest occurrence).
     pub message: String,
+    /// The command or operation that failed (`update.install`, `hub.heartbeat`, or a hub
+    /// command kind such as `restart_module`); empty when no command was running.
+    pub command: String,
     /// Extra facts (latest occurrence). Never secrets.
     pub context: Map,
     /// First occurrence, Unix seconds.
@@ -92,11 +98,18 @@ impl ProblemReport {
             module: module.to_string(),
             code: code.to_string(),
             message: message.to_string(),
+            command: String::new(),
             context: Map::new(),
             first_seen: now,
             last_seen: now,
             count: 1,
         }
+    }
+
+    /// Names the command or operation that failed (kept to 100 characters).
+    pub fn with_command(mut self, command: &str) -> ProblemReport {
+        self.command = command.chars().take(MAX_COMMAND_CHARS).collect();
+        self
     }
 
     /// Adds a context fact.
@@ -109,7 +122,8 @@ impl ProblemReport {
     pub fn to_json(&self, agent_version: &str, os: &str, hostname: &str) -> Value {
         json!({
             "fingerprint": self.fingerprint, "severity": self.severity.as_str(),
-            "module": self.module, "code": self.code, "message": self.message,
+            "module": self.module, "code": self.code, "command": self.command,
+            "message": self.message,
             "context": Value::Object(self.context.clone()),
             "first_seen": self.first_seen, "last_seen": self.last_seen, "count": self.count,
             "agent_version": agent_version, "os": os, "hostname": hostname,
@@ -129,6 +143,8 @@ impl ProblemReport {
             module: s("module")?,
             code: s("code")?,
             message: s("message")?,
+            // Spools written before `command` existed have none.
+            command: s("command").unwrap_or_default(),
             context: v
                 .get("context")
                 .and_then(Value::as_object)
@@ -298,6 +314,37 @@ mod tests {
         let again = Spool::open(p);
         assert_eq!(again.len(), MAX_SPOOLED);
         assert_eq!(again.peek(1)[0].code, "c5", "oldest dropped first");
+    }
+
+    #[test]
+    fn command_is_on_the_wire_survives_the_spool_and_old_spools_read() {
+        let r = ProblemReport::new(Severity::Error, "agent", "update_failed", "bad hash", 5)
+            .with_command("update.install");
+        let wire = r.to_json("1.4.0", "windows", "FO");
+        assert_eq!(wire["command"].as_str(), Some("update.install"));
+        assert_eq!(wire["code"].as_str(), Some("update_failed"));
+        assert!(wire["context"].is_object());
+        let none = ProblemReport::new(Severity::Info, "m", "c", "x", 1).to_json("1", "", "");
+        assert_eq!(
+            none["command"].as_str(),
+            Some(""),
+            "the field is always there"
+        );
+        let long =
+            ProblemReport::new(Severity::Info, "m", "c", "x", 1).with_command(&"y".repeat(300));
+        assert_eq!(long.command.len(), MAX_COMMAND_CHARS);
+
+        let d = TestDir::new("spool-command");
+        let p = d.0.join("reports.json");
+        Spool::open(p.clone()).record(r).unwrap();
+        assert_eq!(Spool::open(p.clone()).peek(1)[0].command, "update.install");
+        // A spool written before `command` existed still loads, with an empty command.
+        std::fs::write(
+            &p,
+            r#"[{"fingerprint":"ab","severity":"error","module":"m","code":"c","message":"x","context":{},"first_seen":1,"last_seen":1,"count":1}]"#,
+        )
+        .unwrap();
+        assert_eq!(Spool::open(p).peek(1)[0].command, "");
     }
 
     #[test]

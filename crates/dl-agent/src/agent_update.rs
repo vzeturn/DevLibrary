@@ -109,13 +109,10 @@ impl Agent {
         }
         let msg = format!("installed {version} over {current}, restarting");
         dl_log::info!("{}", msg);
-        self.report_with(ProblemReport::new(
-            Severity::Info,
-            "agent",
-            "update_installed",
-            &msg,
-            now,
-        ));
+        self.report_with(
+            ProblemReport::new(Severity::Info, "agent", "update_installed", &msg, now)
+                .with_command("update.install"),
+        );
         Ok(Checked::Installed)
     }
 
@@ -136,14 +133,38 @@ impl Agent {
         Checked::Held(reason)
     }
 
+    /// An agent report that names the command or operation that failed.
+    pub(super) fn report_cmd(&self, severity: Severity, command: &str, code: &str, message: &str) {
+        self.report_with(
+            ProblemReport::new(severity, "agent", code, message, now()).with_command(command),
+        );
+    }
+
+    /// Hands a command the runtime does not handle itself to its module; one that cannot
+    /// run is answered and reported with its kind as `command`.
+    pub(super) fn route_to_module(&mut self, cmd: crate::command::Command) {
+        let cmd = crate::sys_module::route(cmd);
+        if cmd.module.is_none() {
+            let msg = format!("unknown command {}", cmd.kind);
+            self.report_cmd(Severity::Warning, &cmd.kind, "command_unknown", &msg);
+            self.answer(&cmd.id, false, msg);
+        } else if let Err(c) = self.supervisor.deliver(cmd) {
+            let target = c.module.as_deref().unwrap_or_default();
+            let msg = format!("module {target} is not running");
+            self.report_cmd(Severity::Warning, &c.kind, "command_module_down", &msg);
+            self.answer(&c.id, false, msg);
+        }
+    }
+
     /// Restores the previous binary and counts the failure.
     pub(super) fn roll_back(&mut self, reason: &str) -> Result<(), Error> {
         let Some(p) = self.update.pending.take() else {
             return Ok(());
         };
         if let Err(e) = self.installer().rollback() {
-            self.report(
+            self.report_cmd(
                 Severity::Critical,
+                "update.rollback",
                 "rollback_failed",
                 &format!("cannot restore {}: {e}", p.previous_version),
             );
@@ -162,6 +183,7 @@ impl Agent {
             &msg,
             now(),
         )
+        .with_command("update.rollback")
         .with("version", p.version.to_string())
         .with("previous_version", p.previous_version.to_string());
         self.report_with(r);

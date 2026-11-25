@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- dl-agent problem reports carry a fixed `command` field (the failed operation: `update.install`, `update.rollback`, `hub.heartbeat`, or the kind of a hub command that could not run) next to `code` and `context`; agent-hub stores it (migration 0012) and lists it in `/admin/reports`. A hub command the agent cannot run (`command_unknown`, `command_module_down`) is now reported, not only answered (PROTOCOL §7, RT-1163).
 - dl-agent-pms: `select` calls may carry `SUM`/`COUNT` aggregates, `group_by` and a day bucket (ADR 0007 addendum), and the manifest gains the Dashboard reads `fo.dashboard.forecast@1`, `fo.dashboard.segments@1`, `fo.dashboard.revenue@1` and `pos.dashboard.revenue@1` (tables `FolioTransaction`, `Folio.MarketSegmentCode`), for sites with only SMILE_FO/POS/BO (RT-1129).
 - dl-agent-pms embeds the SMILE-PMS manifest (allowlist hash cffeca23...) with the Dashboard read ops `fo.dashboard.today@1`, `fo.dashboard.houseMix@1` and `fo.dashboard.rooms@1` (select calls on `Folio`, `Profile` and `Room`), so agent tenants fill Today in detail, Room status and Needs attention (RT-1079).
 - dl-agent `service` command: stop, start or set the startup type of a Windows service from a command signed offline with a release key; unsigned, badly signed, expired and own-service commands are refused before the service manager is touched (PROTOCOL §4.3, RT-1105, part of RT-1054).
