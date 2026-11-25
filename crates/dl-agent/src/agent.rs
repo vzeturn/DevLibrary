@@ -521,7 +521,8 @@ impl Agent {
                 }
                 self.next_heartbeat = now + RETRY_SECONDS.min(self.heartbeat_seconds);
                 dl_log::warn!("heartbeat failed"; error = %e);
-                self.report(Severity::Warning, "hub_unreachable", &e.to_string());
+                let m = e.to_string();
+                self.report_cmd(Severity::Warning, "hub.heartbeat", "hub_unreachable", &m);
                 return None;
             }
         };
@@ -557,7 +558,10 @@ impl Agent {
             match self.try_update(now, false) {
                 Ok(update_flow::Checked::Installed) => return Some(Exit::Restart),
                 Ok(_) => {}
-                Err(e) => self.report(Severity::Error, "update_failed", &e.to_string()),
+                Err(e) => {
+                    let m = e.to_string();
+                    self.report_cmd(Severity::Error, "update.install", "update_failed", &m);
+                }
             }
         }
         self.flush_reports();
@@ -584,13 +588,7 @@ impl Agent {
             return None;
         }
         if !cmd.is_built_in() {
-            let cmd = crate::sys_module::route(cmd);
-            if cmd.module.is_none() {
-                self.answer(&cmd.id, false, format!("unknown command {}", cmd.kind));
-            } else if let Err(c) = self.supervisor.deliver(cmd) {
-                let target = c.module.as_deref().unwrap_or_default();
-                self.answer(&c.id, false, format!("module {target} is not running"));
-            }
+            self.route_to_module(cmd);
             return None;
         }
         let arg = |k: &str| cmd.args.get(k).and_then(Value::as_str).map(str::to_string);

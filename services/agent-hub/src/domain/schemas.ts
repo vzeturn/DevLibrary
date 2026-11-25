@@ -75,6 +75,8 @@ export const problemReport = z.object({
   severity,
   module: z.string().max(100),
   code: z.string().max(100),
+  /** The command or operation that failed; agents before 1.4.x send none. */
+  command: z.string().max(200).default(''),
   message: z.string().max(4000),
   context: z.record(z.string(), z.unknown()).default({}),
   first_seen: z.number().int(),

@@ -465,10 +465,15 @@ recovery actions) and renaming a running `.exe`; those need the canary machine.
 
 ```json
 {"fingerprint":"9f2c…","severity":"info|warning|error|critical","module":"pda-sync",
- "code":"sql_login_failed","message":"…","context":{"server":"FO\\SQL2019"},
+ "code":"sql_login_failed","command":"","message":"…","context":{"server":"FO\\SQL2019"},
  "first_seen":1763460000,"last_seen":1763463600,"count":12,
  "agent_version":"1.4.0","os":"windows","hostname":"FO-SERVER"}
 ```
+
+`command` names the command or operation that failed (`update.install`, `update.rollback`,
+`hub.heartbeat`, or the kind of a hub command the agent could not run, e.g. `restart_module`);
+it is always present and empty when no command was running (agents before it send none and the
+hub stores `""`). The hub keeps it per report and lists it in `GET /admin/reports`.
 
 The fingerprint is `hex(sha256(module|code|message with digits removed))[0..16]`, so the
 same fault coalesces. Reports are kept in an on-disk spool (bounded) while the hub is

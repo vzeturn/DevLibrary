@@ -107,6 +107,22 @@ fn heartbeat_applies_config_and_answers_commands() {
     };
     assert!(ok(0) && out(0) == "log level debug");
     assert!(!ok(1) && out(1).contains("unknown command"));
+    // A command that could not run is also a structured report naming that command.
+    let sent: Vec<Value> = hub
+        .seen()
+        .iter()
+        .filter(|s| s.url.ends_with("/v1/reports"))
+        .flat_map(|s| {
+            let v = dl_json::parse_slice(&s.body).unwrap();
+            v["reports"].as_array().cloned().unwrap_or_default()
+        })
+        .collect();
+    assert!(
+        sent.iter()
+            .any(|r| r["code"].as_str() == Some("command_unknown")
+                && r["command"].as_str() == Some("frobnicate")),
+        "{sent:?}"
+    );
     assert!(!ok(2) && out(2) == "expired");
     assert!(!ok(3) && out(3).contains("nope is not running"));
     // The fake hub's `{}` is no upload answer: the command fails but carries the diagnostics.
@@ -130,7 +146,7 @@ fn unreachable_hub_is_spooled_and_retried() {
         a.spool()
             .peek(10)
             .iter()
-            .any(|r| r.code == "hub_unreachable")
+            .any(|r| r.code == "hub_unreachable" && r.command == "hub.heartbeat")
     );
     hub.push(200, HB_OK).push(200, r#"{"accepted": 1}"#);
     assert_eq!(a.step(1000 + RETRY_SECONDS), None);
@@ -191,7 +207,14 @@ fn badly_signed_release_is_refused_and_reported() {
         .into_iter()
         .find(|s| s.url.ends_with("/v1/reports"))
         .expect("reports sent");
-    assert!(String::from_utf8_lossy(&reports.body).contains("update_failed"));
+    let body = dl_json::parse_slice(&reports.body).unwrap();
+    let failed = body["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["code"].as_str() == Some("update_failed"))
+        .expect("update_failed report");
+    assert_eq!(failed["command"].as_str(), Some("update.install"));
     assert!(
         !urls(&hub).iter().any(|u| u.contains("/artifacts/")),
         "nothing downloaded"
