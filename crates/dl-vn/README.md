@@ -4,7 +4,7 @@ Vietnam-specific utilities for business software: amounts in words for e-invoice
 Vietnamese diacritics, slugs and alphabetical sorting, tax codes (mã số thuế), phone
 numbers, citizen ID numbers (CCCD) and VietQR bank-transfer payloads.
 
-`dl-vn` is part of [DevLibrary](https://github.com/vzeturn/DevLibrary). It has no
+`dl-vn` is part of [DevLibrary](https://github.com/vzeturn/devlibrary). It has no
 dependencies, is `#![no_std]` (it needs `alloc`), forbids `unsafe`, and builds for
 `wasm32-unknown-unknown`. Every parser returns a typed `dl_vn::Error`, with a byte offset
 where it applies; no input makes it panic.
@@ -57,7 +57,7 @@ From GitHub:
 
 ```toml
 [dependencies]
-dl-vn = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-vn = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout:
@@ -280,11 +280,11 @@ assert_eq!(scanned.bank().map(|b| b.short_name), Some("Vietcombank"));
 ```
 
 To draw the code, pass the payload to the sibling crate
-[`dl-qr`](https://github.com/vzeturn/DevLibrary/tree/main/crates/dl-qr). It is not a
+[`dl-qr`](https://github.com/vzeturn/devlibrary/tree/main/crates/dl-qr). It is not a
 dependency of `dl-vn`, so this example is not compiled here:
 
 ```text
-// Cargo.toml: dl-qr = { git = "https://github.com/vzeturn/DevLibrary" }
+// Cargo.toml: dl-qr = { git = "https://github.com/vzeturn/devlibrary" }
 use dl_qr::{Ecc, QrCode, SvgOptions};
 
 let code = QrCode::encode_text(&payload, Ecc::Medium)?;
@@ -351,4 +351,4 @@ print!("{}", code.to_text(4));                  // for a terminal
 ## License
 
 Licensed under either of the MIT license or the Apache License, Version 2.0, at your
-option, as stated in the [DevLibrary repository](https://github.com/vzeturn/DevLibrary).
+option, as stated in the [DevLibrary repository](https://github.com/vzeturn/devlibrary).

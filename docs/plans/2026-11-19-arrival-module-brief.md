@@ -2,7 +2,7 @@
 
 ## Goal
 
-The Azolo Check-In site agent (`~/Projects/SmileCheckin/src/MM.Arrival.Agent`, .NET 10, Windows
+The Azolo Check-In site agent (`~/Projects/azolo-checkinonline/src/MM.Arrival.Agent`, .NET 10, Windows
 service `MM.Arrival.Agent`, wire contract in `src/MM.Arrival.Sync.Contracts`) moves onto the shared
 `dl-agent` as module `arrival`, following the pattern of `crates/dl-agent-einvoice` and
 `crates/dl-agent-pms` (read their READMEs and `module/`). This slice builds the **module only**,
@@ -10,7 +10,7 @@ inside DevLibrary. Do not change SmileCheckin, release, or deploy.
 
 **Three hotels run this agent in production** (muine-bay-resort, vic-saigon, victory-vungtau) and a
 demo tenant (aurelia-demo) will be the canary. A switch must need **no re-enrollment**: read the
-existing install in place. Read `~/Projects/SmileCheckin/CLAUDE.md` and `docs/saas/` first.
+existing install in place. Read `~/Projects/azolo-checkinonline/CLAUDE.md` and `docs/saas/` first.
 
 ## Keep in place (find the exact paths in `Program.cs`, `AgentOptions.cs`, `deploy/agent/Install.ps1`)
 
@@ -66,7 +66,7 @@ existing install in place. Read `~/Projects/SmileCheckin/CLAUDE.md` and `docs/sa
 
 ## Tests (mirror source structure, hand-written fakes, no mocking crates)
 
-- Port the agent and contracts unit tests from `~/Projects/SmileCheckin/tests` that cover what you
+- Port the agent and contracts unit tests from `~/Projects/azolo-checkinonline/tests` that cover what you
   ported. Golden fixtures from .NET as above.
 - Fake cloud on a local socket: poll → request → PMS fake → envelope reply; replayed request →
   idempotent; skewed clock → `arrival_clock_skew`; 401 → degraded.

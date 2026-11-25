@@ -2,7 +2,7 @@
 
 ## Goal
 
-The SRBackup site agent (Go, `~/Projects/SRBackup/agent`, ~7.8k non-test lines) moves onto the
+The SRBackup site agent (Go, `~/Projects/sr-backup/agent`, ~7.8k non-test lines) moves onto the
 shared `dl-agent` as module `backup`, following the pattern of `crates/dl-agent-einvoice` and
 `crates/dl-agent-pms` (read their READMEs and `module/`). This slice builds the **module only**,
 inside DevLibrary. Do not change SRBackup, release, or deploy.
@@ -11,7 +11,7 @@ Production has **no SRBackup agents yet** (0 agents, hub `https://backupapi.sr.i
 is no `agent.json` / bbolt queue to import: the module starts clean. Do not port the Go on-disk
 formats or the hwid-derived `secret` package.
 
-## Hub contract (keep byte-compatible; the hub is `~/Projects/SRBackup/hub`, Hono on Workers)
+## Hub contract (keep byte-compatible; the hub is `~/Projects/sr-backup/hub`, Hono on Workers)
 
 Read `agent/internal/hubclient/` and `hub/src/routes/agent.ts` + `agentDistribution.ts`:
 `POST /api/agent/register` / `self-register` (enroll key → agent id + token), `GET /api/agent/config`
@@ -80,7 +80,7 @@ report, the rest keeps running.
 - Port the Go unit tests that cover the ported packages (executor, queue, scheduler, pipeline,
   restore, retention, syncloop, masterkey, uploader request signing). Credential decrypt must
   pass against values produced by the hub's `encryptCredential` (fixtures: generate a few with
-  `cd ~/Projects/SRBackup/hub && bun` + `src/lib/credentialCrypto.ts`, test-only keys).
+  `cd ~/Projects/sr-backup/hub && bun` + `src/lib/credentialCrypto.ts`, test-only keys).
 - Fake hub on a local socket: enroll → config → scheduled job → report; key rotation (first
   decrypt fails → re-fetch → ok); `credentialError` → job fails, others run; hub down → outbox.
 - S3 SigV4 against the AWS published test vectors; Azure SharedKey/SAS signing against fixed

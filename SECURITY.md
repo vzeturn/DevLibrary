@@ -8,7 +8,7 @@ and update when an advisory is published.
 ## Reporting a vulnerability
 
 Please **do not open a public issue** for security problems. Report them privately with
-[GitHub security advisories](https://github.com/vzeturn/DevLibrary/security/advisories/new)
+[GitHub security advisories](https://github.com/vzeturn/devlibrary/security/advisories/new)
 ("Report a vulnerability"). Include the crate, the commit, a description of the impact
 and, if possible, a proof of concept.
 

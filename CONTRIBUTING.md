@@ -5,7 +5,7 @@ all welcome. Bug reports and questions can be written in English or Vietnamese.
 
 ## Reporting bugs
 
-Open an [issue](https://github.com/vzeturn/DevLibrary/issues) with:
+Open an [issue](https://github.com/vzeturn/devlibrary/issues) with:
 
 - the crate and version (or commit),
 - the smallest input that shows the problem,

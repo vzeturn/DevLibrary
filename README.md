@@ -90,15 +90,15 @@ package by name inside the repository:
 
 ```toml
 [dependencies]
-dl-json    = { git = "https://github.com/vzeturn/DevLibrary" }
-dl-decimal = { git = "https://github.com/vzeturn/DevLibrary" }
-dl-time    = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-json    = { git = "https://github.com/vzeturn/devlibrary" }
+dl-decimal = { git = "https://github.com/vzeturn/devlibrary" }
+dl-time    = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 For reproducible builds, pin a tag or commit and update deliberately:
 
 ```toml
-dl-json = { git = "https://github.com/vzeturn/DevLibrary", tag = "v0.1.0" }
+dl-json = { git = "https://github.com/vzeturn/devlibrary", tag = "v0.1.0" }
 # or: rev = "<commit sha>"
 ```
 
@@ -149,7 +149,7 @@ error tables, benchmarks and a list of known limitations.
 ## Building and testing
 
 ```sh
-git clone https://github.com/vzeturn/DevLibrary
+git clone https://github.com/vzeturn/devlibrary
 cd DevLibrary
 cargo test --workspace                       # unit tests + every README example
 cargo clippy --workspace --all-targets -- -D warnings
@@ -228,8 +228,8 @@ thanh toán. Mỗi crate thay thế một gói quen thuộc trên NuGet, npm, Go
 
 ```toml
 [dependencies]
-dl-vn      = { git = "https://github.com/vzeturn/DevLibrary" }
-dl-decimal = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-vn      = { git = "https://github.com/vzeturn/devlibrary" }
+dl-decimal = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 ```rust,ignore
@@ -239,5 +239,5 @@ assert_eq!(vnd_to_words(1_250_000), "Một triệu hai trăm năm mươi nghìn 
 
 Hướng dẫn chi tiết, ví dụ chạy được và bảng API nằm trong README của từng crate (viết bằng
 tiếng Anh để cộng đồng quốc tế cùng dùng). Báo lỗi hoặc đề xuất tính năng tại
-[Issues](https://github.com/vzeturn/DevLibrary/issues); xem
+[Issues](https://github.com/vzeturn/devlibrary/issues); xem
 [CONTRIBUTING.md](CONTRIBUTING.md) trước khi gửi pull request.

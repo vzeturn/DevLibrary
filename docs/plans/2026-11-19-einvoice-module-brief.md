@@ -8,13 +8,13 @@ MM-EINVOICE, release anything, or deploy.
 
 ## Source to port
 
-- `~/Projects/MM-EINVOICE/rust/agent/`: the Rust port of the Go agent (`cmd/agent`). It is about
+- `~/Projects/azolo-einvoice/rust/agent/`: the Rust port of the Go agent (`cmd/agent`). It is about
   8.4k lines and uses DevLibrary crates only (pinned to an old rev). Read its README first.
   It covers collection (FO/POS procs, VAT apportion, TCVN3, void pairs), SQL proc install with
   the 2008 rewrite, the platform client (push, heartbeat, config, trn-types, write-back and ack,
   backoff), the outbox, the runner, and `config.enc` (Go format, DPAPI LocalMachine).
 - **Missing from the Rust port and required:** the provider egress relay (ADR 0016,
-  `~/Projects/MM-EINVOICE/docs/adr/0016-provider-egress-through-tenant-agent.md`). Go code:
+  `~/Projects/azolo-einvoice/docs/adr/0016-provider-egress-through-tenant-agent.md`). Go code:
   `internal/agentcollector/relay.go`, `internal/egressrelay/wire.go`, `CheckURL` in
   `internal/egressrelay`. Port it with exactly the behaviour in the ADR:
   - Long-poll `/relay/next`.

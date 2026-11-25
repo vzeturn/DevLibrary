@@ -4,7 +4,7 @@ Hex (Base16), Base64 and Base32 from [RFC 4648](https://www.rfc-editor.org/rfc/r
 with strict decoders. `#![no_std]` + `alloc`, no dependencies, no `unsafe`, builds for
 `wasm32-unknown-unknown`.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary).
 
 ## Replaces
 
@@ -34,7 +34,7 @@ Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
 
 ```toml
 [dependencies]
-dl-encoding = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-encoding = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 From a local checkout: `dl-encoding = { path = "../DevLibrary/crates/dl-encoding" }`.

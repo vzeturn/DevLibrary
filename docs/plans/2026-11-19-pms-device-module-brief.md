@@ -10,7 +10,7 @@ anything, or deploy.
 
 ## Source to port
 
-- `~/Projects/SMILE-PMS/apps/device-agent/rust/`: the Rust port of the .NET agent
+- `~/Projects/azolo-pms/apps/device-agent/rust/`: the Rust port of the .NET agent
   (`apps/device-agent/src/SmilePms.DeviceAgent`), about 12k lines, DevLibrary crates only (pinned to
   old rev `3b50836`). Read its README first. It claims commands (`POST /device-agent/commands/claim`),
   runs them through the adapters and posts results (`POST /device-agent/commands/{id}/result`), with

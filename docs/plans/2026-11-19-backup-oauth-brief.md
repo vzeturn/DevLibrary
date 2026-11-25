@@ -8,7 +8,7 @@ schedule targeting Google Drive or OneDrive fails today with `backup_destination
 Port the two remaining uploaders from the Go agent so the module covers every destination the
 SRBackup hub offers.
 
-Reference (read only, do not modify): `~/Projects/SRBackup/agent/internal/uploader/up_gdrive.go`
+Reference (read only, do not modify): `~/Projects/sr-backup/agent/internal/uploader/up_gdrive.go`
 (387 lines) and `up_onedrive.go` (722 lines) plus their tests, and how `hub/src/routes/agent.ts`
 sends the destination (fields, `credentialError`). The SRBackup main checkout has another
 session's uncommitted work (a hub-side "managed Drive"): read only, never write there, and do not

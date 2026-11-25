@@ -4,7 +4,7 @@ A minimal benchmark harness used by every DevLibrary crate in place of `criterio
 case is warmed up, then sampled for a fixed time budget; the median time per iteration
 (and the throughput, when given a byte count) is printed.
 
-Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
+Part of [DevLibrary](https://github.com/vzeturn/devlibrary).
 
 ## Usage
 
@@ -12,7 +12,7 @@ Part of [DevLibrary](https://github.com/vzeturn/DevLibrary).
 
 ```toml
 [dev-dependencies]
-dl-bench = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-bench = { git = "https://github.com/vzeturn/devlibrary" }
 
 [[bench]]
 name = "my_bench"

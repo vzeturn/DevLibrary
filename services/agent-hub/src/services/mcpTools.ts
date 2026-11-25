@@ -3,7 +3,7 @@ import { limited, parseCommitFeed, parsePatch } from './githubFallback';
 import { testRunsView } from './testRuns';
 
 /** The repository the console reads (public on GitHub; no token involved). */
-export const REPO = 'vzeturn/DevLibrary';
+export const REPO = 'vzeturn/devlibrary';
 /** Largest file or admin answer handed back to the caller, in characters. */
 export const MAX_TEXT = 200_000;
 

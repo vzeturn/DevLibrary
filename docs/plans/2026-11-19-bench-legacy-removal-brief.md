@@ -15,9 +15,9 @@ Before SQL fixups/install, when `remove_legacy` is true, for every old agent fou
   `schtasks /Delete /F`).
 - Their data/identity directories: **rename, never delete**, to `<dir>.bench-old-<yyyyMMddHHmmss>`.
   Find the exact directories from each product's own installer (read-only in the repos:
-  `~/Projects/SRBackup` (read-only git show origin/main, never touch its working tree),
-  `~/Projects/SMILE-HLAPI`, `~/Projects/MM-EINVOICE`, `~/Projects/SmileCheckin`,
-  `~/Projects/MM-MEMBERSHIP`, `~/Projects/SMILE-PMS`, `~/Projects/SML-PDAOrder` — install scripts
+  `~/Projects/sr-backup` (read-only git show origin/main, never touch its working tree),
+  `~/Projects/sr-hotel-link-api`, `~/Projects/azolo-einvoice`, `~/Projects/azolo-checkinonline`,
+  `~/Projects/azolo-victory-membership`, `~/Projects/azolo-pms`, `~/Projects/azolo-pda-order` — install scripts
   under `deploy/`, `scripts/`, `wwwroot/downloads/`), and the dl-agent enroll tools' adoption paths
   (`crates/dl-agent-*/src/**/enroll*`, e.g. `C:\ProgramData\srbackup\agent.json`,
   `%ProgramData%\SMILE-HL-Agent`, `%ProgramData%\MM.Membership.Agent`). Put the list in one

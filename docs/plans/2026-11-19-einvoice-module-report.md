@@ -10,7 +10,7 @@ Commit: `adbf7bf` feat(dl-agent-einvoice): Azolo E-Invoice as an opt-in dl-agent
 
 ### New crate `crates/dl-agent-einvoice`
 
-A port of `~/Projects/MM-EINVOICE/rust/agent` (read only, not modified) as a dl-agent
+A port of `~/Projects/azolo-einvoice/rust/agent` (read only, not modified) as a dl-agent
 module. It exports `einvoice_module() -> Factory` and `EinvoiceModule`.
 
 - **Ported, unchanged in behaviour**:

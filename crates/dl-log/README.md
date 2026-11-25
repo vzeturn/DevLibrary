@@ -50,7 +50,7 @@ repository:
 
 ```toml
 [dependencies]
-dl-log = { git = "https://github.com/vzeturn/DevLibrary" }
+dl-log = { git = "https://github.com/vzeturn/devlibrary" }
 ```
 
 Pin a revision for reproducible builds: `{ git = "...", rev = "<commit>" }`.
