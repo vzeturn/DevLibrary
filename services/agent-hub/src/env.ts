@@ -17,6 +17,10 @@ export interface Env {
   GATE_SOAK_HOURS_MAJOR?: string;
   /** Minor rollout ramp after promotion, "hours:percent,…" (default "0:10,24:50,48:100"). */
   MINOR_RAMP?: string;
+  /** Hours the site canary list is watched before a stable release opens (default 4). */
+  SITE_CANARY_HOURS?: string;
+  /** Seconds of silence from a site canary that taking the release counts as a fault (default 900). */
+  SITE_CANARY_SILENT_SECONDS?: string;
   /** Hub base URLs handed to agents, primary first ("https://a,https://b"); also limits the fallback host to agent paths. */
   HUB_URLS?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`); with ACCESS_AUD, names admins in the audit trail. */

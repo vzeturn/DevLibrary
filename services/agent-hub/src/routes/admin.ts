@@ -25,6 +25,7 @@ import { diagnosticsObject } from '../services/diagnostics';
 import { createProductKey } from '../services/productKeys';
 import { removeRequirement, requirementOf, setRequirement, siteReadiness, surveyOf } from '../services/sites';
 import { allowRelease, disallowRelease } from '../services/lanes';
+import { addCanarySite, canarySites, removeCanarySite } from '../services/watch';
 import { holdsView, holdTenant, pauseRelease, releaseHold, resumeRelease } from '../services/holds';
 import { gateStatus, promote, publishCanary } from '../services/releases';
 import { selftestView } from '../services/selftest';
@@ -203,6 +204,18 @@ adminRoutes.delete('/releases/:product/:version/allow', async (c) => {
   const body = validate(allowBody, await jsonBody(c.req));
   const { product, version } = c.req.param();
   await disallowRelease(c.env, product, version, body);
+  return c.json({});
+});
+
+/** Site canary lane (RT-1106): sites that take a stable release first and are watched. */
+adminRoutes.get('/site-canaries', async (c) => c.json({ site_canaries: await canarySites(c.env) }));
+adminRoutes.post('/site-canaries', async (c) => {
+  const body = validate(allowBody, await jsonBody(c.req));
+  return c.json(await addCanarySite(c.env, body.tenant_id, body.site_id, nowSeconds()), 201);
+});
+adminRoutes.delete('/site-canaries', async (c) => {
+  const body = validate(allowBody, await jsonBody(c.req));
+  await removeCanarySite(c.env, body.tenant_id, body.site_id);
   return c.json({});
 });
 
