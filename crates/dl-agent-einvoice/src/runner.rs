@@ -7,7 +7,10 @@ use crate::agent_config::AgentConfig;
 use crate::log::{self, V};
 use crate::outbox::Outbox;
 use crate::platform::{ApiError, Heartbeat, Platform};
-use crate::sql::{CollectKey, Sql, WritebackApply};
+use crate::sql::{CollectKey, Sql};
+
+mod writeback;
+pub use writeback::writeback_apply_from;
 
 /// Errors of one cycle, and whether the platform said this install was replaced.
 #[derive(Debug, Default, Clone)]
@@ -478,83 +481,6 @@ impl Runner {
         }
     }
 
-    /// `WritebackCycle`.
-    pub fn writeback_cycle(&mut self, deadline: Instant, res: &mut CycleResult) {
-        let cmds = match self.cli.poll(deadline) {
-            Ok(c) => c,
-            Err(e) => {
-                if e != ApiError::DeviceReplaced {
-                    res.poll_failed = Some(e.to_string());
-                }
-                res.writeback_errors.api(e);
-                return;
-            }
-        };
-        self.apply_commands(cmds, deadline, res);
-    }
-
-    /// Applies polled write-back commands to SQL Server and acks the applied ones.
-    fn apply_commands(
-        &mut self,
-        cmds: Vec<crate::platform::WritebackCommand>,
-        deadline: Instant,
-        res: &mut CycleResult,
-    ) {
-        res.polled += cmds.len() as i64;
-        let mut to_ack = Vec::new();
-        for cmd in cmds {
-            let id = cmd.id.to_string();
-            if self.outbox.is_applied(&id) {
-                res.skipped += 1;
-                to_ack.push(cmd.id);
-                continue;
-            }
-            let apply = match writeback_apply_from(&cmd) {
-                Ok(a) => a,
-                Err(e) => {
-                    log::error(
-                        "writeback: map command failed",
-                        &[("command_id", V::S(&id)), ("error", V::S(&e))],
-                    );
-                    res.writeback_errors.list.push(e);
-                    continue;
-                }
-            };
-            let timeout = deadline.saturating_duration_since(Instant::now());
-            if let Err(e) = self.sql.apply_writeback(&apply, timeout) {
-                log::error(
-                    "writeback: apply failed",
-                    &[("command_id", V::S(&id)), ("error", V::S(&e))],
-                );
-                res.sql_errors.push(e.clone());
-                res.writeback_errors.list.push(e);
-                continue;
-            }
-            if let Err(e) = self.outbox.mark_applied(&id) {
-                log::error(
-                    "writeback: mark applied failed",
-                    &[("command_id", V::S(&id)), ("error", V::S(&e))],
-                );
-                res.outbox_errors.push(e.clone());
-                res.writeback_errors.list.push(e);
-                continue;
-            }
-            res.applied += 1;
-            to_ack.push(cmd.id);
-        }
-        if !to_ack.is_empty() {
-            match self.cli.ack(&to_ack, deadline) {
-                Ok(()) => res.acked += to_ack.len() as i64,
-                Err(e) => {
-                    if e != ApiError::DeviceReplaced {
-                        res.poll_failed = Some(e.to_string());
-                    }
-                    res.writeback_errors.api(e);
-                }
-            }
-        }
-    }
-
     /// `RunOnce`: each cycle under its own `cycle_timeout`.
     pub fn run_once(&mut self) -> CycleResult {
         let t = self.cfg.cycle_timeout;
@@ -573,41 +499,6 @@ impl Runner {
             res.writeback_ms = ms_since(started);
         }
         res
-    }
-
-    /// Hands write-back to a dedicated worker (RT-0785): from now on the cycle reports
-    /// what the worker did instead of polling itself.
-    pub fn hand_writeback_to_worker(&mut self) {
-        self.writeback_worker = true;
-    }
-
-    /// Applies commands the write-back worker polled, under the cycle timeout. The
-    /// outcome is returned and also kept for the next cycle's log, heartbeat and problems.
-    pub fn apply_polled_writeback(
-        &mut self,
-        cmds: Vec<crate::platform::WritebackCommand>,
-    ) -> CycleResult {
-        let started = Instant::now();
-        let mut res = CycleResult::default();
-        self.apply_commands(cmds, started + self.cfg.cycle_timeout, &mut res);
-        res.writeback_ms = ms_since(started);
-        self.writeback_pending.absorb_writeback(res.clone());
-        res
-    }
-
-    /// What the write-back worker did since the last cycle (tests).
-    #[cfg(test)]
-    pub fn take_writeback_pending(&mut self) -> CycleResult {
-        std::mem::take(&mut self.writeback_pending)
-    }
-
-    /// Records a failed write-back poll of the worker for the next cycle's report.
-    pub fn note_writeback_poll_error(&mut self, e: ApiError) {
-        let w = &mut self.writeback_pending;
-        if e != ApiError::DeviceReplaced {
-            w.poll_failed = Some(e.to_string());
-        }
-        w.writeback_errors.api(e);
     }
 
     /// `refreshHubConfig`.
@@ -757,39 +648,9 @@ struct ReadFailures {
     items: Vec<String>,
 }
 
-/// `writebackApplyFrom`.
-pub fn writeback_apply_from(
-    cmd: &crate::platform::WritebackCommand,
-) -> Result<WritebackApply, String> {
-    let Some((bill_type, bill_id)) = cmd.source_ref.split_once(':') else {
-        return Err(format!("agent: malformed source_ref {:?}", cmd.source_ref));
-    };
-    let mut a = WritebackApply {
-        bill_id: bill_id.to_owned(),
-        bill_type: bill_type.to_owned(),
-        issued_at: cmd.issued_at,
-        ..Default::default()
-    };
-    match cmd.kind.as_str() {
-        "SET_INVOICE_NUMBER" => {
-            a.invoice_number = cmd.invoice_number.clone();
-            a.ky_hieu = cmd.ky_hieu.clone();
-        }
-        "SET_MA_CQT" => a.ma_cqt = cmd.ma_cqt.clone(),
-        other => {
-            return Err(format!(
-                "agent: unknown writeback command type {other:?} for {}",
-                cmd.source_ref
-            ));
-        }
-    }
-    Ok(a)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::WritebackCommand;
 
     #[test]
     fn heartbeat_names_the_host_binary() {
@@ -820,29 +681,5 @@ mod tests {
         assert_eq!(sources_for(""), vec!["FO", "POS"]);
         assert_eq!(sources_for("POS"), vec!["POS"]);
         assert_eq!(sources_for("x"), vec!["FO", "POS"]);
-    }
-
-    #[test]
-    fn writeback_mapping() {
-        let mut c = WritebackCommand {
-            source_ref: "FO:123".into(),
-            kind: "SET_INVOICE_NUMBER".into(),
-            invoice_number: "7".into(),
-            ky_hieu: "1C26TAA".into(),
-            ..Default::default()
-        };
-        let a = writeback_apply_from(&c).unwrap();
-        assert_eq!(
-            (
-                a.bill_type.as_str(),
-                a.bill_id.as_str(),
-                a.invoice_number.as_str()
-            ),
-            ("FO", "123", "7")
-        );
-        c.kind = "SET_SOMETHING".into();
-        assert!(writeback_apply_from(&c).is_err());
-        c.source_ref = "nocolon".into();
-        assert!(writeback_apply_from(&c).is_err());
     }
 }

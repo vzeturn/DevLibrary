@@ -29,6 +29,7 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent-einvoice: write-back acks applied commands on their own 20 s deadline instead of the batch's 2-minute budget, and each command's SQL write gets at most 30 s of that budget; commands left when the budget is spent are counted, logged and left for the hub to send again. Before, one SQL write that hung spent the budget, the ack failed with a deadline error and the hub re-sent the same commands until it marked them FAILED (port of MM-EINVOICE RT-1212).
 - dl-agent-einvoice: a night-sweep page that times out is halved (500 down to 25) and, at the smallest page, retried every 10 minutes instead of re-running the same 500-bill page every cycle, which kept the module degraded with `einvoice_sql_failed` (RT-1071).
 
 ### Security
