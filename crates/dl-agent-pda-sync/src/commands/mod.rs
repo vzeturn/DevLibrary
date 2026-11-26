@@ -23,6 +23,7 @@ pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
 mod resnapshot;
+pub mod result_outbox;
 mod schema_guard;
 pub mod service;
 mod sql;
@@ -35,7 +36,9 @@ mod units;
 pub mod verify;
 pub mod verify_manifest;
 
-pub use channel::{ChannelError, CommandChannel, CommandChannelParts, next_failure_count};
+pub use channel::{
+    ChannelError, CommandChannel, CommandChannelParts, next_failure_count, reconnect_delay,
+};
 pub use error::{CommandError, PERMISSION_DENIED, Result};
 pub use executor::{
     CATEGORY as EXECUTOR_CATEGORY, CommandExecutor, GrantsCheck, RejectingCommandExecutor,
