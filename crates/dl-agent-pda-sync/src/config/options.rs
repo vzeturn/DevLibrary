@@ -18,8 +18,11 @@ pub const APPLICATION_NAME: &str = "PdaSyncAgent";
 pub struct PrintRelayOptions {
     /// Join the order hub's print relay. Default on.
     pub enabled: bool,
-    /// CIDR ranges the relay may print to; a null entry (JSON `null` in an array) is kept
-    /// as `None` like the C# list keeps it.
+    /// CIDR ranges the relay may print to. Empty (the default) allows every private LAN
+    /// range: 10/8, 172.16/12, 192.168/16 and fc00::/7 (RT-1309, ADR 0010); entries narrow
+    /// that and must themselves be private. Public and loopback addresses are never
+    /// allowed. A null entry (JSON `null` in an array) is kept as `None` like the C# list
+    /// keeps it, and makes the relay configuration invalid.
     pub printer_subnets: Vec<Option<String>>,
     /// TCP ports a job may target. Default `[9100]`; configured entries are appended
     /// (`ConfigurationBinder` adds to the initialised list).

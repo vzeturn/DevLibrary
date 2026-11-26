@@ -123,12 +123,17 @@ pub fn system_resolver() -> Resolver {
     })
 }
 
-/// A job may only reach a private-range address inside the allowed subnets, on an
-/// allowed port (`PrinterTargetPolicy`). A host name is resolved once and the checked
-/// address is what the printer dials. A refusal is permanent; only a failed lookup is
-/// retryable.
+/// A job may only reach a private (LAN) address on an allowed port
+/// (`PrinterTargetPolicy`). With no `PrinterSubnets` every private range is allowed
+/// (owner decision 2026-11-26, RT-1309, ADR 0010): a printer on a routed store LAN is
+/// printed to, and only a failed connection is an error. `PrinterSubnets` narrows that to
+/// the listed ranges. Public, loopback and link-local addresses are always refused, so the
+/// relay never becomes a TCP proxy to the internet or to the server itself. A host name is
+/// resolved once and the checked address is what the printer dials. A refusal is
+/// permanent; only a failed lookup is retryable.
 pub struct PrinterTargetPolicy {
     subnets: Vec<IpNetwork>,
+    configured: bool,
     ports: Vec<i32>,
     resolve: Resolver,
 }
@@ -137,42 +142,47 @@ impl std::fmt::Debug for PrinterTargetPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrinterTargetPolicy")
             .field("subnets", &self.subnets)
+            .field("configured", &self.configured)
             .field("ports", &self.ports)
             .finish_non_exhaustive()
     }
 }
 
+fn join<T: std::fmt::Display>(items: &[T]) -> String {
+    items
+        .iter()
+        .map(T::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl PrinterTargetPolicy {
-    /// Builds the gate from the configured subnets or, when none is configured, from
-    /// `auto_subnets`. `Err` with the reason when an entry is not a private CIDR, a port is
-    /// out of range, or nothing is allowed at all: the relay then stays off.
+    /// Builds the gate from the configured `PrinterSubnets`, or every private range when
+    /// none is configured. `Err` with the reason when an entry is not a private CIDR or a
+    /// port is out of range: the relay then stays off.
     pub fn create(
         options: &PrintRelayOptions,
-        auto_subnets: impl IntoIterator<Item = IpNetwork>,
         resolve: Option<Resolver>,
     ) -> Result<PrinterTargetPolicy, String> {
         let mut subnets: Vec<IpNetwork> = Vec::new();
-        if !options.printer_subnets.is_empty() {
-            for entry in &options.printer_subnets {
-                match entry.as_deref().map(str::trim).and_then(IpNetwork::parse) {
-                    Some(net) if is_private_network(&net) => subnets.push(net),
-                    _ => {
-                        return Err(format!(
-                            "PrinterSubnets entry '{}' is not a private CIDR range",
-                            entry.as_deref().unwrap_or("")
-                        ));
+        for entry in &options.printer_subnets {
+            match entry.as_deref().map(str::trim).and_then(IpNetwork::parse) {
+                Some(net) if is_private_network(&net) => {
+                    if !subnets.contains(&net) {
+                        subnets.push(net);
                     }
                 }
-            }
-        } else {
-            for net in auto_subnets {
-                if is_private_network(&net) && !subnets.contains(&net) {
-                    subnets.push(net);
+                _ => {
+                    return Err(format!(
+                        "PrinterSubnets entry '{}' is not a private CIDR range",
+                        entry.as_deref().unwrap_or("")
+                    ));
                 }
             }
         }
-        if subnets.is_empty() {
-            return Err("no private printer subnet is configured or found on this machine".into());
+        let configured = !subnets.is_empty();
+        if !configured {
+            subnets = private_ranges().to_vec();
         }
         if options.ports.is_empty() || options.ports.iter().any(|p| !(1..=65535).contains(p)) {
             return Err("Ports must list at least one TCP port between 1 and 65535".into());
@@ -185,14 +195,20 @@ impl PrinterTargetPolicy {
         }
         Ok(PrinterTargetPolicy {
             subnets,
+            configured,
             ports,
             resolve: resolve.unwrap_or_else(system_resolver),
         })
     }
 
-    /// The allowed subnets.
+    /// The allowed subnets: the configured `PrinterSubnets`, else every private range.
     pub fn subnets(&self) -> &[IpNetwork] {
         &self.subnets
+    }
+
+    /// Whether `PrinterSubnets` narrows the private ranges.
+    pub fn is_narrowed(&self) -> bool {
+        self.configured
     }
 
     /// The allowed ports.
@@ -200,11 +216,25 @@ impl PrinterTargetPolicy {
         &self.ports
     }
 
+    /// Where the relay prints, for logs, site events and the selftest: "any private LAN
+    /// address (10.0.0.0/8, …)" or "PrinterSubnets [192.168.1.0/24]", plus the ports.
+    pub fn describe(&self) -> String {
+        let scope = if self.configured {
+            format!("PrinterSubnets [{}]", join(&self.subnets))
+        } else {
+            format!("any private LAN address ({})", join(&self.subnets))
+        };
+        format!("{scope}, ports [{}]", join(&self.ports))
+    }
+
     /// The checked endpoint to dial, or the refusal (`ResolveAsync`).
     pub fn resolve(&self, host: &str, port: i32, ctx: &Ctx) -> Result<SocketAddr, TargetRefusal> {
         if !self.ports.contains(&port) {
             return Err(TargetRefusal {
-                reason: format!("port {port} is not an allowed printer port"),
+                reason: format!(
+                    "port {port} is not an allowed printer port (allowed: {})",
+                    join(&self.ports)
+                ),
                 retryable: false,
             });
         }
@@ -218,6 +248,8 @@ impl PrinterTargetPolicy {
         };
         // In range: the caller's port passed the allow-list (1..=65535).
         let port = u16::try_from(port).unwrap_or_default();
+        let mut any_private = false;
+        let mut seen = Vec::new();
         for ip in candidates {
             let address = match ip {
                 IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
@@ -226,20 +258,38 @@ impl PrinterTargetPolicy {
             if self.is_allowed(address) {
                 return Ok(SocketAddr::new(address, port));
             }
+            any_private |= is_private_address(address);
+            seen.push(address);
         }
+        let shown = if seen.len() == 1 && seen[0].to_string() == literal {
+            format!("printer host '{host}'")
+        } else {
+            format!("printer host '{host}' ({})", join(&seen))
+        };
+        let reason = if any_private {
+            format!(
+                "{shown} is outside PrinterSubnets [{}] (modules.pda-sync.PrintRelay in the hub config; leave PrinterSubnets empty to allow every private LAN printer)",
+                join(&self.subnets)
+            )
+        } else {
+            format!(
+                "{shown} is not a private LAN address; the print relay only dials 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and fc00::/7, never public or loopback addresses"
+            )
+        };
         Err(TargetRefusal {
-            reason: format!(
-                "printer host '{host}' is not inside an allowed private printer subnet"
-            ),
+            reason,
             retryable: false,
         })
     }
 
     /// A private address inside an allowed subnet.
     pub fn is_allowed(&self, address: IpAddr) -> bool {
-        private_ranges().iter().any(|r| r.contains(address))
-            && self.subnets.iter().any(|s| s.contains(address))
+        is_private_address(address) && self.subnets.iter().any(|s| s.contains(address))
     }
+}
+
+fn is_private_address(address: IpAddr) -> bool {
+    private_ranges().iter().any(|r| r.contains(address))
 }
 
 /// Whether `net` lies inside one of 10/8, 172.16/12, 192.168/16, fc00::/7.
@@ -269,7 +319,11 @@ mod tests {
     }
 
     fn policy(resolve: Option<Resolver>) -> PrinterTargetPolicy {
-        PrinterTargetPolicy::create(&options(&["192.168.1.0/24"]), [], resolve).unwrap()
+        PrinterTargetPolicy::create(&options(&["192.168.1.0/24"]), resolve).unwrap()
+    }
+
+    fn default_policy() -> PrinterTargetPolicy {
+        PrinterTargetPolicy::create(&PrintRelayOptions::default(), None).unwrap()
     }
 
     #[test]
@@ -286,17 +340,58 @@ mod tests {
     #[test]
     fn create_refuses_non_private_subnets() {
         for s in ["8.8.8.0/24", "0.0.0.0/0", "10.0.0.0/7", "not-a-cidr"] {
-            let e = PrinterTargetPolicy::create(&options(&[s]), [], None).unwrap_err();
+            let e = PrinterTargetPolicy::create(&options(&[s]), None).unwrap_err();
             assert!(e.contains(s), "{e}");
         }
     }
 
     #[test]
-    fn create_refuses_when_nothing_is_allowed() {
-        let e =
-            PrinterTargetPolicy::create(&PrintRelayOptions::default(), [net("8.8.8.0/24")], None)
-                .unwrap_err();
-        assert!(e.contains("no private printer subnet"));
+    fn with_no_subnet_configured_every_private_lan_is_allowed() {
+        // RT-1309: a printer on a routed store LAN that is not one of the server's own
+        // adapter subnets.
+        let p = default_policy();
+        assert!(!p.is_narrowed());
+        let t = p
+            .resolve("10.244.204.245", 9100, &Ctx::background())
+            .unwrap();
+        assert_eq!(t, "10.244.204.245:9100".parse().unwrap());
+        for a in ["10.0.0.1", "172.31.255.1", "192.168.77.8", "fd12::7"] {
+            assert!(p.is_allowed(ip(a)), "{a}");
+        }
+        assert!(
+            p.describe()
+                .starts_with("any private LAN address (10.0.0.0/8")
+        );
+        assert!(p.describe().ends_with("ports [9100]"));
+    }
+
+    #[test]
+    fn with_no_subnet_configured_public_and_local_addresses_are_still_refused() {
+        let p = default_policy();
+        for a in [
+            "8.8.8.8",
+            "127.0.0.1",
+            "169.254.1.1",
+            "::1",
+            "172.32.0.1",
+            "11.0.0.1",
+        ] {
+            assert!(!p.is_allowed(ip(a)), "{a}");
+            let r = p.resolve(a, 9100, &Ctx::background()).unwrap_err();
+            assert!(!r.retryable, "{a}");
+            assert!(
+                r.reason.contains("not a private LAN address"),
+                "{}",
+                r.reason
+            );
+        }
+        let r = p
+            .resolve("10.244.204.245", 22, &Ctx::background())
+            .unwrap_err();
+        assert_eq!(
+            r.reason,
+            "port 22 is not an allowed printer port (allowed: 9100)"
+        );
     }
 
     #[test]
@@ -305,21 +400,31 @@ mod tests {
             ports: vec![0],
             ..options(&["10.1.0.0/16"])
         };
-        let e = PrinterTargetPolicy::create(&o, [], None).unwrap_err();
+        let e = PrinterTargetPolicy::create(&o, None).unwrap_err();
         assert!(e.contains("Ports"));
     }
 
     #[test]
-    fn create_uses_auto_subnets_only_when_none_configured() {
-        let auto =
-            PrinterTargetPolicy::create(&PrintRelayOptions::default(), [net("10.9.0.0/16")], None)
-                .unwrap();
-        assert!(auto.is_allowed(ip("10.9.3.4")));
-        let configured =
-            PrinterTargetPolicy::create(&options(&["192.168.1.0/24"]), [net("10.9.0.0/16")], None)
-                .unwrap();
-        assert!(!configured.is_allowed(ip("10.9.3.4")));
-        assert!(configured.is_allowed(ip("192.168.1.50")));
+    fn configured_subnets_narrow_the_private_ranges() {
+        let p = policy(None);
+        assert!(p.is_narrowed());
+        assert!(p.is_allowed(ip("192.168.1.50")));
+        assert!(!p.is_allowed(ip("10.244.204.245")));
+        let r = p
+            .resolve("10.244.204.245", 9100, &Ctx::background())
+            .unwrap_err();
+        assert!(!r.retryable);
+        assert!(
+            r.reason.starts_with(
+                "printer host '10.244.204.245' is outside PrinterSubnets [192.168.1.0/24]"
+            ),
+            "{}",
+            r.reason
+        );
+        assert_eq!(
+            p.describe(),
+            "PrinterSubnets [192.168.1.0/24], ports [9100]"
+        );
     }
 
     #[test]
@@ -358,11 +463,21 @@ mod tests {
 
     #[test]
     fn resolve_refuses_a_host_name_that_resolves_outside() {
-        let p = policy(Some(Arc::new(|_: &str, _: &Ctx| Ok(vec![ip("8.8.8.8")]))));
+        let p = default_policy();
+        let p = PrinterTargetPolicy {
+            resolve: Arc::new(|_: &str, _: &Ctx| Ok(vec![ip("8.8.8.8")])),
+            ..p
+        };
         let r = p
             .resolve("evil.example", 9100, &Ctx::background())
             .unwrap_err();
         assert!(!r.retryable);
+        assert!(
+            r.reason
+                .starts_with("printer host 'evil.example' (8.8.8.8) is not a private LAN address"),
+            "{}",
+            r.reason
+        );
     }
 
     #[test]

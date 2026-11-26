@@ -7,10 +7,7 @@
 //! tenant. The cloud closes the connection when the token expires; the service
 //! reconnects with a fresh one and joins again.
 
-use super::discovery::{
-    CloudPrintQueueReporter, PrintQueueDiscovery, WindowsPrintQueueSource, WindowsRegistry,
-    adapter_networks, host_networks,
-};
+use super::discovery::{CloudPrintQueueReporter, PrintQueueDiscovery, WindowsPrintQueueSource};
 use super::engine::{PrintRelayEngine, PrintRelayEngineParts, PrintRelayJob, PrintRelayLink};
 use super::journal::PrintJournal;
 use super::policy::PrinterTargetPolicy;
@@ -297,6 +294,8 @@ fn close_text(reason: &CloseReason) -> String {
 /// How the last connection went (the C# `onUp` captures).
 #[derive(Debug, Default)]
 struct LinkState {
+    /// `PrinterTargetPolicy::describe`, for the up event.
+    printers: String,
     failures: u32,
     was_up: bool,
     last_failure: Option<String>,
@@ -385,10 +384,15 @@ impl PrintRelayService {
                     "rvcs",
                     JsonValue::Array(rvcs.iter().map(|r| JsonValue::from(*r)).collect()),
                 );
+                detail.insert("printers", JsonValue::from(state.printers.as_str()));
                 self.deps.events.report(
                     INFO,
                     "PRINT_RELAY_UP",
-                    &format!("The print relay is connected for {} branch(es)", rvcs.len()),
+                    &format!(
+                        "The print relay is connected for {} branch(es) and prints to {}",
+                        rvcs.len(),
+                        state.printers
+                    ),
                     Some(detail),
                 );
                 loop {
@@ -481,34 +485,35 @@ impl LoopService for PrintRelayService {
             );
             return Ok(());
         }
-        let queues = if options.discover_queues {
-            match self.deps.discovery.run(ctx) {
-                Ok(q) => q,
-                Err(_) => return Ok(()),
-            }
-        } else {
-            Vec::new()
-        };
-        let auto = adapter_networks(&WindowsRegistry)
-            .into_iter()
-            .chain(host_networks(&queues));
-        let policy = match PrinterTargetPolicy::create(&options, auto, None) {
+        if options.discover_queues && self.deps.discovery.run(ctx).is_err() {
+            return Ok(());
+        }
+        // No PrinterSubnets: every private LAN address is allowed (RT-1309, ADR 0010).
+        let policy = match PrinterTargetPolicy::create(&options, None) {
             Ok(p) => p,
             Err(error) => {
                 self.deps.events.report(
                     ERROR,
                     "PRINT_RELAY_CONFIG_INVALID",
                     &format!(
-                        "The print relay stays off: {error}. Fix Agent:PrintRelay in appsettings.site.json and restart the service"
+                        "The print relay stays off: {error}. Fix modules.pda-sync.PrintRelay in the hub config and restart the service"
                     ),
                     None,
                 );
                 return Ok(());
             }
         };
+        let printers = policy.describe();
+        self.log.info(
+            "Print relay prints to {Printers}",
+            &[Value::from(printers.as_str())],
+        );
         let engine = self.start_engine(policy, ctx)?;
         let rediscovery = self.rediscover(ctx);
-        let mut state = LinkState::default();
+        let mut state = LinkState {
+            printers,
+            ..LinkState::default()
+        };
         while !ctx.is_done() {
             let reason = self.run_connection(&engine, ctx, &mut state);
             if ctx.is_done() {

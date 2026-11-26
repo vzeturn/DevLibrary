@@ -17,6 +17,7 @@ use crate::bootstrap::probes::{
 };
 use crate::config::health::{DEGRADED, HEALTHY, REENROLL_REQUIRED};
 use crate::config::{AgentIdentity, AgentOptions, AgentPaths, AgentStatus};
+use crate::printrelay::policy::PrinterTargetPolicy;
 use crate::security::names;
 use crate::util::ctx::Ctx;
 
@@ -193,31 +194,49 @@ fn data_folder(paths: &AgentPaths) -> Check {
     })
 }
 
-/// The print relay settings (ADR 0098: on by default at sites without a speaker).
+/// The print relay settings (ADR 0098: on by default at sites without a speaker). With no
+/// `PrinterSubnets` the relay prints to any private LAN address (RT-1309, ADR 0010).
 fn print_relay(options: &AgentOptions) -> Check {
     let p = &options.print_relay;
     let o = if !p.enabled {
         Outcome::pass("off")
     } else {
-        let subnets: Vec<&str> = p
-            .printer_subnets
-            .iter()
-            .flatten()
-            .map(String::as_str)
-            .collect();
-        let ports: Vec<String> = p.ports.iter().map(i32::to_string).collect();
-        let d = format!(
-            "on: subnets [{}], ports [{}], queue discovery {}",
-            subnets.join(", "),
-            ports.join(", "),
-            if p.discover_queues { "on" } else { "off" }
-        );
-        if subnets.is_empty() && !p.discover_queues {
-            Outcome::warn(format!("{d}: nothing to relay to"))
-                .remedy("set modules.pda-sync.PrintRelay.PrinterSubnets in the hub config")
-        } else {
-            Outcome::pass(d)
+        match PrinterTargetPolicy::create(p, None) {
+            Ok(policy) => Outcome::pass(format!(
+                "on: prints to {}, queue discovery {}",
+                policy.describe(),
+                if p.discover_queues { "on" } else { "off" }
+            )),
+            Err(e) => Outcome::fail(format!("the print relay stays off: {e}"))
+                .remedy("fix modules.pda-sync.PrintRelay in the hub config"),
         }
     };
     Check::timed(NAME, "print_relay", "Print relay settings", || o)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dl_agent::selftest::Status;
+
+    #[test]
+    fn print_relay_with_no_subnet_prints_to_any_private_lan() {
+        let c = print_relay(&AgentOptions::default());
+        assert_eq!(c.status, Status::Pass, "{}", c.detail);
+        assert!(
+            c.detail
+                .starts_with("on: prints to any private LAN address (10.0.0.0/8"),
+            "{}",
+            c.detail
+        );
+    }
+
+    #[test]
+    fn print_relay_with_a_bad_subnet_fails_with_the_reason() {
+        let mut o = AgentOptions::default();
+        o.print_relay.printer_subnets = vec![Some("8.8.8.0/24".into())];
+        let c = print_relay(&o);
+        assert_eq!(c.status, Status::Fail);
+        assert!(c.detail.contains("8.8.8.0/24"), "{}", c.detail);
+    }
 }
