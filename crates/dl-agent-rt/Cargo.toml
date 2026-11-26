@@ -1,0 +1,16 @@
+[package]
+name = "dl-agent-rt"
+description = "dl-rt/1 session protocol: frame codec and seq/ack/credit/resume state machines (pure, no I/O)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+
+[lints]
+workspace = true
