@@ -9,6 +9,7 @@ All notable changes are listed here. The format follows
 ### Added
 
 - dl-agent sends the schema dictionary by itself: ten minutes after start and then daily it reads the structure of each declared database with the catalog-only `dl-agent-schema` collector (five fixed `sys.*` queries, no rows, no definitions) and uploads one database per `POST /v1/agent/schema-snapshot`; the catalog queries now name their columns `c0..cN` so rows map by position (PROTOCOL §9.10, RT-1215).
+- `scripts/schema/expected-objects.mjs` builds the expected-objects list of the schema coverage matrix from the PMS ops manifest (procedures, SELECT tables and columns) and the PDAOrder sync catalog, for `POST /admin/schema/coverage` (RT-1215).
 - `scripts/latency-probe`: read-only round-trip probe of PMS routes on the `azolo-demo-pms` tenant wired to dl-agent at SR (5 warm-ups, sequential samples, 10-parallel burst, p50/p95/p99; keeps the connection warm across long gaps). Second SR measurement (fo.inhouse.list, fo.reservation.list, dashboard overview) in the latency budget plan, section 7 (RT-1232, RT-1161).
 
 - dl-agent problem reports carry a fixed `command` field (the failed operation: `update.install`, `update.rollback`, `hub.heartbeat`, or the kind of a hub command that could not run) next to `code` and `context`; agent-hub stores it (migration 0012) and lists it in `/admin/reports`. A hub command the agent cannot run (`command_unknown`, `command_module_down`) is now reported, not only answered (PROTOCOL §7, RT-1163).
