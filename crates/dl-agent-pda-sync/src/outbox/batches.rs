@@ -299,6 +299,74 @@ ON CONFLICT(stream) DO UPDATE SET last_seq=excluded.last_seq,
         })
     }
 
+    /// [`SqliteOutbox::peek`] with the batches of the `live` streams first (RT-1309): the
+    /// open checks a waiter reads back after an order command are never queued behind a
+    /// backlog of ledger, master or resnapshot batches. Each stream keeps its own order;
+    /// a live stream in `skip` is left out like any other.
+    pub fn peek_live_first<S: AsRef<str>>(
+        &self,
+        max: i32,
+        skip: &[S],
+        live: &[&str],
+    ) -> Result<Vec<OutboxItem>> {
+        let skipped = |s: &str| skip.iter().any(|k| k.as_ref() == s);
+        let mut items: Vec<OutboxItem> = Vec::new();
+        for stream in live.iter().filter(|s| !skipped(s)) {
+            let left = max - i32::try_from(items.len()).unwrap_or(i32::MAX);
+            if left <= 0 {
+                return Ok(items);
+            }
+            items.extend(self.peek_stream(stream, left)?);
+        }
+        let left = max - i32::try_from(items.len()).unwrap_or(i32::MAX);
+        if left > 0 {
+            let mut others: Vec<&str> = skip.iter().map(AsRef::as_ref).collect();
+            others.extend(live.iter().copied());
+            items.extend(self.peek(left, &others)?);
+        }
+        Ok(items)
+    }
+
+    /// The oldest `max` sendable batches of one stream.
+    fn peek_stream(&self, stream: &str, max: i32) -> Result<Vec<OutboxItem>> {
+        sql::query(
+            &self.lock(),
+            "SELECT id,stream,seq,payload FROM outbox WHERE quarantined=0 AND stream=$s ORDER BY id LIMIT $n",
+            &[("$s", &stream), ("$n", &max)],
+            |r| {
+                Ok(OutboxItem {
+                    id: r.get(0)?,
+                    stream: r.get(1)?,
+                    seq: r.get(2)?,
+                    payload: r.get(3)?,
+                })
+            },
+        )
+    }
+
+    /// When batch `id` was queued (round-trip text), `None` once it left the queue.
+    pub fn created_utc(&self, id: i64) -> Result<Option<String>> {
+        Ok(sql::query(
+            &self.lock(),
+            "SELECT created_utc FROM outbox WHERE id=$i",
+            &[("$i", &id)],
+            |r| r.get(0),
+        )?
+        .into_iter()
+        .next())
+    }
+
+    /// Sendable batches per stream, largest first, at most `max` streams: what a backlog
+    /// is made of (RT-1309 diagnostics).
+    pub fn depth_by_stream(&self, max: i32) -> Result<Vec<(String, i64)>> {
+        sql::query(
+            &self.lock(),
+            "SELECT stream,COUNT(*) FROM outbox WHERE quarantined=0 GROUP BY stream ORDER BY COUNT(*) DESC, stream LIMIT $n",
+            &[("$n", &max)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+    }
+
     /// The cloud applied the batch: removes it.
     pub fn ack(&self, id: i64) -> Result<()> {
         self.exec("DELETE FROM outbox WHERE id=$i", &[("$i", &id)])?;

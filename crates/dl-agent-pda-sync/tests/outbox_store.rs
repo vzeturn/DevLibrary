@@ -170,6 +170,42 @@ fn peek_leaves_out_the_parked_streams_and_keeps_the_rest_in_order() {
 }
 
 #[test]
+fn peek_live_first_puts_the_live_stream_ahead_of_older_batches() {
+    let env = Env::new();
+    env.enqueue("Trn");
+    env.enqueue("Invoice");
+    env.enqueue("open");
+    env.enqueue("Trn");
+    env.enqueue("open");
+    let peek = |max, skip: &[&str]| -> Vec<(String, i64)> {
+        env.outbox
+            .peek_live_first(max, skip, &["open"])
+            .unwrap()
+            .into_iter()
+            .map(|i| (i.stream, i.seq))
+            .collect()
+    };
+    let s = |x: &str, n| (x.to_owned(), n);
+
+    assert_eq!(
+        peek(10, &[]),
+        [
+            s("open", 1),
+            s("open", 2),
+            s("Trn", 1),
+            s("Invoice", 1),
+            s("Trn", 2)
+        ]
+    );
+    assert_eq!(peek(1, &[]), [s("open", 1)]);
+    assert_eq!(peek(3, &["open", "Trn"]), [s("Invoice", 1)]);
+    assert_eq!(
+        env.outbox.depth_by_stream(2).unwrap(),
+        [("Trn".to_owned(), 2), ("open".to_owned(), 2)]
+    );
+}
+
+#[test]
 fn a_clean_stream_resnapshot_is_reported_once_its_batches_left_the_queue() {
     let mut env = Env::new();
     let first = env

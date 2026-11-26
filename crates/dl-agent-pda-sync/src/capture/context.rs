@@ -49,6 +49,9 @@ pub struct CaptureContext {
     /// What the open-check strategy remembers between cycles (ADR 0153); shared by the
     /// engine's cycles and the snapshot, like the one C# `OpenCheckCapture` instance.
     pub open_signatures: Mutex<SignatureMemory>,
+    /// Checks the next open-check run re-reads whatever their signature says (RT-1309):
+    /// pushed by a nudge after an order command committed, drained by that run.
+    pub open_forced: Mutex<Vec<String>>,
 }
 
 impl std::fmt::Debug for CaptureContext {
@@ -82,6 +85,7 @@ impl CaptureContext {
             clock,
             exists: Mutex::new(HashMap::new()),
             open_signatures: Mutex::new(SignatureMemory::default()),
+            open_forced: Mutex::new(Vec::new()),
         }
     }
 

@@ -7,7 +7,9 @@
 //! Two-phase detection (RT-0759, ADR 0153): between full reads, phase 1 reads one tiny
 //! signature row per check and table, and phase 2 reads only the checks whose signature
 //! moved (or that are new). A full read runs every `open_full_read_every` cycles, when the
-//! source has no signatures, and after a reset.
+//! source has no signatures, and after a reset. A check an order command just wrote
+//! (`CaptureContext::open_forced`, RT-1309) is read in phase 2 whatever its signature, so
+//! its rows never wait for the next full read.
 
 use std::collections::HashSet;
 use std::sync::PoisonError;
@@ -143,6 +145,14 @@ impl<'a> OpenCheckCapture<'a> {
             return Ok(report);
         }
 
+        // Taken before phase 1: a nudge that lands after this read is kept for the next cycle.
+        let forced: Vec<String> = std::mem::take(
+            &mut *self
+                .cx
+                .open_forced
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
         let signatures = self.signatures(&tables, ctx)?;
         let mut memory = self
             .cx
@@ -163,7 +173,7 @@ impl<'a> OpenCheckCapture<'a> {
             // Phase 2 reads only the checks whose phase-1 signature moved (or that are new).
             present = sigs.keys().map(str::to_owned).collect();
             for (key, sig) in sigs.iter() {
-                if last.get(key) == Some(&sig.signature) {
+                if last.get(key) == Some(&sig.signature) && !forced.iter().any(|f| f == key) {
                     continue;
                 }
                 let mut one = self.read(&tables, Some(&sig.value), &mut report, ctx)?;

@@ -7,6 +7,7 @@
 //! - [`BatchUploader`], [`BlobUploader`]: drain the two queues to the cloud.
 //! - [`HeartbeatSender`]: the heartbeat, its health verdict and the cloud config.
 
+mod backlog;
 mod batch_uploader;
 mod batches;
 mod blob_uploader;
@@ -19,6 +20,7 @@ mod parent_pending;
 mod resnapshots;
 mod sql;
 
+pub use backlog::{BACKLOG_REPORT_DEPTH, BACKLOG_REPORT_INTERVAL};
 pub use batch_uploader::{
     BATCH_CATEGORY, BATCHES_PATH, BatchUploader, MAX_REASON, PARENT_GONE_CODE,
     RECOVERY_RESNAPSHOT_COOLDOWN, UploadCycleResult, parent_stream_of, rejection_of, table_of,

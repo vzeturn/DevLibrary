@@ -19,6 +19,7 @@ use std::time::Duration;
 use dl_http::Method;
 use dl_json::Value as Json;
 
+use super::backlog::BacklogReporter;
 use super::batches::{OutboxItem, SqliteOutbox};
 use super::error::{OutboxError, UploadError};
 use super::parent_pending::{ParentPendingEpisode, ParentPendingTracker};
@@ -181,6 +182,7 @@ pub struct BatchUploader {
     log: Logger,
     clock: SharedClock,
     parents: ParentPendingTracker,
+    backlog: BacklogReporter,
 }
 
 impl std::fmt::Debug for BatchUploader {
@@ -211,6 +213,7 @@ impl BatchUploader {
             log: log.for_category(BATCH_CATEGORY),
             clock: clock.unwrap_or_else(SystemClock::shared),
             parents: ParentPendingTracker::new(escalate),
+            backlog: BacklogReporter::default(),
         }
     }
 
@@ -218,50 +221,72 @@ impl BatchUploader {
         to_dto(self.clock.now())
     }
 
-    /// Sends up to `max_batches` queued batches, oldest first.
+    /// Sends up to `max_batches` queued batches: the live open-check stream first, then the
+    /// rest oldest first (RT-1309). A batch that parks its stream does not end the cycle
+    /// idle while other streams still have batches: the outbox is peeked again without it.
     pub fn run_cycle(
         &mut self,
         max_batches: i32,
         ctx: &Ctx,
     ) -> Result<UploadCycleResult, UploadError> {
         self.promote_deferred_resnapshot()?;
-        let parked_now = self.parents.parked(self.now());
-        let items = self.outbox.peek(max_batches, &parked_now)?;
-        if items.is_empty() {
-            return Ok(UploadCycleResult::Idle);
-        }
+        let mut skip = self.parents.parked(self.now());
+        let result = self.drain(max_batches, &mut skip, ctx)?;
+        let now = self.now();
+        self.backlog.check(&self.outbox, &skip, now, &self.log)?;
+        Ok(result)
+    }
+
+    fn drain(
+        &mut self,
+        max_batches: i32,
+        skip: &mut Vec<String>,
+        ctx: &Ctx,
+    ) -> Result<UploadCycleResult, UploadError> {
         let mut progressed = false;
-        let mut parked: Vec<String> = Vec::new();
-        for item in &items {
-            // A parked stream keeps its order: none of its later batches goes before the one that waits.
-            if parked.contains(&item.stream) {
-                continue;
-            }
-            match self.upload_one(item, ctx)? {
-                Outcome::Retry => {
-                    return Ok(if progressed {
-                        UploadCycleResult::Progress
-                    } else {
-                        UploadCycleResult::Blocked
-                    });
+        loop {
+            let items = self
+                .outbox
+                .peek_live_first(max_batches, skip, &[sync_streams::OPEN])?;
+            let mut newly_parked = false;
+            for item in &items {
+                // A parked stream keeps its order: none of its later batches goes before the one that waits.
+                if skip.contains(&item.stream) {
+                    continue;
                 }
-                // Renumbered: the rest of this peek carries stale seqs; the next cycle peeks again.
-                Outcome::Repeek => return Ok(UploadCycleResult::Progress),
-                Outcome::Parked => parked.push(item.stream.clone()),
-                Outcome::Done => progressed = true,
+                match self.upload_one(item, ctx)? {
+                    Outcome::Retry => {
+                        return Ok(if progressed {
+                            UploadCycleResult::Progress
+                        } else {
+                            UploadCycleResult::Blocked
+                        });
+                    }
+                    // Renumbered: the rest of this peek carries stale seqs; the next cycle peeks again.
+                    Outcome::Repeek => return Ok(UploadCycleResult::Progress),
+                    Outcome::Parked => {
+                        skip.push(item.stream.clone());
+                        newly_parked = true;
+                    }
+                    Outcome::Done => progressed = true,
+                }
+            }
+            // Progress: the loop calls again at once. Every stream skipped grows `skip`, so
+            // the re-peek ends; with only parked streams left the loop idles, not backs off.
+            if progressed || !newly_parked {
+                return Ok(if progressed {
+                    UploadCycleResult::Progress
+                } else {
+                    UploadCycleResult::Idle
+                });
             }
         }
-        // Only parked streams: nothing else to send until a backoff ends, so the loop idles instead of backing off.
-        Ok(if progressed {
-            UploadCycleResult::Progress
-        } else {
-            UploadCycleResult::Idle
-        })
     }
 
     fn upload_one(&mut self, item: &OutboxItem, ctx: &Ctx) -> Result<Outcome, UploadError> {
         let bearer = self.tokens.get_access_token(ctx)?;
         self.outbox.mark_attempt(item.id)?;
+        let sending = std::time::Instant::now();
         let resp = self.http.send(
             ctx,
             Method::Post,
@@ -270,6 +295,9 @@ impl BatchUploader {
             Some(&bearer),
         )?;
         if resp.is_success() {
+            if item.stream == sync_streams::OPEN {
+                self.log_open_timing(item, sending.elapsed())?;
+            }
             self.outbox.ack(item.id)?;
             self.parent_arrived(&item.stream);
             return Ok(Outcome::Done);
@@ -293,6 +321,29 @@ impl BatchUploader {
             },
             _ => self.refused(item, &resp),
         }
+    }
+
+    /// RT-1309: how long a live open-check batch waited in the outbox and how long its POST
+    /// took, so a site's end-to-end latency can be read from its log.
+    fn log_open_timing(&self, item: &OutboxItem, post: Duration) -> Result<(), UploadError> {
+        let queued_ms = self
+            .outbox
+            .created_utc(item.id)?
+            .and_then(|t| DateTimeOffset::parse(&t))
+            .map_or(-1, |t| {
+                DateTimeOffset::now_utc().unix_millis() - t.unix_millis()
+            });
+        self.log.info(
+            "Batch {Stream}#{Seq} of {Table} applied {QueuedMs} ms after it was queued (POST {PostMs} ms)",
+            &[
+                Value::from(&item.stream),
+                Value::from(item.seq),
+                Value::from(table_of(&item.payload).unwrap_or_else(|| "?".to_owned())),
+                Value::from(queued_ms),
+                Value::from(i64::try_from(post.as_millis()).unwrap_or(i64::MAX)),
+            ],
+        );
+        Ok(())
     }
 
     /// Any other refusal: retried in place when transient, else quarantined.

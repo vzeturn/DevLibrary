@@ -166,6 +166,36 @@ fn a_redelivered_post_send_or_void_answers_from_the_journal_without_writing_agai
 }
 
 #[test]
+fn an_applied_line_verb_asks_capture_to_re_read_its_own_check() {
+    // RT-1309: the check the command wrote is re-read whatever its signature says.
+    let t = T {
+        store: FakeStore::new(),
+        nudge: Arc::new(CountingNudge::default()),
+    };
+    let open = OrderCheckOpenPayload {
+        rvc_no: RVC,
+        table_no: "T6".to_owned(),
+        num_guest: 1,
+        cashier: "clerk-7".to_owned(),
+    };
+    let opened = t.exec(&command(
+        o::CHECK_OPEN,
+        open.to_element(),
+        &order_aggregate::open(RVC, Uuid::new_v4()),
+    ));
+    let check = OrderCheckResult::result_from(opened.result.as_ref())
+        .unwrap()
+        .check_no;
+    assert!(t.nudge.checks().is_empty(), "an open has no check key yet");
+
+    let posted = t.exec(&post(check, "CF01"));
+
+    assert_eq!(posted.status, CommandStatus::Applied, "{:?}", posted.reason);
+    assert_eq!(t.nudge.checks(), [check.to_string()]);
+    assert_eq!(t.nudge.count(), 2, "both verbs still make the open job due");
+}
+
+#[test]
 fn a_redelivered_resnapshot_finds_its_streams_pending_and_schedules_nothing_new() {
     let dir = std::env::temp_dir()
         .join("pda-sync-agent-tests")

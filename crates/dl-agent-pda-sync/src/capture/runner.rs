@@ -18,7 +18,7 @@ use super::engine::CaptureEngine;
 use super::error::{CaptureError, ErrorKind, Result};
 use super::failure::{CaptureFailureInfo, classify};
 use super::governor::{PollBudget, PollGovernor};
-use super::nudge::{CaptureNudge, UploadWake};
+use super::nudge::UploadWake;
 use super::options::CaptureOptions;
 use super::plan::CapturePlan;
 use super::report::{CaptureReport, RejectedRow};
@@ -43,6 +43,9 @@ use crate::transport::RetryPolicy;
 use crate::util::ctx::Ctx;
 use crate::util::stj::eq_ignore_case;
 
+#[path = "runner_nudge.rs"]
+mod nudge_impl;
+
 /// `ILogger<SqlCaptureRunner>`: the log category.
 pub const RUNNER_CATEGORY: &str = "MM.PdaOrder.SyncAgent.Capture.SqlCaptureRunner";
 
@@ -60,7 +63,8 @@ pub struct CaptureTimings {
     pub ledger_tail_interval: Duration,
     /// Ledger rescan interval (5 min).
     pub ledger_rescan_interval: Duration,
-    /// Floor for the cloud-pushed open-check poll (500 ms).
+    /// Floor for the cloud-pushed open-check poll (250 ms, RT-1309: a POS change is seen
+    /// within the sub-second target when the cloud sets `openCheckPollMs` low).
     pub min_open_interval: Duration,
     /// Floor for the cloud-pushed master scan interval (10 s).
     pub min_master_interval: Duration,
@@ -73,7 +77,7 @@ impl Default for CaptureTimings {
             snapshot_pass_interval: Duration::from_secs(1),
             ledger_tail_interval: Duration::from_secs(10),
             ledger_rescan_interval: Duration::from_secs(300),
-            min_open_interval: Duration::from_millis(500),
+            min_open_interval: Duration::from_millis(250),
             min_master_interval: Duration::from_secs(10),
         }
     }
@@ -372,20 +376,6 @@ impl crate::reporting::CaptureHealth for SqlCaptureRunner {
     }
 }
 
-impl CaptureNudge for SqlCaptureRunner {
-    /// ADR 0104 §4: an order command committed, so the open checks are read now and the
-    /// uploader is woken once they are queued. Two open-job runs pulse the uploader: the
-    /// run in flight may have read before the commit. Outside a scheduled session there is
-    /// nothing to hurry.
-    fn nudge_open_checks(&self) {
-        self.0.open_nudges.store(2, Ordering::SeqCst);
-        let scheduler = lock(&self.0.scheduler).clone();
-        if let Some(s) = scheduler {
-            s.nudge_open_checks();
-        }
-    }
-}
-
 impl Shared {
     /// Records and logs a failed session, then waits; false when the wait was cancelled.
     fn back_off(&self, e: &CaptureError, ctx: &Ctx) -> bool {
@@ -543,8 +533,10 @@ impl Shared {
             let restart_error = restart_error.clone();
             Box::new(move |job, report, busy| {
                 me.on_job_completed(job, report, busy);
+                // RT-1309: an open run that queued batches wakes the uploader too (`|`: the
+                // nudge is always taken).
                 if job == scheduler::OPEN_JOB
-                    && me.take_open_nudge()
+                    && (me.take_open_nudge() | report.is_some_and(|r| r.batches > 0))
                     && let Some(w) = &me.deps.upload_wake
                 {
                     w.pulse();

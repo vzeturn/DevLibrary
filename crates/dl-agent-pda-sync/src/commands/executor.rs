@@ -243,11 +243,15 @@ impl SiteCommandExecutor {
         );
         // Read-your-writes (ADR 0104 §4): an applied order verb asks capture to read the
         // open checks now, so the cloud mirror reaches the result's fingerprint quickly.
+        // RT-1309: the command's own check is re-read whatever its signature says.
         if result.status == CommandStatus::Applied
             && is_order_verb(&command.type_)
             && let Some(n) = &self.nudge
         {
-            n.nudge_open_checks();
+            match check_aggregate::try_parse(Some(&command.aggregate_key)) {
+                Some((_, check_no)) => n.nudge_open_check(&check_no.to_string()),
+                None => n.nudge_open_checks(),
+            }
         }
         Ok(result)
     }
