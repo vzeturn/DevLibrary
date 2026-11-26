@@ -207,6 +207,24 @@ impl OrderGrantsProbe for SqlOrderGrantsProbe {
                 });
             }
         }
+        // The money verbs (180_money_grants.sql, ADR 0174): a store enrolled before 1.3.48
+        // lacks them, and the old four checks above would call its grants complete.
+        for (table, permission) in super::admin::MONEY_GRANTS {
+            let obj = format!("dbo.{table}");
+            let r = run(
+                &mut c,
+                "SELECT HAS_PERMS_BY_NAME(@obj, N'OBJECT', @permission);",
+                &[
+                    Param::new("obj", obj.as_str()),
+                    Param::new("permission", *permission),
+                ],
+                PROBE_TIMEOUT,
+                ctx,
+            )?;
+            if r.rows().first().and_then(|row| row.value(0)) == Some(&dl_tds::Value::I32(0)) {
+                missing.push(format!("{permission} {obj}"));
+            }
+        }
         let r = run(&mut c, COUNTER_GRANTS_SQL, &[], PROBE_TIMEOUT, ctx)?;
         let names: Vec<dl_tds::Value> = r
             .rows()
