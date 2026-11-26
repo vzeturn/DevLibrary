@@ -174,6 +174,10 @@ pub fn counter_grants_missing(rows: &[dl_tds::Value]) -> Vec<String> {
         .collect()
 }
 
+/// One column grant of [`super::admin::MONEY_GRANTS`]: NULL (not reported) when the table is
+/// visible but has no such column, else `HAS_PERMS_BY_NAME` on the column.
+pub const MONEY_COLUMN_PROBE_SQL: &str = "SELECT CASE WHEN OBJECT_ID(@obj, N'U') IS NOT NULL AND COL_LENGTH(@obj, @column) IS NULL THEN NULL ELSE HAS_PERMS_BY_NAME(@obj, N'OBJECT', @permission, @column, N'COLUMN') END;";
+
 /// The real grants probe (`SqlOrderGrantsProbe`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SqlOrderGrantsProbe;
@@ -209,20 +213,36 @@ impl OrderGrantsProbe for SqlOrderGrantsProbe {
         }
         // The money verbs (180_money_grants.sql, ADR 0174): a store enrolled before 1.3.48
         // lacks them, and the old four checks above would call its grants complete.
-        for (table, permission) in super::admin::MONEY_GRANTS {
+        for (table, permission, columns) in super::admin::MONEY_GRANTS {
             let obj = format!("dbo.{table}");
-            let r = run(
-                &mut c,
-                "SELECT HAS_PERMS_BY_NAME(@obj, N'OBJECT', @permission);",
-                &[
+            // A column grant is probed per column: on the table it reads 0 although every
+            // column the batches write is granted. NULL (no such column) is not reported.
+            let targets: Vec<Option<&str>> = if columns.is_empty() {
+                vec![None]
+            } else {
+                columns.iter().map(|c| Some(*c)).collect()
+            };
+            for column in targets {
+                let mut params = vec![
                     Param::new("obj", obj.as_str()),
                     Param::new("permission", *permission),
-                ],
-                PROBE_TIMEOUT,
-                ctx,
-            )?;
-            if r.rows().first().and_then(|row| row.value(0)) == Some(&dl_tds::Value::I32(0)) {
-                missing.push(format!("{permission} {obj}"));
+                ];
+                let sql = match column {
+                    None => "SELECT HAS_PERMS_BY_NAME(@obj, N'OBJECT', @permission);",
+                    // HAS_PERMS_BY_NAME reads 0, not NULL, for a column the build lacks:
+                    // a visible table without the column has nothing to grant (as script 180).
+                    Some(col) => {
+                        params.push(Param::new("column", col));
+                        MONEY_COLUMN_PROBE_SQL
+                    }
+                };
+                let r = run(&mut c, sql, &params, PROBE_TIMEOUT, ctx)?;
+                if r.rows().first().and_then(|row| row.value(0)) == Some(&dl_tds::Value::I32(0)) {
+                    missing.push(match column {
+                        None => format!("{permission} {obj}"),
+                        Some(col) => format!("{permission} {obj}({col})"),
+                    });
+                }
             }
         }
         let r = run(&mut c, COUNTER_GRANTS_SQL, &[], PROBE_TIMEOUT, ctx)?;
