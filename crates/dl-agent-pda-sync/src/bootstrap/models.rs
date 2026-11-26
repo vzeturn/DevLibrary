@@ -51,6 +51,9 @@ pub enum StepKind {
     /// `dbo.LastTrn<rvc>` that `dbo.GetRVCSeqNumber` reaches through dynamic SQL on some
     /// builds (RT-0654).
     SequenceGrants,
+    /// The tender and close table writes of `order.tender_*` / `order.check_close`
+    /// (ADR 0174, RT-1297).
+    MoneyGrants,
 }
 
 impl StepKind {
@@ -66,6 +69,7 @@ impl StepKind {
             StepKind::OrderGrantsOw1c => "OrderGrantsOw1c",
             StepKind::OrderGrantsOw1e => "OrderGrantsOw1e",
             StepKind::SequenceGrants => "SequenceGrants",
+            StepKind::MoneyGrants => "MoneyGrants",
         }
     }
 }

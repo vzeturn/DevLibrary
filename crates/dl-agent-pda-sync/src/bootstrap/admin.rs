@@ -2,7 +2,7 @@
 //! `Bootstrap/ISqlAdmin.cs` and `Bootstrap/SqlServerAdmin.cs`).
 
 use super::error::{Error, Result, tds_failure};
-use super::models::{BootstrapStep, SqlInstance, TableSet};
+use super::models::{BootstrapStep, SqlInstance, StepKind, TableSet};
 use super::preflight::SqlServerInfo;
 use crate::capture::failure::code_for;
 use crate::config::sql::{agent_connection, data_source};
@@ -144,6 +144,70 @@ pub fn connect_failure(
             ),
         ),
     }
+}
+
+/// What script 180 grants: (table, permission); column grants are checked on their
+/// table (any column counts).
+pub const MONEY_GRANTS: &[(&str, &str)] = &[
+    ("tmpTrn", "INSERT"),
+    ("tmpTrn", "DELETE"),
+    ("tmpPayment", "INSERT"),
+    ("tmpPayment", "DELETE"),
+    ("tmpInvoice", "UPDATE"),
+    ("tmpTaxTable", "INSERT"),
+    ("tmpTaxTable", "UPDATE"),
+    ("tmpTaxTable", "DELETE"),
+    ("Trn", "INSERT"),
+    ("Invoice", "INSERT"),
+    ("Payment", "INSERT"),
+    ("ARInv", "INSERT"),
+    ("CCInv", "INSERT"),
+    ("TaxTable", "INSERT"),
+    ("MemberPoint", "INSERT"),
+    ("tmpInvoice", "DELETE"),
+    ("tmpInvoiceInfo", "DELETE"),
+    ("tmpTrnInfo", "DELETE"),
+    ("tmpARInv", "DELETE"),
+    ("tmpCCInv", "DELETE"),
+    ("checkopenlog", "UPDATE"),
+];
+
+/// `SqlServerAdmin.MoneyGrantsExistAsync`'s query: 1 once `@name` holds every grant of
+/// [`MONEY_GRANTS`] on every table the POS database has.
+pub fn money_grants_exists_query() -> String {
+    let checks: Vec<String> = MONEY_GRANTS
+        .iter()
+        .map(|(table, permission)| {
+            format!(
+                "(OBJECT_ID(N'dbo.{table}', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p \
+                 JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name \
+                 WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = '{permission}' AND p.major_id = OBJECT_ID(N'dbo.{table}', N'U')))"
+            )
+        })
+        .collect();
+    format!(
+        "SELECT CASE WHEN {} THEN 1 ELSE 0 END",
+        checks.join(" AND ")
+    )
+}
+
+/// 180: done once `pda_sync` holds every grant of the script on every table the POS
+/// database has.
+fn money_grants_exist(c: &mut Client, step: &BootstrapStep, ctx: &Ctx) -> Result<bool> {
+    let r = run(
+        c,
+        &money_grants_exists_query(),
+        &[Param::new("name", step.object_name)],
+        COMMAND_TIMEOUT,
+        ctx,
+    )?;
+    let n = match r.rows().first() {
+        Some(row) => row
+            .get::<Option<i64>>(0)
+            .map_err(|e| Error::unexpected("System.InvalidCastException", e.to_string()))?,
+        None => None,
+    };
+    Ok(n == Some(1))
 }
 
 /// `SqlServerAdmin.ExistsAsync`'s query (CRLF line ends, as the C# raw literal built on
@@ -351,6 +415,9 @@ impl SqlAdmin for SqlServerAdmin {
         ctx: &Ctx,
     ) -> Result<bool> {
         let mut c = self.open(instance, database, ctx)?;
+        if step.kind == StepKind::MoneyGrants {
+            return money_grants_exist(&mut c, step, ctx);
+        }
         let r = run(
             &mut c,
             &exists_query(),
@@ -462,6 +529,17 @@ mod tests {
             assert!(e.message().contains(hint), "{number}: {}", e.message());
             assert!(e.message().contains(&format!("error {number}")), "{number}");
         }
+    }
+
+    #[test]
+    fn the_money_grants_query_checks_every_grant_of_script_180() {
+        let q = money_grants_exists_query();
+        assert!(q.starts_with("SELECT CASE WHEN (OBJECT_ID(N'dbo.tmpTrn', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'INSERT' AND p.major_id = OBJECT_ID(N'dbo.tmpTrn', N'U'))) AND "));
+        assert!(q.ends_with("p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.checkopenlog', N'U'))) THEN 1 ELSE 0 END"));
+        assert_eq!(
+            q.matches(" AND (OBJECT_ID(").count(),
+            MONEY_GRANTS.len() - 1
+        );
     }
 
     #[test]

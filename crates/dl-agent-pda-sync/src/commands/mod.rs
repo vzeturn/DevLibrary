@@ -13,6 +13,7 @@
 //!   the grants self-check; [`service::services`]: the host's loop factory.
 
 pub mod batches;
+pub mod batches_money;
 pub mod channel;
 mod error;
 mod executor;
@@ -21,6 +22,7 @@ mod resnapshot;
 mod schema_guard;
 pub mod service;
 mod sql;
+mod sql_money;
 mod sql_order;
 mod sql_store;
 mod sql_table;
@@ -41,8 +43,9 @@ pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_column
 pub use service::{CommandExtras, CommandService};
 pub use sql_store::{ConfigSource, SqlSiteCommandStore, SqlSiteCommandUnit};
 pub use units::{
-    CheckMoneyFacts, CommandWork, EmptyBillFacts, OrderCommandUnit, OrderLineFacts,
-    OrderPostOutcome, SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
+    CheckMoneyFacts, CommandWork, EmptyBillFacts, OrderCloseOutcome, OrderCommandUnit,
+    OrderLineFacts, OrderPostOutcome, SiteCommandStore, SiteCommandUnit, StoreColumn,
+    TableCommandUnit,
 };
 pub use verify::{VerifyCommandHandler, VerifyParts};
 pub use verify_manifest::{
@@ -53,6 +56,9 @@ pub use verify_manifest::{
 /// `SqlTableCommandUnit.*Parameters`), public so tests can hold each batch's free
 /// `@variables` against them.
 pub mod params {
+    pub use super::sql_money::{
+        check_close_parameters, tender_add_parameters, tender_remove_parameters,
+    };
     pub use super::sql_order::{
         COMBO_CHECK_NOT_FOUND, COMBO_ITEM_NOT_FOUND, COMBO_POSTED, OPEN_NAME_REQUIRED_ERROR,
         OPEN_PRICE_REQUIRED_ERROR, combo_parameters, covers_parameters, open_parameters,

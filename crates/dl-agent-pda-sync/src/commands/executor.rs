@@ -27,12 +27,15 @@ use crate::contracts::wire::{
     OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload, OrderMultiCheckResult,
     OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, ReservationCancelPayload,
     ReservationSavePayload, ReservationSavedResult, SyncCommand, SyncCommandResult,
-    check_aggregate, kds_line_actions, order_command_reasons as order, order_command_types,
-    site_command_reasons, site_command_types, table_command_reasons as table, table_command_types,
+    check_aggregate, kds_line_actions, money_command_types, order_command_reasons as order,
+    order_command_types, site_command_reasons, site_command_types, table_command_reasons as table,
+    table_command_types,
 };
 use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
 use crate::util::ctx::Ctx;
+
+mod money;
 
 /// Rejection reasons the cloud stores in `sync.commands.last_error`
 /// (`SiteCommandExecutor.Reasons`).
@@ -115,7 +118,9 @@ pub(crate) fn utc_now(clock: &SharedClock) -> DateTimeOffset {
 /// Whether `type_` is an order verb: refused at once on a missing grant and nudging
 /// capture.
 pub fn is_order_verb(type_: &str) -> bool {
-    order_command_types::ALL.contains(&type_) || table_command_types::ALL.contains(&type_)
+    order_command_types::ALL.contains(&type_)
+        || table_command_types::ALL.contains(&type_)
+        || money_command_types::ALL.contains(&type_)
 }
 
 /// The site command executor.
@@ -271,6 +276,9 @@ impl SiteCommandExecutor {
             t::TABLE_TRANSFER => self.table_transfer(c, ctx),
             t::CHECK_MERGE => self.check_merge(c, ctx),
             t::ITEMS_MOVE => self.items_move(c, ctx),
+            money_command_types::TENDER_ADD => self.tender_add(c, ctx),
+            money_command_types::TENDER_REMOVE => self.tender_remove(c, ctx),
+            money_command_types::CHECK_CLOSE => self.check_close(c, ctx),
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
         }

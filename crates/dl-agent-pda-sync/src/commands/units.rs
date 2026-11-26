@@ -8,10 +8,11 @@ use dl_uuid::Uuid;
 
 use super::error::Result;
 use crate::contracts::wire::{
-    OrderCheckCancelEmptyPayload, OrderCheckLine, OrderCheckMergePayload, OrderCheckOpenPayload,
-    OrderCheckResult, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
-    OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload, OrderTableChangePayload,
-    OrderTableTransferPayload, ReservationSavePayload, SyncCommandResult,
+    OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
+    OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
+    OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
+    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
 
@@ -134,6 +135,28 @@ pub trait OrderCommandUnit {
         check_no: i64,
         ctx: &Ctx,
     ) -> Result<Option<OrderCheckResult>>;
+
+    /// Adds one tender (`SqlOrderCommandUnit.AddTenderAsync`, ADR 0174): the tender line,
+    /// or the `money_command_reasons` / `order_command_reasons` refusal.
+    fn add_tender(
+        &mut self,
+        payload: &OrderTenderAddPayload,
+        ctx: &Ctx,
+    ) -> Result<OrderPostOutcome>;
+
+    /// Removes one tender line; `None` when removed, otherwise the refusal.
+    fn remove_tender(
+        &mut self,
+        payload: &OrderTenderRemovePayload,
+        ctx: &Ctx,
+    ) -> Result<Option<String>>;
+
+    /// Closes a balanced check, or answers the bill an earlier close made.
+    fn close_check(
+        &mut self,
+        payload: &OrderCheckClosePayload,
+        ctx: &Ctx,
+    ) -> Result<OrderCloseOutcome>;
 }
 
 /// The SMILE_POS writes and reads of the table and multi-check verbs (OW1e, ADR 0112).
@@ -223,6 +246,33 @@ impl OrderPostOutcome {
     pub fn refused(reason: &str) -> OrderPostOutcome {
         OrderPostOutcome {
             trn_seq: 0,
+            reason: Some(reason.to_owned()),
+        }
+    }
+}
+
+/// The closed bill, or the reason the close batch refused it with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderCloseOutcome {
+    /// The closed bill.
+    pub closed: Option<OrderCheckCloseResult>,
+    /// The refusal.
+    pub reason: Option<String>,
+}
+
+impl OrderCloseOutcome {
+    /// A closed (or already closed) bill.
+    pub fn done(closed: OrderCheckCloseResult) -> OrderCloseOutcome {
+        OrderCloseOutcome {
+            closed: Some(closed),
+            reason: None,
+        }
+    }
+
+    /// A refusal.
+    pub fn refused(reason: &str) -> OrderCloseOutcome {
+        OrderCloseOutcome {
+            closed: None,
             reason: Some(reason.to_owned()),
         }
     }

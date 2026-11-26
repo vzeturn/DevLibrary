@@ -5,6 +5,7 @@ mod blobs;
 mod envelope;
 mod fingerprint;
 mod legacy_import;
+mod money;
 mod order;
 mod print;
 mod site_commands;
@@ -23,6 +24,10 @@ pub use fingerprint::{CheckStateFingerprint, CheckStateHeader, CheckStateLine, c
 pub use legacy_import::{
     LegacyImportAck, LegacyImportBranchAck, LegacyImportHostPrinterAck, LegacyImportTableAck,
     legacy_import_wire,
+};
+pub use money::{
+    OrderCheckClosePayload, OrderCheckCloseResult, OrderTenderAddPayload, OrderTenderRemovePayload,
+    money_command_reasons, money_command_types,
 };
 pub use order::{
     OrderCheckLine, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,

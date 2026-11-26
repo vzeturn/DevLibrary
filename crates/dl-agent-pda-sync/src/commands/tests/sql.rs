@@ -101,7 +101,7 @@ fn expr(src: &str, mut i: usize, known: &HashMap<String, String>) -> (String, us
 }
 
 /// Every `const string Name = ...;` of a C# file (CRLF normalised).
-fn cs_consts(file: &str) -> HashMap<String, String> {
+pub(super) fn cs_consts(file: &str) -> HashMap<String, String> {
     let src = file.replace("\r\n", "\n");
     let mut known = HashMap::new();
     let mut from = 0;
@@ -400,7 +400,7 @@ fn declared_at(s: &[u8], at: usize, end: usize) -> bool {
 
 /// The free `@variables` of a batch (case-insensitive); `exclude_declared` drops the
 /// ones the batch declares itself.
-fn free(sql: &str, exclude_declared: bool) -> BTreeSet<String> {
+pub(super) fn free(sql: &str, exclude_declared: bool) -> BTreeSet<String> {
     let text = strip(sql);
     let s = text.as_bytes();
     let mut referenced = Vec::new();
@@ -428,14 +428,14 @@ fn free(sql: &str, exclude_declared: bool) -> BTreeSet<String> {
         .collect()
 }
 
-fn bound(params: &[Param]) -> BTreeSet<String> {
+pub(super) fn bound(params: &[Param]) -> BTreeSet<String> {
     params
         .iter()
         .map(|p| p.name().to_ascii_lowercase())
         .collect()
 }
 
-fn param<'a>(params: &'a [Param], name: &str) -> &'a ParamValue {
+pub(super) fn param<'a>(params: &'a [Param], name: &str) -> &'a ParamValue {
     params
         .iter()
         .find(|p| p.name() == name)

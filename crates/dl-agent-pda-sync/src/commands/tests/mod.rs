@@ -2,3 +2,4 @@
 //! `SiteCommandOrderTests`, `SiteCommandComboTests` SQL-text cases).
 
 mod sql;
+mod sql_money;
