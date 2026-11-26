@@ -6,14 +6,16 @@ use dl_tds::{Param, Results};
 use super::batches as b;
 use super::error::{CommandError, Result};
 use super::sql;
+use super::sql_money;
 use super::sql_store::SqlSiteCommandUnit;
 use super::sql_text as q;
-use super::units::{OrderCommandUnit, OrderLineFacts, OrderPostOutcome};
+use super::units::{OrderCloseOutcome, OrderCommandUnit, OrderLineFacts, OrderPostOutcome};
 use crate::contracts::mapping::tcvn3;
 use crate::contracts::wire::{
-    CheckStateHeader, OrderCheckLine, OrderCheckOpenPayload, OrderCheckResult,
-    OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload,
-    OrderSendPayload, order_command_reasons as reasons,
+    CheckStateHeader, OrderCheckClosePayload, OrderCheckLine, OrderCheckOpenPayload,
+    OrderCheckResult, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
+    OrderItemVoidPayload, OrderSendPayload, OrderTenderAddPayload, OrderTenderRemovePayload,
+    order_command_reasons as reasons,
 };
 use crate::util::ctx::Ctx;
 
@@ -364,5 +366,29 @@ impl OrderCommandUnit for SqlSiteCommandUnit<'_> {
             trn_seq: None,
             sent_seqs: None,
         }))
+    }
+
+    fn add_tender(
+        &mut self,
+        payload: &OrderTenderAddPayload,
+        ctx: &Ctx,
+    ) -> Result<OrderPostOutcome> {
+        sql_money::add_tender(self, payload, ctx)
+    }
+
+    fn remove_tender(
+        &mut self,
+        payload: &OrderTenderRemovePayload,
+        ctx: &Ctx,
+    ) -> Result<Option<String>> {
+        sql_money::remove_tender(self, payload, ctx)
+    }
+
+    fn close_check(
+        &mut self,
+        payload: &OrderCheckClosePayload,
+        ctx: &Ctx,
+    ) -> Result<OrderCloseOutcome> {
+        sql_money::close_check(self, payload, ctx)
     }
 }

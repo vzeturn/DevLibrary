@@ -65,7 +65,9 @@ pub mod site_command_reasons {
 /// Cloud to site command contract (ADR 0029).
 pub mod site_command_contract {
     use super::*;
-    use crate::contracts::wire::{order_command_types as o, table_command_types as t};
+    use crate::contracts::wire::{
+        money_command_types as m, order_command_types as o, table_command_types as t,
+    };
 
     /// Contract version.
     pub const VERSION: i32 = 1;
@@ -113,6 +115,10 @@ pub mod site_command_contract {
         spec(t::TABLE_TRANSFER, Interactive, 3),
         spec(t::CHECK_MERGE, Interactive, 3),
         spec(t::ITEMS_MOVE, Interactive, 3),
+        // ADR 0174 (RT-1297): tenders and close; a cashier waits for them.
+        spec(m::TENDER_ADD, Interactive, 3),
+        spec(m::TENDER_REMOVE, Interactive, 3),
+        spec(m::CHECK_CLOSE, Interactive, 3),
         spec(t::CHECK_CANCEL_EMPTY, Durable, 8),
     ];
 

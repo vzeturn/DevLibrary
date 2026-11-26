@@ -37,7 +37,8 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "order_grants",
             "order_grants_ow1c",
             "order_grants_ow1e",
-            "sequence_grants"
+            "sequence_grants",
+            "money_grants"
         ]
     );
     assert!(report.steps.iter().all(|s| s.executed));
@@ -360,6 +361,7 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::OrderGrantsOw1c
                 | StepKind::OrderGrantsOw1e
                 | StepKind::SequenceGrants
+                | StepKind::MoneyGrants
         )
     }) {
         let sql = read_script(step.resource_name).unwrap();
@@ -494,7 +496,9 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         .unwrap();
     assert_eq!(step.id, "sequence_grants");
     assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
-    assert_eq!(STEPS.last(), Some(step), "a new grant script runs last");
+    // ADR 0174: the money grants (180) run after the sequence grants.
+    let at = STEPS.iter().position(|s| s == step).unwrap();
+    assert_eq!(STEPS[at + 1].kind, StepKind::MoneyGrants);
     let sql = code(read_script(step.resource_name).unwrap());
     // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
     // and is quoted, and the grant follows the object's kind.

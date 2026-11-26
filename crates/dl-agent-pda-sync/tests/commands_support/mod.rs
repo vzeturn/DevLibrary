@@ -6,22 +6,26 @@
 
 #![allow(dead_code)]
 
+mod money;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dl_agent_pda_sync::capture::CaptureNudge;
 use dl_agent_pda_sync::commands::{
-    CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCommandUnit, OrderLineFacts,
-    OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit, StoreColumn, TableCommandUnit,
+    CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCloseOutcome,
+    OrderCommandUnit, OrderLineFacts, OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit,
+    StoreColumn, TableCommandUnit,
 };
 use dl_agent_pda_sync::config::{ManualClock, SharedClock, Timestamp};
 use dl_agent_pda_sync::contracts::wire::{
-    CheckStateHeader, OrderCheckCancelEmptyPayload, OrderCheckLine, OrderCheckMergePayload,
-    OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload, OrderCoversPayload,
-    OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload, OrderSendPayload,
-    OrderTableChangePayload, OrderTableTransferPayload, ReservationSavePayload, SyncCommandResult,
-    kds_line_actions, order_command_reasons as reasons,
+    CheckStateHeader, OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckLine,
+    OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
+    OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
+    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult, kds_line_actions,
+    order_command_reasons as reasons,
 };
 use dl_agent_pda_sync::util::ctx::Ctx;
 use dl_decimal::Decimal;
@@ -590,6 +594,18 @@ impl OrderCommandUnit for Unit<'_> {
         _: &Ctx,
     ) -> Result<Option<OrderCheckResult>> {
         Ok(self.read(rvc_no, check_no))
+    }
+
+    fn add_tender(&mut self, p: &OrderTenderAddPayload, _: &Ctx) -> Result<OrderPostOutcome> {
+        Ok(self.fake_add_tender(p))
+    }
+
+    fn remove_tender(&mut self, p: &OrderTenderRemovePayload, _: &Ctx) -> Result<Option<String>> {
+        Ok(self.fake_remove_tender(p))
+    }
+
+    fn close_check(&mut self, p: &OrderCheckClosePayload, _: &Ctx) -> Result<OrderCloseOutcome> {
+        Ok(self.fake_close_check(p))
     }
 }
 
