@@ -203,8 +203,9 @@ fn a_removed_tender_reopens_the_balance() {
 }
 
 #[test]
-fn the_money_grant_script_runs_last_and_only_grants_table_writes_to_pda_sync() {
-    let step = STEPS.last().unwrap();
+fn the_money_grant_script_runs_after_the_order_grants_and_only_grants_table_writes_to_pda_sync() {
+    // RT-1296: the Front Office read grants (190) follow it.
+    let step = &STEPS[STEPS.len() - 2];
     assert_eq!(
         (step.id, step.kind, step.resource_name),
         (

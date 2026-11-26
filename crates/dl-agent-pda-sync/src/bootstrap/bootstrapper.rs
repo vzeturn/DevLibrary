@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 11] = [
+pub const STEPS: [BootstrapStep; 12] = [
     step(
         "login",
         StepKind::Login,
@@ -121,10 +121,17 @@ pub const STEPS: [BootstrapStep; 11] = [
         "Sql.180_money_grants.sql",
         false,
     ),
+    step(
+        "fo_inhouse_grants",
+        StepKind::FoInhouseGrants,
+        LOGIN_NAME,
+        "Sql.190_fo_inhouse_grants.sql",
+        false,
+    ),
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 11] = [
+const SCRIPTS: [(&str, &str); 12] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -168,6 +175,10 @@ const SCRIPTS: [(&str, &str); 11] = [
     (
         "Sql.180_money_grants.sql",
         include_str!("../../assets/sql/180_money_grants.sql"),
+    ),
+    (
+        "Sql.190_fo_inhouse_grants.sql",
+        include_str!("../../assets/sql/190_fo_inhouse_grants.sql"),
     ),
 ];
 
@@ -551,7 +562,8 @@ mod tests {
                 "order_grants_ow1c",
                 "order_grants_ow1e",
                 "sequence_grants",
-                "money_grants"
+                "money_grants",
+                "fo_inhouse_grants"
             ]
         );
         for s in &STEPS {
