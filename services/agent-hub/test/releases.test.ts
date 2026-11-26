@@ -138,6 +138,15 @@ describe('releases', () => {
     expect(g.promotions[0]).toMatchObject({ forced: 1, reason: 'hotfix for a site outage' });
   });
 
+  it('promote: refuses stable artifacts that differ from the soaked canary, even forced (RT-1315)', async () => {
+    await soak();
+    const rebuilt = manifestText('1.0.1', 'stable', T0 + 3 * H).replace('"size":123', '"size":124');
+    const res = await admin(env, 'POST', '/admin/releases/dl-agent/1.0.1/promote', { manifest: rebuilt, force: true, reason: 'x' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'artifacts_differ_from_canary' });
+    expect((await promote({})).status).toBe(200);
+  });
+
   it('promote: rejects a manifest for another version or the canary channel', async () => {
     await soak();
     const wrongVersion = await admin(env, 'POST', '/admin/releases/dl-agent/1.0.1/promote', { manifest: manifestText('1.2.0', 'stable', T0) });
