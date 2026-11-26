@@ -38,7 +38,8 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "order_grants_ow1c",
             "order_grants_ow1e",
             "sequence_grants",
-            "money_grants"
+            "money_grants",
+            "fo_inhouse_grants"
         ]
     );
     assert!(report.steps.iter().all(|s| s.executed));
@@ -362,6 +363,7 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::OrderGrantsOw1e
                 | StepKind::SequenceGrants
                 | StepKind::MoneyGrants
+                | StepKind::FoInhouseGrants
         )
     }) {
         let sql = read_script(step.resource_name).unwrap();

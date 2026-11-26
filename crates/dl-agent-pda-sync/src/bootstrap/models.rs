@@ -54,6 +54,9 @@ pub enum StepKind {
     /// The tender and close table writes of `order.tender_*` / `order.check_close`
     /// (ADR 0174, RT-1297).
     MoneyGrants,
+    /// The read of `dbo.Folio` in the Front Office database by `fo.inhouse_search`
+    /// (RT-1296, ADR 0172 §7).
+    FoInhouseGrants,
 }
 
 impl StepKind {
@@ -70,6 +73,7 @@ impl StepKind {
             StepKind::OrderGrantsOw1e => "OrderGrantsOw1e",
             StepKind::SequenceGrants => "SequenceGrants",
             StepKind::MoneyGrants => "MoneyGrants",
+            StepKind::FoInhouseGrants => "FoInhouseGrants",
         }
     }
 }
