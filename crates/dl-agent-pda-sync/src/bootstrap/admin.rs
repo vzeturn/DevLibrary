@@ -146,43 +146,72 @@ pub fn connect_failure(
     }
 }
 
-/// What script 180 grants: (table, permission); column grants are checked on their
-/// table (any column counts).
-pub const MONEY_GRANTS: &[(&str, &str)] = &[
-    ("tmpTrn", "INSERT"),
-    ("tmpTrn", "DELETE"),
-    ("tmpPayment", "INSERT"),
-    ("tmpPayment", "DELETE"),
-    ("tmpInvoice", "UPDATE"),
-    ("tmpTaxTable", "INSERT"),
-    ("tmpTaxTable", "UPDATE"),
-    ("tmpTaxTable", "DELETE"),
-    ("Trn", "INSERT"),
-    ("Invoice", "INSERT"),
-    ("Payment", "INSERT"),
-    ("ARInv", "INSERT"),
-    ("CCInv", "INSERT"),
-    ("TaxTable", "INSERT"),
-    ("MemberPoint", "INSERT"),
-    ("tmpInvoice", "DELETE"),
-    ("tmpInvoiceInfo", "DELETE"),
-    ("tmpTrnInfo", "DELETE"),
-    ("tmpARInv", "DELETE"),
-    ("tmpCCInv", "DELETE"),
-    ("checkopenlog", "UPDATE"),
+/// What script 180 grants: (table, permission, columns). An empty column list is a grant
+/// on the whole table; a column grant is checked per column, so a store missing one of
+/// them is reported (a table-level `HAS_PERMS_BY_NAME` is 0 under column grants alone).
+pub const MONEY_GRANTS: &[(&str, &str, &[&str])] = &[
+    ("tmpTrn", "INSERT", &[]),
+    ("tmpTrn", "DELETE", &[]),
+    ("tmpPayment", "INSERT", &[]),
+    ("tmpPayment", "DELETE", &[]),
+    (
+        "tmpInvoice",
+        "UPDATE",
+        &["PaymentMode", "PaymentType", "PaymentInfo"],
+    ),
+    ("tmpTaxTable", "INSERT", &[]),
+    ("tmpTaxTable", "UPDATE", &["BillNo", "Sub2"]),
+    ("tmpTaxTable", "DELETE", &[]),
+    ("Trn", "INSERT", &[]),
+    ("Invoice", "INSERT", &[]),
+    ("Payment", "INSERT", &[]),
+    ("ARInv", "INSERT", &[]),
+    ("CCInv", "INSERT", &[]),
+    ("TaxTable", "INSERT", &[]),
+    ("MemberPoint", "INSERT", &[]),
+    ("tmpInvoice", "DELETE", &[]),
+    ("tmpInvoiceInfo", "DELETE", &[]),
+    ("tmpTrnInfo", "DELETE", &[]),
+    ("tmpARInv", "DELETE", &[]),
+    ("tmpCCInv", "DELETE", &[]),
+    (
+        "checkopenlog",
+        "UPDATE",
+        &["isOpen", "CloseTime", "LastAction"],
+    ),
 ];
 
 /// `SqlServerAdmin.MoneyGrantsExistAsync`'s query: 1 once `@name` holds every grant of
-/// [`MONEY_GRANTS`] on every table the POS database has.
+/// [`MONEY_GRANTS`] on every table the POS database has (a column grant: on every column
+/// of the list the table has, or on the whole table).
 pub fn money_grants_exists_query() -> String {
     let checks: Vec<String> = MONEY_GRANTS
         .iter()
-        .map(|(table, permission)| {
-            format!(
-                "(OBJECT_ID(N'dbo.{table}', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p \
-                 JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name \
-                 WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = '{permission}' AND p.major_id = OBJECT_ID(N'dbo.{table}', N'U')))"
-            )
+        .map(|(table, permission, columns)| {
+            let granted = |minor: &str| {
+                format!(
+                    "EXISTS (SELECT 1 FROM sys.database_permissions p \
+                     JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name \
+                     WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = '{permission}' AND p.major_id = OBJECT_ID(N'dbo.{table}', N'U'){minor})"
+                )
+            };
+            let held = if columns.is_empty() {
+                granted("")
+            } else {
+                let per_column: Vec<String> = columns
+                    .iter()
+                    .map(|col| {
+                        format!(
+                            "(COL_LENGTH(N'dbo.{table}', N'{col}') IS NULL OR {})",
+                            granted(&format!(
+                                " AND p.minor_id IN (0, COLUMNPROPERTY(OBJECT_ID(N'dbo.{table}', N'U'), N'{col}', 'ColumnId'))"
+                            ))
+                        )
+                    })
+                    .collect();
+                format!("({})", per_column.join(" AND "))
+            };
+            format!("(OBJECT_ID(N'dbo.{table}', N'U') IS NULL OR {held})")
         })
         .collect();
     format!(
@@ -581,7 +610,10 @@ mod tests {
     fn the_money_grants_query_checks_every_grant_of_script_180() {
         let q = money_grants_exists_query();
         assert!(q.starts_with("SELECT CASE WHEN (OBJECT_ID(N'dbo.tmpTrn', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'INSERT' AND p.major_id = OBJECT_ID(N'dbo.tmpTrn', N'U'))) AND "));
-        assert!(q.ends_with("p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.checkopenlog', N'U'))) THEN 1 ELSE 0 END"));
+        assert!(q.ends_with("p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.checkopenlog', N'U') AND p.minor_id IN (0, COLUMNPROPERTY(OBJECT_ID(N'dbo.checkopenlog', N'U'), N'LastAction', 'ColumnId')))))) THEN 1 ELSE 0 END"));
+        // A column grant is checked on each column of script 180's list, skipping a column the build lacks.
+        assert!(q.contains("(COL_LENGTH(N'dbo.tmpInvoice', N'PaymentInfo') IS NULL OR EXISTS ("));
+        assert_eq!(q.matches("COL_LENGTH(").count(), 8);
         assert_eq!(
             q.matches(" AND (OBJECT_ID(").count(),
             MONEY_GRANTS.len() - 1
