@@ -41,6 +41,7 @@ does not verify.
 | `POST /v1/commands/{id}/result` | `{ok:bool, output:string, finished_at}` → `{}` |
 | `POST /v1/agent/selftest` | self-test run → `{accepted, run_id}` |
 | `POST /v1/agent/diagnostics?command_id=` | zip (§4.1, at most 8 MB) → `{id, key, size, sha256}` |
+| `POST /v1/agent/schema-snapshot` | structure-only schema of one declared database (§9.10, at most 1.9 MB) → `{accepted, databases}` |
 | `GET  /v1/releases/{product}/{channel}` | → signed Manifest (§5); `404` when no release |
 | `GET  <artifact url>` | binary, size and SHA-256 come from the manifest |
 
@@ -740,3 +741,14 @@ database (`{"<name>":{"ok":true,…}}`; a refusal is `{"ok":false,"code","error"
   `elapsed_ms`) and `blocked` (requests blocked by another session: ids, wait type and
   time). No SQL text. A refused DMV (`VIEW SERVER STATE`) only marks that part `ok: false`.
 
+### 9.10 Schema dictionary (RT-1215)
+
+Ten minutes after start, then once a day (an hour after a round where nothing reached the hub),
+the agent reads the structure of every database declared in `sql.json` with the
+`dl-agent-schema` collector: tables with estimated row counts, columns, keys, indexes, foreign
+keys and the names of views, procedures, functions and triggers. Only five fixed `sys.*`
+catalog queries can be sent (byte-for-byte allowlist); no table row and no definition text is
+read. Each database goes in its own `POST /v1/agent/schema-snapshot` with its `schema_hash`;
+the hub keeps one row per (agent, database, hash) and only moves `last_seen` for an unchanged
+structure. A database that cannot be read is reported as `schema_collect_failed`, an upload
+that fails as `schema_upload_failed` (warnings); a 404 means a hub older than the route.
