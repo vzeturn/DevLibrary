@@ -67,6 +67,11 @@ pub struct OrderTenderAddPayload {
     pub card_type: Option<i32>,
     /// Bill number.
     pub bill_no: Option<String>,
+    /// The tender code of the cloud's payment-mode config (RT-1297); wins over
+    /// `dbo.PaymentMode.TrnCode` when it is a settlement code of the store.
+    pub trn_code: Option<i32>,
+    /// Its sub code.
+    pub trn_sub: Option<i32>,
 }
 
 impl OrderTenderAddPayload {
@@ -114,7 +119,13 @@ impl OrderTenderAddPayload {
             .as_deref()
             .is_some_and(|b| utf16_len(b) > Self::MAX_BILL_NO)
         {
-            Some("bill_no must be at most 30 characters")
+            return Some("bill_no must be at most 30 characters");
+        }
+        if self.trn_code.is_some_and(|c| !(200..=9999).contains(&c)) {
+            return Some("trn_code must be in 200..9999");
+        }
+        if self.trn_sub.is_some_and(|s| !(0..=9999).contains(&s)) {
+            Some("trn_sub must be in 0..9999")
         } else {
             None
         }
@@ -133,6 +144,8 @@ impl WireJson for OrderTenderAddPayload {
         json::opt_str(w, "reference", &self.reference);
         json::opt_int(w, "card_type", self.card_type.map(i64::from));
         json::opt_str(w, "bill_no", &self.bill_no);
+        json::opt_int(w, "trn_code", self.trn_code.map(i64::from));
+        json::opt_int(w, "trn_sub", self.trn_sub.map(i64::from));
         w.end_object();
     }
 
@@ -147,6 +160,8 @@ impl WireJson for OrderTenderAddPayload {
             reference: o.opt_string("reference")?,
             card_type: o.opt_int("card_type")?,
             bill_no: o.opt_string("bill_no")?,
+            trn_code: o.opt_int("trn_code")?,
+            trn_sub: o.opt_int("trn_sub")?,
         })
     }
 }
@@ -310,7 +325,30 @@ mod tests {
             reference: None,
             card_type: None,
             bill_no: None,
+            trn_code: None,
+            trn_sub: None,
         }
+    }
+
+    #[test]
+    fn a_configured_code_is_a_settlement_code_range() {
+        let ok = OrderTenderAddPayload {
+            trn_code: Some(400),
+            trn_sub: Some(1),
+            ..tender("CASH", 10_000)
+        };
+        assert_eq!(ok.problem(), None);
+        let low = OrderTenderAddPayload {
+            trn_code: Some(199),
+            ..tender("CASH", 10_000)
+        };
+        assert_eq!(low.problem(), Some("trn_code must be in 200..9999"));
+        let sub = OrderTenderAddPayload {
+            trn_code: Some(400),
+            trn_sub: Some(-1),
+            ..tender("CASH", 10_000)
+        };
+        assert_eq!(sub.problem(), Some("trn_sub must be in 0..9999"));
     }
 
     #[test]

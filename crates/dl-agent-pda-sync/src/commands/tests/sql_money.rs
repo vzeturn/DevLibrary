@@ -25,6 +25,8 @@ fn tender() -> OrderTenderAddPayload {
         reference: None,
         card_type: None,
         bill_no: Some("   ".into()),
+        trn_code: None,
+        trn_sub: None,
     }
 }
 
@@ -87,11 +89,17 @@ fn the_tender_binds_the_trimmed_type_an_empty_reference_and_no_blank_bill_number
     );
     assert_eq!(param(&params, "BillNo"), &ParamValue::VarChar(None));
     assert_eq!(param(&params, "CardType"), &ParamValue::I32(None));
+    assert_eq!(param(&params, "CfgTrnCode"), &ParamValue::I32(None));
+    assert_eq!(param(&params, "CfgTrnSub"), &ParamValue::I32(None));
 
     let mut with_bill = tender();
     with_bill.bill_no = Some(" 0000123 ".into());
     with_bill.card_type = Some(2);
+    with_bill.trn_code = Some(400);
+    with_bill.trn_sub = Some(1);
     let params = p::tender_add_parameters(&with_bill);
+    assert_eq!(param(&params, "CfgTrnCode"), &ParamValue::I32(Some(400)));
+    assert_eq!(param(&params, "CfgTrnSub"), &ParamValue::I32(Some(1)));
     assert_eq!(
         param(&params, "BillNo"),
         &ParamValue::VarChar(Some("0000123".into()))

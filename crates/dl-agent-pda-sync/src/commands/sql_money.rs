@@ -40,6 +40,8 @@ pub fn tender_add_parameters(p: &OrderTenderAddPayload) -> Vec<Param> {
         sql::text_param("Reference", Some(p.reference.as_deref().unwrap_or(""))),
         Param::new("CardType", p.card_type),
         Param::new("BillNo", ParamValue::VarChar(bill_no)),
+        Param::new("CfgTrnCode", p.trn_code),
+        Param::new("CfgTrnSub", p.trn_sub),
     ]
 }
 

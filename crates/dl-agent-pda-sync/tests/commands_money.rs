@@ -113,6 +113,8 @@ fn tender(check: i64, amount: i64, payment_type: &str) -> SyncCommand {
         reference: None,
         card_type: None,
         bill_no: None,
+        trn_code: None,
+        trn_sub: None,
     };
     command(m::TENDER_ADD, p.to_element(), &key(check))
 }

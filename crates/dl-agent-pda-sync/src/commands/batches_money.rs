@@ -54,6 +54,15 @@ SELECT TOP 1
     @AP_PType     = NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(20), pm.TrnCode))), '')
 FROM dbo.PaymentMode pm
 WHERE LTRIM(RTRIM(pm.PType)) = LTRIM(RTRIM(@PaymentType));
+-- RT-1297: the cloud sends the code of its payment-mode config (@CfgTrnCode): POS Win sites may keep PaymentMode.TrnCode = 0
+-- (POS Win posts 200/400/900 itself). It wins when it is a settlement code of this store, else the tender is refused.
+IF @CfgTrnCode IS NOT NULL
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM dbo.TransactionCode WHERE TrnCode = @CfgTrnCode AND TrnType >= 100)
+    BEGIN SELECT 1 AS IsOut, 'tender_not_configured' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+    SET @TrnCode = @CfgTrnCode;
+    SET @TrnSub  = ISNULL(@CfgTrnSub, 0);
+END;
 SET @AP_PmtCode = @TrnCode;
 
 IF @TrnCode IS NULL
@@ -137,7 +146,8 @@ IF @RP_Status <> 1 BEGIN SELECT 1 AS IsOut, 'bill_not_open' AS Reason; RETURN; E
 IF NOT EXISTS (
     SELECT 1 FROM dbo.tmpTrn t
     WHERE t.TrnSeq = @TrnSeq AND t.CheckNo = @CheckNo AND t.RVC = @RVCNo
-      AND t.TrnCode IN (SELECT COALESCE(NULLIF(pm.TrnCode, 0), NULLIF(pm.ZeroPayment, 0)) FROM dbo.PaymentMode pm)
+      AND (t.TrnCode IN (SELECT COALESCE(NULLIF(pm.TrnCode, 0), NULLIF(pm.ZeroPayment, 0)) FROM dbo.PaymentMode pm)
+           OR t.TrnCode IN (SELECT tc.TrnCode FROM dbo.TransactionCode tc WHERE tc.TrnType >= 100 AND tc.TrnCode NOT IN (800, 810)))
 )
 BEGIN SELECT 1 AS IsOut, 'tender_not_found' AS Reason; RETURN; END;
 
