@@ -718,6 +718,7 @@ fn a_cloud_error_answer_carries_its_code_and_a_short_message() {
     let resp = SyncResponse {
         status: 200,
         body: br#"{"result":200,"data":{"slug":"x"}}"#.to_vec(),
+        reused: false,
     };
     let e = parse_ack(&resp).unwrap_err();
     assert_eq!(e.code, codes::LEGACY_UPLOAD_FAILED);

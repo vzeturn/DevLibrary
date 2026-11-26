@@ -11,13 +11,15 @@ mod headers;
 mod message;
 mod proxy;
 mod proxy_rules;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod upgraded;
 mod url;
 
 pub use body::ChunkedDecoder;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub use cancel::Cancel;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub use client::{Client, ClientOptions, ShutdownHandle, Upgraded};
+pub use client::{Client, ClientOptions};
 pub use error::Error;
 pub use headers::Headers;
 pub use message::{
@@ -26,4 +28,6 @@ pub use message::{
 };
 pub use proxy::Proxy;
 pub use proxy_rules::ProxyRules;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use upgraded::{ShutdownHandle, Upgraded};
 pub use url::{Scheme, Url, encode_path_segment, encode_query_component, percent_decode};
