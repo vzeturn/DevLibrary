@@ -214,3 +214,28 @@ fn parallel_streams_keep_each_stream_in_order_and_a_parked_stream_waits() {
     );
     assert_eq!(fx.outbox.depth().unwrap(), 4);
 }
+
+#[test]
+fn a_child_answered_before_its_parent_landed_in_the_same_round_goes_again_unparked() {
+    let mut fx = Fx::new().parallel(4);
+    fx.cloud
+        .with(|c| c.parent_race.insert("Trn".into(), "Invoice".into()));
+    fx.enqueue("Trn");
+    fx.enqueue("Invoice");
+    fx.enqueue("Trn");
+
+    assert_eq!(fx.cycle(8), UploadCycleResult::Progress);
+
+    let (trn, parent_answers) = fx.cloud.with(|c| {
+        let trn: Vec<i64> = c
+            .applied
+            .iter()
+            .filter(|b| b.stream == "Trn")
+            .map(|b| b.seq)
+            .collect();
+        (trn, c.parent_pending_answers)
+    });
+    assert_eq!(parent_answers, 1, "Trn#1 met the race once");
+    assert_eq!(trn, [1, 2], "Trn went again in the same cycle, in order");
+    assert_eq!(fx.outbox.depth().unwrap(), 0, "nothing parked");
+}

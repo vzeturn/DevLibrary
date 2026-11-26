@@ -107,6 +107,12 @@ struct Entry {
     result: SyncCommandResult,
     attempts: u32,
     next_at: Instant,
+    /// This answer was written to the command socket (the cloud acks it there).
+    on_socket: bool,
+    /// Socket acks still due for the earlier answers this entry replaced: the cloud acks
+    /// frames in the order it read them, so those acks come first and must not settle
+    /// this newer answer (RT-1318 review).
+    stale_acks: u32,
 }
 
 /// Results waiting for the cloud's acknowledgement.
@@ -141,16 +147,24 @@ impl ResultOutbox {
     /// its HTTP post waits [`SOCKET_CONFIRM_WAIT`] for the cloud's confirmation instead of
     /// going out at once. When the write fails the link's forced flush posts it at once.
     pub fn enqueue_for_socket(&self, result: &SyncCommandResult) {
-        self.enqueue_due(result, Instant::now() + self.socket_wait);
+        self.enqueue_due(result, Instant::now() + self.socket_wait, true);
     }
 
     /// The cloud confirmed it stored the result from the socket: nothing to post. Returns
     /// whether the result was still waiting.
     pub fn confirm(&self, id: Uuid) -> bool {
         let mut q = self.lock();
-        let before = q.len();
-        q.retain(|e| e.result.command_id != id);
-        q.len() != before
+        let Some(at) = q.iter().position(|e| e.result.command_id == id) else {
+            return false;
+        };
+        if let Some(e) = q.get_mut(at)
+            && e.stale_acks > 0
+        {
+            // The ack of an older frame of this command: the newer answer still waits.
+            e.stale_acks -= 1;
+            return false;
+        }
+        q.remove(at).is_some()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<Entry>> {
@@ -160,16 +174,22 @@ impl ResultOutbox {
     /// Keeps `result` until acknowledged; the same command id again replaces the entry
     /// (a redelivery re-answers) and is due at once.
     pub fn enqueue(&self, result: &SyncCommandResult) {
-        self.enqueue_due(result, Instant::now());
+        self.enqueue_due(result, Instant::now(), false);
     }
 
-    fn enqueue_due(&self, result: &SyncCommandResult, next_at: Instant) {
+    fn enqueue_due(&self, result: &SyncCommandResult, next_at: Instant, on_socket: bool) {
         let mut q = self.lock();
+        let stale_acks = q
+            .iter()
+            .find(|e| e.result.command_id == result.command_id)
+            .map_or(0, |e| e.stale_acks + u32::from(e.on_socket));
         q.retain(|e| e.result.command_id != result.command_id);
         q.push_back(Entry {
             result: result.clone(),
             attempts: 0,
             next_at,
+            on_socket,
+            stale_acks,
         });
         while q.len() > MAX_PENDING {
             if let Some(old) = q.pop_front() {

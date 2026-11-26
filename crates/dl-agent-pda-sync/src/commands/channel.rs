@@ -8,6 +8,7 @@
 //! unexecuted, and each result carries how long the store took (ADR 0100).
 
 use std::collections::{HashMap, VecDeque};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
@@ -22,7 +23,7 @@ use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentOptions, codes};
 use crate::contracts::WireJson;
 use crate::contracts::wire::{
-    CommandStatus, SyncCommand, SyncCommandResult, site_command_contract,
+    CommandStatus, SyncCommand, SyncCommandResult, site_command_contract, table_command_types,
 };
 use crate::reporting::{Exception, Level, Logger, Value};
 use crate::transport::signer::{NONCE_HEADER, SIGNATURE_HEADER, TIMESTAMP_HEADER};
@@ -47,6 +48,19 @@ pub const STABLE_LINK: Duration = Duration::from_secs(5);
 const READ_POLL: Duration = Duration::from_secs(1);
 /// The read wake-up while commands run, so their results go out within a few ms.
 const BUSY_READ_POLL: Duration = Duration::from_millis(5);
+/// The reason of a command whose run panicked on a pool worker.
+pub const PANICKED: &str = "AgentPanic";
+
+/// Whether `command` touches more than its own aggregate (RT-1318 review): a merge or
+/// item move between checks, a table transfer, or an `rvc:*` command. It runs alone on
+/// the pool, after every command received before it and before every one after it, as the
+/// serial loop ran them.
+pub fn runs_alone(command: &SyncCommand) -> bool {
+    use table_command_types as t;
+    t::MULTI_CHECK.contains(&command.type_.as_str())
+        || command.type_ == t::TABLE_TRANSFER
+        || command.aggregate_key.starts_with("rvc:")
+}
 
 /// Failures in a row after one more failed attempt (`NextFailureCount`). A link that
 /// came up and later dropped starts a fresh count, so only consecutive failures to connect
@@ -308,11 +322,12 @@ impl CommandChannel {
         ctx: &Ctx,
     ) -> Result<(), ChannelError> {
         let workers = usize::try_from(self.parts.options.command_workers).unwrap_or(1);
+        let intake = keyed_pool::intake_limit(workers);
         let (answers, finished) = mpsc::channel::<Option<SyncCommandResult>>();
         keyed_pool::run(
             workers,
             |command: SyncCommand| {
-                let answer = self.handle(&command, ctx);
+                let answer = self.handle_guarded(&command, ctx);
                 if let Some(result) = &answer {
                     self.outbox.enqueue_for_socket(result);
                 }
@@ -320,8 +335,20 @@ impl CommandChannel {
                 // outbox, whose forced flush posts it before the link reconnects.
                 let _ = answers.send(answer);
             },
-            |queue| self.socket_loop(ws, queue, &finished, ctx),
+            |queue| self.socket_loop(ws, queue, &finished, intake, ctx),
         )
+    }
+
+    /// Writes one finished answer to the socket; a cancelled run (`None`) ends the loop.
+    fn send_answer(
+        ws: &mut dl_ws::WebSocket<dl_http::Upgraded>,
+        answer: Option<SyncCommandResult>,
+    ) -> Result<(), ChannelError> {
+        let Some(result) = answer else {
+            return Err(ChannelError::Cancelled);
+        };
+        ws.send_text(&result.to_json())?;
+        Ok(())
     }
 
     fn socket_loop(
@@ -329,6 +356,7 @@ impl CommandChannel {
         ws: &mut dl_ws::WebSocket<dl_http::Upgraded>,
         queue: &KeyedQueue<SyncCommand>,
         finished: &mpsc::Receiver<Option<SyncCommandResult>>,
+        intake: usize,
         ctx: &Ctx,
     ) -> Result<(), ChannelError> {
         let mut last_sent = Instant::now();
@@ -337,6 +365,24 @@ impl CommandChannel {
             if ctx.is_done() {
                 let _ = ws.close(Some(dl_ws::CloseFrame::normal()));
                 return Err(ChannelError::Cancelled);
+            }
+            // Backpressure (RT-1318 review): with `intake` commands queued or running the
+            // socket is not read, so the cloud's lease, not this queue, holds the backlog.
+            if queue.in_flight() >= intake {
+                match finished.recv_timeout(BUSY_READ_POLL) {
+                    Ok(answer) => {
+                        Self::send_answer(ws, answer)?;
+                        last_sent = Instant::now();
+                    }
+                    // The workers hold the sender until this loop ends: only a timeout here.
+                    Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                        if last_sent.elapsed() >= KEEP_ALIVE {
+                            ws.pong(&[])?;
+                            last_sent = Instant::now();
+                        }
+                    }
+                }
+                continue;
             }
             // In flight is read before the answers are drained: a worker sends its answer
             // before it leaves the pool, so with nothing in flight now every answer is
@@ -350,10 +396,7 @@ impl CommandChannel {
             // the cloud's confirmation and goes out only without it. A failed write leaves
             // the result in the outbox: `run` posts it before reconnecting.
             while let Ok(answer) = finished.try_recv() {
-                let Some(result) = answer else {
-                    return Err(ChannelError::Cancelled);
-                };
-                ws.send_text(&result.to_json())?;
+                Self::send_answer(ws, answer)?;
                 last_sent = Instant::now();
             }
             if poll != read_poll {
@@ -391,7 +434,11 @@ impl CommandChannel {
                 }
                 continue;
             };
-            queue.submit(&command.aggregate_key.clone(), command);
+            if runs_alone(&command) {
+                queue.submit_alone(command);
+            } else {
+                queue.submit(&command.aggregate_key.clone(), command);
+            }
         }
     }
 
@@ -459,6 +506,38 @@ impl CommandChannel {
             at_utc: utc_now(&self.parts.clock),
             exec_ms: None,
         })
+    }
+
+    /// [`handle`](Self::handle) on a pool worker (RT-1318 review): a command whose run
+    /// panicked is answered `unknown` (not remembered, so a redelivery runs it again; its
+    /// transaction never committed or the command log says so) and logged as an error.
+    pub fn handle_guarded(&self, command: &SyncCommand, ctx: &Ctx) -> Option<SyncCommandResult> {
+        match catch_unwind(AssertUnwindSafe(|| self.handle(command, ctx))) {
+            Ok(answer) => answer,
+            Err(panic) => {
+                let what = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_owned())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "no message".to_owned());
+                self.log.error(
+                    "Command {Id} ({Type}) panicked: {Panic}; it is answered unknown",
+                    &[
+                        Value::from(command.command_id),
+                        Value::from(&command.type_),
+                        Value::from(what),
+                    ],
+                );
+                Some(SyncCommandResult {
+                    command_id: command.command_id,
+                    status: CommandStatus::Unknown,
+                    reason: Some(PANICKED.to_owned()),
+                    result: None,
+                    at_utc: utc_now(&self.parts.clock),
+                    exec_ms: None,
+                })
+            }
+        }
     }
 
     /// Decides one command (`HandleAsync`); `None` when `ctx` ended while it ran (the C#

@@ -295,8 +295,10 @@ fn push_field(out: &mut Vec<u8>, name: &str, value: &str) {
     out.extend_from_slice(b"\r\n");
 }
 
-/// An HTTP response.
+/// An HTTP response. New fields may be added in a minor version: build one outside this
+/// crate with [`Response::new`] and set the public fields after.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Response {
     /// Protocol version of the status line.
     pub version: Version,
@@ -316,6 +318,19 @@ pub struct Response {
 }
 
 impl Response {
+    /// An empty HTTP/1.1 response with `status` on a new connection (fakes, tests).
+    pub fn new(status: StatusCode) -> Response {
+        Response {
+            version: Version::Http11,
+            status,
+            reason: String::new(),
+            headers: Headers::new(),
+            body: Vec::new(),
+            trailers: Headers::new(),
+            reused: false,
+        }
+    }
+
     /// The body as UTF-8 text.
     ///
     /// # Errors

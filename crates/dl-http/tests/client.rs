@@ -150,6 +150,13 @@ fn keep_alive_reuses_connections() {
 }
 
 #[test]
+fn a_response_built_outside_the_crate_starts_empty_on_a_new_connection() {
+    let r = dl_http::Response::new(dl_http::StatusCode::new(429).unwrap());
+    assert_eq!(r.status.as_u16(), 429);
+    assert!(!r.reused && r.body.is_empty() && r.headers.is_empty());
+}
+
+#[test]
 fn responses_say_whether_their_connection_was_reused() {
     let server = Server::ok("warm");
     let c = client();

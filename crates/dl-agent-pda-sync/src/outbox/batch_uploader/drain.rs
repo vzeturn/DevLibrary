@@ -4,15 +4,28 @@
 //! its next batch is posted only after the cloud answered the one before, so a 409 or a 424
 //! `SYNC_PARENT_PENDING` answer can never let a later seq of the stream overtake it.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
-use super::{BatchUploader, Outcome, UploadCycleResult};
+use super::{BatchUploader, Outcome, UploadCycleResult, parent_stream_of};
 use crate::contracts::wire::sync_streams;
 use crate::outbox::batches::OutboxItem;
 use crate::outbox::error::UploadError;
+use crate::reporting::Value;
 use crate::transport::SyncResponse;
 use crate::util::ctx::Ctx;
+
+type Sent = Result<(SyncResponse, Duration), UploadError>;
+
+/// The parent stream named by a 424 `SYNC_PARENT_PENDING` answer when that parent is posted
+/// in the same round: the child may have been read before its parent landed.
+fn parent_in_round(sent: &Sent, round: &[OutboxItem]) -> Option<String> {
+    let (resp, _) = sent.as_ref().ok()?;
+    if resp.status != 424 {
+        return None;
+    }
+    parent_stream_of(resp).filter(|p| round.iter().any(|i| &i.stream == p))
+}
 
 /// The peeked batches per stream, streams in the order the peek met them (live first).
 fn by_stream(items: Vec<OutboxItem>, skip: &[String]) -> Vec<VecDeque<OutboxItem>> {
@@ -63,12 +76,37 @@ impl BatchUploader {
                 let sent = self.post_round(&round, ctx)?;
                 let mut stop = Stop::No;
                 let mut failed = None;
+                // A child answered 424 for a parent posted beside it is read after the
+                // round's other answers: when the parent landed, the child goes again next
+                // round instead of parking (RT-1318 review).
+                let (children, others): (Vec<_>, Vec<_>) = round
+                    .iter()
+                    .zip(sent)
+                    .map(|(item, sent)| (parent_in_round(&sent, &round), item, sent))
+                    .partition(|(parent, _, _)| parent.is_some());
+                let mut landed: HashSet<String> = HashSet::new();
+                let mut again: Vec<OutboxItem> = Vec::new();
                 // Every answer is read, even after a failure: a batch the cloud applied is
                 // acked here, not posted again.
-                for (item, sent) in round.iter().zip(sent) {
+                for (parent, item, sent) in others.into_iter().chain(children) {
+                    if let Some(parent) = parent.filter(|p| landed.contains(p)) {
+                        self.log.debug(
+                            "Batch {Stream}#{Seq} waited for {Parent}, which landed beside it; it is sent again",
+                            &[
+                                Value::from(&item.stream),
+                                Value::from(item.seq),
+                                Value::from(parent),
+                            ],
+                        );
+                        again.push(item.clone());
+                        continue;
+                    }
                     let outcome = sent.and_then(|(resp, took)| self.answer(item, &resp, took, ctx));
                     match outcome {
-                        Ok(Outcome::Done) => progressed = true,
+                        Ok(Outcome::Done) => {
+                            progressed = true;
+                            landed.insert(item.stream.clone());
+                        }
                         Ok(Outcome::Parked) => {
                             skip.push(item.stream.clone());
                             streams.retain(|q| q.front().is_none_or(|i| i.stream != item.stream));
@@ -101,6 +139,15 @@ impl BatchUploader {
                     Stop::No => {}
                 }
                 streams.retain(|q| !q.is_empty());
+                for item in again.into_iter().rev() {
+                    match streams
+                        .iter_mut()
+                        .find(|q| q.front().is_some_and(|i| i.stream == item.stream))
+                    {
+                        Some(q) => q.push_front(item),
+                        None => streams.insert(0, VecDeque::from([item])),
+                    }
+                }
             }
             // Progress: the loop calls again at once. Every stream skipped grows `skip`, so
             // the re-peek ends; with only parked streams left the loop idles, not backs off.
@@ -115,12 +162,7 @@ impl BatchUploader {
     }
 
     /// Posts the round's batches side by side (one alone is posted on this thread).
-    #[allow(clippy::type_complexity)]
-    fn post_round(
-        &self,
-        round: &[OutboxItem],
-        ctx: &Ctx,
-    ) -> Result<Vec<Result<(SyncResponse, Duration), UploadError>>, UploadError> {
+    fn post_round(&self, round: &[OutboxItem], ctx: &Ctx) -> Result<Vec<Sent>, UploadError> {
         let bearer = self.tokens.get_access_token(ctx)?;
         if let [item] = round {
             return Ok(vec![self.post(item, &bearer, ctx)]);

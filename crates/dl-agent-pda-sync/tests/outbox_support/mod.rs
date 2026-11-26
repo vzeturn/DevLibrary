@@ -32,6 +32,9 @@ pub struct Cloud {
     pub fail_status: u16,
     pub fail_body: Option<String>,
     pub parent_pending: HashMap<String, String>,
+    /// child stream -> parent stream: the child's next batch is answered 424 once, as when
+    /// the cloud reads it while its parent's batch is still in flight (RT-1318 review).
+    pub parent_race: HashMap<String, String>,
     pub honor_skip_orphans: bool,
     pub orphan_skips: Vec<SyncBatch>,
     pub parent_pending_answers: u32,
@@ -178,7 +181,12 @@ fn handle(st: &mut Cloud, agent_id: dl_uuid::Uuid, agent_token: &str, req: &Req)
             if skip {
                 st.orphan_skips.push(batch.clone());
             }
-            if !skip && let Some(parent) = st.parent_pending.get(&batch.stream).cloned() {
+            let raced = st.parent_race.remove(&batch.stream);
+            if let Some(parent) = raced.or_else(|| {
+                (!skip)
+                    .then(|| st.parent_pending.get(&batch.stream).cloned())
+                    .flatten()
+            }) {
                 st.parent_pending_answers += 1;
                 return (
                     424,

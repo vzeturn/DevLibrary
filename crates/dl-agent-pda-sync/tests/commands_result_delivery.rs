@@ -408,6 +408,29 @@ fn a_cloud_confirmation_frame_settles_the_result_without_a_post() {
     assert_eq!(parse_result_ack(r#"{"result_ack":"not-a-uuid"}"#), None);
 }
 
+#[test]
+fn a_late_ack_of_an_older_socket_answer_does_not_settle_the_newer_one() {
+    let poster = ScriptedPoster::with(vec![]);
+    let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none());
+    let cmd = command();
+    let mut unknown = result_of(&cmd);
+    unknown.status = CommandStatus::Unknown;
+    outbox.enqueue_for_socket(&unknown);
+    // The redelivery's answer replaces it before the first frame's ack arrives.
+    outbox.enqueue_for_socket(&result_of(&cmd));
+    assert!(!outbox.confirm(cmd.command_id), "the old frame's ack");
+    assert_eq!(outbox.pending_ids(), vec![cmd.command_id]);
+    assert!(outbox.confirm(cmd.command_id), "the new frame's ack");
+    assert!(outbox.is_empty());
+    // An answer replaced by an HTTP-only one keeps the old frame's ack from settling it.
+    outbox.enqueue_for_socket(&unknown);
+    outbox.enqueue(&result_of(&cmd));
+    assert!(!outbox.confirm(cmd.command_id));
+    outbox.flush(&Ctx::background(), false).unwrap();
+    assert_eq!(poster.posted(), vec![cmd.command_id], "posted over HTTP");
+    assert!(outbox.is_empty());
+}
+
 // ---- (e) RT-1318 benchmark: commands of different checks run side by side
 
 /// Throughput (commands/s) and p95 latency (cloud send to result back at the cloud) of 200

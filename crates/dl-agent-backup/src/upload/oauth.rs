@@ -406,15 +406,7 @@ mod tests {
     #[test]
     fn waits_follow_retry_after_and_cap() {
         let p = Pace::default();
-        let mut r = dl_http::Response {
-            version: dl_http::Version::Http11,
-            status: dl_http::StatusCode::new(429).unwrap(),
-            reason: String::new(),
-            headers: dl_http::Headers::new(),
-            body: Vec::new(),
-            trailers: dl_http::Headers::new(),
-            reused: false,
-        };
+        let mut r = dl_http::Response::new(dl_http::StatusCode::new(429).unwrap());
         r.headers.insert("retry-after", "7").unwrap();
         assert_eq!(p.wait_for(Some(&r), 0), Duration::from_secs(7));
         r.headers.insert("retry-after", "9999").unwrap();

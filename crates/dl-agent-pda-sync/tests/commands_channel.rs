@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use commands_support::{FakeStore, Throw, lock};
 use dl_agent_pda_sync::bootstrap::{OrderGrantsProbe, probes::CHECKED};
-use dl_agent_pda_sync::commands::channel::web_socket_url;
+use dl_agent_pda_sync::commands::channel::{PANICKED, runs_alone, web_socket_url};
 use dl_agent_pda_sync::commands::grants::{
     RECHECK_INTERVAL, SERVICE_ATTEMPTS, SERVICE_GAP, next_wait,
 };
@@ -27,7 +27,7 @@ use dl_agent_pda_sync::contracts::WireJson;
 use dl_agent_pda_sync::contracts::time::DateTimeOffset;
 use dl_agent_pda_sync::contracts::wire::{
     CommandStatus, OrderCheckOpenPayload, SyncCommand, SyncCommandResult, order_aggregate,
-    order_command_reasons, order_command_types, site_event_levels,
+    order_command_reasons, order_command_types, site_event_levels, table_command_types,
 };
 use dl_agent_pda_sync::reporting::{Logger, SiteEvents};
 use dl_agent_pda_sync::security::{SecretError, SecretStore, SharedSecretStore, names};
@@ -275,6 +275,74 @@ fn a_command_that_throws_is_an_unknown_outcome_that_is_not_remembered() {
         2,
         "the cloud retries an unknown outcome"
     );
+}
+
+/// Panics on its first run, then applies (RT-1318 review: a pool worker's command panics).
+struct PanicOnceExecutor(AtomicUsize);
+
+impl CommandExecutor for PanicOnceExecutor {
+    fn execute(&self, command: &SyncCommand, _ctx: &Ctx) -> CommandResult<SyncCommandResult> {
+        assert!(
+            self.0.fetch_add(1, Ordering::SeqCst) > 0,
+            "store driver bug"
+        );
+        Ok(SyncCommandResult {
+            command_id: command.command_id,
+            status: CommandStatus::Applied,
+            reason: None,
+            result: None,
+            at_utc: DateTimeOffset::from_unix_seconds(START).unwrap(),
+            exec_ms: None,
+        })
+    }
+
+    fn find_recorded(&self, _id: Uuid, _ctx: &Ctx) -> CommandResult<Option<SyncCommandResult>> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn a_command_that_panics_is_answered_unknown_and_runs_again_on_redelivery() {
+    let exec = Arc::new(PanicOnceExecutor(AtomicUsize::new(0)));
+    let ch = channel(exec.clone(), None);
+    let cmd = command();
+    let ctx = Ctx::background();
+
+    let r = ch.handle_guarded(&cmd, &ctx).unwrap();
+    assert_eq!(
+        (r.status, r.reason.as_deref()),
+        (CommandStatus::Unknown, Some(PANICKED))
+    );
+    let again = ch.handle_guarded(&cmd, &ctx).unwrap();
+    assert_eq!(again.status, CommandStatus::Applied);
+    assert_eq!(exec.0.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn commands_that_touch_several_checks_or_a_whole_rvc_run_alone() {
+    let with = |type_: &str, key: &str| SyncCommand {
+        type_: type_.into(),
+        aggregate_key: key.into(),
+        ..command()
+    };
+    assert!(runs_alone(&with(
+        table_command_types::CHECK_MERGE,
+        "check:3:12"
+    )));
+    assert!(runs_alone(&with(
+        table_command_types::ITEMS_MOVE,
+        "check:3:12"
+    )));
+    assert!(runs_alone(&with(
+        table_command_types::TABLE_TRANSFER,
+        "check:3:12"
+    )));
+    assert!(runs_alone(&with("site.anything", "rvc:3")));
+    assert!(!runs_alone(&with(
+        order_command_types::CHECK_OPEN,
+        "check:3:12"
+    )));
+    assert!(!runs_alone(&command()));
 }
 
 // ---- OrderGrantsTests
