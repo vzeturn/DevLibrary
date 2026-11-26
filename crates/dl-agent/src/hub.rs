@@ -16,6 +16,8 @@ pub const SELFTEST_PATH: &str = "/v1/agent/selftest";
 
 /// Where `collect_diagnostics` uploads its zip (agent-hub `routes/agent.ts`).
 pub const DIAGNOSTICS_PATH: &str = "/v1/agent/diagnostics";
+/// Structure-only schema snapshot upload (RT-1215).
+pub const SCHEMA_PATH: &str = "/v1/agent/schema-snapshot";
 
 /// Where an enrolled agent takes another product's code (PROTOCOL.md §2, RT-0298).
 pub const ATTACH_PATH: &str = "/v1/attach";
@@ -423,6 +425,16 @@ impl HubClient {
     pub fn selftest(&self, run: &Value) -> Result<bool, Error> {
         let body = dl_json::to_string(run);
         match self.call("POST", SELFTEST_PATH, body.as_bytes()) {
+            Ok(_) => Ok(true),
+            Err(Error::Status { code: 404, .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Uploads one schema snapshot body (`dl_agent_schema::upload_body`) to [`SCHEMA_PATH`].
+    /// `Ok(false)` when the hub answers 404 (a hub older than the route).
+    pub fn schema_snapshot(&self, body: &str) -> Result<bool, Error> {
+        match self.call("POST", SCHEMA_PATH, body.as_bytes()) {
             Ok(_) => Ok(true),
             Err(Error::Status { code: 404, .. }) => Ok(false),
             Err(e) => Err(e),

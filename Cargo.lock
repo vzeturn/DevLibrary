@@ -6,6 +6,7 @@ version = 4
 name = "dl-agent"
 version = "0.2.1"
 dependencies = [
+ "dl-agent-schema",
  "dl-cli",
  "dl-ed25519",
  "dl-encoding",

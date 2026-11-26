@@ -146,6 +146,7 @@ pub struct Agent {
     sql: Site,
     host: Value,
     survey_sent: Option<(String, u64)>,
+    schema_next: Option<u64>,
     post_selftest: bool,
     hub_ok_at: u64,
     beat_at: u64,
@@ -209,6 +210,7 @@ impl Agent {
             sql,
             host: crate::host::info(),
             survey_sent: None,
+            schema_next: None,
             post_selftest: false,
             hub_ok_at: 0,
             beat_at: 0,
@@ -325,6 +327,7 @@ impl Agent {
         if let Some(exit) = self.local_update(now) {
             return Some(exit);
         }
+        self.schema_upload(now);
         if now >= self.next_heartbeat {
             return self.heartbeat(now);
         }
@@ -779,20 +782,19 @@ mod post_install_run;
 
 #[path = "agent_diag.rs"]
 mod diag;
+#[path = "agent_schema.rs"]
+mod schema_upload;
 pub use diag::{diagnostic_file_allowed, diagnostic_folder_allowed, log_tail};
-
-#[cfg(test)]
-#[path = "agent_tests.rs"]
-mod tests;
 
 #[cfg(test)]
 #[path = "agent_lane_tests.rs"]
 mod lane_tests;
-
-#[cfg(test)]
-#[path = "agent_rollback_tests.rs"]
-mod rollback_tests;
-
 #[cfg(test)]
 #[path = "agent_post_install_tests.rs"]
 mod post_install_tests;
+#[cfg(test)]
+#[path = "agent_rollback_tests.rs"]
+mod rollback_tests;
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;
