@@ -6,6 +6,7 @@
 //! socket and HTTP, or posted twice, is harmless.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -20,6 +21,8 @@ use crate::util::ctx::Ctx;
 
 /// Results kept while the cloud cannot be reached; the oldest is dropped (and logged) past it.
 pub const MAX_PENDING: usize = 500;
+/// How often the poster beside the socket loop looks for due results.
+pub const POST_BESIDE_POLL: Duration = Duration::from_millis(50);
 /// The longest wait between two posts of the same result.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -193,6 +196,26 @@ impl ResultOutbox {
             }
         }
         Ok(())
+    }
+
+    /// Runs `work` while a scoped thread posts the due results every
+    /// [`POST_BESIDE_POLL`] (RT-1309): the socket loop answers the next command at once
+    /// instead of waiting for the previous result's HTTP round trip.
+    pub fn post_beside<R>(&self, ctx: &Ctx, work: impl FnOnce() -> R) -> R {
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(Ordering::SeqCst) && !ctx.is_done() {
+                    if let Err(ChannelError::Cancelled) = self.flush(ctx, false) {
+                        return;
+                    }
+                    std::thread::sleep(POST_BESIDE_POLL);
+                }
+            });
+            let out = work();
+            stop.store(true, Ordering::SeqCst);
+            out
+        })
     }
 
     fn remove(&self, id: Uuid) {

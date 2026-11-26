@@ -287,6 +287,18 @@ impl CommandChannel {
         ws.set_read_timeout(Some(READ_POLL))?;
         // Pending results first: the answers the previous link lost go out before new work.
         self.outbox.flush(ctx, true)?;
+        // RT-1309: results are posted over HTTP beside the socket loop, never inline, so
+        // a command is not held behind the previous command's HTTP round trip.
+        self.outbox
+            .post_beside(ctx, || self.serve_socket(&mut ws, ctx))
+    }
+
+    /// Reads commands from the socket and answers each at once over it.
+    fn serve_socket<S: std::io::Read + std::io::Write>(
+        &self,
+        ws: &mut dl_ws::WebSocket<S>,
+        ctx: &Ctx,
+    ) -> Result<(), ChannelError> {
         let mut last_sent = Instant::now();
         loop {
             if ctx.is_done() {
@@ -302,7 +314,6 @@ impl CommandChannel {
                 }
                 Ok(_) => continue,
                 Err(e) if e.is_timeout() => {
-                    self.outbox.flush(ctx, false)?;
                     if last_sent.elapsed() >= KEEP_ALIVE {
                         ws.pong(&[])?;
                         last_sent = Instant::now();
@@ -316,9 +327,7 @@ impl CommandChannel {
                 // RT-1309: an unread command with an id still gets a terminal answer.
                 if let Some(result) = dl_json::parse(&text).ok().and_then(|v| self.unreadable(&v)) {
                     self.outbox.enqueue(&result);
-                    let sent = ws.send_text(&result.to_json());
-                    self.outbox.flush(ctx, false)?;
-                    sent?;
+                    ws.send_text(&result.to_json())?;
                     last_sent = Instant::now();
                 }
                 continue;
@@ -326,11 +335,9 @@ impl CommandChannel {
             let Some(result) = self.answer(&command, ctx) else {
                 return Err(ChannelError::Cancelled);
             };
-            // Fast path over the socket; the HTTP post is the acknowledged one. A dead
-            // socket must not lose the result: it is posted before the link is dropped.
-            let sent = ws.send_text(&result.to_json());
-            self.outbox.flush(ctx, false)?;
-            sent?;
+            // Fast path over the socket; the HTTP post (beside this loop) is the acknowledged
+            // one. A dead socket does not lose the result: `run` posts it before reconnecting.
+            ws.send_text(&result.to_json())?;
             last_sent = Instant::now();
         }
     }
