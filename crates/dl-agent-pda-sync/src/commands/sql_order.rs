@@ -18,6 +18,7 @@ use crate::contracts::wire::{
     order_command_reasons as reasons,
 };
 use crate::util::ctx::Ctx;
+use crate::util::store_text;
 
 /// SQL error number the legacy post batch THROWs before any write (open name).
 pub const OPEN_NAME_REQUIRED_ERROR: i32 = 51101;
@@ -156,7 +157,13 @@ fn status_row(r: &Results, name: &str, min_columns: usize) -> Result<Option<(i32
 }
 
 fn tcvn(row: &dl_tds::Row, i: usize) -> Option<String> {
-    sql::bytes(row, i).map(|raw| tcvn3::decode(raw).trim().to_owned())
+    sql::bytes(row, i).map(tcvn_text)
+}
+
+/// TCVN3 bytes of a store column as result text: decoded, without NUL characters
+/// ([`store_text::clean`], RT-1309) and trimmed at both ends.
+fn tcvn_text(raw: &[u8]) -> String {
+    store_text::clean(tcvn3::decode(raw)).trim().to_owned()
 }
 
 impl OrderCommandUnit for SqlSiteCommandUnit<'_> {
@@ -390,5 +397,17 @@ impl OrderCommandUnit for SqlSiteCommandUnit<'_> {
         ctx: &Ctx,
     ) -> Result<OrderCloseOutcome> {
         sql_money::close_check(self, payload, ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tcvn_text;
+
+    #[test]
+    fn a_tcvn3_name_with_nul_characters_reaches_the_result_without_them() {
+        // RT-1309: `C` followed by NULs broke the cloud's jsonb (22P05).
+        assert_eq!(tcvn_text(b"C\0\0\0\0"), "C");
+        assert_eq!(tcvn_text(b" Cafe\0 sua   "), "Cafe sua");
     }
 }

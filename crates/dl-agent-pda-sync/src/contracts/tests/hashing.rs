@@ -316,6 +316,21 @@ fn time_null_and_garbage() {
 }
 
 #[test]
+fn capture_text_loses_nul_characters_and_char_padding() {
+    // RT-1309: PostgreSQL refuses U+0000; a padded CHAR(n) code still matches once trimmed.
+    let z = vietnam();
+    let g = |v: RawValue| transforms::generic(&v, "c", &z).unwrap();
+    assert_eq!(g("C\0\0\0".into()).as_deref(), Some("C"));
+    assert_eq!(g("100001      ".into()).as_deref(), Some("100001"));
+    assert_eq!(
+        transforms::tcvn3(&RawValue::Bytes(b"C\0\0  ".to_vec()), "IName")
+            .unwrap()
+            .as_deref(),
+        Some("C")
+    );
+}
+
+#[test]
 fn generic_covers_common_ado_types() {
     let z = vietnam();
     let g = |v: RawValue| transforms::generic(&v, "c", &z).unwrap();
