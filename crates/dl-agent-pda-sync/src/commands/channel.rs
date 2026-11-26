@@ -16,6 +16,7 @@ use dl_uuid::Uuid;
 
 use super::error::CommandError;
 use super::executor::{CommandExecutor, utc_now};
+use super::result_outbox::{HttpResultPoster, ResultOutbox, ResultPoster};
 use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentOptions, codes};
 use crate::contracts::WireJson;
@@ -39,6 +40,8 @@ pub const MAX_REMEMBERED: usize = 2000;
 pub const CATEGORY: &str = "MM.PdaOrder.SyncAgent.Commands.CommandChannel";
 /// `ClientWebSocketOptions.KeepAliveInterval`.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(20);
+/// A link up this long that then drops is reconnected at once.
+pub const STABLE_LINK: Duration = Duration::from_secs(5);
 /// How often a blocked WebSocket read wakes up to check for a stop.
 const READ_POLL: Duration = Duration::from_secs(1);
 
@@ -77,7 +80,7 @@ impl ChannelError {
         }
     }
 
-    fn to_exception(&self) -> Exception {
+    pub(super) fn to_exception(&self) -> Exception {
         match self {
             ChannelError::WebSocket(e) => {
                 Exception::new("System.Net.WebSockets.WebSocketException", e.to_string())
@@ -149,16 +152,50 @@ pub struct CommandChannel {
     parts: CommandChannelParts,
     log: Logger,
     remembered: Mutex<Remembered>,
+    outbox: ResultOutbox,
 }
 
 impl CommandChannel {
     /// A channel over `parts`; `log` is the root logger.
     pub fn new(parts: CommandChannelParts, log: &Logger) -> CommandChannel {
+        let poster = Arc::new(HttpResultPoster::new(
+            parts.http.clone(),
+            parts.tokens.clone(),
+        ));
+        CommandChannel::with_poster(parts, log, poster)
+    }
+
+    /// A channel whose results are posted through `poster` (tests).
+    pub fn with_poster(
+        parts: CommandChannelParts,
+        log: &Logger,
+        poster: Arc<dyn ResultPoster>,
+    ) -> CommandChannel {
+        let outbox = ResultOutbox::new(poster, parts.retry.clone(), log);
         CommandChannel {
             parts,
             log: log.for_category(CATEGORY),
             remembered: Mutex::new(Remembered::default()),
+            outbox,
         }
+    }
+
+    /// Results the cloud has not acknowledged yet.
+    pub fn pending_results(&self) -> Vec<Uuid> {
+        self.outbox.pending_ids()
+    }
+
+    /// Answers `command` (a redelivery gets the stored result, never a second run) and
+    /// keeps the answer until the cloud acknowledged it. `None` when `ctx` ended.
+    pub fn answer(&self, command: &SyncCommand, ctx: &Ctx) -> Option<SyncCommandResult> {
+        let result = self.handle(command, ctx)?;
+        self.outbox.enqueue(&result);
+        Some(result)
+    }
+
+    /// Posts the results still waiting (all of them when `force`).
+    pub fn flush_results(&self, ctx: &Ctx, force: bool) -> Result<(), ChannelError> {
+        self.outbox.flush(ctx, force)
     }
 
     /// Runs until `ctx` ends (`RunAsync`). A failure the C# loop does not catch is
@@ -168,7 +205,12 @@ impl CommandChannel {
         let mut failures: i32 = 0;
         let mut poll_cycles = 0;
         while !ctx.is_done() {
+            // Results the last link could not deliver go out first (RT-1309).
+            if let Err(ChannelError::Cancelled) = self.outbox.flush(ctx, false) {
+                return Ok(());
+            }
             let mut link_was_up = false;
+            let attempt_started = Instant::now();
             let attempt = if failures < before_poll {
                 self.run_web_socket(ctx, &mut link_was_up).map(|()| {
                     failures = 0;
@@ -188,10 +230,12 @@ impl CommandChannel {
                 Err(ChannelError::Cancelled) => return Ok(()),
                 Err(e) if e.is_link_failure() => {
                     failures = next_failure_count(failures, link_was_up);
-                    let delay = self
-                        .parts
-                        .retry
-                        .delay_for(u32::try_from(failures.clamp(0, 8)).unwrap_or(8), None);
+                    // The dead link's results are posted before anything else.
+                    if let Err(ChannelError::Cancelled) = self.outbox.flush(ctx, true) {
+                        return Ok(());
+                    }
+                    let up_for = link_was_up.then(|| attempt_started.elapsed());
+                    let delay = reconnect_delay(&self.parts.retry, failures, up_for);
                     if failures == 1 {
                         self.log.write(
                             Level::Information,
@@ -241,6 +285,8 @@ impl CommandChannel {
         self.log.info("Command channel connected", &[]);
         *link_was_up = true;
         ws.set_read_timeout(Some(READ_POLL))?;
+        // Pending results first: the answers the previous link lost go out before new work.
+        self.outbox.flush(ctx, true)?;
         let mut last_sent = Instant::now();
         loop {
             if ctx.is_done() {
@@ -256,6 +302,7 @@ impl CommandChannel {
                 }
                 Ok(_) => continue,
                 Err(e) if e.is_timeout() => {
+                    self.outbox.flush(ctx, false)?;
                     if last_sent.elapsed() >= KEEP_ALIVE {
                         ws.pong(&[])?;
                         last_sent = Instant::now();
@@ -268,15 +315,22 @@ impl CommandChannel {
             let Ok(command) = SyncCommand::from_json(&text) else {
                 // RT-1309: an unread command with an id still gets a terminal answer.
                 if let Some(result) = dl_json::parse(&text).ok().and_then(|v| self.unreadable(&v)) {
-                    ws.send_text(&result.to_json())?;
+                    self.outbox.enqueue(&result);
+                    let sent = ws.send_text(&result.to_json());
+                    self.outbox.flush(ctx, false)?;
+                    sent?;
                     last_sent = Instant::now();
                 }
                 continue;
             };
-            let Some(result) = self.handle(&command, ctx) else {
+            let Some(result) = self.answer(&command, ctx) else {
                 return Err(ChannelError::Cancelled);
             };
-            ws.send_text(&result.to_json())?;
+            // Fast path over the socket; the HTTP post is the acknowledged one. A dead
+            // socket must not lose the result: it is posted before the link is dropped.
+            let sent = ws.send_text(&result.to_json());
+            self.outbox.flush(ctx, false)?;
+            sent?;
             last_sent = Instant::now();
         }
     }
@@ -301,29 +355,17 @@ impl CommandChannel {
         for item in list {
             let Ok(command) = SyncCommand::from_value(&item) else {
                 if let Some(result) = self.unreadable(&item) {
-                    self.parts.http.post_json(
-                        ctx,
-                        RESULT_PATH,
-                        &result.to_json(),
-                        Some(&bearer),
-                    )?;
+                    self.outbox.enqueue(&result);
+                    self.outbox.flush(ctx, false)?;
                 }
                 continue;
             };
-            let Some(result) = self.handle(&command, ctx) else {
+            if self.answer(&command, ctx).is_none() {
                 return Err(ChannelError::Cancelled);
-            };
-            let ack =
-                self.parts
-                    .http
-                    .post_json(ctx, RESULT_PATH, &result.to_json(), Some(&bearer))?;
-            if !ack.is_success() {
-                self.log.warn(
-                    "Command {Id} result ack rejected with HTTP {Status}",
-                    &[Value::from(command.command_id), Value::from(ack.status)],
-                );
             }
+            self.outbox.flush(ctx, false)?;
         }
+        self.outbox.flush(ctx, false)?;
         Ok(())
     }
 
@@ -510,6 +552,16 @@ impl CommandChannel {
             }
         }
     }
+}
+
+/// How long to wait before reconnecting after a failed attempt. A link that was up for at
+/// least [`STABLE_LINK`] and dropped reconnects at once (no fixed wait); a link that never
+/// came up, or died at once, backs off.
+pub fn reconnect_delay(retry: &RetryPolicy, failures: i32, up_for: Option<Duration>) -> Duration {
+    if up_for.is_some_and(|d| d >= STABLE_LINK) {
+        return Duration::ZERO;
+    }
+    retry.delay_for(u32::try_from(failures.clamp(0, 8)).unwrap_or(8), None)
 }
 
 /// `new UriBuilder(new Uri(baseUri, WebSocketPath)) { Scheme = https ? "wss" : "ws" }`:
