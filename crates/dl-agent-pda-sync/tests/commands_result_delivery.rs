@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use dl_agent_pda_sync::commands::result_outbox::{
-    PostOutcome, ResultOutbox, ResultPoster, classify,
+    PostOutcome, ResultOutbox, ResultPoster, SOCKET_CONFIRM_WAIT, classify, parse_result_ack,
 };
 use dl_agent_pda_sync::commands::{
     ChannelError, CommandChannel, CommandChannelParts, CommandExecutor, Result as CommandResult,
@@ -340,4 +340,59 @@ fn results_are_posted_beside_the_socket_loop_not_inline() {
         *poster.0.lock().unwrap(),
         results.iter().map(|r| r.command_id).collect::<Vec<_>>()
     );
+}
+
+// ---- (d) RT-1318: the socket is the fast path, HTTP the delayed fallback
+
+fn result_of(cmd: &SyncCommand) -> SyncCommandResult {
+    exec().execute(cmd, &Ctx::background()).unwrap()
+}
+
+#[test]
+fn a_result_written_to_the_socket_is_not_posted_before_the_confirm_wait() {
+    let poster = ScriptedPoster::with(vec![]);
+    let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none());
+    let ctx = Ctx::background();
+    let cmd = command();
+    outbox.enqueue_for_socket(&result_of(&cmd));
+    outbox.flush(&ctx, false).unwrap();
+    assert!(
+        poster.posted().is_empty(),
+        "no HTTP post while the socket may confirm"
+    );
+    assert_eq!(outbox.pending_ids(), vec![cmd.command_id]);
+    // A dead link's forced flush posts it at once.
+    outbox.flush(&ctx, true).unwrap();
+    assert_eq!(poster.posted(), vec![cmd.command_id]);
+    assert_eq!(SOCKET_CONFIRM_WAIT, Duration::from_secs(3));
+}
+
+#[test]
+fn an_unconfirmed_socket_result_is_posted_after_the_wait() {
+    let poster = ScriptedPoster::with(vec![]);
+    let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none())
+        .with_socket_wait(Duration::from_millis(30));
+    let ctx = Ctx::background();
+    let cmd = command();
+    outbox.enqueue_for_socket(&result_of(&cmd));
+    std::thread::sleep(Duration::from_millis(60));
+    outbox.flush(&ctx, false).unwrap();
+    assert_eq!(poster.posted(), vec![cmd.command_id]);
+    assert!(outbox.is_empty());
+}
+
+#[test]
+fn a_cloud_confirmation_frame_settles_the_result_without_a_post() {
+    let poster = ScriptedPoster::with(vec![]);
+    let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none());
+    let cmd = command();
+    outbox.enqueue_for_socket(&result_of(&cmd));
+    let frame = format!(r#"{{"result_ack":"{}"}}"#, cmd.command_id);
+    assert_eq!(parse_result_ack(&frame), Some(cmd.command_id));
+    assert!(outbox.confirm(cmd.command_id));
+    assert!(!outbox.confirm(cmd.command_id), "already settled");
+    outbox.flush(&Ctx::background(), true).unwrap();
+    assert!(poster.posted().is_empty());
+    assert_eq!(parse_result_ack(r#"{"command_id":"x"}"#), None);
+    assert_eq!(parse_result_ack(r#"{"result_ack":"not-a-uuid"}"#), None);
 }

@@ -413,6 +413,7 @@ mod tests {
             headers: dl_http::Headers::new(),
             body: Vec::new(),
             trailers: dl_http::Headers::new(),
+            reused: false,
         };
         r.headers.insert("retry-after", "7").unwrap();
         assert_eq!(p.wait_for(Some(&r), 0), Duration::from_secs(7));

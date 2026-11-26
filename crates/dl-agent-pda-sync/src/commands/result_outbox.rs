@@ -4,6 +4,11 @@
 //! posted again, with backoff, and is flushed first when the link comes back. The cloud
 //! stores a result idempotently per command id, so a result delivered over both the
 //! socket and HTTP, or posted twice, is harmless.
+//!
+//! RT-1318: a result written to the live command socket is the fast path; its HTTP post
+//! waits [`SOCKET_CONFIRM_WAIT`] first and is skipped when the cloud confirms the socket
+//! delivery with a `{"result_ack":"<command_id>"}` frame. A failed socket write leaves
+//! the result due at once.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +28,12 @@ use crate::util::ctx::Ctx;
 pub const MAX_PENDING: usize = 500;
 /// How often the poster beside the socket loop looks for due results.
 pub const POST_BESIDE_POLL: Duration = Duration::from_millis(50);
+/// How long a result written to the command socket waits before its HTTP post (RT-1318):
+/// the socket normally delivers it in milliseconds, the post is the fallback for a socket
+/// that died with the frame in flight.
+pub const SOCKET_CONFIRM_WAIT: Duration = Duration::from_secs(3);
+/// The field of the cloud's frame confirming a result it stored from the socket.
+pub const RESULT_ACK_FIELD: &str = "result_ack";
 /// The longest wait between two posts of the same result.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -69,6 +80,19 @@ impl ResultPoster for HttpResultPoster {
     }
 }
 
+/// The command id of a `{"result_ack":"<command_id>"}` frame, `None` for any other frame.
+pub fn parse_result_ack(text: &str) -> Option<Uuid> {
+    if !text.contains(RESULT_ACK_FIELD) {
+        return None;
+    }
+    dl_json::parse(text)
+        .ok()?
+        .get(RESULT_ACK_FIELD)?
+        .as_str()?
+        .parse()
+        .ok()
+}
+
 /// How an HTTP status answers a posted result.
 pub fn classify(status: u16) -> PostOutcome {
     match status {
@@ -91,6 +115,7 @@ pub struct ResultOutbox {
     retry: RetryPolicy,
     log: Logger,
     pending: Mutex<VecDeque<Entry>>,
+    socket_wait: Duration,
 }
 
 impl ResultOutbox {
@@ -101,7 +126,31 @@ impl ResultOutbox {
             retry,
             log: log.clone(),
             pending: Mutex::new(VecDeque::new()),
+            socket_wait: SOCKET_CONFIRM_WAIT,
         }
+    }
+
+    /// The outbox with another wait between a socket write and the HTTP fallback (tests).
+    #[must_use]
+    pub fn with_socket_wait(mut self, wait: Duration) -> ResultOutbox {
+        self.socket_wait = wait;
+        self
+    }
+
+    /// [`enqueue`](Self::enqueue) for a result about to be written to the command socket:
+    /// its HTTP post waits [`SOCKET_CONFIRM_WAIT`] for the cloud's confirmation instead of
+    /// going out at once. When the write fails the link's forced flush posts it at once.
+    pub fn enqueue_for_socket(&self, result: &SyncCommandResult) {
+        self.enqueue_due(result, Instant::now() + self.socket_wait);
+    }
+
+    /// The cloud confirmed it stored the result from the socket: nothing to post. Returns
+    /// whether the result was still waiting.
+    pub fn confirm(&self, id: Uuid) -> bool {
+        let mut q = self.lock();
+        let before = q.len();
+        q.retain(|e| e.result.command_id != id);
+        q.len() != before
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<Entry>> {
@@ -111,12 +160,16 @@ impl ResultOutbox {
     /// Keeps `result` until acknowledged; the same command id again replaces the entry
     /// (a redelivery re-answers) and is due at once.
     pub fn enqueue(&self, result: &SyncCommandResult) {
+        self.enqueue_due(result, Instant::now());
+    }
+
+    fn enqueue_due(&self, result: &SyncCommandResult, next_at: Instant) {
         let mut q = self.lock();
         q.retain(|e| e.result.command_id != result.command_id);
         q.push_back(Entry {
             result: result.clone(),
             attempts: 0,
-            next_at: Instant::now(),
+            next_at,
         });
         while q.len() > MAX_PENDING {
             if let Some(old) = q.pop_front() {

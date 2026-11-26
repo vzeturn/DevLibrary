@@ -32,6 +32,10 @@ pub const CATEGORY: &str = "MM.PdaOrder.SyncAgent.Transport.SyncHttpClient";
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// The service's `HttpClient.Timeout`.
 pub const SERVICE_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long an idle keep-alive connection to the cloud is kept for the next request
+/// (RT-1318): a store uplink pays ~1.7 s for every new TCP+TLS handshake, so the open-batch,
+/// result and heartbeat calls reuse one warm connection across their usual gaps.
+pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 /// `application/json; charset=utf-8`.
 pub const JSON_CONTENT_TYPE: &str = "application/json; charset=utf-8";
 
@@ -42,6 +46,9 @@ pub struct SyncResponse {
     pub status: u16,
     /// The body bytes.
     pub body: Vec<u8>,
+    /// Whether the last attempt went over a pooled keep-alive connection (`false`: a new
+    /// TCP+TLS connection was opened for it).
+    pub reused: bool,
 }
 
 impl SyncResponse {
@@ -93,6 +100,7 @@ pub fn client_options(timeout: Duration) -> ClientOptions {
         user_agent: None,
         max_redirects: 0,
         danger_accept_invalid_certs: false,
+        pool_idle_timeout: POOL_IDLE_TIMEOUT,
     }
 }
 
@@ -183,6 +191,12 @@ impl SyncHttpClient {
     /// The retry policy.
     pub fn retry(&self) -> &RetryPolicy {
         &self.retry
+    }
+
+    /// Connections opened to the cloud since the client was created (RT-1318); a request
+    /// on a pooled keep-alive connection does not count.
+    pub fn connections_opened(&self) -> u64 {
+        self.client.connections_opened()
     }
 
     fn signer(&self) -> Result<&RequestSigner, Error> {
@@ -406,11 +420,25 @@ impl SyncHttpClient {
             }
             match self.client.request(&req) {
                 Ok(resp) => {
+                    if !resp.reused {
+                        self.log.info(
+                            "Opened a new connection to the cloud for {Method} {Path} ({Opened} opened since start)",
+                            &[
+                                method.as_str().into(),
+                                path.into(),
+                                LogValue::Int(
+                                    i64::try_from(self.client.connections_opened())
+                                        .unwrap_or(i64::MAX),
+                                ),
+                            ],
+                        );
+                    }
                     let status = resp.status.as_u16();
                     if !is_transient(status) {
                         return Ok(SyncResponse {
                             status,
                             body: resp.body,
+                            reused: resp.reused,
                         });
                     }
                     retry_after = parse_retry_after(resp.headers.get("retry-after"));
@@ -419,6 +447,7 @@ impl SyncHttpClient {
                         return Ok(SyncResponse {
                             status,
                             body: resp.body,
+                            reused: resp.reused,
                         });
                     }
                 }

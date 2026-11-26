@@ -16,7 +16,7 @@ use dl_uuid::Uuid;
 
 use super::error::CommandError;
 use super::executor::{CommandExecutor, utc_now};
-use super::result_outbox::{HttpResultPoster, ResultOutbox, ResultPoster};
+use super::result_outbox::{HttpResultPoster, ResultOutbox, ResultPoster, parse_result_ack};
 use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentOptions, codes};
 use crate::contracts::WireJson;
@@ -288,7 +288,9 @@ impl CommandChannel {
         // Pending results first: the answers the previous link lost go out before new work.
         self.outbox.flush(ctx, true)?;
         // RT-1309: results are posted over HTTP beside the socket loop, never inline, so
-        // a command is not held behind the previous command's HTTP round trip.
+        // a command is not held behind the previous command's HTTP round trip. RT-1318: a
+        // result written to the socket is posted only if the cloud has not confirmed it
+        // within SOCKET_CONFIRM_WAIT.
         self.outbox
             .post_beside(ctx, || self.serve_socket(&mut ws, ctx))
     }
@@ -323,20 +325,26 @@ impl CommandChannel {
                 Err(dl_ws::Error::Closed) => return Ok(()),
                 Err(e) => return Err(e.into()),
             };
+            if let Some(id) = parse_result_ack(&text) {
+                self.outbox.confirm(id);
+                continue;
+            }
             let Ok(command) = SyncCommand::from_json(&text) else {
                 // RT-1309: an unread command with an id still gets a terminal answer.
                 if let Some(result) = dl_json::parse(&text).ok().and_then(|v| self.unreadable(&v)) {
-                    self.outbox.enqueue(&result);
+                    self.outbox.enqueue_for_socket(&result);
                     ws.send_text(&result.to_json())?;
                     last_sent = Instant::now();
                 }
                 continue;
             };
-            let Some(result) = self.answer(&command, ctx) else {
+            let Some(result) = self.handle(&command, ctx) else {
                 return Err(ChannelError::Cancelled);
             };
-            // Fast path over the socket; the HTTP post (beside this loop) is the acknowledged
-            // one. A dead socket does not lose the result: `run` posts it before reconnecting.
+            self.outbox.enqueue_for_socket(&result);
+            // Fast path over the socket (RT-1318): the HTTP post beside this loop waits for the
+            // cloud's confirmation and goes out only without it. A failed write leaves the
+            // result due at once: `run` posts it before reconnecting.
             ws.send_text(&result.to_json())?;
             last_sent = Instant::now();
         }

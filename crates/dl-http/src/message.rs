@@ -310,6 +310,9 @@ pub struct Response {
     pub body: Vec<u8>,
     /// Trailer fields of a chunked body.
     pub trailers: Headers,
+    /// Whether the response came over a pooled keep-alive connection; `false` when the
+    /// client opened a new connection (TCP, plus TLS for `https`) for it.
+    pub reused: bool,
 }
 
 impl Response {
@@ -474,6 +477,7 @@ pub fn parse_response_head(buf: &[u8]) -> Result<Option<(Response, usize)>, Erro
             headers,
             body: Vec::new(),
             trailers: Headers::new(),
+            reused: false,
         },
         pos,
     )))

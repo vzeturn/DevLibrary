@@ -6,18 +6,20 @@ use crate::headers::validate_value;
 use crate::message::{
     BodyFraming, MAX_HEAD_SIZE, find_head_end, keep_alive, parse_response_head, response_framing,
 };
+use crate::upgraded::Upgraded;
 use crate::url::Scheme;
 use crate::{Error, Method, Proxy, Request, Response, Url, percent_decode};
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// Idle connections kept per (scheme, host, port, proxy).
 const MAX_IDLE_PER_HOST: usize = 4;
-/// Idle connections older than this are closed instead of reused.
+/// Default for [`ClientOptions::pool_idle_timeout`].
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Bytes requested from the socket per read.
 const READ_CHUNK: usize = 16 * 1024;
@@ -57,6 +59,9 @@ pub struct ClientOptions {
     /// Accept any TLS certificate. The connection is encrypted but not authenticated;
     /// use only for tests or known self-signed hosts.
     pub danger_accept_invalid_certs: bool,
+    /// How long an idle keep-alive connection stays in the pool before it is closed
+    /// instead of reused. Default 60 s.
+    pub pool_idle_timeout: Duration,
 }
 
 impl Default for ClientOptions {
@@ -69,17 +74,20 @@ impl Default for ClientOptions {
             user_agent: Some(concat!("dl-http/", env!("CARGO_PKG_VERSION")).to_owned()),
             max_redirects: 0,
             danger_accept_invalid_certs: false,
+            pool_idle_timeout: IDLE_TIMEOUT,
         }
     }
 }
 
 /// A blocking HTTP/1.1 client.
 ///
-/// Keeps up to 4 idle keep-alive connections per destination for 60 s. A `Client` is
+/// Keeps up to 4 idle keep-alive connections per destination for
+/// [`ClientOptions::pool_idle_timeout`] (60 s by default). A `Client` is
 /// `Send + Sync`; share one (by reference or `Arc`) instead of creating one per request.
 pub struct Client {
     options: ClientOptions,
     pool: Mutex<HashMap<PoolKey, Vec<Conn>>>,
+    opened: AtomicU64,
 }
 
 impl Default for Client {
@@ -122,13 +130,13 @@ struct Progress {
     response_started: bool,
 }
 
-enum Transport {
+pub(crate) enum Transport {
     Plain(TcpStream),
     Tls(Box<dl_tls::TlsStream<TcpStream>>),
 }
 
 impl Transport {
-    fn tcp(&self) -> &TcpStream {
+    pub(crate) fn tcp(&self) -> &TcpStream {
         match self {
             Transport::Plain(s) => s,
             Transport::Tls(t) => t.get_ref(),
@@ -493,12 +501,19 @@ impl Client {
         Client {
             options,
             pool: Mutex::new(HashMap::new()),
+            opened: AtomicU64::new(0),
         }
     }
 
     /// The options in use.
     pub fn options(&self) -> &ClientOptions {
         &self.options
+    }
+
+    /// Connections this client opened (TCP, plus TLS for `https`) since it was created;
+    /// a request on a pooled connection does not count.
+    pub fn connections_opened(&self) -> u64 {
+        self.opened.load(Ordering::Relaxed)
     }
 
     /// Sends a `GET` request.
@@ -653,7 +668,8 @@ impl Client {
             drop(watch);
             let cancelled = cancel.is_some_and(Cancel::is_cancelled);
             match result {
-                Ok((response, reusable)) => {
+                Ok((mut response, reusable)) => {
+                    response.reused = reused;
                     if reusable && !cancelled {
                         self.checkin(route.key.clone(), conn);
                     }
@@ -777,6 +793,7 @@ impl Client {
             None => (target.host(), target.port()),
         };
         let tcp = connect_tcp(host, port, self.options.connect_timeout, deadline)?;
+        self.opened.fetch_add(1, Ordering::Relaxed);
         let _ = tcp.set_nodelay(true);
         let mut conn = Conn::new(Transport::Plain(tcp));
         if target.scheme() == Scheme::Http {
@@ -843,7 +860,7 @@ impl Client {
         let list = pool.get_mut(key)?;
         let mut found = None;
         while let Some(conn) = list.pop() {
-            if conn.idle_since.elapsed() < IDLE_TIMEOUT && conn.is_alive() {
+            if conn.idle_since.elapsed() < self.options.pool_idle_timeout && conn.is_alive() {
                 found = Some(conn);
                 break;
             }
@@ -856,9 +873,10 @@ impl Client {
 
     fn checkin(&self, key: PoolKey, mut conn: Conn) {
         conn.idle_since = Instant::now();
+        let idle = self.options.pool_idle_timeout;
         let mut pool = self.lock_pool();
         pool.retain(|_, list| {
-            list.retain(|c| c.idle_since.elapsed() < IDLE_TIMEOUT);
+            list.retain(|c| c.idle_since.elapsed() < idle);
             !list.is_empty()
         });
         let list = pool.entry(key).or_default();
@@ -913,118 +931,7 @@ impl Client {
         tcp.set_read_timeout(None).map_err(Error::Io)?;
         tcp.set_write_timeout(None).map_err(Error::Io)?;
         let Conn { io, buf, .. } = conn;
-        Ok((response, Some(Upgraded { io, buf, pos: 0 })))
-    }
-}
-
-/// A connection after `101 Switching Protocols`, returned by [`Client::upgrade`].
-///
-/// Reads first return any bytes the server sent right after the response head, then
-/// read from the socket (through TLS for `https`). It is `Send`; use one thread at a
-/// time, and [`Upgraded::shutdown_handle`] to unblock a reader from another thread.
-pub struct Upgraded {
-    io: Transport,
-    buf: Vec<u8>,
-    pos: usize,
-}
-
-impl Upgraded {
-    /// Sets the socket read timeout (`None` blocks). A read that times out fails with
-    /// [`io::ErrorKind::WouldBlock`] or [`io::ErrorKind::TimedOut`] and loses no data:
-    /// partial TLS records stay buffered for the next read.
-    ///
-    /// # Errors
-    /// The OS error, e.g. for a zero duration.
-    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.io.tcp().set_read_timeout(timeout)
-    }
-
-    /// Sets the socket write timeout (`None` blocks).
-    ///
-    /// # Errors
-    /// The OS error, e.g. for a zero duration.
-    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.io.tcp().set_write_timeout(timeout)
-    }
-
-    /// Whether the connection runs over TLS.
-    pub fn is_tls(&self) -> bool {
-        matches!(self.io, Transport::Tls(_))
-    }
-
-    /// A handle that closes the socket from another thread; a blocked read then returns.
-    ///
-    /// # Errors
-    /// The OS error from duplicating the socket handle.
-    pub fn shutdown_handle(&self) -> io::Result<ShutdownHandle> {
-        self.io.tcp().try_clone().map(ShutdownHandle)
-    }
-
-    /// Sends TLS close_notify (for `https`) and shuts the socket down in both directions.
-    ///
-    /// # Errors
-    /// The OS error; a peer that already closed is not an error.
-    pub fn shutdown(&mut self) -> io::Result<()> {
-        if let Transport::Tls(t) = &mut self.io {
-            let _ = t.shutdown();
-        }
-        match self.io.tcp().shutdown(std::net::Shutdown::Both) {
-            Err(e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
-            r => r,
-        }
-    }
-}
-
-impl Read for Upgraded {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if self.pos < self.buf.len() {
-            let n = out.len().min(self.buf.len() - self.pos);
-            out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
-            self.pos += n;
-            if self.pos == self.buf.len() {
-                self.buf = Vec::new();
-                self.pos = 0;
-            }
-            return Ok(n);
-        }
-        self.io.read(out)
-    }
-}
-
-impl Write for Upgraded {
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.io.write(data)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.io.flush()
-    }
-}
-
-impl fmt::Debug for Upgraded {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Upgraded")
-            .field("tls", &self.is_tls())
-            .field("buffered", &(self.buf.len() - self.pos))
-            .finish_non_exhaustive()
-    }
-}
-
-/// Closes an [`Upgraded`] connection's socket from another thread.
-#[derive(Debug)]
-pub struct ShutdownHandle(TcpStream);
-
-impl ShutdownHandle {
-    /// Shuts the socket down in both directions. Blocked reads and writes on the
-    /// connection return; later ones fail.
-    ///
-    /// # Errors
-    /// The OS error; a socket that is already closed is not an error.
-    pub fn shutdown(&self) -> io::Result<()> {
-        match self.0.shutdown(std::net::Shutdown::Both) {
-            Err(e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
-            r => r,
-        }
+        Ok((response, Some(Upgraded::new(io, buf))))
     }
 }
 

@@ -223,6 +223,7 @@ mod tests {
         SyncResponse {
             status: 200,
             body: json.as_bytes().to_vec(),
+            reused: false,
         }
     }
 

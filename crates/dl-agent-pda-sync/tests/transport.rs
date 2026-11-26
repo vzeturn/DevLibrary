@@ -325,3 +325,69 @@ fn a_cancelled_context_stops_before_sending() {
     ));
     assert!(server.with(|s| s.requests.is_empty()));
 }
+
+/// RT-1318: two sequential cloud calls share one TCP connection (no second handshake), the
+/// second response says so, and the pool keeps idle connections for 90 s.
+#[test]
+fn sequential_cloud_calls_reuse_one_connection() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counted = accepted.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            counted.fetch_add(1, Ordering::SeqCst);
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut out = stream;
+                loop {
+                    let mut length = 0usize;
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                            length = v.trim().parse().unwrap();
+                        }
+                        if line == "\r\n" {
+                            break;
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    reader.read_exact(&mut body).unwrap();
+                    let reply = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}";
+                    if out.write_all(reply).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    let env = TestEnv::new();
+    let (key, _) = AgentKey::load_or_create(env.secrets.as_ref()).unwrap();
+    let http = env.http_for(&base, Arc::new(key));
+    let ctx = Ctx::background();
+    let first = http
+        .post_json(&ctx, "/sync/v1/batches", "{}", None)
+        .unwrap();
+    let second = http
+        .post_json(&ctx, "/sync/v1/batches", "{}", None)
+        .unwrap();
+    assert!(first.is_success() && second.is_success());
+    assert!(!first.reused && second.reused);
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        1,
+        "one connection for both calls"
+    );
+    assert_eq!(http.connections_opened(), 1);
+    assert_eq!(
+        dl_agent_pda_sync::transport::http::client_options(Duration::from_secs(5))
+            .pool_idle_timeout,
+        Duration::from_secs(90)
+    );
+}

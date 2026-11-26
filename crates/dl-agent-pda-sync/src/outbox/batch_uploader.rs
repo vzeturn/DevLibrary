@@ -296,7 +296,7 @@ impl BatchUploader {
         )?;
         if resp.is_success() {
             if item.stream == sync_streams::OPEN {
-                self.log_open_timing(item, sending.elapsed())?;
+                self.log_open_timing(item, sending.elapsed(), resp.reused)?;
             }
             self.outbox.ack(item.id)?;
             self.parent_arrived(&item.stream);
@@ -324,8 +324,14 @@ impl BatchUploader {
     }
 
     /// RT-1309: how long a live open-check batch waited in the outbox and how long its POST
-    /// took, so a site's end-to-end latency can be read from its log.
-    fn log_open_timing(&self, item: &OutboxItem, post: Duration) -> Result<(), UploadError> {
+    /// took, so a site's end-to-end latency can be read from its log; RT-1318: and whether
+    /// the POST reused a warm connection or paid a new TCP+TLS handshake.
+    fn log_open_timing(
+        &self,
+        item: &OutboxItem,
+        post: Duration,
+        reused: bool,
+    ) -> Result<(), UploadError> {
         let queued_ms = self
             .outbox
             .created_utc(item.id)?
@@ -334,13 +340,14 @@ impl BatchUploader {
                 DateTimeOffset::now_utc().unix_millis() - t.unix_millis()
             });
         self.log.info(
-            "Batch {Stream}#{Seq} of {Table} applied {QueuedMs} ms after it was queued (POST {PostMs} ms)",
+            "Batch {Stream}#{Seq} of {Table} applied {QueuedMs} ms after it was queued (POST {PostMs} ms, connection {Connection})",
             &[
                 Value::from(&item.stream),
                 Value::from(item.seq),
                 Value::from(table_of(&item.payload).unwrap_or_else(|| "?".to_owned())),
                 Value::from(queued_ms),
                 Value::from(i64::try_from(post.as_millis()).unwrap_or(i64::MAX)),
+                Value::from(if reused { "reused" } else { "new" }),
             ],
         );
         Ok(())
@@ -688,6 +695,7 @@ mod tests {
         SyncResponse {
             status,
             body: body.as_bytes().to_vec(),
+            reused: false,
         }
     }
 
