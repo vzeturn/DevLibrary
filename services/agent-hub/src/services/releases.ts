@@ -99,8 +99,26 @@ export interface PromoteAnswer {
   gate: GateStatus;
 }
 
+/**
+ * Targets whose stable artifact is not the one the canary soaked (url, sha256 and size). A
+ * stable manifest signed from another build of the same version fails every agent's integrity
+ * check (RT-1315), so it is refused even when the promotion is forced.
+ */
+export function artifactsDiffer(canary: Manifest, stable: Manifest): string[] {
+  const key = (a: Manifest['artifacts'][number]): string => `${a.url}|${a.sha256.toLowerCase()}|${a.size}`;
+  const soaked = new Map(canary.artifacts.map((a) => [a.target, key(a)]));
+  const differ = stable.artifacts.filter((a) => soaked.get(a.target) !== key(a)).map((a) => a.target);
+  const missing = canary.artifacts.filter((a) => !stable.artifacts.some((s) => s.target === a.target)).map((a) => a.target);
+  return [...differ, ...missing];
+}
+
 export async function promote(env: Env, product: string, version: string, req: PromoteRequest, now: number): Promise<PromoteAnswer> {
   const stable = checkManifest(req.manifest, product, version, 'stable');
+  const canaryRow = await getRelease(env.DB, product, version, 'canary');
+  if (canaryRow) {
+    const differ = artifactsDiffer(checkManifest(canaryRow.manifest, product, version, 'canary'), stable);
+    if (differ.length > 0) throw new HttpError(409, 'artifacts_differ_from_canary', { targets: differ });
+  }
   const gate = await gateStatus(env, product, version, now);
   const forced = !gate.pass;
   if (forced) {
