@@ -80,6 +80,11 @@ impl Fx {
         assert_eq!(r, EnqueueResult::Queued);
     }
 
+    fn parallel(mut self, streams: usize) -> Fx {
+        self.uploader = self.uploader.with_parallel_streams(streams);
+        self
+    }
+
     fn cycle(&mut self, max: i32) -> UploadCycleResult {
         self.uploader.run_cycle(max, &Ctx::background()).unwrap()
     }
@@ -171,4 +176,41 @@ fn a_deep_outbox_is_reported_with_its_streams() {
         reports[0].property("Streams"),
         Some(&Value::from("ledger=75, masters=25"))
     );
+}
+
+/// RT-1318: several streams are posted side by side, each in seq order, and a stream parked
+/// by a 424 never has its next batch sent past the one that waits.
+#[test]
+fn parallel_streams_keep_each_stream_in_order_and_a_parked_stream_waits() {
+    let mut fx = Fx::new().parallel(4);
+    fx.cloud
+        .with(|c| c.parent_pending.insert("Trn".into(), "Invoice".into()));
+    for _ in 0..4 {
+        for stream in [sync_streams::OPEN, "ledger", "masters", "Trn"] {
+            fx.enqueue(stream);
+        }
+    }
+
+    assert_eq!(fx.cycle(16), UploadCycleResult::Progress);
+
+    let (seqs, rejections, parent_answers) = fx.cloud.with(|c| {
+        let mut seqs: std::collections::HashMap<String, Vec<i64>> = Default::default();
+        for b in &c.applied {
+            seqs.entry(b.stream.clone()).or_default().push(b.seq);
+        }
+        (seqs, c.rejections.clone(), c.parent_pending_answers)
+    });
+    for stream in [sync_streams::OPEN, "ledger", "masters"] {
+        assert_eq!(seqs[stream], [1, 2, 3, 4], "stream {stream} in seq order");
+    }
+    assert!(!seqs.contains_key("Trn"));
+    assert_eq!(
+        parent_answers, 1,
+        "only Trn#1 was sent; Trn#2.. wait behind it"
+    );
+    assert!(
+        rejections.is_empty(),
+        "no seq gap was ever sent: {rejections:?}"
+    );
+    assert_eq!(fx.outbox.depth().unwrap(), 4);
 }

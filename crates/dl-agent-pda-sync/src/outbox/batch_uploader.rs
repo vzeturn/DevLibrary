@@ -32,6 +32,8 @@ use crate::transport::retry::is_transient;
 use crate::transport::{SyncHttpClient, SyncResponse, TokenProvider};
 use crate::util::ctx::Ctx;
 
+mod drain;
+
 /// `MM.PdaOrder.SyncAgent.Outbox.BatchUploader`: the log category.
 pub const BATCH_CATEGORY: &str = "MM.PdaOrder.SyncAgent.Outbox.BatchUploader";
 
@@ -183,6 +185,7 @@ pub struct BatchUploader {
     clock: SharedClock,
     parents: ParentPendingTracker,
     backlog: BacklogReporter,
+    parallel: usize,
 }
 
 impl std::fmt::Debug for BatchUploader {
@@ -214,7 +217,16 @@ impl BatchUploader {
             clock: clock.unwrap_or_else(SystemClock::shared),
             parents: ParentPendingTracker::new(escalate),
             backlog: BacklogReporter::default(),
+            parallel: 1,
         }
+    }
+
+    /// The uploader posting the next batch of up to `streams` (at least 1) streams at the
+    /// same time (RT-1318); one stream's batches still go one after the other, in seq order.
+    #[must_use]
+    pub fn with_parallel_streams(mut self, streams: usize) -> BatchUploader {
+        self.parallel = streams.max(1);
+        self
     }
 
     fn now(&self) -> DateTimeOffset {
@@ -237,66 +249,33 @@ impl BatchUploader {
         Ok(result)
     }
 
-    fn drain(
-        &mut self,
-        max_batches: i32,
-        skip: &mut Vec<String>,
+    /// Posts one batch; the answer is read by [`Self::answer`]. Takes `&self` so the
+    /// batches of different streams can be posted side by side (RT-1318).
+    fn post(
+        &self,
+        item: &OutboxItem,
+        bearer: &str,
         ctx: &Ctx,
-    ) -> Result<UploadCycleResult, UploadError> {
-        let mut progressed = false;
-        loop {
-            let items = self
-                .outbox
-                .peek_live_first(max_batches, skip, &[sync_streams::OPEN])?;
-            let mut newly_parked = false;
-            for item in &items {
-                // A parked stream keeps its order: none of its later batches goes before the one that waits.
-                if skip.contains(&item.stream) {
-                    continue;
-                }
-                match self.upload_one(item, ctx)? {
-                    Outcome::Retry => {
-                        return Ok(if progressed {
-                            UploadCycleResult::Progress
-                        } else {
-                            UploadCycleResult::Blocked
-                        });
-                    }
-                    // Renumbered: the rest of this peek carries stale seqs; the next cycle peeks again.
-                    Outcome::Repeek => return Ok(UploadCycleResult::Progress),
-                    Outcome::Parked => {
-                        skip.push(item.stream.clone());
-                        newly_parked = true;
-                    }
-                    Outcome::Done => progressed = true,
-                }
-            }
-            // Progress: the loop calls again at once. Every stream skipped grows `skip`, so
-            // the re-peek ends; with only parked streams left the loop idles, not backs off.
-            if progressed || !newly_parked {
-                return Ok(if progressed {
-                    UploadCycleResult::Progress
-                } else {
-                    UploadCycleResult::Idle
-                });
-            }
-        }
-    }
-
-    fn upload_one(&mut self, item: &OutboxItem, ctx: &Ctx) -> Result<Outcome, UploadError> {
-        let bearer = self.tokens.get_access_token(ctx)?;
+    ) -> Result<(SyncResponse, Duration), UploadError> {
         self.outbox.mark_attempt(item.id)?;
         let sending = std::time::Instant::now();
-        let resp = self.http.send(
-            ctx,
-            Method::Post,
-            BATCHES_PATH,
-            &item.payload,
-            Some(&bearer),
-        )?;
+        let resp = self
+            .http
+            .send(ctx, Method::Post, BATCHES_PATH, &item.payload, Some(bearer))?;
+        Ok((resp, sending.elapsed()))
+    }
+
+    /// What the cloud's answer to `item` means for its stream.
+    fn answer(
+        &mut self,
+        item: &OutboxItem,
+        resp: &SyncResponse,
+        took: Duration,
+        ctx: &Ctx,
+    ) -> Result<Outcome, UploadError> {
         if resp.is_success() {
             if item.stream == sync_streams::OPEN {
-                self.log_open_timing(item, sending.elapsed(), resp.reused)?;
+                self.log_open_timing(item, took, resp.reused)?;
             }
             self.outbox.ack(item.id)?;
             self.parent_arrived(&item.stream);
@@ -307,7 +286,7 @@ impl BatchUploader {
                 self.tokens.invalidate();
                 Ok(Outcome::Retry)
             }
-            409 => self.handle_seq_conflict(item, &resp),
+            409 => self.handle_seq_conflict(item, resp),
             403 => {
                 self.log.error(
                     "Cloud forbids batch uploads for this agent (HTTP 403); backing off",
@@ -315,11 +294,11 @@ impl BatchUploader {
                 );
                 Ok(Outcome::Retry)
             }
-            424 => match parent_stream_of(&resp) {
+            424 => match parent_stream_of(resp) {
                 Some(parent) => self.park(item, &parent, ctx),
-                None => self.refused(item, &resp),
+                None => self.refused(item, resp),
             },
-            _ => self.refused(item, &resp),
+            _ => self.refused(item, resp),
         }
     }
 

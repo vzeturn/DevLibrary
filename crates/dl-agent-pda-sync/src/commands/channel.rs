@@ -8,7 +8,7 @@
 //! unexecuted, and each result carries how long the store took (ADR 0100).
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use dl_json::Value as Json;
@@ -16,6 +16,7 @@ use dl_uuid::Uuid;
 
 use super::error::CommandError;
 use super::executor::{CommandExecutor, utc_now};
+use super::keyed_pool::{self, KeyedQueue};
 use super::result_outbox::{HttpResultPoster, ResultOutbox, ResultPoster, parse_result_ack};
 use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentOptions, codes};
@@ -44,6 +45,8 @@ pub const KEEP_ALIVE: Duration = Duration::from_secs(20);
 pub const STABLE_LINK: Duration = Duration::from_secs(5);
 /// How often a blocked WebSocket read wakes up to check for a stop.
 const READ_POLL: Duration = Duration::from_secs(1);
+/// The read wake-up while commands run, so their results go out within a few ms.
+const BUSY_READ_POLL: Duration = Duration::from_millis(5);
 
 /// Failures in a row after one more failed attempt (`NextFailureCount`). A link that
 /// came up and later dropped starts a fresh count, so only consecutive failures to connect
@@ -295,17 +298,67 @@ impl CommandChannel {
             .post_beside(ctx, || self.serve_socket(&mut ws, ctx))
     }
 
-    /// Reads commands from the socket and answers each at once over it.
-    fn serve_socket<S: std::io::Read + std::io::Write>(
+    /// Reads commands from the socket and runs them on the keyed worker pool (RT-1318):
+    /// commands of different aggregates run side by side, one aggregate's commands in the
+    /// order they arrived. Each result is written to the socket as soon as it is ready
+    /// (out of order across aggregates; every frame carries its command id).
+    fn serve_socket(
         &self,
-        ws: &mut dl_ws::WebSocket<S>,
+        ws: &mut dl_ws::WebSocket<dl_http::Upgraded>,
+        ctx: &Ctx,
+    ) -> Result<(), ChannelError> {
+        let workers = usize::try_from(self.parts.options.command_workers).unwrap_or(1);
+        let (answers, finished) = mpsc::channel::<Option<SyncCommandResult>>();
+        keyed_pool::run(
+            workers,
+            |command: SyncCommand| {
+                let answer = self.handle(&command, ctx);
+                if let Some(result) = &answer {
+                    self.outbox.enqueue_for_socket(result);
+                }
+                // Fails only once the socket loop has ended: the result is then in the
+                // outbox, whose forced flush posts it before the link reconnects.
+                let _ = answers.send(answer);
+            },
+            |queue| self.socket_loop(ws, queue, &finished, ctx),
+        )
+    }
+
+    fn socket_loop(
+        &self,
+        ws: &mut dl_ws::WebSocket<dl_http::Upgraded>,
+        queue: &KeyedQueue<SyncCommand>,
+        finished: &mpsc::Receiver<Option<SyncCommandResult>>,
         ctx: &Ctx,
     ) -> Result<(), ChannelError> {
         let mut last_sent = Instant::now();
+        let mut read_poll = READ_POLL;
         loop {
             if ctx.is_done() {
                 let _ = ws.close(Some(dl_ws::CloseFrame::normal()));
                 return Err(ChannelError::Cancelled);
+            }
+            // In flight is read before the answers are drained: a worker sends its answer
+            // before it leaves the pool, so with nothing in flight now every answer is
+            // drained below and the next read may block for a full poll.
+            let poll = if queue.in_flight() > 0 {
+                BUSY_READ_POLL
+            } else {
+                READ_POLL
+            };
+            // Fast path over the socket (RT-1318): the HTTP post beside this loop waits for
+            // the cloud's confirmation and goes out only without it. A failed write leaves
+            // the result in the outbox: `run` posts it before reconnecting.
+            while let Ok(answer) = finished.try_recv() {
+                let Some(result) = answer else {
+                    return Err(ChannelError::Cancelled);
+                };
+                ws.send_text(&result.to_json())?;
+                last_sent = Instant::now();
+            }
+            if poll != read_poll {
+                ws.set_read_timeout(Some(poll))?;
+                read_poll = poll;
             }
             let text = match ws.read() {
                 Ok(dl_ws::Message::Text(t)) => t,
@@ -338,15 +391,7 @@ impl CommandChannel {
                 }
                 continue;
             };
-            let Some(result) = self.handle(&command, ctx) else {
-                return Err(ChannelError::Cancelled);
-            };
-            self.outbox.enqueue_for_socket(&result);
-            // Fast path over the socket (RT-1318): the HTTP post beside this loop waits for the
-            // cloud's confirmation and goes out only without it. A failed write leaves the
-            // result due at once: `run` posts it before reconnecting.
-            ws.send_text(&result.to_json())?;
-            last_sent = Instant::now();
+            queue.submit(&command.aggregate_key.clone(), command);
         }
     }
 

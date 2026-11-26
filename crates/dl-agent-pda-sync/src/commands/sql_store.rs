@@ -3,6 +3,7 @@
 //! [`super::sql_text`] and [`super::batches`]; all SQL is parameterized.
 
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use dl_tds::{Client, Param};
 use dl_uuid::Uuid;
@@ -23,11 +24,21 @@ use crate::util::ctx::Ctx;
 /// Builds the connection settings of each command (`Func<string> connectionString`).
 pub type ConfigSource = Arc<dyn Fn() -> Result<dl_tds::Config> + Send + Sync>;
 
-/// The SQL Server command store. One idle connection is kept for the next command, as
-/// SqlClient's pool would.
+/// SQL Server's deadlock victim (1205) and lock request time-out (1222): SMILE's own
+/// writers hold the check rows, so a command that meets them is run again (RT-1318).
+const BUSY: [i32; 2] = [1205, 1222];
+/// Runs of a command that meets a busy store, the first included.
+const BUSY_ATTEMPTS: u32 = 3;
+/// The wait before the next run, times the runs so far.
+const BUSY_BACKOFF: Duration = Duration::from_millis(100);
+
+/// The SQL Server command store. Idle connections are kept for the next commands, as
+/// SqlClient's pool would: up to one per command worker (RT-1318), so commands running
+/// side by side never open more connections than there are workers.
 pub struct SqlSiteCommandStore {
     config: ConfigSource,
-    idle: Mutex<Option<Client>>,
+    idle: Mutex<Vec<Client>>,
+    max_idle: usize,
 }
 
 impl SqlSiteCommandStore {
@@ -35,22 +46,31 @@ impl SqlSiteCommandStore {
     pub fn new(config: ConfigSource) -> SqlSiteCommandStore {
         SqlSiteCommandStore {
             config,
-            idle: Mutex::new(None),
+            idle: Mutex::new(Vec::new()),
+            max_idle: 1,
         }
+    }
+
+    /// The store keeping up to `max_idle` (at least 1) idle connections.
+    #[must_use]
+    pub fn with_max_idle(mut self, max_idle: usize) -> SqlSiteCommandStore {
+        self.max_idle = max_idle.max(1);
+        self
     }
 
     fn open(&self, ctx: &Ctx) -> Result<Client> {
         check_ctx(ctx)?;
-        let pooled = self
-            .idle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        if let Some(c) = pooled
-            && !c.is_broken()
-            && !c.in_transaction()
-        {
-            return Ok(c);
+        loop {
+            let pooled = self
+                .idle
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop();
+            match pooled {
+                Some(c) if !c.is_broken() && !c.in_transaction() => return Ok(c),
+                Some(_) => continue,
+                None => break,
+            }
         }
         let cfg = (self.config)()?;
         let mut c = Client::connect(&cfg)?;
@@ -60,7 +80,10 @@ impl SqlSiteCommandStore {
 
     fn release(&self, c: Client) {
         if !c.is_broken() && !c.in_transaction() {
-            *self.idle.lock().unwrap_or_else(PoisonError::into_inner) = Some(c);
+            let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
+            if idle.len() < self.max_idle {
+                idle.push(c);
+            }
         }
     }
 
@@ -160,15 +183,25 @@ impl SiteCommandStore for SqlSiteCommandStore {
         work: CommandWork<'_>,
         ctx: &Ctx,
     ) -> Result<SyncCommandResult> {
-        let mut c = self.open(ctx)?;
-        let r = Self::run_in(&mut c, command_id, work, ctx);
-        // An error leaves neither the business write nor the log row: roll back what is
-        // still open; a connection that cannot is dropped.
-        if r.is_err() && (c.is_broken() || sql::rollback(&mut c).is_err()) {
-            return r;
+        let mut runs = 1;
+        loop {
+            let mut c = self.open(ctx)?;
+            let r = Self::run_in(&mut c, command_id, work, ctx);
+            // An error leaves neither the business write nor the log row: roll back what is
+            // still open; a connection that cannot is dropped.
+            if r.is_ok() || !(c.is_broken() || sql::rollback(&mut c).is_err()) {
+                self.release(c);
+            }
+            // A busy store committed nothing, and the log row read first makes a second
+            // run of a command that did commit return its logged result.
+            let busy = matches!(&r, Err(e) if e.sql_number().is_some_and(|n| BUSY.contains(&n)));
+            if !busy || runs >= BUSY_ATTEMPTS {
+                return r;
+            }
+            std::thread::sleep(BUSY_BACKOFF * runs);
+            check_ctx(ctx)?;
+            runs += 1;
         }
-        self.release(c);
-        r
     }
 }
 

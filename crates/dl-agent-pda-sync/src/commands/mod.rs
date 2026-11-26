@@ -22,6 +22,7 @@ pub mod fo_inhouse;
 pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
+pub mod keyed_pool;
 mod resnapshot;
 pub mod result_outbox;
 mod schema_guard;

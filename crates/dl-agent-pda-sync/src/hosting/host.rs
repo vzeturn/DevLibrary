@@ -776,7 +776,8 @@ pub fn build_host(
             &services.log,
             Some(services.clock.clone()),
             Some(o.parent_pending_escalate_minutes),
-        ),
+        )
+        .with_parallel_streams(usize::try_from(o.upload_parallel_streams).unwrap_or(1)),
         batches_per_cycle: o.upload_batches_per_cycle,
         retry: services.retry.clone(),
         wake: capture.as_ref().and_then(|c| c.upload_wake.clone()),

@@ -82,7 +82,9 @@ pub fn build(
         s.clock.clone(),
         log,
     ));
-    let store = Arc::new(SqlSiteCommandStore::new(config));
+    // One idle store connection per command worker (RT-1318).
+    let workers = usize::try_from(s.options.command_workers).unwrap_or(1);
+    let store = Arc::new(SqlSiteCommandStore::new(config).with_max_idle(workers));
 
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
     let resnapshot = Arc::new(ResnapshotCommandHandler::new(

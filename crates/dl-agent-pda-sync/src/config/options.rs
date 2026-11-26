@@ -74,6 +74,12 @@ pub struct AgentOptions {
     pub upload_backlog_alert_batches: i32,
     /// Websocket failures before the command channel falls back to long-poll (3).
     pub web_socket_failures_before_poll: i32,
+    /// Commands of different aggregates run side by side on at most this many workers, each
+    /// with its own store connection; one aggregate's commands stay serial (8, RT-1318).
+    pub command_workers: i32,
+    /// Streams whose next batch is posted at the same time; one stream stays in seq order
+    /// (4, RT-1318).
+    pub upload_parallel_streams: i32,
     /// Self-update (ADR 0097). Default on.
     pub auto_update: bool,
     /// Minutes between self-update checks (45).
@@ -96,6 +102,8 @@ impl Default for AgentOptions {
             upload_blobs_per_cycle: 4,
             upload_backlog_alert_batches: 500,
             web_socket_failures_before_poll: 3,
+            command_workers: 8,
+            upload_parallel_streams: 4,
             auto_update: true,
             auto_update_check_minutes: 45,
             print_relay: PrintRelayOptions::default(),
@@ -256,6 +264,11 @@ impl AgentOptions {
         b.int(
             &format!("{s}:WebSocketFailuresBeforePoll"),
             &mut o.web_socket_failures_before_poll,
+        )?;
+        b.int(&format!("{s}:CommandWorkers"), &mut o.command_workers)?;
+        b.int(
+            &format!("{s}:UploadParallelStreams"),
+            &mut o.upload_parallel_streams,
         )?;
         b.bool(&format!("{s}:AutoUpdate"), &mut o.auto_update)?;
         b.int(
@@ -611,6 +624,7 @@ mod tests {
             "--Agent:DataDir",
             "D:\\x",
             "/Agent:WebSocketFailuresBeforePoll=7",
+            "--Agent:CommandWorkers=3",
             "--agent:HEARTBEATSECONDS=30",
             "--Agent:AutoUpdateCheckMinutes",
         ];
@@ -628,6 +642,8 @@ mod tests {
         assert_eq!(o.blob_queue_cap_bytes, 1000);
         assert_eq!(o.upload_blobs_per_cycle, 7);
         assert_eq!(o.web_socket_failures_before_poll, 7);
+        assert_eq!(o.command_workers, 3);
+        assert_eq!(o.upload_parallel_streams, 4);
         assert!(!o.auto_update);
         assert_eq!(o.auto_update_check_minutes, 45);
         assert!(!o.print_relay.enabled);

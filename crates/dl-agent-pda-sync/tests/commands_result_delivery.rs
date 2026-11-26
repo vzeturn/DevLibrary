@@ -3,11 +3,12 @@
 //! reconnect, and a redelivered command is answered again with the same stored result
 //! without running twice.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use dl_agent_pda_sync::commands::keyed_pool;
 use dl_agent_pda_sync::commands::result_outbox::{
     PostOutcome, ResultOutbox, ResultPoster, SOCKET_CONFIRM_WAIT, classify, parse_result_ack,
 };
@@ -51,11 +52,21 @@ impl SecretStore for MemorySecrets {
 
 struct CountingExecutor {
     runs: AtomicUsize,
+    /// The simulated store round trip of each command.
+    sql: Duration,
+    /// Aggregates with a command running now: one aggregate never runs two at once.
+    running: Mutex<HashSet<String>>,
 }
 
 impl CommandExecutor for CountingExecutor {
     fn execute(&self, c: &SyncCommand, _ctx: &Ctx) -> CommandResult<SyncCommandResult> {
         self.runs.fetch_add(1, Ordering::SeqCst);
+        if !self.sql.is_zero() {
+            let first = self.running.lock().unwrap().insert(c.aggregate_key.clone());
+            assert!(first, "two commands of {} ran at once", c.aggregate_key);
+            std::thread::sleep(self.sql);
+            self.running.lock().unwrap().remove(&c.aggregate_key);
+        }
         Ok(SyncCommandResult {
             command_id: c.command_id,
             status: CommandStatus::Applied,
@@ -163,8 +174,14 @@ fn command() -> SyncCommand {
 }
 
 fn exec() -> Arc<CountingExecutor> {
+    slow_exec(Duration::ZERO)
+}
+
+fn slow_exec(sql: Duration) -> Arc<CountingExecutor> {
     Arc::new(CountingExecutor {
         runs: AtomicUsize::new(0),
+        sql,
+        running: Mutex::default(),
     })
 }
 
@@ -312,13 +329,7 @@ fn results_are_posted_beside_the_socket_loop_not_inline() {
     let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none());
     let ctx = Ctx::background();
     let results: Vec<SyncCommandResult> = (0..3)
-        .map(|_| {
-            CountingExecutor {
-                runs: AtomicUsize::new(0),
-            }
-            .execute(&command(), &ctx)
-            .unwrap()
-        })
+        .map(|_| exec().execute(&command(), &ctx).unwrap())
         .collect();
 
     let answered_in = outbox.post_beside(&ctx, || {
@@ -395,4 +406,73 @@ fn a_cloud_confirmation_frame_settles_the_result_without_a_post() {
     assert!(poster.posted().is_empty());
     assert_eq!(parse_result_ack(r#"{"command_id":"x"}"#), None);
     assert_eq!(parse_result_ack(r#"{"result_ack":"not-a-uuid"}"#), None);
+}
+
+// ---- (e) RT-1318 benchmark: commands of different checks run side by side
+
+/// Throughput (commands/s) and p95 latency (cloud send to result back at the cloud) of 200
+/// commands over 40 checks, offered at 200/s over a link of `LINK` each way, each command
+/// taking `SQL` at the store, through the channel's `handle` on the keyed worker pool.
+/// `workers = 1` is the serial socket loop before RT-1318.
+fn simulate(workers: usize) -> (f64, Duration) {
+    const COMMANDS: usize = 200;
+    const CHECKS: usize = 40;
+    const LINK: Duration = Duration::from_millis(30);
+    const SQL: Duration = Duration::from_millis(30);
+    const EVERY: Duration = Duration::from_millis(5);
+    let exec = slow_exec(SQL);
+    let ch = channel(exec.clone(), ScriptedPoster::with(vec![]));
+    let ctx = Ctx::background();
+    let done = Mutex::new(vec![None; COMMANDS]);
+    let start = Instant::now();
+    keyed_pool::run(
+        workers,
+        |(i, cmd): (usize, SyncCommand)| {
+            let r = ch.handle(&cmd, &ctx).expect("not cancelled");
+            assert_eq!(r.status, CommandStatus::Applied);
+            done.lock().unwrap()[i] = Some(Instant::now());
+        },
+        |queue| {
+            for i in 0..COMMANDS {
+                let arrives = start + EVERY * u32::try_from(i).unwrap() + LINK;
+                std::thread::sleep(arrives.saturating_duration_since(Instant::now()));
+                let mut cmd = command();
+                cmd.aggregate_key = format!("check:1:{}", i % CHECKS);
+                queue.submit(&cmd.aggregate_key.clone(), (i, cmd));
+            }
+        },
+    );
+    let done = done.into_inner().unwrap();
+    let mut latencies: Vec<Duration> = (0..COMMANDS)
+        .map(|i| {
+            let sent = start + EVERY * u32::try_from(i).unwrap();
+            done[i].expect("every command answered") + LINK - sent
+        })
+        .collect();
+    latencies.sort();
+    let last = done.iter().flatten().max().copied().unwrap() + LINK;
+    let throughput = COMMANDS as f64 / (last - start).as_secs_f64();
+    assert_eq!(exec.runs.load(Ordering::SeqCst), COMMANDS);
+    (throughput, latencies[COMMANDS * 95 / 100])
+}
+
+#[test]
+#[ignore = "benchmark (~8 s): cargo test --test commands_result_delivery -- --ignored --nocapture"]
+fn commands_of_different_checks_run_side_by_side() {
+    let (serial_rate, serial_p95) = simulate(1);
+    let (pool_rate, pool_p95) = simulate(AgentOptions::default().command_workers as usize);
+    println!(
+        "RT-1318 200 commands / 40 checks, 30 ms link, 30 ms SQL: \
+         before {serial_rate:.0}/s p95 {} ms; after {pool_rate:.0}/s p95 {} ms",
+        serial_p95.as_millis(),
+        pool_p95.as_millis()
+    );
+    assert!(
+        pool_rate > serial_rate * 3.0,
+        "throughput {pool_rate:.0} vs {serial_rate:.0}"
+    );
+    assert!(
+        pool_p95 * 5 < serial_p95,
+        "p95 {pool_p95:?} vs {serial_p95:?}"
+    );
 }
