@@ -8,6 +8,7 @@ use dl_tds::{Client, Param, ResultSet, Results, Row, Value};
 use super::error::{CommandError, Result, check_ctx};
 use crate::contracts::time::{DateTime, DateTimeOffset, TICKS_PER_SECOND, UNIX_EPOCH_TICKS};
 use crate::util::ctx::Ctx;
+use crate::util::store_text;
 
 /// `SqlCommand.CommandTimeout` of the command units.
 pub const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -126,10 +127,17 @@ pub fn to_decimal(v: &Value) -> Result<Decimal> {
     })
 }
 
-/// `r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), InvariantCulture)`.
+/// `r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), InvariantCulture)`, cleaned by
+/// [`value_text`].
 pub fn text(row: &Row, i: usize) -> Option<String> {
-    let v = value(row, i)?;
-    Some(match v {
+    value(row, i).map(value_text)
+}
+
+/// `Convert.ToString(value, InvariantCulture)` of a non-NULL store value, without NUL
+/// characters and trailing padding ([`store_text::clean`], RT-1309), so it can go into a
+/// command result the cloud stores in PostgreSQL.
+pub fn value_text(v: &Value) -> String {
+    store_text::clean(match v {
         Value::String(s) => s.clone(),
         Value::Decimal(d) => d.to_string(),
         Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
@@ -226,4 +234,18 @@ pub fn text_param(name: &str, value: Option<&str>) -> Param {
 pub fn money_param(name: &str, value: Decimal) -> Param {
     let v = value.rescale(4, RoundingMode::HalfUp).unwrap_or(value);
     Param::new(name, v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_text_drops_nul_characters_and_char_padding() {
+        // RT-1309: a name with NULs and a padded CHAR(n) code, as SMILE stores them.
+        assert_eq!(value_text(&Value::String("C\0\0\0".into())), "C");
+        assert_eq!(value_text(&Value::String("100001      ".into())), "100001");
+        assert_eq!(value_text(&Value::String(" T1 ".into())), " T1");
+        assert_eq!(value_text(&Value::Bool(true)), "True");
+    }
 }

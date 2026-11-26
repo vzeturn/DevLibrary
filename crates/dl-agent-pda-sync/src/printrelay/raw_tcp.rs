@@ -78,6 +78,10 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Drain timeout.
 pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// The hint on a connect failure: the target passed the policy, so the printer, its
+/// address or the route to it is what failed (RT-1309).
+const CHECK_PRINTER: &str = "check that the printer is on and that its address and port are right and reachable from this server";
+
 /// `SocketException.SocketErrorCode` names for the connect failures.
 fn socket_error_code(e: &std::io::Error) -> &'static str {
     match e.kind() {
@@ -115,7 +119,7 @@ impl RawPrinter for RawTcpPrinter {
             Err(e) if e.kind() == ErrorKind::TimedOut => {
                 return Err(PrintSendError::new(
                     format!(
-                        "printer {target} did not answer within {} s",
+                        "printer {target} did not answer within {} s; {CHECK_PRINTER}",
                         DIAL_TIMEOUT.as_secs()
                     ),
                     true,
@@ -123,10 +127,16 @@ impl RawPrinter for RawTcpPrinter {
                 .into());
             }
             Err(e) => {
+                let what = if e.kind() == ErrorKind::ConnectionRefused {
+                    "refused the connection"
+                } else {
+                    "could not be reached"
+                };
                 return Err(PrintSendError::new(
                     format!(
-                        "printer {target} refused the connection: {}",
-                        socket_error_code(&e)
+                        "printer {target} {what}: {} ({}); {CHECK_PRINTER}",
+                        socket_error_code(&e),
+                        os_message(&e)
                     ),
                     true,
                 )
@@ -212,7 +222,13 @@ mod tests {
         match RawTcpPrinter.print(addr, b"x", &Ctx::background()) {
             Err(PrintError::Send(e)) => {
                 assert!(e.not_sent && e.retryable(), "{e}");
-                assert!(e.message.starts_with(&format!("printer {addr} ")), "{e}");
+                assert!(
+                    e.message.starts_with(&format!(
+                        "printer {addr} refused the connection: ConnectionRefused ("
+                    )),
+                    "{e}"
+                );
+                assert!(e.message.ends_with(CHECK_PRINTER), "{e}");
             }
             other => panic!("{other:?}"),
         }

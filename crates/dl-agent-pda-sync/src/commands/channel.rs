@@ -266,7 +266,11 @@ impl CommandChannel {
                 Err(e) => return Err(e.into()),
             };
             let Ok(command) = SyncCommand::from_json(&text) else {
-                self.log.warn("Ignoring unparseable command frame", &[]);
+                // RT-1309: an unread command with an id still gets a terminal answer.
+                if let Some(result) = dl_json::parse(&text).ok().and_then(|v| self.unreadable(&v)) {
+                    ws.send_text(&result.to_json())?;
+                    last_sent = Instant::now();
+                }
                 continue;
             };
             let Some(result) = self.handle(&command, ctx) else {
@@ -296,6 +300,14 @@ impl CommandChannel {
         };
         for item in list {
             let Ok(command) = SyncCommand::from_value(&item) else {
+                if let Some(result) = self.unreadable(&item) {
+                    self.parts.http.post_json(
+                        ctx,
+                        RESULT_PATH,
+                        &result.to_json(),
+                        Some(&bearer),
+                    )?;
+                }
                 continue;
             };
             let Some(result) = self.handle(&command, ctx) else {
@@ -313,6 +325,38 @@ impl CommandChannel {
             }
         }
         Ok(())
+    }
+
+    /// The answer to a command this agent cannot read (RT-1309): rejected as
+    /// `invalid_payload` when its `command_id` can still be read, so the cloud gets a
+    /// terminal answer instead of letting the lease expire; `None` (logged) otherwise.
+    pub fn unreadable(&self, frame: &Json) -> Option<SyncCommandResult> {
+        let Some(id) = frame
+            .get("command_id")
+            .and_then(Json::as_str)
+            .and_then(|s| s.parse::<Uuid>().ok())
+        else {
+            self.log.warn(
+                "Ignoring a command frame without a readable command_id",
+                &[],
+            );
+            return None;
+        };
+        self.log.warn(
+            "Command {Id} could not be read by this agent; it is rejected",
+            &[Value::from(id)],
+        );
+        Some(SyncCommandResult {
+            command_id: id,
+            status: CommandStatus::Rejected,
+            reason: Some(format!(
+                "{}: the command could not be read by this agent",
+                super::executor::reasons::INVALID_PAYLOAD
+            )),
+            result: None,
+            at_utc: utc_now(&self.parts.clock),
+            exec_ms: None,
+        })
     }
 
     /// Decides one command (`HandleAsync`); `None` when `ctx` ended while it ran (the C#

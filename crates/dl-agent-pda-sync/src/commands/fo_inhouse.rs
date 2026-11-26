@@ -23,6 +23,7 @@ use crate::contracts::wire::{
 };
 use crate::reporting::{Logger, Value};
 use crate::util::ctx::Ctx;
+use crate::util::store_text;
 
 /// Category of the handler's log lines.
 pub const CATEGORY: &str = "MM.PdaOrder.SyncAgent.Commands.FoInHouseSearchCommandHandler";
@@ -276,12 +277,12 @@ impl FoInHouseSource for SqlFoInHouseSource {
         for row in r.rows() {
             guests.push(FoInHouseGuest {
                 room_no: match sql::value(row, 1) {
-                    Some(SqlValue::String(s)) => s.clone(),
+                    Some(SqlValue::String(s)) => store_text::clean(s.clone()),
                     _ => String::new(),
                 },
                 folio_num: sql::int64(row, 0)?,
                 guest_name: sql::bytes(row, 2)
-                    .map(dl_vn::tcvn3::decode_bytes)
+                    .map(|b| store_text::clean(dl_vn::tcvn3::decode_bytes(b)))
                     .unwrap_or_default(),
                 arrival_date: day(sql::value(row, 3)),
                 departure_date: day(sql::value(row, 4)),

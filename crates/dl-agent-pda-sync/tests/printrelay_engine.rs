@@ -199,7 +199,7 @@ impl Fixture {
             printer_subnets: vec![Some("192.168.1.0/24".into())],
             ..PrintRelayOptions::default()
         };
-        let policy = PrinterTargetPolicy::create(&options, [], None).unwrap();
+        let policy = PrinterTargetPolicy::create(&options, None).unwrap();
         let engine = PrintRelayEngine::new(
             PrintRelayEngineParts {
                 journal: self.journal(),

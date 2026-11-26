@@ -12,9 +12,13 @@ use std::time::Duration;
 use commands_support::{FakeStore, Throw, lock};
 use dl_agent_pda_sync::bootstrap::{OrderGrantsProbe, probes::CHECKED};
 use dl_agent_pda_sync::commands::channel::web_socket_url;
+use dl_agent_pda_sync::commands::grants::{
+    RECHECK_INTERVAL, SERVICE_ATTEMPTS, SERVICE_GAP, next_wait,
+};
 use dl_agent_pda_sync::commands::{
     CommandChannel, CommandChannelParts, CommandError, CommandExecutor, GrantsRepair,
-    OrderGrantsMonitor, Result as CommandResult, SiteCommandExecutor, next_failure_count,
+    OrderGrantsMonitor, RepairAttempt, RepairOutcome, Result as CommandResult, SiteCommandExecutor,
+    next_failure_count,
 };
 use dl_agent_pda_sync::config::{
     AgentIdentity, AgentOptions, AgentPaths, ManualClock, SharedClock, Timestamp, codes,
@@ -319,18 +323,37 @@ impl FakeProbe {
 }
 
 struct FakeRepair {
-    failure: Option<String>,
+    outcome: RepairOutcome,
     probe: Arc<FakeProbe>,
     calls: AtomicUsize,
 }
 
+impl FakeRepair {
+    /// A repair whose identities end as `outcomes` (`(identity, outcome)`).
+    fn new(probe: &Arc<FakeProbe>, outcomes: &[(&str, &str)]) -> Arc<FakeRepair> {
+        Arc::new(FakeRepair {
+            outcome: RepairOutcome {
+                attempts: outcomes
+                    .iter()
+                    .map(|(identity, outcome)| RepairAttempt {
+                        identity: (*identity).into(),
+                        outcome: (*outcome).into(),
+                    })
+                    .collect(),
+            },
+            probe: probe.clone(),
+            calls: AtomicUsize::new(0),
+        })
+    }
+}
+
 impl GrantsRepair for FakeRepair {
-    fn try_repair(&self, _ctx: &Ctx) -> Option<String> {
+    fn try_repair(&self, _ctx: &Ctx) -> RepairOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        if self.failure.is_none() {
+        if self.outcome.applied_by().is_some() {
             self.probe.set(&[]);
         }
-        self.failure.clone()
+        self.outcome.clone()
     }
 }
 
@@ -376,6 +399,36 @@ impl Grants {
     fn past_the_gap(&self) {
         self.clock.advance(Duration::from_secs(61));
     }
+}
+
+#[test]
+fn an_unreadable_command_with_an_id_is_rejected_terminally_instead_of_expiring() {
+    let ch = channel(
+        Arc::new(SiteCommandExecutor::new(
+            FakeStore::new(),
+            clock(),
+            &Logger::none(),
+        )),
+        None,
+    );
+    let id = Uuid::new_v4();
+    let frame = dl_json::parse(&format!(r#"{{"command_id":"{id}","type":42}}"#)).unwrap();
+
+    let r = ch.unreadable(&frame).unwrap();
+
+    assert_eq!((r.command_id, r.status), (id, CommandStatus::Rejected));
+    assert!(
+        r.reason
+            .as_deref()
+            .unwrap()
+            .starts_with("invalid_payload: "),
+        "{:?}",
+        r.reason
+    );
+    assert!(
+        ch.unreadable(&dl_json::parse(r#"{"type":"x"}"#).unwrap())
+            .is_none()
+    );
 }
 
 #[test]
@@ -455,14 +508,13 @@ fn an_order_command_denied_by_sql_is_rejected_terminally_and_checks_the_grants()
 }
 
 #[test]
-fn the_service_applies_missing_grants_itself_when_its_identity_may() {
+fn the_service_applies_missing_grants_itself_as_the_smile_login_when_windows_is_refused() {
     let g = Grants::new();
     g.probe.set(&["UPDATE dbo.tmpInvoice(NGuest)"]);
-    let repair = Arc::new(FakeRepair {
-        failure: None,
-        probe: g.probe.clone(),
-        calls: AtomicUsize::new(0),
-    });
+    let repair = FakeRepair::new(
+        &g.probe,
+        &[("windows", codes::SQL_NO_ACCESS), ("sql:smile", "applied")],
+    );
 
     assert_eq!(
         g.monitor(Some(repair.clone()))
@@ -471,18 +523,29 @@ fn the_service_applies_missing_grants_itself_when_its_identity_may() {
     );
 
     assert_eq!(repair.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(g.events.codes(), [codes::SQL_GRANTS_REPAIRED]);
+    let events = lock(&g.events.0);
+    assert_eq!(events.len(), 1);
+    let (_, code, message, detail) = &events[0];
+    assert_eq!(code, codes::SQL_GRANTS_REPAIRED);
+    assert!(message.contains("as sql:smile"), "{message}");
+    let detail = detail.as_ref().unwrap();
+    assert_eq!(
+        detail.get("identity").and_then(Json::as_str),
+        Some("sql:smile")
+    );
 }
 
 #[test]
-fn a_refused_self_repair_reports_the_install_command_once_and_is_not_retried() {
+fn a_refused_self_repair_is_retried_each_round_and_reported_once() {
     let g = Grants::new();
     g.probe.set(&["EXECUTE dbo.PostITrn"]);
-    let repair = Arc::new(FakeRepair {
-        failure: Some(codes::SQL_NO_ACCESS.into()),
-        probe: g.probe.clone(),
-        calls: AtomicUsize::new(0),
-    });
+    let repair = FakeRepair::new(
+        &g.probe,
+        &[
+            ("windows", codes::SQL_NO_ACCESS),
+            ("sql:smile", codes::SQL_LOGIN_FAILED),
+        ],
+    );
     let m = g.monitor(Some(repair.clone()));
     let ctx = Ctx::background();
 
@@ -490,15 +553,66 @@ fn a_refused_self_repair_reports_the_install_command_once_and_is_not_retried() {
     g.past_the_gap();
     assert_eq!(m.check_grants(&ctx), Some(true));
 
-    assert_eq!(repair.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        repair.calls.load(Ordering::SeqCst),
+        2,
+        "the repair is not once per process"
+    );
     let events = lock(&g.events.0);
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].1, codes::SQL_GRANTS_MISSING);
-    let detail = events[0].3.as_ref().unwrap();
+    assert_eq!(events.len(), 1, "one event per episode");
+    let (_, code, message, detail) = &events[0];
+    assert_eq!(code, codes::SQL_GRANTS_MISSING);
+    assert!(message.contains("dl-agent pda-grants"), "{message}");
+    assert!(message.contains("every 15 minutes"), "{message}");
+    let detail = detail.as_ref().unwrap();
     assert_eq!(
         detail.get("self_repair").and_then(Json::as_str),
-        Some(codes::SQL_NO_ACCESS)
+        Some("windows: SQL_NO_ACCESS; sql:smile: SQL_LOGIN_FAILED")
     );
+    let identities = detail.get("identities").and_then(Json::as_array).unwrap();
+    assert_eq!(identities.len(), 2);
+}
+
+#[test]
+fn a_refused_order_command_never_runs_the_repair_and_wakes_the_service() {
+    let g = Grants::new();
+    g.probe.set(&["EXECUTE dbo.PostITrn"]);
+    let repair = FakeRepair::new(&g.probe, &[("windows", "applied")]);
+    let monitor = Arc::new(g.monitor(Some(repair.clone())));
+    let store = FakeStore::new();
+    store.knobs().throw_in_work = Some(Throw::Sql(
+        229,
+        "The EXECUTE permission was denied on the object 'PostITrn'".into(),
+    ));
+    let executor = SiteCommandExecutor::new(store.clone(), clock(), &Logger::none())
+        .with_grants(monitor.clone());
+
+    let r = executor.execute(&command(), &Ctx::background()).unwrap();
+
+    assert_eq!(r.status, CommandStatus::Rejected);
+    assert_eq!(
+        r.reason.as_deref(),
+        Some(order_command_reasons::SQL_GRANTS_MISSING)
+    );
+    assert_eq!(
+        repair.calls.load(Ordering::SeqCst),
+        0,
+        "the command is answered before any repair"
+    );
+    assert!(
+        g.events.codes().is_empty(),
+        "SQL_GRANTS_MISSING waits until every identity failed"
+    );
+    assert!(monitor.take_wake(), "the service's loop repairs at once");
+    assert!(!monitor.take_wake());
+}
+
+#[test]
+fn the_service_rechecks_while_the_grants_are_missing_and_sleeps_when_they_are_present() {
+    assert_eq!(next_wait(Some(true), 0), Some(RECHECK_INTERVAL));
+    assert_eq!(next_wait(Some(false), 0), None);
+    assert_eq!(next_wait(None, 1), Some(SERVICE_GAP));
+    assert_eq!(next_wait(None, SERVICE_ATTEMPTS), Some(RECHECK_INTERVAL));
 }
 
 #[test]

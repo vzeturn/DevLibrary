@@ -31,10 +31,15 @@ and diagnostics; this crate brings everything that reads or writes `SMILE_POS`.
   duplicate rows (`CashierRVC`) are not repaired by key, as in C#.
 - **Bootstrap** (`bootstrap`): the `pda_sync` login, the `Pda_Sync*` tables and the
   grants `010`–`090`, run by `dl-agent pda-enroll` under the operator's Windows login or a
-  SQL admin (`PDA_SQL_ADMIN_PASSWORD`).
+  SQL admin (`PDA_SQL_ADMIN_PASSWORD`). The running service applies missing order grants
+  itself, as the Windows identity and then the SMILE default login, every 15 minutes while
+  they are missing; it only touches `pda_sync`'s objects and grants (ADR 0010).
 - **Staff** (`staff`): `CashierDef` to the cloud with hashed PINs (ADR 0101/0114).
 - **Print relay** (`printrelay`): kitchen prints from the cloud's `/hubs/order` to raw TCP
-  or Windows spooler printers (ADR 0098/0105).
+  or Windows spooler printers (ADR 0098/0105). With `PrinterSubnets` empty it dials any
+  private LAN address (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`) on the allowed ports
+  (default `9100`); a list narrows it. Public, loopback and link-local addresses are always
+  refused, so it is never an open TCP proxy (ADR 0010).
 
 Every wire body, row hash and SQL text matches the C# agent byte for byte: the golden
 tests read the shared catalog (`assets/catalog`), the bootstrap scripts (`assets/sql`)

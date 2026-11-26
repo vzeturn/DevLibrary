@@ -4,7 +4,7 @@
 use super::{MappingError, RawValue, tcvn3};
 use crate::contracts::hashing::canonical_value;
 use crate::contracts::time::{DateTime, DateTimeKind, TICKS_PER_HOUR, TimeZone, time_span_text};
-use crate::util::stj;
+use crate::util::{stj, store_text};
 
 fn format_error(column: &str, message: String) -> MappingError {
     MappingError::ValueFormat {
@@ -42,11 +42,11 @@ pub fn tcvn3(value: &RawValue, column: &str) -> Result<Option<String>, MappingEr
 /// database pads `CHAR(n)` values and ignores trailing spaces when it compares text, so
 /// `'100001'` and `'100001      '` are one code there; PostgreSQL `text` sees two. Only
 /// U+0020 is dropped, as in that comparison (tabs, newlines, leading and inner spaces stay);
-/// an all-space value becomes `""`, never NULL.
-pub fn trim_fixed_width(mut value: String) -> String {
-    let len = value.trim_end_matches(' ').len();
-    value.truncate(len);
-    value
+/// an all-space value becomes `""`, never NULL. NUL characters, which PostgreSQL refuses,
+/// are removed too (RT-1309): this is [`store_text::clean`], the agent's one read-side
+/// normaliser.
+pub fn trim_fixed_width(value: String) -> String {
+    store_text::clean(value)
 }
 
 /// `new decimal(double)`: rounded to 15 significant digits (7 for `float`).

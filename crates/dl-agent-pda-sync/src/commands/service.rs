@@ -13,7 +13,7 @@ use super::schema_guard::{LogOnlyEvents, TableSchemaGuard};
 use super::sql_store::{ConfigSource, SqlSiteCommandStore};
 use super::verify::{VerifyCommandHandler, VerifyParts};
 use super::verify_manifest::HttpCloudManifestSource;
-use crate::bootstrap::{SqlAdminCredential, SqlOrderGrantsProbe};
+use crate::bootstrap::SqlOrderGrantsProbe;
 use crate::contracts::SyncCatalog;
 use crate::contracts::time::TimeZone;
 use crate::hosting::cli::Unhandled;
@@ -114,18 +114,13 @@ pub fn build(
         },
         log,
     ));
-    let repair: Option<Arc<dyn GrantsRepair>> = match crate::hosting::enroll::real_bootstrapper(
+    // The repair runs as each identity `pda-enroll` tries (Windows, then the SMILE
+    // default login) and only ever applies pda_sync's objects and grants (RT-1309).
+    let repair: Option<Arc<dyn GrantsRepair>> = Some(Arc::new(BootstrapGrantsRepair::new(
         s.secrets.clone(),
-        SqlAdminCredential::windows(),
+        s.identity.clone(),
         log,
-    ) {
-        Ok(b) => Some(Arc::new(BootstrapGrantsRepair::new(
-            Arc::new(b),
-            s.identity.clone(),
-            log,
-        ))),
-        Err(e) => return Err(e.to_string().into()),
-    };
+    )));
     let grants = Arc::new(OrderGrantsMonitor::new(
         events.clone(),
         Arc::new(SqlOrderGrantsProbe),
