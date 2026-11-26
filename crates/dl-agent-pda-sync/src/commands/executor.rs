@@ -131,6 +131,7 @@ pub struct SiteCommandExecutor {
     resnapshot: Option<Arc<ResnapshotCommandHandler>>,
     verify: Option<Arc<super::verify::VerifyCommandHandler>>,
     legacy_export: Option<Arc<LegacyExportCommandHandler>>,
+    fo_inhouse: Option<Arc<super::fo_inhouse::FoInHouseSearchCommandHandler>>,
     nudge: Option<Arc<dyn CaptureNudge>>,
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
@@ -156,6 +157,7 @@ impl SiteCommandExecutor {
             resnapshot: None,
             verify: None,
             legacy_export: None,
+            fo_inhouse: None,
             nudge: None,
             grants: None,
             schema,
@@ -171,6 +173,15 @@ impl SiteCommandExecutor {
     /// Runs `sync.verify` with `handler` (without one the type is unknown).
     pub fn with_verify(mut self, handler: Arc<super::verify::VerifyCommandHandler>) -> Self {
         self.verify = Some(handler);
+        self
+    }
+
+    /// Runs `fo.inhouse_search` with `handler` (without one the type is unknown).
+    pub fn with_fo_inhouse(
+        mut self,
+        handler: Arc<super::fo_inhouse::FoInHouseSearchCommandHandler>,
+    ) -> Self {
+        self.fo_inhouse = Some(handler);
         self
     }
 
@@ -259,6 +270,10 @@ impl SiteCommandExecutor {
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
             s::SYNC_VERIFY => match &self.verify {
+                Some(h) => h.execute(c, ctx),
+                None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
+            },
+            s::FO_INHOUSE_SEARCH => match &self.fo_inhouse {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
