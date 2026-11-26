@@ -1,0 +1,25 @@
+[package]
+name = "dl-rt-transport"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "RT-1318 spike: QUIC (quinn) vs WebSocket over TLS latency through an in-process delay/loss shim."
+
+# Standalone workspace on purpose: the DevLibrary workspace allows no third-party crates
+# (CONTRIBUTING.md), and this spike needs quinn/rustls/tokio to measure them. It is never
+# built by the root workspace (members = crates/*) and ships in no release.
+[workspace]
+
+[[bin]]
+name = "rt-bench"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
