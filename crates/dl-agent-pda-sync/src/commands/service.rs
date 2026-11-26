@@ -75,6 +75,13 @@ pub fn build(
     let config: ConfigSource = Arc::new(move || {
         crate::config::sql::agent_connection_for(&identity, &*secrets).map_err(Into::into)
     });
+    // fo.inhouse_search (RT-1296) reads the RVC's Front Office database on its own
+    // connection; it never writes and keeps no command-log row.
+    let fo_inhouse = Arc::new(super::fo_inhouse::FoInHouseSearchCommandHandler::new(
+        Arc::new(super::fo_inhouse::SqlFoInHouseSource::new(config.clone())),
+        s.clock.clone(),
+        log,
+    ));
     let store = Arc::new(SqlSiteCommandStore::new(config));
 
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
@@ -137,6 +144,7 @@ pub fn build(
         .with_resnapshot(resnapshot)
         .with_verify(verify)
         .with_legacy_export(legacy_export)
+        .with_fo_inhouse(fo_inhouse)
         .with_grants(grants.clone())
         .with_schema(schema);
     if let Some(n) = &extras.nudge {

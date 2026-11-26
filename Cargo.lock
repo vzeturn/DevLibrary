@@ -147,6 +147,7 @@ dependencies = [
  "dl-tds",
  "dl-time",
  "dl-uuid",
+ "dl-vn",
  "dl-winos",
  "dl-winsvc",
  "dl-ws",

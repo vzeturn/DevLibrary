@@ -40,6 +40,8 @@ pub mod site_command_types {
     /// Store-cloud reconciliation (ADR 0126): compare the agent's shadow with the cloud
     /// manifest per bucket.
     pub const SYNC_VERIFY: &str = "sync.verify";
+    /// Read-only search of the in-house guests of an RVC's Front Office database (RT-1296).
+    pub const FO_INHOUSE_SEARCH: &str = "fo.inhouse_search";
 }
 
 /// Values of [`KdsLineStatePayload::action`].
@@ -103,6 +105,7 @@ pub mod site_command_contract {
         spec(site_command_types::RESERVATION_CANCEL, Durable, 8),
         spec(site_command_types::SYNC_RESNAPSHOT, Durable, 8),
         spec(site_command_types::SYNC_VERIFY, Durable, 3),
+        spec(site_command_types::FO_INHOUSE_SEARCH, Interactive, 1),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),
         spec(o::SEND, Interactive, 3),

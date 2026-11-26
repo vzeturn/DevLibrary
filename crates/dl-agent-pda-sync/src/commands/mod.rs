@@ -8,7 +8,8 @@
 //! - [`TableSchemaGuard`]: the column probe of the table verbs.
 //! - [`SiteCommandExecutor`]: runs each command once in the store's transaction;
 //!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
-//!   `sync.verify` (ADR 0126/0128).
+//!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
+//!   `fo.inhouse_search` (RT-1296).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`service::services`]: the host's loop factory.
 
@@ -16,6 +17,8 @@ pub mod batches;
 pub mod channel;
 mod error;
 mod executor;
+pub mod fo_inhouse;
+pub mod fo_inhouse_match;
 pub mod grants;
 mod resnapshot;
 mod schema_guard;
@@ -34,6 +37,9 @@ pub use error::{CommandError, PERMISSION_DENIED, Result};
 pub use executor::{
     CATEGORY as EXECUTOR_CATEGORY, CommandExecutor, GrantsCheck, RejectingCommandExecutor,
     SiteCommandExecutor, is_order_verb, reasons,
+};
+pub use fo_inhouse::{
+    FoInHouseRead, FoInHouseSearchCommandHandler, FoInHouseSource, SqlFoInHouseSource,
 };
 pub use grants::{BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, OrderGrantsService};
 pub use resnapshot::ResnapshotCommandHandler;

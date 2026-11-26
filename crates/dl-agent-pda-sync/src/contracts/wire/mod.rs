@@ -4,6 +4,7 @@
 mod blobs;
 mod envelope;
 mod fingerprint;
+mod fo_inhouse;
 mod legacy_import;
 mod order;
 mod print;
@@ -20,6 +21,7 @@ pub use envelope::{
     SyncHeartbeat, SyncMode, SyncRow, SyncTombstone, wire_version,
 };
 pub use fingerprint::{CheckStateFingerprint, CheckStateHeader, CheckStateLine, check_aggregate};
+pub use fo_inhouse::{FoInHouseGuest, FoInHouseSearchPayload, FoInHouseSearchResult, txn_reasons};
 pub use legacy_import::{
     LegacyImportAck, LegacyImportBranchAck, LegacyImportHostPrinterAck, LegacyImportTableAck,
     legacy_import_wire,

@@ -30,6 +30,7 @@ dl-sqlite.workspace = true
 dl-zip.workspace = true
 dl-winsvc.workspace = true
 dl-winos.workspace = true
+dl-vn.workspace = true
 
 [lints]
 workspace = true
