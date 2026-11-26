@@ -226,6 +226,24 @@ Live at **https://agent.pms.id.vn** since 2026-11-18 (owner chose the host, RT-0
 - Artifacts: `wrangler r2 object put agent-hub-artifacts/<product>/<version>/<target>/<file> --remote`,
   served to agents at `/v1/artifacts/<key>`.
 
+## Schema dictionary and coverage matrix (RT-1215)
+
+Agents upload a structure-only snapshot of each SMILE database (`SMILE_FO`, `SMILE_POS`,
+`SMILE_BO`) once a day to `POST /v1/agent/schema-snapshot` (catalog views only, no row data;
+see `crates/dl-agent/PROTOCOL.md` §9.10). The hub keeps one row per agent, database and schema
+hash in `schema_snapshots`, so each SMILE version seen on a site stays on record.
+
+- `GET /admin/schema/snapshots[?agent_id=]` lists them; `GET /admin/schema/snapshots/:id` returns one.
+- `POST /admin/schema/coverage` compares a list of expected objects with the newest snapshot
+  of each database per agent: `present`, `drift` (table there, columns missing) or `missing`,
+  with a percent per site. The expected list is generated from the manifests the agents ship
+  (PMS ops procedures and SELECTs, the PDAOrder sync catalog):
+
+```sh
+node scripts/schema/expected-objects.mjs [agent_id ...] > coverage.json
+( . scripts/release/lib.sh; admin POST /admin/schema/coverage -H 'content-type: application/json' --data-binary @coverage.json )
+```
+
 ## Guided install page (RT-0292)
 
 Product consoles (Azolo E-Invoice, Check-In, Membership, PMS, PDAOrder, Hotel Link, SRBackup) should not
