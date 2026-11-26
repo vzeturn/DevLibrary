@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use dl_agent_pda_sync::commands::result_outbox::{PostOutcome, ResultPoster, classify};
+use dl_agent_pda_sync::commands::result_outbox::{
+    PostOutcome, ResultOutbox, ResultPoster, classify,
+};
 use dl_agent_pda_sync::commands::{
     ChannelError, CommandChannel, CommandChannelParts, CommandExecutor, Result as CommandResult,
     reconnect_delay,
@@ -291,5 +293,51 @@ fn a_link_that_was_up_and_dropped_reconnects_at_once_and_a_dead_one_backs_off() 
     assert!(
         reconnect_delay(&retry, 3, None) > reconnect_delay(&retry, 1, None),
         "failing to connect backs off more each time"
+    );
+}
+
+#[test]
+fn results_are_posted_beside_the_socket_loop_not_inline() {
+    // RT-1309: a slow result post must not hold the next command; the loop runs on while
+    // a thread beside it posts each result.
+    struct SlowPoster(Mutex<Vec<Uuid>>);
+    impl ResultPoster for SlowPoster {
+        fn post(&self, r: &SyncCommandResult, _ctx: &Ctx) -> Result<PostOutcome, ChannelError> {
+            std::thread::sleep(Duration::from_millis(300));
+            self.0.lock().unwrap().push(r.command_id);
+            Ok(PostOutcome::Acked)
+        }
+    }
+    let poster = Arc::new(SlowPoster(Mutex::default()));
+    let outbox = ResultOutbox::new(poster.clone(), RetryPolicy::default(), &Logger::none());
+    let ctx = Ctx::background();
+    let results: Vec<SyncCommandResult> = (0..3)
+        .map(|_| {
+            CountingExecutor {
+                runs: AtomicUsize::new(0),
+            }
+            .execute(&command(), &ctx)
+            .unwrap()
+        })
+        .collect();
+
+    let answered_in = outbox.post_beside(&ctx, || {
+        let started = std::time::Instant::now();
+        for r in &results {
+            outbox.enqueue(r);
+        }
+        let answered = started.elapsed();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !outbox.is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        answered
+    });
+
+    assert!(answered_in < Duration::from_millis(50), "{answered_in:?}");
+    assert!(outbox.is_empty(), "every result was posted beside the loop");
+    assert_eq!(
+        *poster.0.lock().unwrap(),
+        results.iter().map(|r| r.command_id).collect::<Vec<_>>()
     );
 }

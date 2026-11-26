@@ -102,6 +102,19 @@ impl CaptureEngine {
         CycleDeadline::new(self.cx.options.budget.max_cycle_duration)
     }
 
+    /// Has the next open-check cycle re-read check `check_key` (the invariant text of its
+    /// `CheckNo`) even when its phase-1 signature did not move (RT-1309).
+    pub fn force_open_check(&self, check_key: &str) {
+        let mut forced = self
+            .cx
+            .open_forced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !forced.iter().any(|k| k == check_key) {
+            forced.push(check_key.to_owned());
+        }
+    }
+
     /// One open-check cycle.
     pub fn run_open_checks(&self, ctx: &Ctx) -> Result<CaptureReport> {
         OpenCheckCapture::new(&self.cx).run(&self.plan.open, ctx)

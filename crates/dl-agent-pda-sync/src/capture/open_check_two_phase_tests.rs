@@ -214,3 +214,69 @@ fn a_reset_of_the_open_stream_forgets_the_signatures() {
         "the reset state is filled again from the full read"
     );
 }
+
+#[test]
+fn a_forced_check_is_read_even_when_its_signature_did_not_move() {
+    // RT-1309: an order command just wrote check 2; the source still reports the old
+    // signature (a collision), yet the nudge's forced read sends the row at once.
+    let h = site(3, 5, 30);
+    let e = h.engine();
+    e.run_open_checks(&bg()).unwrap();
+    h.sink.clear();
+    let frozen = h.source.live_signatures("TmpTrn", "CheckNo");
+    h.source.update(
+        "TmpTrn",
+        |r| int(r, "TrnSeq") == Some(203),
+        "ItemPrice",
+        dec("4242"),
+    );
+    h.source
+        .frozen_signatures
+        .lock()
+        .unwrap()
+        .push(("TmpTrn".to_owned(), frozen));
+    assert_eq!(e.run_open_checks(&bg()).unwrap().batches, 0);
+
+    e.force_open_check("2");
+    let forced = e.run_open_checks(&bg()).unwrap();
+
+    assert!(!forced.open_full_read);
+    assert!(forced.batches > 0);
+    assert_eq!(
+        h.sink.rows("TmpTrn").len(),
+        1,
+        "the row command wrote, alone"
+    );
+    assert!(
+        forced.open_rows_read <= 3 * (1 + 5),
+        "only the forced check is read: {}",
+        forced.open_rows_read
+    );
+    h.sink.clear();
+    assert_eq!(
+        e.run_open_checks(&bg()).unwrap().open_rows_read,
+        0,
+        "the force is used once"
+    );
+}
+
+#[test]
+fn one_cycle_sends_the_changes_of_every_open_table_of_a_check() {
+    let h = site(3, 5, 30);
+    let e = h.engine();
+    e.run_open_checks(&bg()).unwrap();
+    h.sink.clear();
+
+    h.source.update(
+        "TmpTrn",
+        |r| int(r, "TrnSeq") == Some(102),
+        "ItemPrice",
+        dec("1234"),
+    );
+    h.source
+        .update("TmpInvoice", check(1), "SubTotal", dec("61234"));
+    e.run_open_checks(&bg()).unwrap();
+
+    assert_eq!(h.sink.rows("TmpTrn").len(), 1);
+    assert_eq!(h.sink.rows("TmpInvoice").len(), 1);
+}

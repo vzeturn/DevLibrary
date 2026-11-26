@@ -11,6 +11,14 @@ use crate::util::ctx::Ctx;
 pub trait CaptureNudge: Send + Sync {
     /// Makes the open-check job due now.
     fn nudge_open_checks(&self);
+
+    /// Makes the open-check job due now and has it re-read check `check_key` (the
+    /// invariant text of its `CheckNo`) even when its phase-1 signature did not move
+    /// (RT-1309): the rows an order command just committed reach the outbox in that run.
+    fn nudge_open_check(&self, check_key: &str) {
+        let _ = check_key;
+        self.nudge_open_checks();
+    }
 }
 
 /// Wakes the uploader out of its idle wait once capture has queued the rows a nudge asked

@@ -81,6 +81,13 @@ impl CaptureScheduler {
         self.wake.notify();
     }
 
+    /// [`Self::nudge_open_checks`] that also re-reads check `check_key` whatever its
+    /// phase-1 signature says (RT-1309).
+    pub fn nudge_open_check(&self, check_key: &str) {
+        self.engine.force_open_check(check_key);
+        self.nudge_open_checks();
+    }
+
     fn emit(&self, name: &str, report: Option<&CaptureReport>, busy: Option<&CaptureError>) {
         if let Some(c) = &self.completed {
             c(name, report, busy);

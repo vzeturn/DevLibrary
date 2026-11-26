@@ -122,6 +122,8 @@ pub mod codes {
     pub const SYNC_STREAM_RECOVERY_FAILED: &str = "SYNC_STREAM_RECOVERY_FAILED";
     /// A stream waited for parent rows of another stream (ADR 0102).
     pub const SYNC_PARENT_PENDING: &str = "SYNC_PARENT_PENDING";
+    /// The outbox holds a backlog of batches waiting for upload (RT-1309).
+    pub const SYNC_OUTBOX_BACKLOG: &str = "SYNC_OUTBOX_BACKLOG";
     /// A targeted resnapshot was scheduled (ADR 0102).
     pub const SYNC_STREAM_RESNAPSHOT: &str = "SYNC_STREAM_RESNAPSHOT";
     /// One capture table fails with a schema error and is skipped (AD1).
