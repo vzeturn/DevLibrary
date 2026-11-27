@@ -210,6 +210,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
             "fo.availability.contractStatus@1",
             "fo.availability.source@1",
             "fo.availability.sourceV2@1",
+            "fo.availability.summary@1",
             "fo.clerk.login@1",
             "fo.clerk.rights.get@1",
             "fo.dashboard.forecast@1",
@@ -223,7 +224,14 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
             "fo.hotelDate.get@1",
             "fo.housekeeping.blocks@1",
             "fo.inhouse.list@1",
+            "fo.masterdata.buildings@1",
+            "fo.masterdata.roomattributes@1",
+            "fo.masterdata.roomexposures@1",
+            "fo.masterdata.rooms@1",
+            "fo.masterdata.roomtypes@1",
+            "fo.masterdata.wings@1",
             "fo.pos.post@1",
+            "fo.ratecodes.list@1",
             "fo.reservation.list@1",
             "fo.reservation.listFigures@1",
             "fo.roomplan.bars@1",
@@ -271,7 +279,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
     assert_eq!(journal.get("entries").and_then(Value::as_u64), Some(1));
     assert_eq!(journal.get("full").and_then(Value::as_bool), Some(false));
     let ops = status.get("ops").and_then(Value::as_array).expect("ops");
-    assert_eq!(ops.len(), 42);
+    assert_eq!(ops.len(), 50);
 
     // An op for a database outside SMILE_FO/POS/BO is a bad frame: the agent closes.
     assert!(r.command("pms.reconnect").ok);

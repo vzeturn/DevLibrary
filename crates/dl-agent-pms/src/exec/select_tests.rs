@@ -153,6 +153,7 @@ fn the_embedded_manifest_still_loads() {
             "AdditionalName",
             "AllotmentContract",
             "AllotmentContractWeekday",
+            "Building",
             "CCardDef",
             "CashierDef",
             "CashierRVC",
@@ -162,6 +163,7 @@ fn the_embedded_manifest_still_loads() {
             "DiscountDtl",
             "Folio",
             "FolioTransaction",
+            "GlobalParameter",
             "GroupBlockDetail",
             "GroupFolio",
             "HotelParameter",
@@ -174,7 +176,10 @@ fn the_embedded_manifest_still_loads() {
             "Profile",
             "RVCItemMenu",
             "RVCLinkCode",
+            "RateCode",
             "Room",
+            "RoomAttribute",
+            "RoomExposure",
             "RoomType",
             "STaxDef",
             "SurChgDef",
@@ -186,6 +191,7 @@ fn the_embedded_manifest_still_loads() {
             "Trn",
             "TrnLinkByRVC",
             "VoidTrn",
+            "Wing",
         ]
     );
     assert!(m.lookup("fo.availability.source").is_some());
