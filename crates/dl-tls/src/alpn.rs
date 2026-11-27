@@ -32,6 +32,26 @@ pub(crate) fn schannel_buffer(protocols: &[Vec<u8>]) -> io::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// The server's choice (RFC 7301 §3.2): its own most preferred protocol that the client's
+/// `ProtocolNameList` body `client` also names. A malformed list matches nothing past the
+/// point where it breaks.
+pub(crate) fn select<'a>(server: &[Vec<u8>], client: &'a [u8]) -> Option<&'a [u8]> {
+    server.iter().find_map(|wanted| {
+        let mut rest = client;
+        while let Some((&len, tail)) = rest.split_first() {
+            let (name, after) = tail.split_at_checked(usize::from(len))?;
+            if name.is_empty() {
+                return None;
+            }
+            if name == wanted.as_slice() {
+                return Some(name);
+            }
+            rest = after;
+        }
+        None
+    })
+}
+
 pub(crate) fn invalid(msg: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg)
 }
@@ -52,5 +72,33 @@ mod tests {
         assert!(encode_wire(&[Vec::new()]).is_err());
         assert!(encode_wire(&[vec![b'a'; 256]]).is_err());
         assert!(encode_wire(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn server_preference_wins() {
+        let client = b"\x02h2\x08http/1.1";
+        let only_http = [b"http/1.1".to_vec()];
+        assert_eq!(select(&only_http, client), Some(&b"http/1.1"[..]));
+        let both = [b"http/1.1".to_vec(), b"h2".to_vec()];
+        assert_eq!(select(&both, client), Some(&b"http/1.1"[..]));
+        let h2_first = [b"h2".to_vec(), b"http/1.1".to_vec()];
+        assert_eq!(select(&h2_first, client), Some(&b"h2"[..]));
+        // The match is a slice of the client's list.
+        let got = select(&h2_first, client).unwrap();
+        assert_eq!(got.as_ptr(), client[1..].as_ptr());
+    }
+
+    #[test]
+    fn no_overlap_or_malformed_lists_select_nothing() {
+        let server = [b"http/1.1".to_vec()];
+        assert_eq!(select(&server, b"\x02h2"), None);
+        assert_eq!(select(&server, b""), None);
+        assert_eq!(select(&[], b"\x08http/1.1"), None);
+        // Prefix "http/1." is not "http/1.1"; lengths that run past the end match nothing.
+        assert_eq!(select(&server, b"\x07http/1."), None);
+        assert_eq!(select(&server, b"\x09http/1.1"), None);
+        assert_eq!(select(&server, b"\x02h2\xffhttp/1.1"), None);
+        // A zero-length entry is malformed (RFC 7301 §3.1); nothing after it counts.
+        assert_eq!(select(&server, b"\x00\x08http/1.1"), None);
     }
 }

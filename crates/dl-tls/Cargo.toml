@@ -1,6 +1,6 @@
 [package]
 name = "dl-tls"
-description = "TLS client over the operating system's TLS stack (SChannel on Windows, system OpenSSL elsewhere)."
+description = "TLS client and server over the operating system's TLS stack (SChannel on Windows, system OpenSSL elsewhere)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

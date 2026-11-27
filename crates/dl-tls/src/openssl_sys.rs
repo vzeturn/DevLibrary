@@ -1,5 +1,6 @@
 //! System OpenSSL (libssl 3 or 1.1), loaded at run time with `dlopen`, so the crate builds
-//! and links without OpenSSL installed. The only file of the Unix backend with `unsafe`.
+//! and links without OpenSSL installed. The only file of the Unix backend with `unsafe`;
+//! client and server connections both run on memory BIOs.
 #![allow(unsafe_code)]
 
 use core::ffi::{c_char, c_int, c_long, c_void};
@@ -43,8 +44,23 @@ macro_rules! api {
     };
 }
 
+/// `SSL_CTX_alpn_select_cb_func`.
+type AlpnSelectCb =
+    unsafe extern "C" fn(Ptr, *mut *const u8, *mut u8, *const u8, u32, Ptr) -> c_int;
+
 api! {
     TLS_client_method: fn() -> Ptr;
+    TLS_server_method: fn() -> Ptr;
+    SSL_CTX_use_certificate_ASN1: fn(Ptr, c_int, *const u8) -> c_int;
+    SSL_CTX_use_PrivateKey: fn(Ptr, Ptr) -> c_int;
+    SSL_CTX_check_private_key: fn(Ptr) -> c_int;
+    SSL_CTX_set_alpn_select_cb: fn(Ptr, Option<AlpnSelectCb>, Ptr) -> ();
+    SSL_set_accept_state: fn(Ptr) -> ();
+    d2i_X509: fn(*mut Ptr, *mut *const u8, c_long) -> Ptr;
+    d2i_PKCS8_PRIV_KEY_INFO: fn(*mut Ptr, *mut *const u8, c_long) -> Ptr;
+    EVP_PKCS82PKEY: fn(Ptr) -> Ptr;
+    PKCS8_PRIV_KEY_INFO_free: fn(Ptr) -> ();
+    EVP_PKEY_free: fn(Ptr) -> ();
     SSL_CTX_new: fn(Ptr) -> Ptr;
     SSL_CTX_free: fn(Ptr) -> ();
     SSL_CTX_ctrl: fn(Ptr, c_int, c_long, Ptr) -> c_long;
@@ -73,6 +89,7 @@ api! {
     BIO_read: fn(Ptr, *mut c_void, c_int) -> c_int;
     BIO_write: fn(Ptr, *const c_void, c_int) -> c_int;
     BIO_ctrl: fn(Ptr, c_int, c_long, Ptr) -> c_long;
+    BIO_free: fn(Ptr) -> c_int;
     ERR_get_error: fn() -> u64;
     ERR_clear_error: fn() -> ();
     ERR_error_string_n: fn(u64, *mut c_char, usize) -> ();
@@ -133,6 +150,10 @@ pub(crate) fn available() -> bool {
 }
 
 const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
+const SSL_CTRL_CHAIN_CERT: c_int = 89;
+const SSL_TLSEXT_ERR_OK: c_int = 0;
+const SSL_TLSEXT_ERR_ALERT_FATAL: c_int = 2;
+const SSL_TLSEXT_ERR_NOACK: c_int = 3;
 const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
 pub(crate) const TLS1_VERSION: c_long = 0x301;
 pub(crate) const TLS1_1_VERSION: c_long = 0x302;
@@ -146,9 +167,11 @@ pub(crate) const SSL_ERROR_WANT_READ: c_int = 2;
 pub(crate) const SSL_ERROR_WANT_WRITE: c_int = 3;
 pub(crate) const SSL_ERROR_ZERO_RETURN: c_int = 6;
 
-/// One client connection: SSL_CTX, SSL and the two memory BIOs it owns.
+/// One connection: its SSL, the two memory BIOs the SSL owns and, for a client, its own
+/// SSL_CTX.
 pub(crate) struct Ssl {
     lib: &'static Lib,
+    /// Owned by this connection (client), or NULL (server: owned by [`ServerCtx`]).
     ctx: Ptr,
     ssl: Ptr,
     /// Network -> OpenSSL.
@@ -165,10 +188,166 @@ unsafe impl Sync for Ssl {}
 
 impl Drop for Ssl {
     fn drop(&mut self) {
-        // SAFETY: SSL_free also frees the BIOs attached with SSL_set_bio; ctx is ours.
+        // SAFETY: SSL_free also frees the BIOs attached with SSL_set_bio; a non-NULL ctx is
+        // ours.
         unsafe {
             (self.lib.api.SSL_free)(self.ssl);
+            if !self.ctx.is_null() {
+                (self.lib.api.SSL_CTX_free)(self.ctx);
+            }
+        }
+    }
+}
+
+/// Why a [`ServerCtx`] could not be built; the OpenSSL error queue holds the details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CtxError {
+    /// OpenSSL could not create the context.
+    Setup,
+    /// A certificate is not DER that OpenSSL accepts.
+    Certificate,
+    /// The key is not PKCS#8 that OpenSSL accepts.
+    Key,
+    /// The key is not the leaf certificate's key.
+    Mismatch,
+}
+
+/// A configured server SSL_CTX (certificates, key, ALPN), shared by every connection
+/// accepted with it.
+pub(crate) struct ServerCtx {
+    lib: &'static Lib,
+    ctx: Ptr,
+    /// The ALPN protocols the select callback reads (from `Box::into_raw`, freed in Drop).
+    alpn: *mut Vec<Vec<u8>>,
+}
+
+// SAFETY: after set-up the SSL_CTX is only read (SSL_new), which OpenSSL allows from any
+// thread; its session cache has its own lock. `alpn` is never written after set-up.
+unsafe impl Send for ServerCtx {}
+// SAFETY: as above.
+unsafe impl Sync for ServerCtx {}
+
+impl Drop for ServerCtx {
+    fn drop(&mut self) {
+        // SAFETY: drops our context reference, then the list from `Box::into_raw`. Sessions
+        // made from this context keep the ServerCtx alive, so no callback can still run.
+        unsafe {
             (self.lib.api.SSL_CTX_free)(self.ctx);
+            drop(Box::from_raw(self.alpn));
+        }
+    }
+}
+
+/// Server ALPN choice (RFC 7301 §3.2): the server's most preferred protocol the client offers,
+/// or the fatal `no_application_protocol` alert.
+unsafe extern "C" fn select_alpn(
+    _ssl: Ptr,
+    out: *mut *const u8,
+    out_len: *mut u8,
+    client: *const u8,
+    client_len: u32,
+    arg: Ptr,
+) -> c_int {
+    if arg.is_null() || client.is_null() || out.is_null() || out_len.is_null() {
+        return SSL_TLSEXT_ERR_NOACK;
+    }
+    // SAFETY: `arg` is the boxed protocol list of a live ServerCtx (see its Drop); OpenSSL
+    // passes the client's list as `client_len` readable bytes for the duration of the call.
+    let (server, offered) = unsafe {
+        (
+            &*arg.cast::<Vec<Vec<u8>>>(),
+            core::slice::from_raw_parts(client, client_len as usize),
+        )
+    };
+    match crate::alpn::select(server, offered) {
+        Some(p) => {
+            // SAFETY: `out`/`out_len` are OpenSSL's out-parameters; `p` points into the
+            // client's list, as OpenSSL requires, and is at most 255 bytes (one length byte).
+            unsafe {
+                *out = p.as_ptr();
+                *out_len = p.len() as u8;
+            }
+            SSL_TLSEXT_ERR_OK
+        }
+        None => SSL_TLSEXT_ERR_ALERT_FATAL,
+    }
+}
+
+impl ServerCtx {
+    /// `chain` is the leaf certificate then its intermediates (DER), `key` the leaf's
+    /// PKCS#8 DER key, `alpn` the accepted protocols (empty: no ALPN), `min_version` a
+    /// `TLS1_*_VERSION` constant.
+    pub(crate) fn new(
+        chain: &[Vec<u8>],
+        key: &[u8],
+        alpn: Vec<Vec<u8>>,
+        min_version: c_long,
+    ) -> Result<ServerCtx, CtxError> {
+        let lib = lib().ok_or(CtxError::Setup)?;
+        let a = &lib.api;
+        let (leaf, intermediates) = chain.split_first().ok_or(CtxError::Certificate)?;
+        let leaf_len = c_int::try_from(leaf.len()).map_err(|_| CtxError::Certificate)?;
+        let key_len = c_long::try_from(key.len()).map_err(|_| CtxError::Key)?;
+        // SAFETY: standard OpenSSL server set-up. Every pointer is checked for NULL; the
+        // context is owned by `me` from creation on, so early returns free it; d2i_* read at
+        // most the given lengths; add0_chain_cert takes ownership of the X509 on success and
+        // the key reference we created is released after SSL_CTX_use_PrivateKey took its own.
+        unsafe {
+            (a.ERR_clear_error)();
+            let ctx = (a.SSL_CTX_new)((a.TLS_server_method)());
+            if ctx.is_null() {
+                return Err(CtxError::Setup);
+            }
+            let has_alpn = !alpn.is_empty();
+            let me = ServerCtx {
+                lib,
+                ctx,
+                alpn: Box::into_raw(Box::new(alpn)),
+            };
+            (a.SSL_CTX_ctrl)(
+                ctx,
+                SSL_CTRL_SET_MIN_PROTO_VERSION,
+                min_version,
+                core::ptr::null_mut(),
+            );
+            if min_version < TLS1_2_VERSION {
+                (a.SSL_CTX_set_security_level)(ctx, 0);
+            }
+            if (a.SSL_CTX_use_certificate_ASN1)(ctx, leaf_len, leaf.as_ptr()) != 1 {
+                return Err(CtxError::Certificate);
+            }
+            for der in intermediates {
+                let len = c_long::try_from(der.len()).map_err(|_| CtxError::Certificate)?;
+                let mut p = der.as_ptr();
+                let x = (a.d2i_X509)(core::ptr::null_mut(), &mut p, len);
+                if x.is_null() {
+                    return Err(CtxError::Certificate);
+                }
+                // SSL_CTX_add0_chain_cert.
+                if (a.SSL_CTX_ctrl)(ctx, SSL_CTRL_CHAIN_CERT, 0, x) != 1 {
+                    (a.X509_free)(x);
+                    return Err(CtxError::Certificate);
+                }
+            }
+            let mut p = key.as_ptr();
+            let p8 = (a.d2i_PKCS8_PRIV_KEY_INFO)(core::ptr::null_mut(), &mut p, key_len);
+            if p8.is_null() {
+                return Err(CtxError::Key);
+            }
+            let pkey = (a.EVP_PKCS82PKEY)(p8);
+            (a.PKCS8_PRIV_KEY_INFO_free)(p8);
+            if pkey.is_null() {
+                return Err(CtxError::Key);
+            }
+            let used = (a.SSL_CTX_use_PrivateKey)(ctx, pkey);
+            (a.EVP_PKEY_free)(pkey);
+            if used != 1 || (a.SSL_CTX_check_private_key)(ctx) != 1 {
+                return Err(CtxError::Mismatch);
+            }
+            if has_alpn {
+                (a.SSL_CTX_set_alpn_select_cb)(ctx, Some(select_alpn), me.alpn.cast());
+            }
+            Ok(me)
         }
     }
 }
@@ -277,6 +456,41 @@ impl Ssl {
             }
             (a.SSL_set_connect_state)(ssl);
             Some(me)
+        }
+    }
+
+    /// A server connection on `server`'s SSL_CTX.
+    pub(crate) fn server(server: &ServerCtx) -> Option<Ssl> {
+        let lib = server.lib;
+        let a = &lib.api;
+        // SAFETY: SSL_new takes its own reference on the configured ctx; the BIOs are checked
+        // and handed to the SSL with SSL_set_bio.
+        unsafe {
+            (a.ERR_clear_error)();
+            let ssl = (a.SSL_new)(server.ctx);
+            if ssl.is_null() {
+                return None;
+            }
+            let rbio = (a.BIO_new)((a.BIO_s_mem)());
+            let wbio = (a.BIO_new)((a.BIO_s_mem)());
+            if rbio.is_null() || wbio.is_null() {
+                for bio in [rbio, wbio] {
+                    if !bio.is_null() {
+                        (a.BIO_free)(bio);
+                    }
+                }
+                (a.SSL_free)(ssl);
+                return None;
+            }
+            (a.SSL_set_bio)(ssl, rbio, wbio);
+            (a.SSL_set_accept_state)(ssl);
+            Some(Ssl {
+                lib,
+                ctx: core::ptr::null_mut(),
+                ssl,
+                rbio,
+                wbio,
+            })
         }
     }
 

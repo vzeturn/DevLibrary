@@ -1,18 +1,51 @@
-//! TLS client session over the system OpenSSL (Linux and other non-Apple Unix).
+//! TLS client and server sessions over the system OpenSSL (Linux and other non-Apple Unix).
 //!
 //! OpenSSL runs on two memory BIOs; this module moves bytes between them and the stream.
 //! Network bytes are fed one whole TLS record at a time, so bytes after the last record
 //! OpenSSL needed stay in `recv` and `into_parts` returns them exactly.
 
 use std::io::{self, Read, Write};
+use std::sync::Arc;
 
 use crate::openssl_sys::{
-    self as sys, SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE, SSL_ERROR_ZERO_RETURN,
+    self as sys, CtxError, SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE, SSL_ERROR_ZERO_RETURN,
 };
 use crate::record::{Frame, frame};
-use crate::{Config, Error, Verify, Version, alpn};
+use crate::{Config, Error, ServerConfig, Verify, Version, alpn};
 
 const READ_CHUNK: usize = 18 * 1024;
+const NO_LIBSSL: &str = "libssl.so.3 / libssl.so.1.1 not found";
+
+/// A server's OpenSSL context, built once per [`ServerConfig`].
+pub(crate) struct ServerCred(sys::ServerCtx);
+
+impl ServerCred {
+    pub(crate) fn new(cfg: &ServerConfig) -> Result<ServerCred, Error> {
+        if !sys::available() {
+            return Err(Error::Unsupported(NO_LIBSSL));
+        }
+        let ctx = sys::ServerCtx::new(
+            cfg.cert_chain_der(),
+            cfg.private_key().pkcs8_der(),
+            cfg.alpn_protocols().to_vec(),
+            min_version(cfg.minimum_version()),
+        )
+        .map_err(|e| {
+            let what = match e {
+                CtxError::Setup => return openssl_error(),
+                CtxError::Certificate => "OpenSSL cannot use a certificate of the chain",
+                CtxError::Key => "OpenSSL cannot read the private key",
+                CtxError::Mismatch => "the private key does not match the leaf certificate",
+            };
+            let (_, detail) = sys::error_string();
+            Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{what}: {detail}"),
+            ))
+        })?;
+        Ok(ServerCred(ctx))
+    }
+}
 
 pub(crate) struct Session {
     ssl: sys::Ssl,
@@ -21,6 +54,59 @@ pub(crate) struct Session {
     closed: bool,
     version: Option<Version>,
     alpn: Option<Vec<u8>>,
+    /// Keeps a server's context (and its ALPN callback data) alive for the session.
+    _cred: Option<Arc<ServerCred>>,
+}
+
+fn openssl_error() -> Error {
+    let (code, message) = sys::error_string();
+    Error::Handshake {
+        code: code as i64,
+        message,
+    }
+}
+
+fn min_version(v: Version) -> core::ffi::c_long {
+    match v {
+        Version::Tls10 => sys::TLS1_VERSION,
+        Version::Tls11 => sys::TLS1_1_VERSION,
+        Version::Tls12 => sys::TLS1_2_VERSION,
+        Version::Tls13 => sys::TLS1_3_VERSION,
+    }
+}
+
+/// Runs `SSL_do_handshake` until it completes, moving flights between the BIOs and `s`.
+fn handshake<S: Read + Write>(
+    ssl: &mut sys::Ssl,
+    recv: &mut Vec<u8>,
+    s: &mut S,
+) -> Result<(), Error> {
+    loop {
+        match ssl.handshake() {
+            Ok(()) => return Ok(flush_out(ssl, s)?),
+            Err(SSL_ERROR_WANT_READ) => {
+                flush_out(ssl, s)?;
+                if !feed_record(ssl, recv, s)? {
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "connection closed during the TLS handshake",
+                    )));
+                }
+            }
+            Err(SSL_ERROR_WANT_WRITE) => flush_out(ssl, s)?,
+            Err(_) => {
+                // Send any alert, then report the most specific cause.
+                let _ = flush_out(ssl, s);
+                // c_long is i32 on 32-bit targets, so the conversion is not always a no-op.
+                #[allow(clippy::useless_conversion)]
+                let verify = i64::from(ssl.verify_result());
+                if let Some(e) = verify_error(verify) {
+                    return Err(e);
+                }
+                return Err(openssl_error());
+            }
+        }
+    }
 }
 
 fn verify_error(code: i64) -> Option<Error> {
@@ -108,7 +194,7 @@ impl Session {
         }
         let alpn_wire = alpn::encode_wire(cfg.alpn_protocols())?;
         if !sys::available() {
-            return Err(Error::Unsupported("libssl.so.3 / libssl.so.1.1 not found"));
+            return Err(Error::Unsupported(NO_LIBSSL));
         }
         let is_ip = name
             .trim_matches(['[', ']'])
@@ -116,53 +202,28 @@ impl Session {
             .is_ok();
         let host = name.trim_matches(['[', ']']);
         let verify = cfg.verify_mode() == Verify::Full;
-        let min = match cfg.minimum_version() {
-            Version::Tls10 => sys::TLS1_VERSION,
-            Version::Tls11 => sys::TLS1_1_VERSION,
-            Version::Tls12 => sys::TLS1_2_VERSION,
-            Version::Tls13 => sys::TLS1_3_VERSION,
-        };
-        let mut ssl = sys::Ssl::new(host, is_ip, verify, &alpn_wire, min).ok_or_else(|| {
-            let (code, message) = sys::error_string();
-            Error::Handshake {
-                code: code as i64,
-                message,
-            }
-        })?;
+        let min = min_version(cfg.minimum_version());
+        let mut ssl =
+            sys::Ssl::new(host, is_ip, verify, &alpn_wire, min).ok_or_else(openssl_error)?;
         let mut recv = Vec::new();
-        loop {
-            match ssl.handshake() {
-                Ok(()) => {
-                    flush_out(&mut ssl, s)?;
-                    break;
-                }
-                Err(SSL_ERROR_WANT_READ) => {
-                    flush_out(&mut ssl, s)?;
-                    if !feed_record(&mut ssl, &mut recv, s)? {
-                        return Err(Error::Io(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "connection closed during the TLS handshake",
-                        )));
-                    }
-                }
-                Err(SSL_ERROR_WANT_WRITE) => flush_out(&mut ssl, s)?,
-                Err(_) => {
-                    // Send any alert, then report the most specific cause.
-                    let _ = flush_out(&mut ssl, s);
-                    // c_long is i32 on 32-bit targets, so the conversion is not always a no-op.
-                    #[allow(clippy::useless_conversion)]
-                    let verify = i64::from(ssl.verify_result());
-                    if let Some(e) = verify_error(verify) {
-                        return Err(e);
-                    }
-                    let (code, message) = sys::error_string();
-                    return Err(Error::Handshake {
-                        code: code as i64,
-                        message,
-                    });
-                }
-            }
-        }
+        handshake(&mut ssl, &mut recv, s)?;
+        Ok(Session::established(ssl, recv, None))
+    }
+
+    /// Runs the server handshake. `recv` holds what the client already sent; OpenSSL's ALPN
+    /// callback makes the same choice as `server::read_client_hello`, so `_alpn` is unused.
+    pub(crate) fn accept<S: Read + Write>(
+        cred: &Arc<ServerCred>,
+        s: &mut S,
+        mut recv: Vec<u8>,
+        _alpn: &[Vec<u8>],
+    ) -> Result<Session, Error> {
+        let mut ssl = sys::Ssl::server(&cred.0).ok_or_else(openssl_error)?;
+        handshake(&mut ssl, &mut recv, s)?;
+        Ok(Session::established(ssl, recv, Some(Arc::clone(cred))))
+    }
+
+    fn established(ssl: sys::Ssl, recv: Vec<u8>, cred: Option<Arc<ServerCred>>) -> Session {
         let version = match ssl.version() {
             0x304 => Some(Version::Tls13),
             0x303 => Some(Version::Tls12),
@@ -171,13 +232,14 @@ impl Session {
             _ => None,
         };
         let alpn = ssl.alpn_selected();
-        Ok(Session {
+        Session {
             ssl,
             recv,
             closed: false,
             version,
             alpn,
-        })
+            _cred: cred,
+        }
     }
 
     pub(crate) fn read<S: Read + Write>(&mut self, s: &mut S, buf: &mut [u8]) -> io::Result<usize> {
@@ -199,13 +261,7 @@ impl Session {
                     }
                 }
                 Err(SSL_ERROR_WANT_WRITE) => flush_out(&mut self.ssl, s)?,
-                Err(_) => {
-                    let (code, message) = sys::error_string();
-                    return Err(io_err(Error::Handshake {
-                        code: code as i64,
-                        message,
-                    }));
-                }
+                Err(_) => return Err(io_err(openssl_error())),
             }
         }
     }
@@ -220,13 +276,7 @@ impl Session {
                 s.write_all(&out)?;
                 Ok(n)
             }
-            Err(_) => {
-                let (code, message) = sys::error_string();
-                Err(io_err(Error::Handshake {
-                    code: code as i64,
-                    message,
-                }))
-            }
+            Err(_) => Err(io_err(openssl_error())),
         }
     }
 

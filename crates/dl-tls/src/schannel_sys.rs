@@ -1,9 +1,11 @@
-//! SSPI / SChannel declarations and safe wrappers. The only file of the Windows backend
-//! that contains `unsafe`.
+//! SSPI / SChannel declarations and safe wrappers. With `schannel_server_sys` (certificates
+//! and CNG keys), the only files of the Windows backend that contain `unsafe`.
 #![allow(unsafe_code)]
 
 use core::ffi::c_void;
 use core::ptr;
+
+use crate::schannel_server_sys::Cert;
 
 pub(crate) const SEC_E_OK: i32 = 0;
 pub(crate) const SEC_I_CONTINUE_NEEDED: i32 = 0x0009_0312;
@@ -11,10 +13,13 @@ pub(crate) const SEC_I_CONTEXT_EXPIRED: i32 = 0x0009_0317;
 pub(crate) const SEC_I_INCOMPLETE_CREDENTIALS: i32 = 0x0009_0320;
 pub(crate) const SEC_I_RENEGOTIATE: i32 = 0x0009_0321;
 pub(crate) const SEC_E_INCOMPLETE_MESSAGE: i32 = 0x8009_0318_u32 as i32;
+const SEC_E_ALGORITHM_MISMATCH: i32 = 0x8009_0331_u32 as i32;
 
+const SECPKG_CRED_INBOUND: u32 = 1;
 const SECPKG_CRED_OUTBOUND: u32 = 2;
 const SCHANNEL_CRED_VERSION: u32 = 4;
 const SCH_CREDENTIALS_VERSION: u32 = 5;
+const SCH_CRED_NO_SYSTEM_MAPPER: u32 = 0x2;
 const SCH_CRED_MANUAL_CRED_VALIDATION: u32 = 0x8;
 const SCH_CRED_NO_DEFAULT_CREDS: u32 = 0x10;
 const SCH_CRED_AUTO_CRED_VALIDATION: u32 = 0x20;
@@ -23,6 +28,10 @@ pub(crate) const SP_PROT_TLS1_0_CLIENT: u32 = 0x80;
 pub(crate) const SP_PROT_TLS1_1_CLIENT: u32 = 0x200;
 pub(crate) const SP_PROT_TLS1_2_CLIENT: u32 = 0x800;
 pub(crate) const SP_PROT_TLS1_3_CLIENT: u32 = 0x2000;
+pub(crate) const SP_PROT_TLS1_0_SERVER: u32 = 0x40;
+pub(crate) const SP_PROT_TLS1_1_SERVER: u32 = 0x100;
+pub(crate) const SP_PROT_TLS1_2_SERVER: u32 = 0x400;
+pub(crate) const SP_PROT_TLS1_3_SERVER: u32 = 0x1000;
 
 const ISC_REQ_FLAGS: u32 = 0x0000_0008 // SEQUENCE_DETECT
     | 0x0000_0004 // REPLAY_DETECT
@@ -30,6 +39,13 @@ const ISC_REQ_FLAGS: u32 = 0x0000_0008 // SEQUENCE_DETECT
     | 0x0000_0100 // ALLOCATE_MEMORY
     | 0x0000_4000 // EXTENDED_ERROR
     | 0x0000_8000; // STREAM
+
+const ASC_REQ_FLAGS: u32 = 0x0000_0004 // REPLAY_DETECT
+    | 0x0000_0008 // SEQUENCE_DETECT
+    | 0x0000_0010 // CONFIDENTIALITY
+    | 0x0000_0100 // ALLOCATE_MEMORY
+    | 0x0000_8000 // EXTENDED_ERROR
+    | 0x0001_0000; // STREAM
 
 const SECBUFFER_VERSION: u32 = 0;
 const SECBUFFER_EMPTY: u32 = 0;
@@ -142,8 +158,9 @@ struct ApplicationProtocol {
     id: [u8; 255],
 }
 
+/// `CERT_CONTEXT`.
 #[repr(C)]
-struct CertContext {
+pub(crate) struct CertContext {
     encoding_type: u32,
     encoded: *const u8,
     encoded_len: u32,
@@ -165,6 +182,17 @@ unsafe extern "system" {
         expiry: *mut i64,
     ) -> i32;
     fn FreeCredentialsHandle(cred: *mut SecHandle) -> i32;
+    fn AcceptSecurityContext(
+        cred: *mut SecHandle,
+        ctx: *mut SecHandle,
+        input: *mut SecBufferDesc,
+        req: u32,
+        data_rep: u32,
+        new_ctx: *mut SecHandle,
+        output: *mut SecBufferDesc,
+        attrs: *mut u32,
+        expiry: *mut i64,
+    ) -> i32;
     fn InitializeSecurityContextW(
         cred: *mut SecHandle,
         ctx: *mut SecHandle,
@@ -236,9 +264,6 @@ impl Drop for Cred {
 /// `modern` uses `SCH_CREDENTIALS` (TLS 1.3 possible, Windows 10 1809+); otherwise
 /// `SCHANNEL_CRED`, which cannot offer TLS 1.3.
 pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, i32> {
-    let mut package: Vec<u16> = "Microsoft Unified Security Protocol Provider\0"
-        .encode_utf16()
-        .collect();
     let flags = SCH_CRED_NO_DEFAULT_CREDS
         | SCH_USE_STRONG_CRYPTO
         | if verify {
@@ -246,6 +271,38 @@ pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, 
         } else {
             SCH_CRED_MANUAL_CRED_VALIDATION
         };
+    acquire_handle(SECPKG_CRED_OUTBOUND, flags, modern, enabled, &mut [])
+}
+
+/// Acquires server credentials presenting `cert` (with its private key attached) for the
+/// `SP_PROT_*_SERVER` protocols in `enabled`. `modern` as for [`acquire`].
+pub(crate) fn acquire_server(cert: &Cert, modern: bool, enabled: u32) -> Result<Cred, i32> {
+    let flags = SCH_CRED_NO_SYSTEM_MAPPER | SCH_USE_STRONG_CRYPTO;
+    acquire_handle(
+        SECPKG_CRED_INBOUND,
+        flags,
+        modern,
+        enabled,
+        &mut [cert.as_ptr()],
+    )
+}
+
+fn acquire_handle(
+    usage: u32,
+    flags: u32,
+    modern: bool,
+    enabled: u32,
+    certs: &mut [*const CertContext],
+) -> Result<Cred, i32> {
+    let legacy_protocols = enabled & !(SP_PROT_TLS1_3_CLIENT | SP_PROT_TLS1_3_SERVER);
+    if !modern && legacy_protocols == 0 {
+        // SCHANNEL_CRED reads 0 as "the system defaults", which would allow older versions.
+        return Err(SEC_E_ALGORITHM_MISMATCH);
+    }
+    let mut package: Vec<u16> = "Microsoft Unified Security Protocol Provider\0"
+        .encode_utf16()
+        .collect();
+    let (count, pa_cred) = (certs.len() as u32, certs.as_mut_ptr().cast::<c_void>());
     let mut params = TlsParameters {
         alpn_ids: 0,
         rgstr_alpn_ids: ptr::null_mut(),
@@ -257,8 +314,8 @@ pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, 
     let mut sch = SchCredentials {
         version: SCH_CREDENTIALS_VERSION,
         cred_format: 0,
-        creds: 0,
-        pa_cred: ptr::null_mut(),
+        creds: count,
+        pa_cred,
         root_store: ptr::null_mut(),
         mappers: 0,
         aph_mappers: ptr::null_mut(),
@@ -269,14 +326,14 @@ pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, 
     };
     let mut legacy = SchannelCred {
         version: SCHANNEL_CRED_VERSION,
-        creds: 0,
-        pa_cred: ptr::null_mut(),
+        creds: count,
+        pa_cred,
         root_store: ptr::null_mut(),
         mappers: 0,
         aph_mappers: ptr::null_mut(),
         supported_algs: 0,
         palg_supported_algs: ptr::null_mut(),
-        enabled_protocols: enabled & !SP_PROT_TLS1_3_CLIENT,
+        enabled_protocols: legacy_protocols,
         minimum_cipher_strength: 0,
         maximum_cipher_strength: 0,
         session_lifespan: 0,
@@ -291,12 +348,13 @@ pub(crate) fn acquire(verify: bool, modern: bool, enabled: u32) -> Result<Cred, 
     let mut h = SecHandle { lower: 0, upper: 0 };
     let mut expiry = 0i64;
     // SAFETY: package is NUL-terminated; auth points to a credentials struct (and its
-    // TLS_PARAMETERS) that lives until the call returns; h and expiry are writable.
+    // TLS_PARAMETERS and certificate array of valid CERT_CONTEXTs) that lives until the call
+    // returns; h and expiry are writable.
     let st = unsafe {
         AcquireCredentialsHandleW(
             ptr::null(),
             package.as_mut_ptr(),
-            SECPKG_CRED_OUTBOUND,
+            usage,
             ptr::null_mut(),
             auth,
             ptr::null_mut(),
@@ -439,6 +497,86 @@ pub(crate) fn initialize(
 
 fn in_bufs_is_empty(d: &SecBufferDesc) -> bool {
     d.count == 0
+}
+
+/// One `AcceptSecurityContext` step of a server. `token` holds the bytes received from the
+/// client (`None` builds the close_notify after [`apply_shutdown`]); `alpn` is a
+/// `SEC_APPLICATION_PROTOCOLS` buffer, passed on the first step only.
+pub(crate) fn accept(
+    cred: &Cred,
+    ctx: &mut Option<Ctx>,
+    token: Option<&[u8]>,
+    alpn: Option<&[u8]>,
+) -> Step {
+    let mut owned = token.unwrap_or_default().to_vec();
+    let mut alpn_owned = alpn.unwrap_or_default().to_vec();
+    let mut in_bufs = Vec::new();
+    if token.is_some() {
+        in_bufs.push(buffer(SECBUFFER_TOKEN, Some(&mut owned)));
+        in_bufs.push(buffer(SECBUFFER_EMPTY, None));
+        if ctx.is_none() && alpn.is_some() {
+            in_bufs.push(buffer(
+                SECBUFFER_APPLICATION_PROTOCOLS,
+                Some(&mut alpn_owned),
+            ));
+        }
+    }
+    let mut in_desc = desc(&mut in_bufs);
+    let mut out_bufs = [
+        buffer(SECBUFFER_TOKEN, None),
+        buffer(SECBUFFER_ALERT, None),
+        buffer(SECBUFFER_EMPTY, None),
+    ];
+    let mut out_desc = desc(&mut out_bufs);
+    // The credentials handle is only read; a copy keeps `cred` shareable between sessions.
+    let mut cred_handle = cred.0;
+    let mut new_ctx = SecHandle { lower: 0, upper: 0 };
+    let mut attrs = 0u32;
+    let mut expiry = 0i64;
+    let existing: *mut SecHandle = match ctx.as_mut() {
+        Some(c) => &mut c.0,
+        None => ptr::null_mut(),
+    };
+    let input_ptr: *mut SecBufferDesc = if in_bufs_is_empty(&in_desc) {
+        ptr::null_mut()
+    } else {
+        &mut in_desc
+    };
+    // SAFETY: cred_handle is a valid credentials handle; existing is NULL or a valid context;
+    // the descriptors point to buffers that outlive the call; output buffers are allocated
+    // by SChannel (ALLOCATE_MEMORY) and freed by take_allocated below.
+    let status = unsafe {
+        AcceptSecurityContext(
+            &mut cred_handle,
+            existing,
+            input_ptr,
+            ASC_REQ_FLAGS,
+            0,
+            if existing.is_null() {
+                &mut new_ctx
+            } else {
+                existing
+            },
+            &mut out_desc,
+            &mut attrs,
+            &mut expiry,
+        )
+    };
+    if ctx.is_none() && (new_ctx.lower != 0 || new_ctx.upper != 0) {
+        *ctx = Some(Ctx(new_ctx));
+    }
+    let token_out = take_allocated(&out_bufs[0]);
+    let _alert = take_allocated(&out_bufs[1]);
+    let _ = take_allocated(&out_bufs[2]);
+    let extra = in_bufs
+        .get(1)
+        .filter(|b| b.kind == SECBUFFER_EXTRA)
+        .map_or(0, |b| b.cb as usize);
+    Step {
+        status,
+        token: token_out,
+        extra,
+    }
 }
 
 /// Result of decrypting the start of a buffer in place.
