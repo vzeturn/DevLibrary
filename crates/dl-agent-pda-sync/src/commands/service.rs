@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use super::change_tracking::ChangeTrackingMonitor;
 use super::channel::{CommandChannel, CommandChannelParts};
 use super::executor::SiteCommandExecutor;
 use super::grants::{BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, OrderGrantsService};
@@ -132,6 +133,16 @@ pub fn build(
         log,
         repair,
     ));
+    // Change Tracking (RT-1318) is probed and enabled beside the grants only with the flag
+    // capture.change_tracking on; off, it issues no statement.
+    let change_tracking = Arc::new(ChangeTrackingMonitor::real(
+        s.options.capture.change_tracking,
+        crate::capture::plan::captured_tables(catalog),
+        events.clone(),
+        s.identity.clone(),
+        s.secrets.clone(),
+        log,
+    ));
     let schema = Arc::new(TableSchemaGuard::new(events.clone(), log));
     let legacy_export = Arc::new(crate::legacy_export::LegacyExportCommandHandler::new(
         legacy_export_env(s, events.clone()),
@@ -161,7 +172,7 @@ pub fn build(
     ));
     Ok(vec![
         Box::new(CommandService::new(channel)),
-        Box::new(OrderGrantsService::new(grants)),
+        Box::new(OrderGrantsService::new(grants).with_change_tracking(change_tracking)),
     ])
 }
 

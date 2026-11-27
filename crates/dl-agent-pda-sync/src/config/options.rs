@@ -48,6 +48,16 @@ impl Default for PrintRelayOptions {
     }
 }
 
+/// Capture switches, section `Agent:Capture` (RT-1318).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaptureFlags {
+    /// `capture.change_tracking` (`Agent:Capture:ChangeTracking`, also read as
+    /// `Agent:Capture:change_tracking`): turn SQL Server Change Tracking on for the
+    /// captured tables in the grants check (ADR 0011 D2). Default off: while it is off the
+    /// agent issues no Change Tracking statement at all.
+    pub change_tracking: bool,
+}
+
 /// Static agent settings (`AgentOptions`); cloud-pushed values live in
 /// [`RuntimeConfig`](super::RuntimeConfig).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +96,8 @@ pub struct AgentOptions {
     pub auto_update_check_minutes: i32,
     /// The print relay endpoint.
     pub print_relay: PrintRelayOptions,
+    /// Capture switches.
+    pub capture: CaptureFlags,
 }
 
 impl Default for AgentOptions {
@@ -107,6 +119,7 @@ impl Default for AgentOptions {
             auto_update: true,
             auto_update_check_minutes: 45,
             print_relay: PrintRelayOptions::default(),
+            capture: CaptureFlags::default(),
         }
     }
 }
@@ -283,6 +296,15 @@ impl AgentOptions {
         b.string(&format!("{p}:QueueDir"), &mut pr.queue_dir);
         b.bool(&format!("{p}:DiscoverQueues"), &mut pr.discover_queues)?;
         b.int(&format!("{p}:DiscoveryMinutes"), &mut pr.discovery_minutes)?;
+        let c = format!("{s}:Capture");
+        b.bool(
+            &format!("{c}:ChangeTracking"),
+            &mut o.capture.change_tracking,
+        )?;
+        b.bool(
+            &format!("{c}:change_tracking"),
+            &mut o.capture.change_tracking,
+        )?;
         Ok(o)
     }
 
@@ -550,6 +572,31 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "Failed to convert configuration value 'abc' at 'Agent:HeartbeatSeconds' to type 'System.Int32'."
+        );
+    }
+
+    #[test]
+    fn change_tracking_is_off_unless_configured() {
+        // RT-1318 brief: the flag capture.change_tracking defaults to false.
+        assert!(!load(&[]).unwrap().capture.change_tracking);
+        for key in [
+            "Agent:Capture:ChangeTracking",
+            "agent:capture:changetracking",
+            "Agent:Capture:change_tracking",
+        ] {
+            assert!(
+                load(&[(key, Some("true"))])
+                    .unwrap()
+                    .capture
+                    .change_tracking,
+                "{key}"
+            );
+        }
+        assert!(
+            !load(&[("Agent:Capture:ChangeTracking", Some("False"))])
+                .unwrap()
+                .capture
+                .change_tracking
         );
     }
 

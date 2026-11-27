@@ -2,12 +2,17 @@
 //! bootstrap of an enrolled store under the operator's Windows login (or
 //! `--sql-admin-user`), without touching the cloud identity. An existing `pda_sync` login
 //! whose password the agent holds is never re-created, so the password does not change.
-//! Its events are `GRANTS_STARTED/FINISHED/FAILED` on source `enroll`.
+//! Its events are `GRANTS_STARTED/FINISHED/FAILED` on source `enroll`. With the flag
+//! `capture.change_tracking` on it then runs the Change Tracking step of [`grants_ct`]
+//! (RT-1318).
+//!
+//! [`grants_ct`]: super::grants_ct
 
 use super::cli::{EXIT_FAILED, EXIT_OK, EXIT_USAGE, Options, unhandled};
 use super::enroll::{
     admin_credential, describe, real_bootstrapper, refuse, sql_auth, tool_options,
 };
+use super::grants_ct::{ChangeTrackingStep, real_step};
 use super::secret_prompt::{ConsoleSecretPrompt, SecretPrompt};
 use super::verbs::{HostContext, VerbContext};
 use crate::bootstrap::error::Error;
@@ -85,14 +90,20 @@ pub fn run_with(
                 }
             };
             let secrets = crate::security::create(&paths);
+            let change_tracking = real_step(
+                host.options.capture.change_tracking,
+                &credential,
+                tool.logger(),
+            )?;
             let bootstrapper = real_bootstrapper(secrets.clone(), credential, tool.logger())
                 .map_err(|e| Box::new(e.to_exception()))?;
-            run_parts(
+            run_parts_with(
                 &bootstrapper,
                 &SqlOrderGrantsProbe,
                 &*secrets,
                 &paths,
                 &args,
+                change_tracking.as_ref(),
                 tool,
                 stdout,
                 stderr,
@@ -120,9 +131,53 @@ pub fn run_parts(
     stderr: &dyn LineWriter,
     ctx: &Ctx,
 ) -> Result<i32, Box<Exception>> {
+    run_parts_with(
+        bootstrapper,
+        probe,
+        secrets,
+        paths,
+        args,
+        None,
+        run,
+        stdout,
+        stderr,
+        ctx,
+    )
+}
+
+/// [`run_parts`] with the Change Tracking step of the flag `capture.change_tracking`
+/// (RT-1318), run once the order grants are verified; `None` issues no Change Tracking
+/// statement.
+#[allow(clippy::too_many_arguments)]
+pub fn run_parts_with(
+    bootstrapper: &SqlBootstrapper,
+    probe: &dyn OrderGrantsProbe,
+    secrets: &dyn SecretStore,
+    paths: &AgentPaths,
+    args: &GrantsArgs,
+    change_tracking: Option<&ChangeTrackingStep<'_>>,
+    run: &dyn RunStages,
+    stdout: &dyn LineWriter,
+    stderr: &dyn LineWriter,
+    ctx: &Ctx,
+) -> Result<i32, Box<Exception>> {
     match apply(bootstrapper, paths, args, run, stdout, ctx) {
         Ok(None) => Ok(EXIT_OK),
-        Ok(Some(report)) => verify(probe, secrets, &report, run, stdout, stderr, ctx),
+        Ok(Some(report)) => {
+            let exit = verify(probe, secrets, &report, run, stdout, stderr, ctx)?;
+            match change_tracking {
+                Some(step) if exit == EXIT_OK => step.run(
+                    secrets,
+                    &report.instance.server_name,
+                    &report.database,
+                    run,
+                    stdout,
+                    stderr,
+                    ctx,
+                ),
+                _ => Ok(exit),
+            }
+        }
         Err(Error::Agent(e)) => Ok(refuse(&e, run, stderr)),
         Err(Error::Unexpected(ex)) => Err(ex),
     }

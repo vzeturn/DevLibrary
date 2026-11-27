@@ -486,7 +486,9 @@ impl SqlServerAdmin {
         }
     }
 
-    fn open(&self, instance: &SqlInstance, database: &str, ctx: &Ctx) -> Result<Client> {
+    /// Opens the setup connection; a failure is mapped to the agent's connection codes
+    /// ([`connect_failure`]).
+    pub(crate) fn open(&self, instance: &SqlInstance, database: &str, ctx: &Ctx) -> Result<Client> {
         if ctx.is_done() {
             return Err(Error::cancelled());
         }

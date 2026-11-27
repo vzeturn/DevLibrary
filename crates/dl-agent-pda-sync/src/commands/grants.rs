@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
+use super::change_tracking::ChangeTrackingMonitor;
 use super::executor::{GrantsCheck, utc_now};
 use crate::bootstrap::OrderGrantsProbe;
 use crate::config::time::SharedClock;
@@ -291,15 +292,28 @@ impl GrantsCheck for OrderGrantsMonitor {
 /// Runs the check at start and keeps watching (`OrderGrantsService`): quick retries
 /// while the POS database is unreachable, then a probe and repair every
 /// [`RECHECK_INTERVAL`] while the grants are missing or unchecked, and at once when a
-/// refused command wakes it.
+/// refused command wakes it. With a [`ChangeTrackingMonitor`] it runs that check after
+/// each check that found the grants in place (RT-1318) and waits for the shorter of both.
 pub struct OrderGrantsService {
     monitor: Arc<OrderGrantsMonitor>,
+    change_tracking: Option<Arc<ChangeTrackingMonitor>>,
 }
 
 impl OrderGrantsService {
     /// The watch of `monitor`.
     pub fn new(monitor: Arc<OrderGrantsMonitor>) -> OrderGrantsService {
-        OrderGrantsService { monitor }
+        OrderGrantsService {
+            monitor,
+            change_tracking: None,
+        }
+    }
+
+    /// Adds the Change Tracking check (flag `capture.change_tracking`, RT-1318). It runs
+    /// only once the grants are in place: `pda_sync` must exist to be granted
+    /// `VIEW CHANGE TRACKING`.
+    pub fn with_change_tracking(mut self, check: Arc<ChangeTrackingMonitor>) -> OrderGrantsService {
+        self.change_tracking = Some(check);
+        self
     }
 
     /// Waits up to `limit` (`None`: until woken); false when `ctx` ended.
@@ -314,6 +328,15 @@ impl OrderGrantsService {
             }
             waited += WAKE_POLL;
         }
+    }
+}
+
+/// The shorter of two waits, `None` being "until woken".
+pub fn shorter_wait(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, None) => a,
+        (None, b) => b,
     }
 }
 
@@ -337,7 +360,11 @@ impl LoopService for OrderGrantsService {
         loop {
             let checked = self.monitor.check_grants(ctx);
             unchecked = if checked.is_none() { unchecked + 1 } else { 0 };
-            if !self.wait(ctx, next_wait(checked, unchecked)) {
+            let mut limit = next_wait(checked, unchecked);
+            if let (Some(false), Some(ct)) = (checked, &self.change_tracking) {
+                limit = shorter_wait(limit, ct.check(ctx).recheck());
+            }
+            if !self.wait(ctx, limit) {
                 return Ok(());
             }
         }

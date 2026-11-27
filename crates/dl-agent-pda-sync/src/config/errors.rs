@@ -132,6 +132,15 @@ pub mod codes {
     pub const CAPTURE_TABLE_SKIPPED: &str = "CAPTURE_TABLE_SKIPPED";
     /// A skipped capture table reads again (AD1).
     pub const CAPTURE_TABLE_RECOVERED: &str = "CAPTURE_TABLE_RECOVERED";
+    /// SQL Server Change Tracking is on for every captured table with a primary key: the
+    /// tables and the identity that enabled it (RT-1318).
+    pub const CAPTURE_CT_ENABLED: &str = "CAPTURE_CT_ENABLED";
+    /// Change Tracking is on, but captured tables are left out and why (`no_pk`,
+    /// `missing`, `refused`, `lock_timeout`) (RT-1318).
+    pub const CAPTURE_CT_PARTIAL: &str = "CAPTURE_CT_PARTIAL";
+    /// Change Tracking could not be enabled: the outcome of each identity, never a password
+    /// (RT-1318).
+    pub const CAPTURE_CT_FAILED: &str = "CAPTURE_CT_FAILED";
 }
 
 /// The .NET type name of `AgentException`, used where an exception is written to a log.

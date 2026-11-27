@@ -1,8 +1,9 @@
 //! The module's self-test (`dl-agent selftest`, the `selftest` command). Read only and
 //! bounded: `agent.json` loads, the last `status.json` state, the PDA cloud's ready route
 //! answers, `pda_sync` signs in to `SMILE_POS` and reads the captured and agent tables,
-//! the order grants are in place, the data folder is writable, and the print relay
-//! settings. Nothing is enrolled, captured, queued or sent.
+//! the order grants are in place, with the flag `capture.change_tracking` on the Change
+//! Tracking state of the captured tables (RT-1318), the data folder is writable, and the
+//! print relay settings. Nothing is enrolled, captured, queued, sent or altered.
 
 use std::sync::Arc;
 
@@ -10,19 +11,25 @@ use dl_agent::selftest::{Check, Outcome, PROBE_TIMEOUT, SelfTest};
 use dl_agent::supervisor::ModuleContext;
 
 use super::{NAME, NOT_ENROLLED, settings};
+use crate::bootstrap::change_tracking::{CtProbe, plan};
+use crate::bootstrap::change_tracking_sql::{ChangeTrackingProbe, SqlChangeTrackingProbe};
 use crate::bootstrap::cloud_probe::{CloudProbe, HttpCloudProbe};
 use crate::bootstrap::models::SqlInstance;
 use crate::bootstrap::probes::{
     AgentLoginProbe, OrderGrantsProbe, SqlAgentLoginProbe, SqlOrderGrantsProbe,
 };
+use crate::capture::plan::captured_tables;
 use crate::config::health::{DEGRADED, HEALTHY, REENROLL_REQUIRED};
 use crate::config::{AgentIdentity, AgentOptions, AgentPaths, AgentStatus};
+use crate::contracts::catalog::SyncCatalog;
 use crate::printrelay::policy::PrinterTargetPolicy;
 use crate::security::names;
 use crate::util::ctx::Ctx;
 
 const REENROLL: &str = "enroll again: dl-agent pda-enroll --code <code> --url <PDA cloud url>";
 const GRANTS: &str = "apply the order grants: dl-agent pda-grants (as a SQL administrator)";
+const CT_PENDING: &str =
+    "the agent turns it on within 15 minutes, or run: dl-agent pda-grants (as a SQL administrator)";
 
 /// The self-test to register with `App::selftest`.
 pub fn pda_sync_selftest() -> SelfTest {
@@ -62,7 +69,7 @@ pub fn checks(ctx: &ModuleContext) -> Vec<Check> {
         state(&host.paths),
         cloud(&identity.cloud_url),
     ];
-    out.extend(sql(&host.paths, &identity));
+    out.extend(sql(&host.paths, &identity, &host.options));
     out.push(data_folder(&host.paths));
     out.push(print_relay(&host.options));
     out
@@ -123,8 +130,9 @@ fn cloud(url: &str) -> Check {
     )
 }
 
-/// `pda_sync` signs in and reads, and has the order grants.
-fn sql(paths: &AgentPaths, identity: &AgentIdentity) -> Vec<Check> {
+/// `pda_sync` signs in and reads, has the order grants and, with the flag on, sees the
+/// Change Tracking state.
+fn sql(paths: &AgentPaths, identity: &AgentIdentity, options: &AgentOptions) -> Vec<Check> {
     let title = "pda_sync reads SMILE_POS";
     let (Some(instance), Some(database)) =
         (identity.sql_instance.clone(), identity.sql_database.clone())
@@ -147,6 +155,7 @@ fn sql(paths: &AgentPaths, identity: &AgentIdentity) -> Vec<Check> {
     crate::reporting::scrubber::register(Some(&password));
     let at = format!("{instance}/{database}");
     let password = Arc::new(password);
+    let change_tracking = change_tracking(options, &instance, &database, &password, &at);
     let (i, d, p, a) = (
         instance.clone(),
         database.clone(),
@@ -178,7 +187,55 @@ fn sql(paths: &AgentPaths, identity: &AgentIdentity) -> Vec<Check> {
             Err(e) => Outcome::fail(format!("{at}: {e}")),
         },
     );
-    vec![login, grants]
+    let mut out = vec![login, grants];
+    out.extend(change_tracking);
+    out
+}
+
+/// With the flag `capture.change_tracking` on, the Change Tracking state of the captured
+/// tables as `pda_sync` reads it (RT-1318); `None` with the flag off, so nothing is probed.
+fn change_tracking(
+    options: &AgentOptions,
+    instance: &str,
+    database: &str,
+    password: &Arc<String>,
+    at: &str,
+) -> Option<Check> {
+    if !options.capture.change_tracking {
+        return None;
+    }
+    let (i, d, p, a) = (
+        instance.to_owned(),
+        database.to_owned(),
+        Arc::clone(password),
+        at.to_owned(),
+    );
+    Some(Check::bounded(
+        NAME,
+        "change_tracking",
+        "Change Tracking on the captured tables",
+        PROBE_TIMEOUT * 2,
+        move || {
+            let probe = SyncCatalog::load()
+                .map_err(|e| format!("sync catalog: {e}"))
+                .and_then(|catalog| {
+                    SqlChangeTrackingProbe
+                        .probe(&i, &d, &p, &captured_tables(catalog), &Ctx::background())
+                        .map_err(|e| e.to_string())
+                });
+            ct_outcome(&a, probe)
+        },
+    ))
+}
+
+/// The verdict on a Change Tracking probe: pass once nothing is left to turn on (a table
+/// without a primary key cannot be tracked and is not a warning), warn while work is left.
+fn ct_outcome(at: &str, probe: Result<CtProbe, String>) -> Outcome {
+    match probe {
+        Ok(p) if plan(&p, true).is_done() => Outcome::pass(format!("{at}: {}", p.describe())),
+        Ok(p) => Outcome::warn(format!("{at}: not on yet, {}", p.describe())).remedy(CT_PENDING),
+        Err(e) => Outcome::fail(format!("{at}: {e}")),
+    }
 }
 
 /// The data folder takes a write (the queues and state live there).
@@ -217,7 +274,76 @@ fn print_relay(options: &AgentOptions) -> Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bootstrap::change_tracking::CtTable;
     use dl_agent::selftest::Status;
+
+    fn table(name: &str, has_pk: bool, tracked: bool) -> CtTable {
+        CtTable {
+            name: name.into(),
+            present: true,
+            has_pk,
+            tracked,
+            can_view: tracked,
+        }
+    }
+
+    #[test]
+    fn change_tracking_is_not_probed_with_the_flag_off() {
+        let pw = Arc::new("pw".to_owned());
+
+        let c = change_tracking(
+            &AgentOptions::default(),
+            "POS",
+            "SMILE_POS",
+            &pw,
+            "POS/SMILE_POS",
+        );
+
+        assert!(c.is_none());
+    }
+
+    #[test]
+    fn change_tracking_on_for_every_keyed_table_passes() {
+        let p = CtProbe {
+            database_enabled: true,
+            current_version: Some(42),
+            tables: vec![
+                table("TmpInvoice", true, true),
+                table("CashierRVC", false, false),
+            ],
+        };
+
+        let o = ct_outcome("POS/SMILE_POS", Ok(p));
+
+        assert_eq!(o.status, Status::Pass, "{}", o.detail);
+        assert_eq!(
+            o.detail,
+            "POS/SMILE_POS: database on, 1/2 captured tables tracked, version 42"
+        );
+    }
+
+    #[test]
+    fn change_tracking_still_off_warns_with_the_remedy() {
+        let p = CtProbe {
+            database_enabled: false,
+            current_version: None,
+            tables: vec![table("TmpInvoice", true, false)],
+        };
+
+        let o = ct_outcome("POS/SMILE_POS", Ok(p));
+
+        assert_eq!(o.status, Status::Warn);
+        assert!(o.detail.contains("database off"), "{}", o.detail);
+        assert_eq!(o.remedy.as_deref(), Some(CT_PENDING));
+    }
+
+    #[test]
+    fn a_failed_change_tracking_probe_fails() {
+        let o = ct_outcome("POS/SMILE_POS", Err("SQL error 4060".into()));
+
+        assert_eq!(o.status, Status::Fail);
+        assert_eq!(o.detail, "POS/SMILE_POS: SQL error 4060");
+    }
 
     #[test]
     fn print_relay_with_no_subnet_prints_to_any_private_lan() {

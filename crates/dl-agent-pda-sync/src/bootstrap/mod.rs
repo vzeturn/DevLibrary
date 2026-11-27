@@ -6,11 +6,16 @@
 //! - [`admin`]: `ISqlAdmin.cs`, `SqlServerAdmin.cs` (setup identity, connection failures).
 //! - [`probes`]: `AgentLoginProbe.cs`, `OrderGrantsProbe.cs` (reads as `pda_sync`).
 //! - [`bootstrapper`]: `SqlBootstrapper.cs` and the embedded `Sql/*.sql` scripts.
+//! - [`change_tracking`]: the SQL Server Change Tracking plan and SQL text;
+//!   [`change_tracking_sql`]: its probe as `pda_sync` and its steps as an administrator
+//!   (RT-1318).
 //! - [`cloud_probe`]: `CloudProbe.cs`; [`workflow`]: `EnrollWorkflow.cs` (with
 //!   `WindowsServiceRecovery`).
 
 pub mod admin;
 pub mod bootstrapper;
+pub mod change_tracking;
+pub mod change_tracking_sql;
 pub mod cloud_probe;
 pub mod discovery;
 pub mod error;
