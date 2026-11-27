@@ -107,6 +107,8 @@ pub mod codes {
     pub const SQL_GRANTS_MISSING: &str = "SQL_GRANTS_MISSING";
     /// The service applied the missing grants itself (AG1).
     pub const SQL_GRANTS_REPAIRED: &str = "SQL_GRANTS_REPAIRED";
+    /// One SQL setup step the service self-repair applied (RT-1425), one event per step.
+    pub const SQL_GRANT_APPLIED: &str = "SQL_GRANT_APPLIED";
     /// A verb was refused because a store column is missing (OW1e, ADR 0112).
     pub const SCHEMA_UNSUPPORTED: &str = "SCHEMA_UNSUPPORTED";
 

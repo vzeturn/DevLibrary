@@ -36,6 +36,9 @@ pub struct RepairAttempt {
 pub struct RepairOutcome {
     /// One entry per identity tried or skipped.
     pub attempts: Vec<RepairAttempt>,
+    /// The ids of the bootstrap steps the identity that applied it ran (RT-1425: each one
+    /// becomes a `SQL_GRANT_APPLIED` site event); empty when none ran.
+    pub applied_steps: Vec<String>,
 }
 
 impl RepairOutcome {
@@ -78,8 +81,8 @@ pub trait GrantsRepair: Send + Sync {
     fn try_repair(&self, ctx: &Ctx) -> RepairOutcome;
 }
 
-/// Runs the bootstrap as one identity; the number of SQL steps it executed.
-pub type ApplyAs = dyn Fn(&SqlAdminCredential, &Ctx) -> Result<usize, Error> + Send + Sync;
+/// Runs the bootstrap as one identity; the ids of the SQL steps it executed.
+pub type ApplyAs = dyn Fn(&SqlAdminCredential, &Ctx) -> Result<Vec<String>, Error> + Send + Sync;
 
 /// The bootstrap of `enroll` and `grants` for the enrolled target, as each identity of
 /// `pda-enroll` in turn (`BootstrapGrantsRepair`).
@@ -94,7 +97,7 @@ impl BootstrapGrantsRepair {
     /// the real bootstrapper for `identity`'s SQL target; `log` is the root logger.
     pub fn new(secrets: SharedSecretStore, identity: AgentIdentity, log: &Logger) -> Self {
         let root = log.clone();
-        let apply = move |credential: &SqlAdminCredential, ctx: &Ctx| -> Result<usize, Error> {
+        let apply = move |credential: &SqlAdminCredential, ctx: &Ctx| -> Result<Vec<String>, Error> {
             let bootstrapper = crate::hosting::enroll::real_bootstrapper(
                 secrets.clone(),
                 credential.clone(),
@@ -106,7 +109,12 @@ impl BootstrapGrantsRepair {
                 ctx,
             )?;
             let report = bootstrapper.apply(&preflight, false, ctx)?;
-            Ok(report.steps.iter().filter(|s| s.executed).count())
+            Ok(report
+                .steps
+                .iter()
+                .filter(|s| s.executed)
+                .map(|s| s.id.clone())
+                .collect())
         };
         Self::with_parts(
             default_attempts(&DefaultLogin::from_process()),
@@ -159,12 +167,13 @@ impl GrantsRepair for BootstrapGrantsRepair {
                 Ok(applied) => {
                     self.log.info(
                         "Grants self-repair applied {Applied} SQL step(s) as {Identity}",
-                        &[Value::from(applied), Value::from(label.as_str())],
+                        &[Value::from(applied.len()), Value::from(label.as_str())],
                     );
                     out.attempts.push(RepairAttempt {
                         identity: label.clone(),
                         outcome: APPLIED.to_owned(),
                     });
+                    out.applied_steps = applied;
                     break;
                 }
                 Err(e) => {
@@ -218,7 +227,7 @@ mod tests {
     }
 
     /// A runner that answers each identity in turn and records who ran.
-    fn runner(answers: Vec<Result<usize, Error>>) -> (Box<ApplyAs>, Arc<Mutex<Vec<String>>>) {
+    fn runner(answers: Vec<Result<Vec<String>, Error>>) -> (Box<ApplyAs>, Arc<Mutex<Vec<String>>>) {
         let ran = Arc::new(Mutex::new(Vec::new()));
         let answers = Mutex::new(answers.into_iter());
         let seen = ran.clone();
@@ -235,13 +244,16 @@ mod tests {
         (Box::new(apply), ran)
     }
 
-    fn refused(code: &str) -> Result<usize, Error> {
+    fn refused(code: &str) -> Result<Vec<String>, Error> {
         Err(Error::Agent(AgentError::new(code, "refused")))
     }
 
     #[test]
     fn a_refused_windows_identity_falls_back_to_the_smile_login() {
-        let (apply, ran) = runner(vec![refused(codes::SQL_NO_ACCESS), Ok(12)]);
+        let (apply, ran) = runner(vec![
+            refused(codes::SQL_NO_ACCESS),
+            Ok(vec!["po_number_grants".into(), "full_rw_grants".into()]),
+        ]);
         let repair =
             BootstrapGrantsRepair::with_parts(attempts(Some(PASSWORD)), apply, &Logger::none());
 
@@ -249,6 +261,8 @@ mod tests {
 
         assert_eq!(*ran.lock().unwrap(), ["windows", "smile"]);
         assert_eq!(out.applied_by(), Some("sql:smile"));
+        // RT-1425: the steps it ran, for one SQL_GRANT_APPLIED event each.
+        assert_eq!(out.applied_steps, ["po_number_grants", "full_rw_grants"]);
         assert_eq!(out.summary(), "windows: SQL_NO_ACCESS; sql:smile: applied");
         let json = dl_json::to_string(&out.to_json());
         assert!(!json.contains(PASSWORD), "never a password: {json}");
@@ -266,6 +280,7 @@ mod tests {
         let out = repair.try_repair(&Ctx::background());
 
         assert_eq!(out.applied_by(), None);
+        assert!(out.applied_steps.is_empty());
         assert_eq!(
             out.summary(),
             "windows: SQL_LOGIN_FAILED; sql:smile: SQL_LOGIN_FAILED"

@@ -12,7 +12,7 @@ use super::sql_text as q;
 use super::units::{CheckMoneyFacts, EmptyBillFacts, StoreColumn, TableCommandUnit};
 use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckMergePayload, OrderItemsMovePayload,
-    OrderTableChangePayload, OrderTableTransferPayload,
+    OrderPoNumberPayload, OrderTableChangePayload, OrderTableTransferPayload,
 };
 use crate::util::ctx::Ctx;
 
@@ -78,6 +78,13 @@ pub fn empty_bill_facts_parameters(rvc_no: i32, check_no: i64, opened_before: &s
 pub fn cancel_empty_parameters(p: &OrderCheckCancelEmptyPayload) -> Vec<Param> {
     let mut v = lock_parameters(p.rvc_no, p.check_no);
     v.push(sql::text_param("CancelBy", Some(&p.cashier)));
+    v
+}
+
+/// The parameters of [`q::SET_PO_NUMBER`] (RT-1413).
+pub fn po_number_parameters(p: &OrderPoNumberPayload) -> Vec<Param> {
+    let mut v = lock_parameters(p.rvc_no, p.check_no);
+    v.push(sql::text_param("PONumber", p.po_number.as_deref()));
     v
 }
 
@@ -276,6 +283,16 @@ impl TableCommandUnit for SqlSiteCommandUnit<'_> {
             self.c,
             b::CANCEL_ORDER,
             &cancel_empty_parameters(payload),
+            ctx,
+        )
+        .map(|_| ())
+    }
+
+    fn set_po_number(&mut self, payload: &OrderPoNumberPayload, ctx: &Ctx) -> Result<()> {
+        sql::execute(
+            self.c,
+            q::SET_PO_NUMBER,
+            &po_number_parameters(payload),
             ctx,
         )
         .map(|_| ())

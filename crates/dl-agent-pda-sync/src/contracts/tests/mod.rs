@@ -8,6 +8,7 @@ mod hops;
 mod legacy;
 mod mapper;
 mod wire;
+mod wire_po_number;
 
 use super::catalog::SyncCatalog;
 use super::map::{OrderedMap, StrMap};

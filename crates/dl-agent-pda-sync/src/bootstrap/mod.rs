@@ -28,6 +28,6 @@ pub use fingerprint::SchemaFingerprint;
 pub use models::{BootstrapReport, BootstrapStep, SqlInstance, StepKind, StepOutcome, TableSet};
 pub use preflight::{PreflightFinding, SqlPreflight, SqlServerInfo, check_server};
 pub use probes::{
-    AgentLoginProbe, OrderGrantsProbe, SqlAgentLoginProbe, SqlOrderGrantsProbe,
+    AgentLoginProbe, CHECKED, OrderGrantsProbe, SqlAgentLoginProbe, SqlOrderGrantsProbe,
     is_permission_denied,
 };

@@ -159,6 +159,18 @@ pub const EMPTY_BILL_FACTS: &str = concat!(
     "FROM dbo.TmpInvoice i WHERE i.CheckNo = @CheckNo AND i.RVC = @RVCNo;"
 );
 
+/// `OrderCommandSql.SetPoNumber` (RT-1413): the guest of an open check into
+/// `TmpInvoice.PONumber` only, TCVN3-encoded and cut to the column's own length; empty
+/// clears it (NULL, or '' on a NOT NULL column).
+pub const SET_PO_NUMBER: &str = r#"SET NOCOUNT ON;
+DECLARE @PoMax int = ISNULL(COLUMNPROPERTY(OBJECT_ID(N'dbo.tmpInvoice'), N'PONumber', 'CharMaxLen'), 50);
+DECLARE @PoText varchar(4000) = dbo.Unicode2TCVN(NULLIF(LTRIM(RTRIM(@PONumber)), N''));
+IF @PoMax > 0 SET @PoText = RTRIM(LEFT(@PoText, @PoMax));
+IF @PoText IS NULL AND ISNULL(COLUMNPROPERTY(OBJECT_ID(N'dbo.tmpInvoice'), N'PONumber', 'AllowsNull'), 0) = 0 SET @PoText = '';
+UPDATE dbo.tmpInvoice
+    SET PONumber = @PoText
+    WHERE CheckNo = @CheckNo AND RVC = @RVCNo;"#;
+
 /// `OrderCommandSql.MissingColumnsHead`.
 pub const MISSING_COLUMNS_HEAD: &str = "SELECT need.t, need.c FROM (VALUES ";
 

@@ -101,7 +101,11 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
     let grant = script.contains("GRANT");
     match step.kind {
         StepKind::Login => script.contains("CREATE LOGIN"),
-        StepKind::User => script.contains("CREATE USER") && !script.contains("dbo.Folio"),
+        StepKind::User => {
+            script.contains("CREATE USER")
+                && !script.contains("dbo.Folio")
+                && !script.contains("db_datawriter")
+        }
         StepKind::Grants => grant && script.contains("Pda_SyncState"),
         StepKind::CommandGrants => grant && script.contains("dbo.TableReservation"),
         StepKind::OrderGrants => grant && script.contains("dbo.PostITrn"),
@@ -117,6 +121,8 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
                 && script.contains("ADR 0179")
                 && script.contains("PostInterfaceTransactionToFolio")
         }
+        StepKind::PoNumberGrants => grant && script.contains("dbo.tmpInvoice (PONumber)"),
+        StepKind::FullRwGrants => grant && script.contains("db_datawriter"),
         StepKind::Table => script.contains(&format!("CREATE TABLE dbo.{}", step.object_name)),
     }
 }

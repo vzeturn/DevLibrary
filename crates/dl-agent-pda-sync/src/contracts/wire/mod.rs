@@ -62,7 +62,7 @@ pub use sync_verify::{
 };
 pub use table_commands::{
     OrderCheckCancelEmptyPayload, OrderCheckExpectation, OrderCheckMergePayload,
-    OrderItemsMovePayload, OrderMultiCheckResult, OrderTableChangePayload,
+    OrderItemsMovePayload, OrderMultiCheckResult, OrderPoNumberPayload, OrderTableChangePayload,
     OrderTableTransferPayload, is_local_timestamp, multi_check_aggregate, table_command_reasons,
     table_command_types,
 };

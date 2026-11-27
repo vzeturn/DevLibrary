@@ -23,6 +23,7 @@ pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
 pub mod keyed_pool;
+mod po_number;
 mod resnapshot;
 pub mod result_outbox;
 mod schema_guard;
@@ -84,7 +85,8 @@ pub mod params {
         cancel_empty_parameters, cancel_parameters, empty_bill_facts_parameters, lock_parameters,
         log_trn_move_parameters, merge_line_info_parameters, merge_lines_parameters,
         missing_columns_parameters, move_line_info_parameters, move_line_parameters,
-        table_info_parameters, transfer_header_parameters, transfer_line_info_parameters,
+        po_number_parameters, table_info_parameters, transfer_header_parameters,
+        transfer_line_info_parameters,
     };
 }
 

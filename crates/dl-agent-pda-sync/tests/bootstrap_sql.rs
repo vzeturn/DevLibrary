@@ -40,7 +40,9 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "sequence_grants",
             "money_grants",
             "fo_inhouse_grants",
-            "post_to_smile_grants"
+            "post_to_smile_grants",
+            "po_number_grants",
+            "full_rw_grants"
         ]
     );
     assert!(report.steps.iter().all(|s| s.executed));
@@ -366,6 +368,8 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::MoneyGrants
                 | StepKind::FoInhouseGrants
                 | StepKind::PostToSmileGrants
+                | StepKind::PoNumberGrants
+                | StepKind::FullRwGrants
         )
     }) {
         let sql = read_script(step.resource_name).unwrap();

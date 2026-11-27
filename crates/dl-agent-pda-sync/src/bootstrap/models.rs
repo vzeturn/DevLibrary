@@ -60,6 +60,12 @@ pub enum StepKind {
     /// The Front Office reads and the posting procedure of the close and the room charge
     /// (`195_post_to_smile_grants.sql`, ADR 0179, RT-1297).
     PostToSmileGrants,
+    /// The column grant of `order.po_number` on `dbo.tmpInvoice (PONumber)` (RT-1413,
+    /// script 200; RT-1425 for this agent).
+    PoNumberGrants,
+    /// Full read/write of `pda_sync` on the POS database, `SMILE_FO` and `SMILE_BO`
+    /// (owner decision RT-1425, temporary; script 210).
+    FullRwGrants,
 }
 
 impl StepKind {
@@ -78,6 +84,8 @@ impl StepKind {
             StepKind::MoneyGrants => "MoneyGrants",
             StepKind::FoInhouseGrants => "FoInhouseGrants",
             StepKind::PostToSmileGrants => "PostToSmileGrants",
+            StepKind::PoNumberGrants => "PoNumberGrants",
+            StepKind::FullRwGrants => "FullRwGrants",
         }
     }
 }

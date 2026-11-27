@@ -411,10 +411,18 @@ impl FakeRepair {
                         outcome: (*outcome).into(),
                     })
                     .collect(),
+                applied_steps: Vec::new(),
             },
             probe: probe.clone(),
             calls: AtomicUsize::new(0),
         })
+    }
+
+    /// RT-1425: the same, with the bootstrap steps the applying identity ran.
+    fn with_steps(mut self: Arc<Self>, steps: &[&str]) -> Arc<FakeRepair> {
+        Arc::get_mut(&mut self).expect("not shared yet").outcome.applied_steps =
+            steps.iter().map(|s| (*s).to_owned()).collect();
+        self
     }
 }
 
@@ -604,6 +612,51 @@ fn the_service_applies_missing_grants_itself_as_the_smile_login_when_windows_is_
         detail.get("identity").and_then(Json::as_str),
         Some("sql:smile")
     );
+}
+
+#[test]
+fn each_step_the_self_repair_applied_is_a_site_event() {
+    // RT-1425: the full read/write script (and any other step it runs) is logged one by one.
+    let g = Grants::new();
+    g.probe.set(&["ROLE db_datawriter"]);
+    let repair = FakeRepair::new(&g.probe, &[("windows", "applied")])
+        .with_steps(&["po_number_grants", "full_rw_grants"]);
+
+    assert_eq!(
+        g.monitor(Some(repair)).check_grants(&Ctx::background()),
+        Some(false)
+    );
+
+    assert_eq!(
+        g.events.codes(),
+        [
+            codes::SQL_GRANT_APPLIED,
+            codes::SQL_GRANT_APPLIED,
+            codes::SQL_GRANTS_REPAIRED
+        ]
+    );
+    let events = lock(&g.events.0);
+    let (_, _, message, detail) = &events[1];
+    assert!(message.contains("full_rw_grants"), "{message}");
+    let detail = detail.as_ref().unwrap();
+    assert_eq!(
+        detail.get("step").and_then(Json::as_str),
+        Some("full_rw_grants")
+    );
+    assert_eq!(
+        detail.get("identity").and_then(Json::as_str),
+        Some("windows")
+    );
+}
+
+#[test]
+fn the_probe_covers_the_po_number_column_grant() {
+    // RT-1425: a missing script 200 grant triggers the self-repair like the older ones.
+    assert!(dl_agent_pda_sync::bootstrap::CHECKED.contains(&(
+        "dbo.tmpInvoice",
+        "UPDATE",
+        Some("PONumber")
+    )));
 }
 
 #[test]

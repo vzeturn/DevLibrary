@@ -23,7 +23,7 @@ use dl_agent_pda_sync::contracts::wire::{
     CheckStateHeader, OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
+    OrderPoNumberPayload, OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
     OrderTenderAddPayload, OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
     kds_line_actions, order_command_reasons as reasons,
 };
@@ -677,6 +677,13 @@ impl TableCommandUnit for Unit<'_> {
         self.s.orders.checks.remove(&(p.rvc_no, p.check_no));
         self.s.open_checks.remove(&(p.rvc_no, p.check_no));
         self.s.fingerprints.remove(&p.check_no);
+        Ok(())
+    }
+
+    fn set_po_number(&mut self, p: &OrderPoNumberPayload, _: &Ctx) -> Result<()> {
+        // RT-1413: the header's PONumber only; nothing the fingerprint or the book models.
+        let text = p.po_number.as_deref().unwrap_or_default();
+        self.owner.call(format!("po {} {text}", p.check_no));
         Ok(())
     }
 

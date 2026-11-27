@@ -401,6 +401,19 @@ const EXISTS_SQL: &str = "SELECT CASE @kind
               WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = CASE o.type WHEN 'U' THEN 'INSERT' ELSE 'UPDATE' END
                 AND p.major_id = o.object_id))
         THEN 1 ELSE 0 END)
+  WHEN 'PoNumberGrants' THEN (SELECT CASE WHEN
+        COL_LENGTH(N'dbo.tmpInvoice', N'PONumber') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
+           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+           JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
+          WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.tmpInvoice')
+            AND c.name = N'PONumber')
+        THEN 1 ELSE 0 END)
+  WHEN 'FullRwGrants' THEN (SELECT CASE WHEN
+        IS_ROLEMEMBER(N'db_datareader', @name) = 1 AND IS_ROLEMEMBER(N'db_datawriter', @name) = 1
+        AND EXISTS (SELECT 1 FROM sys.database_permissions p
+           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+          WHERE p.class = 0 AND p.state = 'G' AND p.permission_name = 'EXECUTE')
+        THEN 1 ELSE 0 END)
   ELSE 0 END";
 
 /// `SELECT name FROM sys.databases ...` of `ListDatabasesAsync`.

@@ -313,13 +313,14 @@ impl SiteCommandExecutor {
             money_command_types::ROOM_CHARGE => self.room_charge(c, ctx),
             money_command_types::CHECK_CLOSE => self.check_close(c, ctx),
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
+            t::PO_NUMBER => self.po_number(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
         }
     }
 
     // ---- results
 
-    fn applied(&self, c: &SyncCommand, result: Option<Json>) -> SyncCommandResult {
+    pub(super) fn applied(&self, c: &SyncCommand, result: Option<Json>) -> SyncCommandResult {
         SyncCommandResult {
             command_id: c.command_id,
             status: CommandStatus::Applied,
@@ -348,7 +349,7 @@ impl SiteCommandExecutor {
     }
 
     /// The payload of `c`, or the `invalid_payload` rejection.
-    fn payload<T: WireJson>(
+    pub(super) fn payload<T: WireJson>(
         &self,
         c: &SyncCommand,
         what: &str,
@@ -368,7 +369,7 @@ impl SiteCommandExecutor {
     /// Runs `work` exactly once per command id. When the command carries an expected
     /// check state, the check is fingerprinted first inside the same transaction and a
     /// mismatch is a logged `check_changed` rejection.
-    fn run_guarded(
+    pub(super) fn run_guarded(
         &self,
         c: &SyncCommand,
         work: CommandWork<'_>,
@@ -666,7 +667,7 @@ impl SiteCommandExecutor {
 
     // ---- table and multi-check verbs (OW1e, ADR 0112)
 
-    fn schema_refusal(
+    pub(super) fn schema_refusal(
         &self,
         c: &SyncCommand,
         unit: &mut dyn SiteCommandUnit,
@@ -676,7 +677,7 @@ impl SiteCommandExecutor {
         Ok((!missing.is_empty()).then(|| self.reject(c, table::SCHEMA_UNSUPPORTED)))
     }
 
-    fn open_refusal(
+    pub(super) fn open_refusal(
         &self,
         c: &SyncCommand,
         unit: &mut dyn SiteCommandUnit,

@@ -123,6 +123,8 @@ pub mod site_command_contract {
         spec(m::TENDER_REMOVE, Interactive, 3),
         spec(m::CHECK_CLOSE, Interactive, 3),
         spec(t::CHECK_CANCEL_EMPTY, Durable, 8),
+        // RT-1413: the guest of a check; waits for the store like the empty-bill cleanup.
+        spec(t::PO_NUMBER, Durable, 8),
     ];
 
     /// The spec of a type (ordinal).

@@ -236,7 +236,7 @@ fn a_room_charge_answers_with_the_check_and_a_bad_payload_writes_nothing() {
 #[test]
 fn the_money_grant_script_runs_after_the_order_grants_and_only_grants_table_writes_to_pda_sync() {
     // RT-1296/RT-1297: the Front Office read grants (190) and the post grants (195) follow it.
-    let step = &STEPS[STEPS.len() - 3];
+    let step = &STEPS[STEPS.len() - 5];
     assert_eq!(
         (step.id, step.kind, step.resource_name),
         (

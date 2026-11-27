@@ -769,7 +769,7 @@ fn strip_comments(sql: &str) -> String {
 }
 
 /// `NotMatchRegex(@"(?i)\b(WORD|...)\b")`.
-fn has_word(sql: &str, words: &[&str]) -> bool {
+pub(super) fn has_word(sql: &str, words: &[&str]) -> bool {
     let upper = sql.to_ascii_uppercase();
     let s = upper.as_bytes();
     words.iter().any(|w| {
