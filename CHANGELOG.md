@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- dl-agent-arrival: the embedded `pms-procedures.sql` is byte for byte the Check-In .NET one again: bill lines carry `RefNo` (`FolioTransaction.RefNumber`), balance codes C, V and P never reach a signed bill, the registration card reads `ConfirmPrintFlag`, and `srCI_GetFolioRates` is installed. Sites on dl-agent had none of these, so the signed bill showed no Ref no.
+
 ### Added
 
 - dl-agent-rt: the `dl-rt/1` session protocol of ADR 0011 D3 as a pure crate (no sockets, clocks or storage; `no_std`, builds for wasm32): a versioned big-endian frame codec with explicit lengths, a 1 MiB default size limit, per-hop timestamp extension (`t_detected_us`, `t_read_us`) and a typed error for every malformed input; per-channel sender (monotonic seq, cumulative acks, byte credit that blocks instead of dropping, resume and in-order resend from the peer's high-water mark) and receiver (dedupe, gap detection, ack only after commit, credit grants, `resume_ok`); a session with the five channels, the resume handshake and the writer priority control > capture/commands/results > bulk. The wire format is specified in `docs/protocol/dl-rt-1.md` with golden vectors generated independently (`testdata/gen_frames.py`) so the PDAOrder cloud can implement the other end in .NET (RT-1318).

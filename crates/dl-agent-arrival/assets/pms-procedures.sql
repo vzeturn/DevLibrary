@@ -1468,6 +1468,7 @@ BEGIN
         FT.FolioBalanceCode AS Description
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
     WHERE FT.FolioNum = @FolioNum
+      AND LTRIM(RTRIM(FT.FolioBalanceCode)) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
     ORDER BY Code;
 END
 -- @@mmarrival:batch pms
@@ -1486,10 +1487,12 @@ BEGIN
         FT.Qty,
         FT.UnitPrice,
         FT.TransactionDate AS TransDate,
-        FT.Description
+        FT.Description,
+        CAST(FT.RefNumber AS VARCHAR(30)) AS RefNo
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
     WHERE FT.FolioNum = @sFolioNum
       AND (ISNULL(@sBalanceCode,'') = '' OR FT.FolioBalanceCode = @sBalanceCode)
+      AND LTRIM(RTRIM(FT.FolioBalanceCode)) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
     ORDER BY FT.TransactionDate;
 END
 -- @@mmarrival:batch pms
@@ -1511,7 +1514,9 @@ BEGIN
         F.NumAdult, F.NumChild,
         F.RateAmount, F.FolioCurrencyCode,
         F.GroupCode, F.TelNumM, F.MailM,
-        F.MemberID, F.ProfileNumber
+        F.MemberID, F.ProfileNumber,
+        -- Folio.ConfirmPrintFlag = true: the stay price must not be printed on the registration card.
+        CAST(ISNULL(F.ConfirmPrintFlag, 0) AS BIT) AS ConfirmPrintFlag
     FROM dbo.Folio F WITH (NOLOCK)
     LEFT JOIN dbo.RoomType RT WITH (NOLOCK) ON RT.RoomTypeCode = F.RoomTypeCode
     LEFT JOIN dbo.RoomType RTB WITH (NOLOCK) ON RTB.RoomTypeCode = F.RoomTypeBooked
@@ -2897,6 +2902,19 @@ BEGIN
     LEFT JOIN dbo.SpecialService SS WITH (NOLOCK) ON SS.SpecialServiceCode = SP.SpecialCode
     WHERE SP.FolioNum = @FolioNum
     ORDER BY SP.SpecialCode;
+END
+-- @@mmarrival:batch pms
+IF OBJECT_ID('dbo.srCI_GetFolioRates', 'P') IS NOT NULL DROP PROCEDURE dbo.srCI_GetFolioRates
+-- @@mmarrival:batch pms
+CREATE PROCEDURE dbo.srCI_GetFolioRates
+    @FolioNum DECIMAL(18,0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT hDate AS HDate, RateAmount
+    FROM dbo.FolioRate WITH (NOLOCK)
+    WHERE FolioNum = @FolioNum AND ISNULL(isCancel, 0) = 0
+    ORDER BY hDate;
 END
 -- @@mmarrival:batch pms
 IF OBJECT_ID('dbo.srCI_GetFolioTrace', 'P') IS NOT NULL DROP PROCEDURE dbo.srCI_GetFolioTrace
