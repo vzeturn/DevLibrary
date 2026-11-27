@@ -2,7 +2,8 @@
 // Builds the expected-objects list of the schema coverage matrix (RT-1215) from the manifests
 // the agents already ship, so it never drifts from what the features really touch:
 //   - dl-agent-pms ops manifest: every procedure (routine) and SELECT (table + columns) per op
-//   - dl-agent-pda-sync catalog: every SMILE_POS table PDAOrder syncs (used_by_pda), per class
+//   - dl-agent-pda-sync catalog: every SMILE_POS table PDAOrder syncs (used_by_pda), per class; a table
+//     marked optional_on_site carries its optional_reason, so a site without it is not a gap (ADR 0184)
 // Prints the body of POST /v1/admin/schema/coverage: {"expected": [...]}.
 //   node scripts/schema/expected-objects.mjs [agent_id ...] > coverage.json
 import { readFileSync } from 'node:fs';
@@ -35,7 +36,13 @@ for (const op of manifest.ops) {
   }
 }
 for (const t of catalog.tables) {
-  if (t.used_by_pda) add({ feature: `pda-sync:class-${t.class}`, database: 'SMILE_POS', table: t.table });
+  if (!t.used_by_pda) continue;
+  const item = { feature: `pda-sync:class-${t.class}`, database: 'SMILE_POS', table: t.table };
+  if (t.optional_on_site) {
+    if (!t.optional_reason?.trim()) throw new Error(`sync-catalog.json: ${t.table} is optional_on_site without an optional_reason`);
+    item.optional_reason = t.optional_reason;
+  }
+  add(item);
 }
 
 const agentIds = process.argv.slice(2);

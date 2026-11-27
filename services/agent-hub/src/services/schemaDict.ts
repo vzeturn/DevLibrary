@@ -37,24 +37,32 @@ export async function snapshotDetail(env: Env, id: string): Promise<Record<strin
   return { ...meta, database: JSON.parse(payload_json) as SnapshotDatabase };
 }
 
-export type CoverageStatus = 'present' | 'missing' | 'drift';
+export type CoverageStatus = 'present' | 'missing' | 'drift' | 'optional_absent';
 
 export interface CoverageCell {
   feature: string;
   object: string;
   status: CoverageStatus;
   missing_columns: string[];
+  /** Why the object may be absent; only on `optional_absent`. */
+  reason?: string;
 }
 
 export function judge(item: ExpectedItem, db: SnapshotDatabase | undefined): CoverageCell {
   const lower = (s: string): string => s.toLowerCase();
+  // An optional object absent from a snapshotted database is by design; without a snapshot nothing is known.
+  const absent = (object: string): CoverageCell =>
+    item.optional_reason !== undefined && db !== undefined
+      ? { feature: item.feature, object, status: 'optional_absent', missing_columns: [], reason: item.optional_reason }
+      : { feature: item.feature, object, status: 'missing', missing_columns: [] };
   if (item.routine !== undefined) {
+    const object = `${item.database}.${item.schema}.${item.routine}`;
     const found = db?.routines.some((r) => lower(r.schema) === lower(item.schema) && lower(r.name) === lower(item.routine ?? ''));
-    return { feature: item.feature, object: `${item.database}.${item.schema}.${item.routine}`, status: found ? 'present' : 'missing', missing_columns: [] };
+    return found ? { feature: item.feature, object, status: 'present', missing_columns: [] } : absent(object);
   }
   const t = db?.tables.find((x) => lower(x.schema) === lower(item.schema) && lower(x.name) === lower(item.table ?? ''));
   const object = `${item.database}.${item.schema}.${item.table}`;
-  if (!t) return { feature: item.feature, object, status: 'missing', missing_columns: [] };
+  if (!t) return absent(object);
   const have = new Set(t.columns.map((c) => lower(c.name)));
   const missing = item.columns.filter((c) => !have.has(lower(c)));
   return { feature: item.feature, object, status: missing.length > 0 ? 'drift' : 'present', missing_columns: missing };
@@ -63,7 +71,9 @@ export function judge(item: ExpectedItem, db: SnapshotDatabase | undefined): Cov
 /**
  * Coverage matrix: each expected table/column/routine of a feature against the newest snapshot of
  * the matching database, per agent. `present` = there, `drift` = table there with columns missing,
- * `missing` = absent (or the database was never snapshotted). Percent counts only `present`.
+ * `missing` = absent (or the database was never snapshotted), `optional_absent` = an object with an
+ * `optional_reason` that the snapshot lacks (with that reason). Percent = `present` over the objects
+ * the site needs, so an optional object it lacks is left out (100 when nothing else is expected).
  */
 export async function coverage(env: Env, body: CoverageBody): Promise<Record<string, unknown>> {
   const snaps = await latestPerDatabase(env.DB, body.agent_ids ?? []);
@@ -81,6 +91,7 @@ export async function coverage(env: Env, body: CoverageBody): Promise<Record<str
       return judge(item, parsed.get(key));
     });
     const count = (s: CoverageStatus): number => cells.filter((c) => c.status === s).length;
+    const needed = cells.length - count('optional_absent');
     const first = [...dbs.values()][0];
     return {
       agent_id: agentId,
@@ -90,8 +101,9 @@ export async function coverage(env: Env, body: CoverageBody): Promise<Record<str
       present: count('present'),
       drift: count('drift'),
       missing: count('missing'),
+      optional_absent: count('optional_absent'),
       total: cells.length,
-      percent: Math.round((count('present') / cells.length) * 1000) / 10,
+      percent: needed === 0 ? 100 : Math.round((count('present') / needed) * 1000) / 10,
       cells,
     };
   });

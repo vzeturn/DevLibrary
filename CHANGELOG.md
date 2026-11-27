@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Schema coverage no longer files the five SMILE_POS tables some SMILE builds lack by design as gaps (`IOrgInvoice`, `TItemCGuild`, `TmpInvoiceDetail`, `TRVCItem`, `ItemTimeDef`, RT-1381..1384, RT-1390): the dl-agent-pda-sync catalog copy marks them `optional_on_site` with the PDAOrder `optional_reason` (PDAOrder ADR 0184, PR #520); `expected-objects.mjs` passes the reason on, agent-hub `POST /admin/schema/coverage` judges such an object `optional_absent` (with `reason`, outside the percent) and `coverage-gaps.mjs` lists it under `explained` instead of `gaps`. On the three live snapshots the pda-order gaps drop from 5 to 0.
+- dl-agent-pda-sync logs a missing `optional_on_site` table once at information level ("optional tables are not in this SMILE_POS build") instead of the "planned tables do not exist" warning, which now names only unexpected gaps; the catalog loader refuses `optional_on_site` without an `optional_reason` and the dry run reports `optional_missing_tables` (port of PDAOrder PR #520's Rust agent change).
+
 - Release scripts refuse a dl-agent build without the SMILE default SQL password: `fly-build.sh` loads `MMEI_BUILD_DEFAULT_SQL_PASSWORD` from `~/.config/devlibrary-agent-hub/einvoice-build.env` when the environment has none and stops when neither has it, and `rel.sh sign` refuses a binary that does not carry it (`DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1` releases without it on purpose). 1.3.63, 1.3.64 and 1.3.66 were built without it, so pda-sync's grant self-repair skipped `sql:smile` and Muine Bay could not apply the RT-1425 grants (`SQL_GRANTS_MISSING`, canary gate fingerprint edab309fe88894fb).
 
 - `dl-agent-arrival`: `srCI_InformationBill` fills the description from `dbo.TransactionCode`, counts a missing quantity as 1 and derives the unit price, so the signed Check-In bill has no blank columns (RT-1348).

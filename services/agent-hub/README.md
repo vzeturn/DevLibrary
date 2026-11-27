@@ -238,10 +238,19 @@ hash in `schema_snapshots`, so each SMILE version seen on a site stays on record
   of each database per agent: `present`, `drift` (table there, columns missing) or `missing`,
   with a percent per site. The expected list is generated from the manifests the agents ship
   (PMS ops procedures and SELECTs, the PDAOrder sync catalog):
+- An expected item may carry `optional_reason` (1-500 chars): an object some SMILE builds lack by
+  design, such as a PDAOrder catalog table marked `optional_on_site` (PDAOrder ADR 0184). When a
+  snapshotted database lacks it the cell is `optional_absent` with that `reason`, counted in
+  `optional_absent` and left out of the percent (`present` over the objects the site needs); a
+  database never snapshotted stays `missing`, and an optional table that is there but short of
+  columns is still `drift`.
+- `scripts/schema/coverage-gaps.mjs` turns the answer into `{gaps, explained}`: file each gap once
+  (marker `[schema-gap:<object>]`), file nothing for `explained` (the optional objects, with reason).
 
 ```sh
 node scripts/schema/expected-objects.mjs [agent_id ...] > coverage.json
-( . scripts/release/lib.sh; admin POST /admin/schema/coverage -H 'content-type: application/json' --data-binary @coverage.json )
+( . scripts/release/lib.sh; admin POST /admin/schema/coverage -H 'content-type: application/json' --data-binary @coverage.json ) \
+  | node scripts/schema/coverage-gaps.mjs
 ```
 
 ## Guided install page (RT-0292)
