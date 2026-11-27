@@ -11,8 +11,8 @@ use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, OrderTenderAddPayload,
-    OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
+    OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
+    OrderTenderAddPayload, OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
 
@@ -141,6 +141,14 @@ pub trait OrderCommandUnit {
     fn add_tender(
         &mut self,
         payload: &OrderTenderAddPayload,
+        ctx: &Ctx,
+    ) -> Result<OrderPostOutcome>;
+
+    /// Charges the check to the folio of an in-house room (`AddRoomChargeAsync`, ADR 0179):
+    /// the tender line and the header only; the folio is posted at the close.
+    fn add_room_charge(
+        &mut self,
+        payload: &OrderRoomChargePayload,
         ctx: &Ctx,
     ) -> Result<OrderPostOutcome>;
 

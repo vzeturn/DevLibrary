@@ -15,8 +15,11 @@ pub mod money_command_types {
     pub const TENDER_REMOVE: &str = "order.tender_remove";
     /// Close a balanced check.
     pub const CHECK_CLOSE: &str = "order.check_close";
+    /// Charge an open check to the Front Office folio of an in-house room (RT-1327,
+    /// ADR 0179); the agent lists it in its heartbeat `commands`.
+    pub const ROOM_CHARGE: &str = "order.room_charge";
     /// All money verbs.
-    pub const ALL: &[&str] = &[TENDER_ADD, TENDER_REMOVE, CHECK_CLOSE];
+    pub const ALL: &[&str] = &[TENDER_ADD, TENDER_REMOVE, CHECK_CLOSE, ROOM_CHARGE];
 }
 
 /// Rejection reasons of the money verbs, on top of the order reasons.
@@ -37,6 +40,20 @@ pub mod money_command_reasons {
     pub const UNDERPAID: &str = "not_balanced_underpaid";
     /// The close found the tenders above the items.
     pub const OVERPAID: &str = "not_balanced_overpaid";
+    /// Room charge: the room has no in-house folio.
+    pub const ROOM_NOT_IN_HOUSE: &str = "room_not_in_house";
+    /// Room charge: the folio is in house but closed to postings.
+    pub const ROOM_NO_POST: &str = "room_no_post";
+    /// Room charge: the given folio is not an in-house folio of the room.
+    pub const FOLIO_MISMATCH: &str = "folio_mismatch";
+    /// Room charge without a folio on a room with several in-house folios.
+    pub const FOLIO_AMBIGUOUS: &str = "folio_ambiguous";
+    /// Room charge above what the check still owes.
+    pub const ABOVE_BALANCE: &str = "room_charge_above_balance";
+    /// The Front Office interface is not configured for this check, or the post to the
+    /// folio cannot be done or failed (ADR 0179): nothing was written, the check stays
+    /// open; the close never goes through without its post.
+    pub const FOLIO_POST_REQUIRED: &str = "folio_post_required";
 }
 
 /// `string.IsNullOrWhiteSpace(s) || s.Length > max`.
@@ -160,6 +177,110 @@ impl WireJson for OrderTenderAddPayload {
             reference: o.opt_string("reference")?,
             card_type: o.opt_int("card_type")?,
             bill_no: o.opt_string("bill_no")?,
+            trn_code: o.opt_int("trn_code")?,
+            trn_sub: o.opt_int("trn_sub")?,
+        })
+    }
+}
+
+/// Payload of [`money_command_types::ROOM_CHARGE`] (`OrderRoomChargePayload.cs`, RT-1327):
+/// charge `amount` of an open check, in the base currency, to the folio of the in-house
+/// room `room_no`; `folio_num` 0 asks the store for the room's one postable folio. The
+/// applied result is the open check, as for a tender.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OrderRoomChargePayload {
+    /// RVC.
+    pub rvc_no: i32,
+    /// Check.
+    pub check_no: i64,
+    /// Cashier.
+    pub cashier: String,
+    /// `Folio.RoomCode`.
+    pub room_no: String,
+    /// The folio, 0 for the room's own.
+    pub folio_num: i64,
+    /// What is charged.
+    pub amount: Decimal,
+    /// Reference.
+    pub reference: Option<String>,
+    /// The cloud config's code of the ROOM mode.
+    pub trn_code: Option<i32>,
+    /// Its sub code.
+    pub trn_sub: Option<i32>,
+}
+
+impl OrderRoomChargePayload {
+    /// Longest room number.
+    pub const MAX_ROOM_NO: usize = 10;
+
+    /// The validation problem, `None` when valid.
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.rvc_no <= 0 {
+            return Some("rvc_no must be positive");
+        }
+        if self.check_no <= 0 {
+            return Some("check_no must be positive");
+        }
+        if bad_text(&self.cashier, OrderTenderAddPayload::MAX_CASHIER) {
+            return Some("cashier must be 1..10 characters");
+        }
+        if self.room_no.trim().is_empty()
+            || utf16_len(&self.room_no) > Self::MAX_ROOM_NO
+            || self.room_no != self.room_no.trim()
+        {
+            return Some("room_no must be 1..10 characters without surrounding spaces");
+        }
+        if self.folio_num < 0 {
+            return Some("folio_num must be 0 (the room's folio) or positive");
+        }
+        if self.amount <= Decimal::ZERO || self.amount > Decimal::from(9_999_999_999_i64) {
+            return Some("amount must be in (0, 9999999999]");
+        }
+        if self.amount.round(2) != self.amount {
+            return Some("amount must have at most 2 decimals");
+        }
+        if self
+            .reference
+            .as_deref()
+            .is_some_and(|r| utf16_len(r) > OrderTenderAddPayload::MAX_REFERENCE)
+        {
+            return Some("reference must be at most 50 characters");
+        }
+        if self.trn_code.is_some_and(|c| !(200..=9999).contains(&c)) {
+            return Some("trn_code must be in 200..9999");
+        }
+        if self.trn_sub.is_some_and(|s| !(0..=9999).contains(&s)) {
+            Some("trn_sub must be in 0..9999")
+        } else {
+            None
+        }
+    }
+}
+
+impl WireJson for OrderRoomChargePayload {
+    fn write_json(&self, w: &mut Writer) {
+        w.begin_object();
+        w.key("rvc_no").int(self.rvc_no.into());
+        w.key("check_no").int(self.check_no);
+        w.key("cashier").string(&self.cashier);
+        w.key("room_no").string(&self.room_no);
+        w.key("folio_num").int(self.folio_num);
+        w.key("amount").decimal(&self.amount);
+        json::opt_str(w, "reference", &self.reference);
+        json::opt_int(w, "trn_code", self.trn_code.map(i64::from));
+        json::opt_int(w, "trn_sub", self.trn_sub.map(i64::from));
+        w.end_object();
+    }
+
+    fn read_json(o: Obj<'_>) -> Result<Self, ReadError> {
+        Ok(OrderRoomChargePayload {
+            rvc_no: o.int("rvc_no")?,
+            check_no: o.int("check_no")?,
+            cashier: o.string("cashier")?,
+            room_no: o.string("room_no")?,
+            folio_num: o.int("folio_num")?,
+            amount: o.decimal("amount")?,
+            reference: o.opt_string("reference")?,
             trn_code: o.opt_int("trn_code")?,
             trn_sub: o.opt_int("trn_sub")?,
         })

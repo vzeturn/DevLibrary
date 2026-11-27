@@ -43,7 +43,7 @@ pub use channel::{
 pub use error::{CommandError, PERMISSION_DENIED, Result};
 pub use executor::{
     CATEGORY as EXECUTOR_CATEGORY, CommandExecutor, GrantsCheck, RejectingCommandExecutor,
-    SiteCommandExecutor, is_order_verb, reasons,
+    SiteCommandExecutor, is_order_verb, reasons, runnable_order_types,
 };
 pub use fo_inhouse::{
     FoInHouseRead, FoInHouseSearchCommandHandler, FoInHouseSource, SqlFoInHouseSource,
@@ -71,7 +71,8 @@ pub use verify_manifest::{
 /// `@variables` against them.
 pub mod params {
     pub use super::sql_money::{
-        check_close_parameters, tender_add_parameters, tender_remove_parameters,
+        check_close_parameters, room_charge_parameters, tender_add_parameters,
+        tender_remove_parameters,
     };
     pub use super::sql_order::{
         COMBO_CHECK_NOT_FOUND, COMBO_ITEM_NOT_FOUND, COMBO_POSTED, OPEN_NAME_REQUIRED_ERROR,

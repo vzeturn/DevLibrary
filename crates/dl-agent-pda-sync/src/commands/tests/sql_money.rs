@@ -8,7 +8,7 @@ use super::sql::{bound, cs_consts, free, param};
 use crate::commands::batches_money as b;
 use crate::commands::params as p;
 use crate::contracts::wire::{
-    OrderCheckClosePayload, OrderTenderAddPayload, OrderTenderRemovePayload,
+    OrderCheckClosePayload, OrderRoomChargePayload, OrderTenderAddPayload, OrderTenderRemovePayload,
 };
 
 const CS_MONEY: &str =
@@ -30,6 +30,20 @@ fn tender() -> OrderTenderAddPayload {
     }
 }
 
+fn room_charge() -> OrderRoomChargePayload {
+    OrderRoomChargePayload {
+        rvc_no: 3,
+        check_no: 7001,
+        cashier: "clerk-7".into(),
+        room_no: "0501".into(),
+        folio_num: 0,
+        amount: Decimal::from(250_000),
+        reference: None,
+        trn_code: None,
+        trn_sub: None,
+    }
+}
+
 #[test]
 fn every_money_batch_is_the_csharp_text_byte_for_byte() {
     let cs = cs_consts(CS_MONEY);
@@ -37,6 +51,7 @@ fn every_money_batch_is_the_csharp_text_byte_for_byte() {
         ("TenderAdd", b::TENDER_ADD),
         ("TenderRemove", b::TENDER_REMOVE),
         ("CheckClose", b::CHECK_CLOSE),
+        ("RoomChargeAdd", b::ROOM_CHARGE_ADD),
     ];
     assert_eq!(cs.len(), rust.len(), "every C# batch has its Rust constant");
     for (name, text) in rust {
@@ -65,6 +80,11 @@ fn each_money_batch_is_bound_exactly_its_free_parameters() {
             p::tender_remove_parameters(&remove),
         ),
         ("close", b::CHECK_CLOSE, p::check_close_parameters(&close)),
+        (
+            "roomcharge",
+            b::ROOM_CHARGE_ADD,
+            p::room_charge_parameters(&room_charge()),
+        ),
     ];
     for (name, sql, params) in cases {
         let mut free = free(sql, true);

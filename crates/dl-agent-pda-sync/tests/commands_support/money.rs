@@ -5,8 +5,9 @@
 
 use dl_agent_pda_sync::commands::{OrderCloseOutcome, OrderPostOutcome};
 use dl_agent_pda_sync::contracts::wire::{
-    OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine, OrderTenderAddPayload,
-    OrderTenderRemovePayload, money_command_reasons as money, order_command_reasons as reasons,
+    OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine, OrderRoomChargePayload,
+    OrderTenderAddPayload, OrderTenderRemovePayload, money_command_reasons as money,
+    order_command_reasons as reasons,
 };
 use dl_decimal::Decimal;
 
@@ -22,6 +23,36 @@ impl Unit<'_> {
             .checks
             .get(&(rvc_no, check_no))
             .is_some_and(|c| c.status == 1)
+    }
+
+    pub(super) fn fake_add_room_charge(&mut self, p: &OrderRoomChargePayload) -> OrderPostOutcome {
+        self.owner.call(format!(
+            "roomcharge {} {} {} {}",
+            p.check_no, p.room_no, p.folio_num, p.amount
+        ));
+        if !self.is_open(p.rvc_no, p.check_no) {
+            return OrderPostOutcome::refused(reasons::BILL_NOT_OPEN);
+        }
+        let seq = self.s.orders.next_trn_seq;
+        self.s.orders.next_trn_seq += 1;
+        self.s.orders.lines.insert(
+            (p.check_no, seq),
+            OrderCheckLine {
+                line_seq: seq,
+                transaction_code: Some(TENDER_CODE.to_owned()),
+                item_code: Some("ROOM CHARGE".to_owned()),
+                item_name: Some("ROOM CHARGE".to_owned()),
+                qty: Decimal::ONE,
+                price: p.amount,
+                amount: p.amount,
+                seat_no: 0,
+                cashier: Some(p.cashier.clone()),
+                sent: true,
+                note: p.reference.clone(),
+            },
+        );
+        self.touch(p.rvc_no, p.check_no);
+        OrderPostOutcome::posted(seq)
     }
 
     pub(super) fn fake_add_tender(&mut self, p: &OrderTenderAddPayload) -> OrderPostOutcome {

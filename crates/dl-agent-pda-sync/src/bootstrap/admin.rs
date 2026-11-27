@@ -236,6 +236,54 @@ pub fn fo_inhouse_grants_exists_query(fo: &str) -> String {
     )
 }
 
+/// 195: 0 when the Front Office has the posting procedure, `Folio` or
+/// `FolioBalanceCode` and `@name` lacks the EXECUTE or SELECT on it (the grants of script
+/// 195); 1 otherwise, including when there is no usable Front Office database.
+pub fn post_to_smile_grants_exists_query(fo: &str) -> String {
+    let held = |perm: &str, obj: &str, kind: &str| {
+        format!(
+            "OBJECT_ID(N'[{fo}].dbo.{obj}', N'{kind}') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [{fo}].sys.database_permissions p JOIN [{fo}].sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = '{perm}' AND p.major_id = OBJECT_ID(N'[{fo}].dbo.{obj}', N'{kind}')) THEN 0"
+        )
+    };
+    format!(
+        "SELECT CASE WHEN DB_ID(@fo) IS NULL OR DB_ID(@fo) = DB_ID() THEN 1\n\
+                     WHEN {}\n\
+                     WHEN {}\n\
+                     WHEN {}\n\
+                     ELSE 1 END",
+        held("EXECUTE", "PostInterfaceTransactionToFolio", "P"),
+        held("SELECT", "Folio", "U"),
+        held("SELECT", "FolioBalanceCode", "U"),
+    )
+}
+
+/// 195: done once `pda_sync` holds the grants of the script in the Front Office
+/// database; an invalid name has nothing to grant, as in the script.
+fn post_to_smile_grants_exist(c: &mut Client, step: &BootstrapStep, ctx: &Ctx) -> Result<bool> {
+    let r = run(c, FO_DATABASE_SQL, &[], COMMAND_TIMEOUT, ctx)?;
+    let fo = match r.rows().first().and_then(|row| row.value(0)) {
+        Some(dl_tds::Value::String(s)) if !s.trim().is_empty() => s.trim().to_owned(),
+        _ => "SMILE_FO".to_owned(),
+    };
+    if !fo.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        return Ok(true);
+    }
+    let r = run(
+        c,
+        &post_to_smile_grants_exists_query(&fo),
+        &[
+            Param::new("fo", fo.as_str()),
+            Param::new("name", step.object_name),
+        ],
+        COMMAND_TIMEOUT,
+        ctx,
+    )?;
+    Ok(matches!(
+        r.rows().first().and_then(|row| row.value(0)),
+        Some(dl_tds::Value::I32(1))
+    ))
+}
+
 /// 190: done once `pda_sync` may read `Folio` in the Front Office database; an invalid
 /// name has nothing to grant, as in the script.
 fn fo_inhouse_grants_exist(c: &mut Client, step: &BootstrapStep, ctx: &Ctx) -> Result<bool> {
@@ -493,6 +541,9 @@ impl SqlAdmin for SqlServerAdmin {
         if step.kind == StepKind::FoInhouseGrants {
             return fo_inhouse_grants_exist(&mut c, step, ctx);
         }
+        if step.kind == StepKind::PostToSmileGrants {
+            return post_to_smile_grants_exist(&mut c, step, ctx);
+        }
         let r = run(
             &mut c,
             &exists_query(),
@@ -631,6 +682,32 @@ mod tests {
         assert!(
             !sql.contains("INSERT ON") && !sql.contains("UPDATE ON") && !sql.contains("EXECUTE ON")
         );
+    }
+
+    #[test]
+    fn the_post_to_smile_grants_query_and_script_cover_the_posting_procedure_and_two_reads() {
+        let q = post_to_smile_grants_exists_query("SMILE_FO");
+        for obj in [
+            "PostInterfaceTransactionToFolio",
+            "Folio",
+            "FolioBalanceCode",
+        ] {
+            assert!(
+                q.contains(&format!("OBJECT_ID(N'[SMILE_FO].dbo.{obj}'")),
+                "{obj}"
+            );
+        }
+        assert!(q.contains("p.permission_name = 'EXECUTE'"));
+        assert_eq!(q.matches("p.permission_name = 'SELECT'").count(), 2);
+        assert!(q.contains("DB_ID(@fo) = DB_ID() THEN 1"));
+        let sql = crate::bootstrap::read_script("Sql.195_post_to_smile_grants.sql").unwrap();
+        assert!(sql.contains(
+            "GRANT EXECUTE ON OBJECT::dbo.PostInterfaceTransactionToFolio TO [pda_sync];"
+        ));
+        assert!(
+            !sql.contains("INSERT ON") && !sql.contains("UPDATE ON") && !sql.contains("DELETE ON")
+        );
+        assert!(!sql.contains("ALTER ") && !sql.contains("DROP "));
     }
 
     #[test]

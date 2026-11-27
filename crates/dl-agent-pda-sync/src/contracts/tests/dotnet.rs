@@ -195,6 +195,7 @@ fn sync_heartbeat_with_double_lags() {
             through_seq: 42,
             completed_at_utc: at(),
         }]),
+        commands: None,
     };
     let expected = r#"{"agent_id":"agent-1","at_utc":"2026-11-15T08:00:00+00:00","agent_version":"3.30.0","envelope_version":1,"mapper_version":1,"catalog_version":1,"sql_reachable":true,"queue_depth":3,"streams":[{"stream":"open","lag_rows":2,"lag_seconds":1.5},{"stream":"Invoice","lag_rows":0,"lag_seconds":0.30000000000000004},{"stream":"x","lag_rows":5,"lag_seconds":1E-07},{"stream":"y","lag_rows":1,"lag_seconds":123456789.123},{"stream":"z","lag_rows":0,"lag_seconds":0}],"blob_queue_depth":3,"resnapshots":[{"stream":"Invoice","through_seq":42,"completed_at_utc":"2026-11-15T08:00:00+00:00"}]}"#;
     assert_eq!(hb.to_json(), expected);
@@ -207,6 +208,7 @@ fn sync_heartbeat_with_double_lags() {
         blob_queue_depth: None,
         capture_error: Some("SQL_LOGIN_FAILED".into()),
         resnapshots: None,
+        commands: None,
         ..hb
     };
     assert_eq!(

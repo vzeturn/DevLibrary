@@ -7,8 +7,8 @@ use super::SiteCommandExecutor;
 use crate::commands::error::{CommandError, Result};
 use crate::contracts::WireJson;
 use crate::contracts::wire::{
-    OrderCheckClosePayload, OrderTenderAddPayload, OrderTenderRemovePayload, SyncCommand,
-    SyncCommandResult,
+    OrderCheckClosePayload, OrderRoomChargePayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, SyncCommand, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
 
@@ -22,6 +22,24 @@ impl SiteCommandExecutor {
             c,
             &mut |unit, t| {
                 let posted = unit.orders().add_tender(&p, t)?;
+                if let Some(reason) = &posted.reason {
+                    return Ok(self.reject(c, reason));
+                }
+                self.applied_check(c, unit, p.rvc_no, p.check_no, t, Some(posted.trn_seq), None)
+            },
+            ctx,
+        )
+    }
+
+    pub(super) fn room_charge(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
+        let p = match self.payload(c, "an order.room_charge", OrderRoomChargePayload::problem) {
+            Ok(p) => p,
+            Err(r) => return Ok(r),
+        };
+        self.run_guarded(
+            c,
+            &mut |unit, t| {
+                let posted = unit.orders().add_room_charge(&p, t)?;
                 if let Some(reason) = &posted.reason {
                     return Ok(self.reject(c, reason));
                 }

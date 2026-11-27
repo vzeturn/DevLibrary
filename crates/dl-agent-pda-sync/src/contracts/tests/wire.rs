@@ -491,7 +491,21 @@ fn heartbeat() -> SyncHeartbeat {
         blob_queue_depth: None,
         capture_error: None,
         resnapshots: None,
+        commands: None,
     }
+}
+
+#[test]
+fn heartbeat_commands_are_optional_on_the_wire() {
+    let hb = SyncHeartbeat {
+        commands: Some(vec!["order.check_open".into(), "order.room_charge".into()]),
+        ..heartbeat()
+    };
+    let json = hb.to_json();
+    assert!(json.contains("\"commands\":[\"order.check_open\",\"order.room_charge\"]"));
+    assert_eq!(SyncHeartbeat::from_json(&json).unwrap(), hb);
+    // An older cloud never sees the field.
+    assert!(!heartbeat().to_json().contains("commands"));
 }
 
 #[test]

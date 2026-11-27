@@ -23,9 +23,9 @@ use dl_agent_pda_sync::contracts::wire::{
     CheckStateHeader, OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, OrderTenderAddPayload,
-    OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult, kds_line_actions,
-    order_command_reasons as reasons,
+    OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
+    OrderTenderAddPayload, OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
+    kds_line_actions, order_command_reasons as reasons,
 };
 use dl_agent_pda_sync::util::ctx::Ctx;
 use dl_decimal::Decimal;
@@ -598,6 +598,10 @@ impl OrderCommandUnit for Unit<'_> {
 
     fn add_tender(&mut self, p: &OrderTenderAddPayload, _: &Ctx) -> Result<OrderPostOutcome> {
         Ok(self.fake_add_tender(p))
+    }
+
+    fn add_room_charge(&mut self, p: &OrderRoomChargePayload, _: &Ctx) -> Result<OrderPostOutcome> {
+        Ok(self.fake_add_room_charge(p))
     }
 
     fn remove_tender(&mut self, p: &OrderTenderRemovePayload, _: &Ctx) -> Result<Option<String>> {

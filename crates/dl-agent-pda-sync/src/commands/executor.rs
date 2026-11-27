@@ -123,6 +123,18 @@ pub fn is_order_verb(type_: &str) -> bool {
         || money_command_types::ALL.contains(&type_)
 }
 
+/// The order, table and money command types this agent runs: its heartbeat `commands`
+/// (`SiteCommandExecutor.RunnableOrderTypes`, RT-1327), from which the PDA offers a verb
+/// only some agents build, such as `order.room_charge`.
+pub fn runnable_order_types() -> Vec<String> {
+    order_command_types::ALL
+        .iter()
+        .chain(table_command_types::ALL)
+        .chain(money_command_types::ALL)
+        .map(|t| (*t).to_owned())
+        .collect()
+}
+
 /// The site command executor.
 pub struct SiteCommandExecutor {
     store: Arc<dyn SiteCommandStore>,
@@ -297,6 +309,7 @@ impl SiteCommandExecutor {
             t::ITEMS_MOVE => self.items_move(c, ctx),
             money_command_types::TENDER_ADD => self.tender_add(c, ctx),
             money_command_types::TENDER_REMOVE => self.tender_remove(c, ctx),
+            money_command_types::ROOM_CHARGE => self.room_charge(c, ctx),
             money_command_types::CHECK_CLOSE => self.check_close(c, ctx),
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
