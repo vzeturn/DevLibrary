@@ -142,6 +142,7 @@ fn a_redelivered_post_send_or_void_answers_from_the_journal_without_writing_agai
         check_no: check,
         table_no: None,
         cashier: "clerk-7".to_owned(),
+        pda_handled: None,
     };
     let sent = t.twice(&command(o::SEND, send.to_element(), &key(check)));
     assert_eq!(sent.sent_seqs, Some(vec![1, 2]));

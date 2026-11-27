@@ -72,6 +72,7 @@ pub fn send_parameters(p: &OrderSendPayload) -> Vec<Param> {
         rvc(p.rvc_no),
         check(p.check_no),
         sql::text_param("Cashier", Some(&p.cashier)),
+        Param::new("PdaHandled", p.pda_handled == Some(true)),
     ]
 }
 

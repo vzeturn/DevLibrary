@@ -79,6 +79,7 @@ fn send(check: i64, expected: Option<&str>) -> SyncCommand {
         check_no: check,
         table_no: None,
         cashier: CLERK.to_owned(),
+        pda_handled: None,
     };
     command(
         o::SEND,

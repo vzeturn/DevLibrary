@@ -229,6 +229,8 @@ pub struct OrderSendPayload {
     pub table_no: Option<String>,
     /// Cashier.
     pub cashier: String,
+    /// The cloud printed the kitchen ticket: flag the `PDASendOrder` row as printed (RT-1371).
+    pub pda_handled: Option<bool>,
 }
 
 impl OrderSendPayload {
@@ -255,6 +257,7 @@ impl WireJson for OrderSendPayload {
         w.key("check_no").int(self.check_no);
         json::opt_str(w, "table_no", &self.table_no);
         w.key("cashier").string(&self.cashier);
+        json::opt_bool(w, "pda_handled", self.pda_handled);
         w.end_object();
     }
 
@@ -264,6 +267,7 @@ impl WireJson for OrderSendPayload {
             check_no: o.int("check_no")?,
             table_no: o.opt_string("table_no")?,
             cashier: o.string("cashier")?,
+            pda_handled: o.opt_bool("pda_handled")?,
         })
     }
 }

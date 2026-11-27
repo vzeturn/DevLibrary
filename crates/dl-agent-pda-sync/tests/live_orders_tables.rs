@@ -62,6 +62,7 @@ fn seed(t: &Live, table: &str, prices: &[&str]) -> (i64, Vec<i64>) {
         check_no: check,
         table_no: None,
         cashier: CLERK.to_owned(),
+        pda_handled: None,
     };
     t.applied(&command(o::SEND, send.to_element(), &key, None));
     (check, seqs)

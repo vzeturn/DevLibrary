@@ -358,7 +358,7 @@ SELECT ISNULL(@PI_IsOut,0) AS IsOut, @PI_OutResult AS MessageResult,
           AND ISNULL(ti.Void, 0) = 0
           AND ti.POrderTime IS NULL;";
 
-    /// <summary>Legacy <c>SqlSendOrder</c>; the PDASendOrder audit insert is guarded by OBJECT_ID. Params: @RVCNo, @CheckNo, @Cashier.</summary>
+    /// <summary>Legacy <c>SqlSendOrder</c>; the PDASendOrder audit insert is guarded by OBJECT_ID. Params: @RVCNo, @CheckNo, @Cashier, @PdaHandled (bit).</summary>
     internal const string SendOrder = @"SET NOCOUNT ON;
 -- pda.spSendOrder body inlined (P6a): @RVC=@RVCNo, @CheckNo=@CheckNo, @SendBy=@Cashier, @LogOff=0.
 DECLARE @SO_Now DATETIME = GETDATE();
@@ -388,8 +388,22 @@ WHERE i.CheckNo = @CheckNo
 -- TRY below cannot catch, so the insert only runs when the table exists (pda_sync's grant on it is conditional too).
 BEGIN TRY
     IF OBJECT_ID(N'dbo.PDASendOrder', N'U') IS NOT NULL
-        INSERT INTO dbo.PDASendOrder (RVC, CheckNo, SendBy, SendTime)
-        VALUES (@RVCNo, @CheckNo, @Cashier, @SO_Now);
+    BEGIN
+        -- RT-1371: POS WIN polls PDASendOrder (Coalesce(OrderSent,0)=0) and prints the order itself, then flags the row
+        -- OrderSent=1 (OrderTime/OrderBy). When the cloud already printed the KOT (@PdaHandled=1) the row is written already
+        -- flagged the way POS WIN flags it after printing, so it is not printed a second time. Needs the three columns.
+        IF ISNULL(@PdaHandled, 0) = 1
+           AND COL_LENGTH(N'dbo.PDASendOrder', N'OrderSent') IS NOT NULL
+           AND COL_LENGTH(N'dbo.PDASendOrder', N'OrderTime') IS NOT NULL
+           AND COL_LENGTH(N'dbo.PDASendOrder', N'OrderBy') IS NOT NULL
+            EXEC sys.sp_executesql
+                N'INSERT INTO dbo.PDASendOrder (RVC, CheckNo, SendBy, SendTime, OrderSent, OrderTime, OrderBy) VALUES (@r, @c, @s, @t, 1, @t, ''PDACLOUD'');',
+                N'@r INT, @c DECIMAL(18,0), @s NVARCHAR(50), @t DATETIME',
+                @RVCNo, @CheckNo, @Cashier, @SO_Now;
+        ELSE
+            INSERT INTO dbo.PDASendOrder (RVC, CheckNo, SendBy, SendTime)
+            VALUES (@RVCNo, @CheckNo, @Cashier, @SO_Now);
+    END
 END TRY
 BEGIN CATCH
 END CATCH;
