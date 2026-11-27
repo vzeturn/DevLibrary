@@ -2290,6 +2290,8 @@
    "class": "unclassified",
    "rows": 5489,
    "used_by_pda": true,
+   "optional_on_site": true,
+   "optional_reason": "check-number archive; read only as a floor for txn.counters, which guards it with OBJECT_ID, and never captured (unclassified). Absent on SMILE builds without the archive: no feature loss.",
    "note": "not referenced by PDA; rows>0 (vendor module: AR/AP/GL/INV/HR/reporting/web)",
    "pk": [
     "CheckNo"
@@ -2653,6 +2655,8 @@
    "class": "A",
    "rows": 0,
    "used_by_pda": true,
+   "optional_on_site": true,
+   "optional_reason": "configured prep times with no PG home; the cloud reads kitchen targets from cloud-owned app.kds_item_sla. Absent on SMILE builds without it: nothing to sync.",
    "pg_target": null,
    "note": "master/config; no PG home yet",
    "source_keys": [
@@ -5528,6 +5532,8 @@
    "class": "C",
    "rows": 0,
    "used_by_pda": true,
+   "optional_on_site": true,
+   "optional_reason": "item-request log with no PG home and no cloud reader (cloud app.item_requests is cloud-owned, migration 0013). Absent on SMILE builds without it: nothing to sync.",
    "pg_target": null,
    "source_keys": [
     "ID"
@@ -5859,6 +5865,8 @@
    "class": "B",
    "rows": 0,
    "used_by_pda": true,
+   "optional_on_site": true,
+   "optional_reason": "open-check satellite with no PG home and no cloud reader; the open-check bill is carried by TmpInvoice/TmpTrn. Absent on SMILE builds without it: nothing to sync.",
    "pg_target": null,
    "note": "open-check satellite; no PG home yet",
    "source_keys": null,
@@ -6605,6 +6613,8 @@
    "class": "A",
    "rows": 2150,
    "used_by_pda": true,
+   "optional_on_site": true,
+   "optional_reason": "second raw source of app.rvc_items; the typed source RVCItem carries the menu, so the menu and ordering work without it. Only the TRVCItem touch-menu extras (ImageItem photo, SoldOut) are not mirrored; the cloud sold-out flag is cloud-owned.",
    "pg_target": "app.rvc_items",
    "source_keys": [
     "ID"

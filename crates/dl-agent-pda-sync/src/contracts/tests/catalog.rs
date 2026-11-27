@@ -1,6 +1,7 @@
 //! `CatalogCoverageTests.cs`, `ServiceTimingRenameCatalogTests.cs`.
 
 use super::*;
+use crate::contracts::CatalogError;
 use crate::contracts::catalog::CatalogTable;
 use crate::util::stj::eq_ignore_case;
 
@@ -91,6 +92,56 @@ fn overlay_keys_are_only_used_where_the_vendor_schema_has_none() {
         .collect();
     dup.sort();
     assert_eq!(dup, ["CashierRVC", "tmpInvoiceInfo"]);
+}
+
+#[test]
+fn schema_gap_tables_are_optional_on_site_with_a_reason() {
+    // RT-1381..1390: absent on some SMILE builds by design; the C# catalog tests pin the same list.
+    let c = catalog();
+    for name in [
+        "IOrgInvoice",
+        "TItemCGuild",
+        "TmpInvoiceDetail",
+        "TRVCItem",
+        "ItemTimeDef",
+    ] {
+        let t = c.find(name).unwrap();
+        assert!(t.optional_on_site, "{name}");
+        assert!(
+            t.optional_reason
+                .as_deref()
+                .is_some_and(|r| !r.trim().is_empty()),
+            "{name}"
+        );
+    }
+    assert!(!c.find("RVCItem").unwrap().optional_on_site);
+}
+
+#[test]
+fn loader_refuses_optional_on_site_without_a_reason() {
+    // CatalogLoader.cs parity (ADR 0184): the flag is only valid with the reason a report shows.
+    let mut root = crate::util::stj::parse(crate::contracts::catalog::CATALOG_JSON).unwrap();
+    let entry = root
+        .as_object_mut()
+        .and_then(|o| o.get_mut("tables"))
+        .and_then(|t| t.as_array_mut())
+        .and_then(|t| {
+            t.iter_mut()
+                .find(|t| t.get("table").and_then(|x| x.as_str()) == Some("TRVCItem"))
+        })
+        .unwrap();
+    entry
+        .as_object_mut()
+        .unwrap()
+        .insert("optional_reason", " ");
+    let mut w = crate::util::stj::Writer::new(crate::util::stj::Style::Compact);
+    w.value(&root);
+    match SyncCatalog::parse(&w.finish(), None) {
+        Err(CatalogError::Invalid(m)) => {
+            assert_eq!(m, "TRVCItem: optional_on_site needs an optional_reason.");
+        }
+        other => panic!("{:?}", other.map(|_| ())),
+    }
 }
 
 #[test]

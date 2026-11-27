@@ -664,6 +664,23 @@ mod open_check {
     }
 
     #[test]
+    fn missing_optional_master_is_told_apart_from_a_real_gap() {
+        // RT-1381..1390: TRVCItem is optional_on_site, RVCItem is a core master.
+        let h = Harness::new();
+        let report = h.engine().run_masters(&bg()).unwrap();
+        assert!(report.missing_tables.iter().any(|t| t == "TRVCItem"));
+        assert!(
+            report
+                .optional_missing_tables
+                .iter()
+                .any(|t| t == "TRVCItem")
+        );
+        let unexpected = report.unexpected_missing_tables();
+        assert!(!unexpected.iter().any(|t| t == "TRVCItem"));
+        assert!(unexpected.iter().any(|t| t == "RVCItem"));
+    }
+
+    #[test]
     fn missing_open_tables_are_skipped_not_fatal() {
         let h = Harness::new();
         h.source

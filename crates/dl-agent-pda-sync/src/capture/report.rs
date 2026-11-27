@@ -55,6 +55,8 @@ pub struct CaptureReport {
     pub null_keys_shadowed: i32,
     /// Planned tables that do not exist in this SMILE_POS build (distinct, in plan order).
     pub missing_tables: Vec<String>,
+    /// The subset of `missing_tables` the catalog marks `optional_on_site`.
+    pub optional_missing_tables: Vec<String>,
     /// The cycle deadline was hit.
     pub deadline_hit: bool,
     /// Rows that could not be mapped.
@@ -77,10 +79,22 @@ impl CaptureReport {
     }
 
     /// Records a planned table that the source does not have.
-    pub fn table_missing(&mut self, table: &str) {
+    pub fn table_missing(&mut self, table: &str, optional: bool) {
         if !contains_ignore_case(&self.missing_tables, table) {
             self.missing_tables.push(table.to_owned());
         }
+        if optional && !contains_ignore_case(&self.optional_missing_tables, table) {
+            self.optional_missing_tables.push(table.to_owned());
+        }
+    }
+
+    /// Missing tables a healthy site is expected to have: the only ones worth a warning.
+    pub fn unexpected_missing_tables(&self) -> Vec<String> {
+        self.missing_tables
+            .iter()
+            .filter(|t| !contains_ignore_case(&self.optional_missing_tables, t))
+            .cloned()
+            .collect()
     }
 
     /// Adds `other` into this report.
@@ -97,7 +111,7 @@ impl CaptureReport {
         self.open_full_read |= other.open_full_read;
         self.null_keys_shadowed += other.null_keys_shadowed;
         for t in &other.missing_tables {
-            self.table_missing(t);
+            self.table_missing(t, contains_ignore_case(&other.optional_missing_tables, t));
         }
         self.deadline_hit |= other.deadline_hit;
         self.rejected.extend(other.rejected);

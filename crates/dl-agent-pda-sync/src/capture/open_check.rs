@@ -138,7 +138,7 @@ impl<'a> OpenCheckCapture<'a> {
             if self.cx.exists(p.name(), ctx)? {
                 tables.push(p);
             } else {
-                report.table_missing(p.name());
+                report.table_missing(p.name(), p.table.optional_on_site);
             }
         }
         if tables.is_empty() {

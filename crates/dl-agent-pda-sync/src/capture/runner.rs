@@ -774,13 +774,32 @@ impl Shared {
                 Some(slot) => slot.1 = missing.clone(),
                 None => p.missing_seen.push((job.to_owned(), missing.clone())),
             }
-            if report.tables_missing() > 0 {
+            // A table the catalog marks optional_on_site is expected to be absent on some SMILE builds
+            // (RT-1381..1390): information only, never a warning.
+            let unexpected = report.unexpected_missing_tables();
+            let optional: Vec<String> = report
+                .missing_tables
+                .iter()
+                .filter(|t| !unexpected.contains(t))
+                .cloned()
+                .collect();
+            if !unexpected.is_empty() {
                 self.log.warn(
                     "Capture {Job}: {Count} planned tables do not exist in SMILE_POS and are skipped: {MissingTables}",
                     &[
                         Value::from(job),
-                        Value::from(report.tables_missing()),
-                        Value::from(missing),
+                        Value::from(unexpected.len()),
+                        Value::from(unexpected.join(", ")),
+                    ],
+                );
+            }
+            if !optional.is_empty() {
+                self.log.info(
+                    "Capture {Job}: {Count} optional tables are not in this SMILE_POS build and are skipped: {MissingTables}",
+                    &[
+                        Value::from(job),
+                        Value::from(optional.len()),
+                        Value::from(optional.join(", ")),
                     ],
                 );
             }
