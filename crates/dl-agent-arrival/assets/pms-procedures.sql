@@ -922,11 +922,17 @@ BEGIN
 
     SELECT
         F.GroupCode,
-        CAST(NULL AS NVARCHAR(200))                             AS GroupName,
+        -- SMILE keeps no separate group-name column: the group's lead folio (lowest FolioNum) is named after the group.
+        NULLIF(LTRIM(RTRIM(dbo.fTCVNToUnicode(ISNULL(MAX(L.LastName),'') + ' ' + ISNULL(MAX(L.FirstName),'')))), '') AS GroupName,
         COUNT(*)                                                AS TotalFolios,
         SUM(CASE WHEN F.FolioStatus = 2 THEN 1 ELSE 0 END)     AS InHouseFolios,
-        SUM(CASE WHEN F.FolioStatus = 1 THEN 1 ELSE 0 END)     AS ReservedFolios
+        SUM(CASE WHEN F.FolioStatus = 1 THEN 1 ELSE 0 END)     AS ReservedFolios,
+        MIN(F.ArrivalDate)                                      AS ArrivalDate,
+        MAX(F.DepartureDate)                                    AS DepartureDate
     FROM dbo.Folio F WITH (NOLOCK)
+    OUTER APPLY (SELECT TOP 1 F2.LastName, F2.FirstName FROM dbo.Folio F2 WITH (NOLOCK)
+                 WHERE F2.GroupCode = F.GroupCode AND ISNULL(F2.CancelNum,0) = 0
+                 ORDER BY F2.FolioNum) L
     WHERE F.ArrivalDate  = @ArrivalDate
       AND ISNULL(F.CancelNum,0)   = 0
       AND ISNULL(F.GroupCode,'') <> ''
