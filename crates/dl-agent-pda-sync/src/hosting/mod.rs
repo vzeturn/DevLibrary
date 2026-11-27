@@ -4,7 +4,7 @@
 //! - [`verbs`]: the table the verbs of other modules plug into.
 //! - [`status`]: `status [--wait]` (`StatusCommand.cs`); the diagnostics bundle is dl-agent's.
 //! - [`secret_prompt`]: passwords from the environment or a no-echo prompt.
-//! - [`enroll`]: `enroll` (`EnrollCommand.cs`), [`enroll_attempts`]: its SQL administrator order; [`grants`]: `grants` (`GrantsCommand.cs`).
+//! - [`enroll`]: `enroll` (`EnrollCommand.cs`), [`enroll_attempts`]: its SQL administrator order; [`grants`]: `grants` (`GrantsCommand.cs`), [`grants_ct`]: its Change Tracking step (RT-1318).
 //! - [`host`]: composition root, service host and Windows service (`AgentHost.cs`,
 //!   `Cli.RunServiceAsync`); [`services`]: the background loops (`AgentServices.cs`).
 
@@ -12,6 +12,7 @@ pub mod cli;
 pub mod enroll;
 pub mod enroll_attempts;
 pub mod grants;
+pub mod grants_ct;
 pub mod host;
 pub mod secret_prompt;
 pub mod services;

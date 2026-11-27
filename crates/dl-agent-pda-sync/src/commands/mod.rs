@@ -11,10 +11,16 @@
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
 //!   `fo.inhouse_search` (RT-1296).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
-//!   the grants self-check; [`service::services`]: the host's loop factory.
+//!   the grants self-check; [`ChangeTrackingMonitor`]: the Change Tracking check run
+//!   beside it behind the flag `capture.change_tracking` (RT-1318), one round of which
+//!   is [`change_tracking_round`]; [`service::services`]: the host's loop factory.
 
 pub mod batches;
 pub mod batches_money;
+pub mod change_tracking;
+#[cfg(test)]
+pub(crate) mod change_tracking_fakes;
+pub mod change_tracking_round;
 pub mod channel;
 mod error;
 mod executor;
@@ -38,6 +44,7 @@ mod units;
 pub mod verify;
 pub mod verify_manifest;
 
+pub use change_tracking::{ChangeTrackingMonitor, CtParts, CtState};
 pub use channel::{
     ChannelError, CommandChannel, CommandChannelParts, next_failure_count, reconnect_delay,
 };

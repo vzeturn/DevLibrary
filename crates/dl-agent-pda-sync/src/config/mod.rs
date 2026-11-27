@@ -16,7 +16,7 @@ pub mod time;
 pub use errors::{AGENT_EXCEPTION_TYPE, AgentError, codes};
 pub use health::AgentHealth;
 pub use identity::AgentIdentity;
-pub use options::{AgentOptions, PrintRelayOptions};
+pub use options::{AgentOptions, CaptureFlags, PrintRelayOptions};
 pub use paths::{AgentPaths, write_atomic};
 pub use providers::{ConfigError, Configuration, Provider};
 pub use runtime::{RuntimeConfig, RuntimeConfigStore};

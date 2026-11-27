@@ -177,6 +177,18 @@ impl CapturePlan {
     }
 }
 
+/// The vendor tables the capture reads, in catalog order: every table the plan does not
+/// reject (the tables SQL Server Change Tracking covers, RT-1318). Unlike
+/// [`CapturePlan::build`] it needs no capture options and cannot fail.
+pub fn captured_tables(catalog: &SyncCatalog) -> Vec<String> {
+    catalog
+        .tables
+        .iter()
+        .filter(|t| rejection(t).is_none())
+        .map(|t| t.table.clone())
+        .collect()
+}
+
 /// Fail closed: anything not explicitly classified, keyed and mappable is never read.
 fn rejection(t: &CatalogTable) -> Option<&'static str> {
     if t.class == catalog_class::SKIP {
@@ -325,6 +337,18 @@ mod tests {
             Arc::new(TimeZone::fixed("SE Asia Standard Time", 420)),
         );
         CapturePlan::build(catalog(), &opts).unwrap()
+    }
+
+    #[test]
+    fn the_captured_tables_are_the_planned_tables() {
+        let mut planned: Vec<String> = the_plan().all().map(|t| t.name().to_owned()).collect();
+        let mut captured = captured_tables(catalog());
+        planned.sort();
+        captured.sort();
+        assert_eq!(captured, planned);
+        // ADR 0011: the open checks (TmpInvoice) and closed lines (Trn) are captured.
+        assert!(captured.iter().any(|t| t == "TmpInvoice"));
+        assert!(captured.iter().any(|t| t == "Trn"));
     }
 
     #[test]
