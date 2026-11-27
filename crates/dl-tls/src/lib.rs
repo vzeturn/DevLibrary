@@ -11,6 +11,14 @@ mod alpn;
 #[cfg_attr(not(all(unix, not(target_vendor = "apple"))), allow(dead_code))]
 mod record;
 
+mod client_hello;
+mod pkcs8;
+mod server;
+
+pub use server::{KeyAlgorithm, PrivateKey, ServerConfig};
+
+#[cfg(windows)]
+mod schannel_server_sys;
 #[cfg(windows)]
 mod schannel_sys;
 
@@ -172,7 +180,8 @@ impl From<io::Error> for Error {
     }
 }
 
-/// A TLS client session over `S`.
+/// A TLS session over `S`: a client from [`TlsStream::connect`] or a server from
+/// [`TlsStream::accept`].
 ///
 /// Wire behaviour every implementation keeps (TDS relies on it):
 /// - each handshake flight is written with one `write_all` followed by one `flush`;
@@ -183,6 +192,7 @@ impl From<io::Error> for Error {
 pub struct TlsStream<S> {
     stream: S,
     session: imp::Session,
+    server_name: Option<String>,
 }
 
 impl<S: Read + Write> TlsStream<S> {
@@ -194,7 +204,32 @@ impl<S: Read + Write> TlsStream<S> {
     /// returned unchanged inside [`Error::Io`].
     pub fn connect(config: &Config, mut stream: S) -> Result<TlsStream<S>, Error> {
         let session = imp::Session::connect(config, &mut stream)?;
-        Ok(TlsStream { stream, session })
+        Ok(TlsStream {
+            stream,
+            session,
+            server_name: None,
+        })
+    }
+
+    /// Runs the server handshake over `stream`, presenting `config`'s certificate chain.
+    ///
+    /// The first call on a `config` builds the OS credential, so configuration errors
+    /// (an empty chain, an invalid ALPN name, a certificate the OS cannot parse, on Linux a
+    /// key that does not match the leaf) come back from it before anything is read, as
+    /// [`Error::Io`] with [`io::ErrorKind::InvalidInput`] or as [`Error::Handshake`].
+    /// A client offering ALPN with no protocol in common is refused with
+    /// [`Error::Handshake`] code 120 (`no_application_protocol`). Clients are not asked for
+    /// certificates. I/O errors of `stream` are returned unchanged inside [`Error::Io`]; set
+    /// a read timeout on the stream so a silent client cannot hold the accept forever.
+    pub fn accept(config: &ServerConfig, mut stream: S) -> Result<TlsStream<S>, Error> {
+        let cred = config.credential()?;
+        let prelude = server::read_client_hello(config, &mut stream)?;
+        let session = imp::Session::accept(&cred, &mut stream, prelude.recv, &prelude.alpn)?;
+        Ok(TlsStream {
+            stream,
+            session,
+            server_name: prelude.server_name,
+        })
     }
 
     /// The underlying stream.
@@ -213,6 +248,7 @@ impl<S: Read + Write> TlsStream<S> {
         let TlsStream {
             stream,
             mut session,
+            ..
         } = self;
         let leftover = session.take_leftover();
         (stream, leftover)
@@ -228,7 +264,16 @@ impl<S: Read + Write> TlsStream<S> {
         self.session.alpn_protocol()
     }
 
-    /// The server's leaf certificate in DER form, if the backend exposes it.
+    /// On a server session, the host name the client sent as SNI (RFC 6066 §3), exactly as
+    /// sent (compare it case-insensitively). `None` when the client sent none or one that is
+    /// not printable ASCII, and always on client sessions.
+    pub fn server_name(&self) -> Option<&str> {
+        self.server_name.as_deref()
+    }
+
+    /// The peer's leaf certificate in DER form, if the backend exposes it: on a client
+    /// session the server's certificate; `None` on server sessions (clients are not asked
+    /// for certificates).
     pub fn peer_certificate_der(&self) -> Option<Vec<u8>> {
         self.session.peer_certificate_der()
     }
@@ -260,6 +305,7 @@ impl<S: fmt::Debug> fmt::Debug for TlsStream<S> {
         f.debug_struct("TlsStream")
             .field("stream", &self.stream)
             .field("version", &self.session.version())
+            .field("server_name", &self.server_name)
             .field(
                 "alpn",
                 &self.session.alpn_protocol().map(String::from_utf8_lossy),

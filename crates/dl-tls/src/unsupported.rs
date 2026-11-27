@@ -2,14 +2,37 @@
 
 use std::io::{self, Read, Write};
 
-use crate::{Config, Error, Version};
+use std::sync::Arc;
 
-/// Uninhabited: `connect` always fails, so no session ever exists.
+use crate::{Config, Error, ServerConfig, Version};
+
+const UNSUPPORTED: &str = "no TLS backend for this platform";
+
+/// Uninhabited: `new` always fails, so no server credential ever exists.
+pub(crate) enum ServerCred {}
+
+impl ServerCred {
+    pub(crate) fn new(_cfg: &ServerConfig) -> Result<ServerCred, Error> {
+        Err(Error::Unsupported(UNSUPPORTED))
+    }
+}
+
+/// Uninhabited: `connect` always fails and `accept` needs a credential, so no session
+/// ever exists.
 pub(crate) enum Session {}
 
 impl Session {
     pub(crate) fn connect<S: Read + Write>(_cfg: &Config, _s: &mut S) -> Result<Session, Error> {
-        Err(Error::Unsupported("no TLS backend for this platform"))
+        Err(Error::Unsupported(UNSUPPORTED))
+    }
+
+    pub(crate) fn accept<S: Read + Write>(
+        cred: &Arc<ServerCred>,
+        _s: &mut S,
+        _recv: Vec<u8>,
+        _alpn: &[Vec<u8>],
+    ) -> Result<Session, Error> {
+        match **cred {}
     }
 
     pub(crate) fn read<S: Read + Write>(&mut self, _s: &mut S, _b: &mut [u8]) -> io::Result<usize> {

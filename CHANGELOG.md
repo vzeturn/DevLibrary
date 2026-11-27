@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- dl-tls: server side for the LAN edge (ADR 0011 D1, row 12a). `ServerConfig::new(chain, PrivateKey::from_pkcs8_der(..)?)` with optional ALPN and minimum version, and `TlsStream::accept` returning the same `TlsStream` (`server_name()` gives the client's SNI). Keys are unencrypted PKCS#8 (ECDSA P-256, RSA). Linux uses the system OpenSSL (still loaded at run time); Windows uses SChannel `AcceptSecurityContext` with the key imported through CNG (ephemeral, or a temporary persisted key deleted with the credential when SChannel refuses the ephemeral one) and the intermediates added to the `CA` store so SChannel sends the chain; macOS and wasm return `Error::Unsupported`. SNI and ALPN are read from the ClientHello before the OS stack runs, so both backends pick the same protocol (server preference, `no_application_protocol` alert when nothing matches). Still no dependencies; tested against the dl-tls client, `curl` and `openssl s_client` with committed test-only certificates (RT-1318).
+
 ### Fixed
 
 - dl-agent-arrival: the embedded `pms-procedures.sql` carries RT-1431: `srCI_InformationBill` joins `dbo.TransactionCode` on the code and the normalized sub code (NULL, blank, 0 and 00 are sub 0; `01` = `1`; padded codes trimmed), never takes another sub code of the same code (no match falls back to sub 0, then the line's own text) and the code table name wins over `FolioTransaction.Description`; balance code filter is trim/upper-insensitive. Check-In PR #246.
