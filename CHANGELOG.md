@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- dl-agent-arrival: the embedded `pms-procedures.sql` carries RT-1431: `srCI_InformationBill` joins `dbo.TransactionCode` on the code and the normalized sub code (NULL, blank, 0 and 00 are sub 0; `01` = `1`; padded codes trimmed), never takes another sub code of the same code (no match falls back to sub 0, then the line's own text) and the code table name wins over `FolioTransaction.Description`; balance code filter is trim/upper-insensitive. Check-In PR #246.
+
 - Schema coverage no longer files the five SMILE_POS tables some SMILE builds lack by design as gaps (`IOrgInvoice`, `TItemCGuild`, `TmpInvoiceDetail`, `TRVCItem`, `ItemTimeDef`, RT-1381..1384, RT-1390): the dl-agent-pda-sync catalog copy marks them `optional_on_site` with the PDAOrder `optional_reason` (PDAOrder ADR 0184, PR #520); `expected-objects.mjs` passes the reason on, agent-hub `POST /admin/schema/coverage` judges such an object `optional_absent` (with `reason`, outside the percent) and `coverage-gaps.mjs` lists it under `explained` instead of `gaps`. On the three live snapshots the pda-order gaps drop from 5 to 0.
 - dl-agent-pda-sync logs a missing `optional_on_site` table once at information level ("optional tables are not in this SMILE_POS build") instead of the "planned tables do not exist" warning, which now names only unexpected gaps; the catalog loader refuses `optional_on_site` without an `optional_reason` and the dry run reports `optional_missing_tables` (port of PDAOrder PR #520's Rust agent change).
 

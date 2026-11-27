@@ -1470,11 +1470,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SELECT DISTINCT
-        FT.FolioBalanceCode AS Code,
-        FT.FolioBalanceCode AS Description
+        UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) AS Code,
+        UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) AS Description
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
     WHERE FT.FolioNum = @FolioNum
-      AND LTRIM(RTRIM(FT.FolioBalanceCode)) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
+      AND UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
     ORDER BY Code;
 END
 -- @@mmarrival:batch pms
@@ -1495,14 +1495,19 @@ BEGIN
         ISNULL(NULLIF(FT.Qty, 0), 1) AS Qty,
         ISNULL(NULLIF(FT.UnitPrice, 0), FT.TransactionAmount / ISNULL(NULLIF(FT.Qty, 0), 1)) AS UnitPrice,
         FT.TransactionDate AS TransDate,
-        dbo.fTCVNToUnicode(COALESCE(NULLIF(RTRIM(FT.Description), ''), NULLIF(RTRIM(TC.Description), ''), '')) AS Description,
+        dbo.fTCVNToUnicode(COALESCE(NULLIF(RTRIM(TC.Description), ''), NULLIF(RTRIM(FT.Description), ''), '')) AS Description,
         CAST(FT.RefNumber AS VARCHAR(30)) AS RefNo
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
+        -- RT-1431: join on the code AND the sub code, both trimmed and without padding (NULL, blank, 0 and 00 are sub 0).
+    -- Another sub code of the same code is never taken: no match falls back to sub 0, then to the line's own text.
     OUTER APPLY (SELECT TOP 1 T.Description FROM dbo.TransactionCode T WITH (NOLOCK)
-                 WHERE T.TransactionCode = FT.TransactionCode ORDER BY T.TransactionCode) TC
+                 WHERE LTRIM(RTRIM(CAST(T.TransactionCode AS varchar(20)))) = LTRIM(RTRIM(CAST(FT.TransactionCode AS varchar(20))))
+                   AND (CASE WHEN LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))) = '' THEN '0' ELSE ISNULL(NULLIF(REPLACE(LTRIM(REPLACE(LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))), '0', ' ')), ' ', '0'), ''), '0') END = CASE WHEN LTRIM(RTRIM(CAST(FT.TransactionSubCode AS varchar(20)))) = '' THEN '0' ELSE ISNULL(NULLIF(REPLACE(LTRIM(REPLACE(LTRIM(RTRIM(CAST(FT.TransactionSubCode AS varchar(20)))), '0', ' ')), ' ', '0'), ''), '0') END
+                        OR CASE WHEN LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))) = '' THEN '0' ELSE ISNULL(NULLIF(REPLACE(LTRIM(REPLACE(LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))), '0', ' ')), ' ', '0'), ''), '0') END = '0')
+                 ORDER BY CASE WHEN CASE WHEN LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))) = '' THEN '0' ELSE ISNULL(NULLIF(REPLACE(LTRIM(REPLACE(LTRIM(RTRIM(CAST(T.TransactionSubCode AS varchar(20)))), '0', ' ')), ' ', '0'), ''), '0') END = CASE WHEN LTRIM(RTRIM(CAST(FT.TransactionSubCode AS varchar(20)))) = '' THEN '0' ELSE ISNULL(NULLIF(REPLACE(LTRIM(REPLACE(LTRIM(RTRIM(CAST(FT.TransactionSubCode AS varchar(20)))), '0', ' ')), ' ', '0'), ''), '0') END THEN 0 ELSE 1 END) TC
     WHERE FT.FolioNum = @sFolioNum
-      AND (ISNULL(@sBalanceCode,'') = '' OR FT.FolioBalanceCode = @sBalanceCode)
-      AND LTRIM(RTRIM(FT.FolioBalanceCode)) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
+      AND (ISNULL(@sBalanceCode,'') = '' OR UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) = UPPER(LTRIM(RTRIM(@sBalanceCode))))
+      AND UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
     ORDER BY FT.TransactionDate;
 END
 -- @@mmarrival:batch pms
