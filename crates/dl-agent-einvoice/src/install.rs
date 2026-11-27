@@ -303,6 +303,7 @@ pub fn install_script_into(c: &mut Client, name: &str) -> Result<(), String> {
         .iter()
         .find(|(n, _)| *n == name)
         .ok_or_else(|| format!("agent: no embedded script {name}"))?;
+    dl_agent_smile_shared::install_into(c)?;
     let legacy = crate::legacy::needs_legacy_sql(c)?;
     let body = prepare_script(c, name, body, legacy)?;
     run_script(c, name, &body)
@@ -313,6 +314,9 @@ pub fn install_script_into(c: &mut Client, name: &str) -> Result<(), String> {
 /// compatibility level below 110, gets the 2008 rewrite ([`crate::legacy`]), applied
 /// after the FO tokens are resolved and before the `CREATE OR ALTER` stub rewrite.
 pub fn install_into(c: &mut Client) -> Result<(), String> {
+    // RT-1432: the shared SA_ layer owns the TransactionCode + SubCode join; the collect
+    // procedures below call it, so it goes first.
+    dl_agent_smile_shared::install_into(c)?;
     let legacy = crate::legacy::needs_legacy_sql(c)?;
     if legacy {
         crate::log::info(

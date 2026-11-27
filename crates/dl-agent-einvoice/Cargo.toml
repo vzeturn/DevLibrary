@@ -12,6 +12,7 @@ readme = "README.md"
 
 [dependencies]
 dl-agent.workspace = true
+dl-agent-smile-shared.workspace = true
 dl-json.workspace = true
 dl-hash.workspace = true
 dl-encoding.workspace = true

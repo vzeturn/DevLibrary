@@ -80,6 +80,7 @@ name = "dl-agent-einvoice"
 version = "0.2.1"
 dependencies = [
  "dl-agent",
+ "dl-agent-smile-shared",
  "dl-cli",
  "dl-encoding",
  "dl-hash",
@@ -208,6 +209,13 @@ dependencies = [
  "dl-encoding",
  "dl-hash",
  "dl-json",
+]
+
+[[package]]
+name = "dl-agent-smile-shared"
+version = "0.2.1"
+dependencies = [
+ "dl-tds",
 ]
 
 [[package]]
