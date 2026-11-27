@@ -25,7 +25,9 @@
 #   FLY_BUILD_TIMEOUT     seconds, default 5400
 #   DL_BUILD_REF          commit to build, default HEAD (must be on GitHub)
 #   CLOUDFLARE_API_TOKEN  R2 edit on the hub's account; handed to the machine for staging
-#   MMEI_BUILD_DEFAULT_SQL_PASSWORD  compiled into einvoice-enroll (optional, see build-dl-agent.sh)
+#   MMEI_BUILD_DEFAULT_SQL_PASSWORD  compiled into the release (pda-sync grant self-repair, einvoice-enroll);
+#                         required: read from ~/.config/devlibrary-agent-hub/einvoice-build.env when
+#                         unset, DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1 builds without it on purpose
 #   DL_AGENT_RELEASE_KEYS public release keys, default ~/.config/devlibrary-agent-hub/release.pub
 #   FLY_BUILD_MODE        warm | oneshot (default: warm if dl-xbuild-warm exists)
 #   FLY_BUILD_DRY_RUN=1   print the machine config (secrets masked) and stop
@@ -71,6 +73,7 @@ print(json.dumps({
 }, indent=1 if mask else None))
 PY
 }
+need_build_password
 if [ -n "${FLY_BUILD_DRY_RUN:-}" ]; then config mask; exit 0; fi
 need FLY_API_TOKEN "deploy token of the Fly app $app"
 need CLOUDFLARE_API_TOKEN "R2 edit on the hub's account"

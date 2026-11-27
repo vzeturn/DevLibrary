@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Release scripts refuse a dl-agent build without the SMILE default SQL password: `fly-build.sh` loads `MMEI_BUILD_DEFAULT_SQL_PASSWORD` from `~/.config/devlibrary-agent-hub/einvoice-build.env` when the environment has none and stops when neither has it, and `rel.sh sign` refuses a binary that does not carry it (`DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1` releases without it on purpose). 1.3.63, 1.3.64 and 1.3.66 were built without it, so pda-sync's grant self-repair skipped `sql:smile` and Muine Bay could not apply the RT-1425 grants (`SQL_GRANTS_MISSING`, canary gate fingerprint edab309fe88894fb).
+
 - `dl-agent-arrival`: `srCI_InformationBill` fills the description from `dbo.TransactionCode`, counts a missing quantity as 1 and derives the unit price, so the signed Check-In bill has no blank columns (RT-1348).
 
 - dl-agent-arrival: the embedded `pms-procedures.sql` is byte for byte the Check-In .NET one again: bill lines carry `RefNo` (`FolioTransaction.RefNumber`), balance codes C, V and P never reach a signed bill, the registration card reads `ConfirmPrintFlag`, and `srCI_GetFolioRates` is installed. Sites on dl-agent had none of these, so the signed bill showed no Ref no.

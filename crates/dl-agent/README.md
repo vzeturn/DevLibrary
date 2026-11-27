@@ -378,7 +378,7 @@ export FLY_API_TOKEN=…           # deploy token of the Fly app dl-xbuild (FLY_
 export CLOUDFLARE_API_TOKEN=…    # R2 edit on the hub's account
 export DL_AGENT_RELEASE_SEED=…   # release seed (base64), or DL_AGENT_RELEASE_SEED_FILE
 export AGENT_HUB_ADMIN_TOKEN=… AGENT_HUB_ACCESS_CLIENT_ID=… AGENT_HUB_ACCESS_CLIENT_SECRET=…
-export MMEI_BUILD_DEFAULT_SQL_PASSWORD=…   # optional, compiled into einvoice-enroll
+export MMEI_BUILD_DEFAULT_SQL_PASSWORD=…   # compiled in (pda-sync grant self-repair, einvoice-enroll); see below
 scripts/release/canary.sh 1.3.17           # build + sign + upload + publish canary
 scripts/release/rel.sh gate 1.3.17         # later: the canary gate
 scripts/release/rel.sh promote 1.3.17      # once the gate passes (stable manifest signed already)

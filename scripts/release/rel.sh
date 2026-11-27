@@ -16,6 +16,8 @@
 #   AGENT_HUB_ADMIN_TOKEN, AGENT_HUB_ACCESS_CLIENT_ID, AGENT_HUB_ACCESS_CLIENT_SECRET
 #                               hub admin (canary, gate, promote); or ~/.config/devlibrary-agent-hub/admin.env
 #   REL_TARGETS                 space-separated targets, default all five
+#   MMEI_BUILD_DEFAULT_SQL_PASSWORD  sign refuses a binary without it compiled in; or
+#                               ~/.config/devlibrary-agent-hub/einvoice-build.env (DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1 skips)
 set -euo pipefail
 # shellcheck source=scripts/release/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -35,14 +37,15 @@ fetch)
 sign)
   ch=${3:?channel}
   case $ch in canary|stable) ;; *) die "channel must be canary or stable" ;; esac
+  t="" u="" b="" bins=()
+  for x in "${TARGETS[@]}"; do
+    f=$(bin_name "$x"); [ -f "$d/$x/$f" ] || die "missing $d/$x/$f"
+    t+="${t:+,}$x"; u+="${u:+,}$HUB/v1/artifacts/dl-agent/$v/$x/$f"; b+="${b:+,}$d/$x/$f"; bins+=("$d/$x/$f")
+  done
+  check_build_password "${bins[@]}"
   seed=$(mktemp); trap 'rm -f "$seed"' EXIT; chmod 600 "$seed"
   if [ -n "${DL_AGENT_RELEASE_SEED:-}" ]; then printf '%s' "$DL_AGENT_RELEASE_SEED" >"$seed"
   else cat "${DL_AGENT_RELEASE_SEED_FILE:-$CFG/release.seed}" >"$seed"; fi
-  t="" u="" b=""
-  for x in "${TARGETS[@]}"; do
-    f=$(bin_name "$x"); [ -f "$d/$x/$f" ] || die "missing $d/$x/$f"
-    t+="${t:+,}$x"; u+="${u:+,}$HUB/v1/artifacts/dl-agent/$v/$x/$f"; b+="${b:+,}$d/$x/$f"
-  done
   (cd "$root" && cargo run -q -p dl-agent --example release -- sign "$seed" "${DL_AGENT_RELEASE_KEY_ID:-rel-2026}" \
     dl-agent "$ch" "$v" "$t" "$u" "$b") >"$d/$ch.json"
   python3 -c "import json,sys;m=json.load(open(sys.argv[1]));print(m['channel'],m['version'],len(m['artifacts']),'artifacts signed')" "$d/$ch.json"

@@ -34,3 +34,36 @@ admin() {
   curl -sS -X "$m" "$HUB$p" -K <(printf 'header = "Authorization: Bearer %s"\nheader = "CF-Access-Client-Id: %s"\nheader = "CF-Access-Client-Secret: %s"\n' \
     "$AGENT_HUB_ADMIN_TOKEN" "$AGENT_HUB_ACCESS_CLIENT_ID" "$AGENT_HUB_ACCESS_CLIENT_SECRET") "$@"
 }
+
+# The SMILE default SQL login password compiled into every release build (MMEI_BUILD_DEFAULT_SQL_PASSWORD,
+# read with option_env!): pda-sync's grant self-repair and pda-enroll try it as `sql:smile`, and
+# einvoice-enroll needs it to run without a prompt. build-dl-agent.sh only warns when it is unset,
+# and 1.3.63, 1.3.64 and 1.3.66 shipped without it: Muine Bay could not apply the 1.3.66 grants.
+# need_build_password loads it from $CFG/einvoice-build.env when the environment has none and
+# exports it; DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1 releases without it on purpose.
+need_build_password() {
+  if [ -z "${MMEI_BUILD_DEFAULT_SQL_PASSWORD:-}" ] && [ -f "$CFG/einvoice-build.env" ]; then
+    set -a
+    # shellcheck disable=SC1091 # operator file, outside the repo
+    . "$CFG/einvoice-build.env"
+    set +a
+  fi
+  if [ -n "${MMEI_BUILD_DEFAULT_SQL_PASSWORD:-}" ]; then export MMEI_BUILD_DEFAULT_SQL_PASSWORD; return 0; fi
+  if [ "${DL_BUILD_NO_DEFAULT_SQL_PASSWORD:-}" = 1 ]; then
+    echo "warning: releasing without the default SQL password (DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1): pda-sync cannot apply new grants as sql:smile" >&2
+    return 0
+  fi
+  die "MMEI_BUILD_DEFAULT_SQL_PASSWORD is not set and $CFG/einvoice-build.env has none: a release without it cannot apply pda_sync grants as the SMILE login. Set it, or DL_BUILD_NO_DEFAULT_SQL_PASSWORD=1 to release without it on purpose."
+}
+
+# check_build_password <binary...>: every binary has the default SQL password compiled in. The
+# password reaches grep through a process-substitution pattern file, never argv or the output.
+check_build_password() {
+  need_build_password
+  [ -n "${MMEI_BUILD_DEFAULT_SQL_PASSWORD:-}" ] || return 0
+  local f
+  for f in "$@"; do
+    grep -a -F -q -f <(printf '%s\n' "$MMEI_BUILD_DEFAULT_SQL_PASSWORD") -- "$f" \
+      || die "$f was built without MMEI_BUILD_DEFAULT_SQL_PASSWORD: build again with it (fly-build.sh loads it from $CFG/einvoice-build.env)"
+  done
+}
