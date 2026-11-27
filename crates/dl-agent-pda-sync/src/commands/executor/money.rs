@@ -34,7 +34,7 @@ impl SiteCommandExecutor {
     pub(super) fn room_charge(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.room_charge", OrderRoomChargePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
