@@ -39,7 +39,7 @@
   },
   {
     "kind": "text",
-    "text": "SELECT t.TransactionCode,\n       ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') AS TransactionSubCode,\n       tc.Description, t.TransactionAmount AS Amount,\n       CASE WHEN ((t.TransactionCode = @EarnC0 AND ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') = @EarnS0)) THEN 1 ELSE 0 END AS Qualifies\nFROM Folio f\nJOIN FolioTransaction t ON t.FolioNum = CONVERT(varchar(20), f.FolioNum)\nLEFT JOIN TransactionCode tc ON tc.TransactionCode = t.TransactionCode\n    AND tc.TransactionSubCode = ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0')\nWHERE f.ConfirmNum = @Conf AND f.ExternalConfirmNumber IS NULL\n  AND ISNULL(f.CancelNum, 0) = 0\n  AND f.FolioStatus = 3\n  AND t.FolioBalanceCode = 'A'",
+    "text": "SELECT t.TransactionCode,\n       (SELECT K FROM dbo.SA_TrnKey(t.TransactionSubCode)) AS TransactionSubCode,\n       tc.Description, t.TransactionAmount AS Amount,\n       CASE WHEN ((t.TransactionCode = @EarnC0 AND (SELECT K FROM dbo.SA_TrnKey(t.TransactionSubCode)) = @EarnS0)) THEN 1 ELSE 0 END AS Qualifies\nFROM Folio f\nJOIN FolioTransaction t ON t.FolioNum = CONVERT(varchar(20), f.FolioNum)\nOUTER APPLY dbo.SA_TrnCode_Resolve(t.TransactionCode, t.TransactionSubCode, 0, 0) tc\nWHERE f.ConfirmNum = @Conf AND f.ExternalConfirmNumber IS NULL\n  AND ISNULL(f.CancelNum, 0) = 0\n  AND f.FolioStatus = 3\n  AND t.FolioBalanceCode = 'A'",
     "params": [
       {
         "name": "Conf",

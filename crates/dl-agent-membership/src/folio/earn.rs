@@ -14,7 +14,9 @@ use crate::smile::{CodeRow, EarnCatalog};
 /// `PMS_EARN_ROOM_CODE_AMBIGUOUS`.
 pub const ROOM_CODE_AMBIGUOUS: &str = "PMS_EARN_ROOM_CODE_AMBIGUOUS";
 
-const SUB_EXPR: &str = "ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0')";
+/// The normalised sub code, from the shared SA_ layer (RT-1432): blank/00/padded/int/text all
+/// compare equal. The only definition of that normalisation lives in `dbo.SA_TrnKey`.
+pub(crate) const SUB_EXPR: &str = "(SELECT K FROM dbo.SA_TrnKey(t.TransactionSubCode))";
 
 /// One `(TransactionCode, TransactionSubCode)` that earns; `sub = None` means any sub-code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -337,7 +339,7 @@ mod tests {
         assert_eq!(
             sql,
             "(t.TransactionCode IN (@EarnAny0,@EarnAny1) OR (t.TransactionCode = @EarnC0 AND \
-             ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') = @EarnS0))"
+             (SELECT K FROM dbo.SA_TrnKey(t.TransactionSubCode)) = @EarnS0))"
         );
         assert_eq!(params.len(), 4);
         assert!(filter(&[]).is_err());

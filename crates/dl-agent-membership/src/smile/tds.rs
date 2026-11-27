@@ -280,6 +280,10 @@ impl TdsSmile {
                     .batch(&lock_timeout_sql(ms))
                     .map_err(|e| SmileError::from_tds(&e))?;
             }
+            // RT-1432: the shared SA_ read layer must exist before any query that calls it.
+            if let Err(e) = dl_agent_smile_shared::ensure_installed(&mut client) {
+                self.warn_shared_layer(&e);
+            }
             *slot = Some(client);
         }
         let Some(client) = slot.as_mut() else {
@@ -358,6 +362,19 @@ impl TdsSmile {
                 .map(ResultSet::into_rows)
                 .collect())
         })
+    }
+
+    fn warn_shared_layer(&self, error: &str) {
+        let mut warned = self
+            .warned
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if warned.insert("shared SA_ layer") {
+            crate::log::warn(
+                "shared SA_ read layer is missing and this login cannot install it; earn queries will fail until it is installed",
+                &[("error", crate::log::V::S(error))],
+            );
+        }
     }
 
     fn warn_once(&self, field: &'static str, number: Option<i32>) {
