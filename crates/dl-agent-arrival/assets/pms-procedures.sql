@@ -1489,7 +1489,7 @@ BEGIN
         ISNULL(NULLIF(FT.Qty, 0), 1) AS Qty,
         ISNULL(NULLIF(FT.UnitPrice, 0), FT.TransactionAmount / ISNULL(NULLIF(FT.Qty, 0), 1)) AS UnitPrice,
         FT.TransactionDate AS TransDate,
-        COALESCE(NULLIF(RTRIM(FT.Description), ''), NULLIF(RTRIM(TC.Description), ''), '') AS Description,
+        dbo.fTCVNToUnicode(COALESCE(NULLIF(RTRIM(FT.Description), ''), NULLIF(RTRIM(TC.Description), ''), '')) AS Description,
         CAST(FT.RefNumber AS VARCHAR(30)) AS RefNo
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
     OUTER APPLY (SELECT TOP 1 T.Description FROM dbo.TransactionCode T WITH (NOLOCK)
