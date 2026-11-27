@@ -107,7 +107,7 @@ Cùng cách đo mục 7: `node scripts/latency-probe/probe.mjs --samples 200 --g
 | `fo.reservation.list` (`/reservations`, 3 op, không cache) | 200 | **604.5** | **721.6** | 884.2 | ~441 | 1681.3 / 2669.7 |
 
 - Không có lỗi 5xx nào trong lượt này (lần 1-2 có `SITE_OFFLINE` rải rác).
-- `pos.menu.items` không đo được: route trả `422 VALIDATION` (cần tham số mà probe chưa gửi), probe dừng sau 5 lỗi liên tiếp. Việc sửa probe để gửi tham số hợp lệ là bước tiếp theo, không đổi kết luận bên dưới.
+- `pos.menu.items` không đo được trong lượt này: route trả `422 VALIDATION` (thiếu `menuNo`). Đã đo bù ở mục 8.2.
 - Giờ cao điểm gần như không làm chậm so với lần 2 ngoài giờ: `/reservations` 604/722 so với 647/770, `dashboard.overview` 233/328 so với 285/387. Nghĩa là độ trễ bị chi phối bởi số op tuần tự và RTT, không phải tải SR.
 - 10 song song trên `/reservations` p95 2.67 s: hàng đợi tuần tự của agent trên một kết nối; đây là điểm RT-1162 cần giải quyết trước.
 
@@ -124,3 +124,15 @@ Chủ dự án (25/11) không cần so IIS: mục tiêu là cloud sát độ tr�
 | 10 yêu cầu song song, màn nặng | p95 <= 1.0 s | 2.67 s | **Chưa** |
 
 Đo lại bằng cùng lệnh sau mỗi bước tối ưu; `/health` p95 dao động ~160-210 ms giữa các lần nên luôn so theo mốc cùng lượt.
+
+### 8.2 Đo bù `pos.menu.items` (RT-1161, 2026-11-27 04:05–04:07 UTC = 11:05–11:07 GMT+7)
+
+Probe đã sửa gửi `?menuNo=1` (route bắt buộc `menuNo`). Cùng cách đo: `--samples 200 --gap 150 --only pos.menu.items`, 5 lần khởi động bỏ đi, 200 mẫu tuần tự, một lượt 10 song song, không lỗi.
+
+| Route | n | p50 | p95 | p99 | 10 song song p50 / p95 |
+|---|---|---|---|---|---|
+| `pos.menu.items` (`/pos/menu/items?menuNo=1`) | 200 | 319.6 | 387.5 | 445.3 | 548.3 / 884.6 |
+
+- So với mốc `/health` (~160 ms p50): phần SaaS->SR khoảng **+160 ms p50 / +180 ms p95**, cao hơn op đọc nhỏ khác (+60 ms) vì op này chạy 2 truy vấn tuần tự (`RVCItemMenu`, `ItemDef`). Với ngưỡng đề xuất "+80 ms cho op đọc nhỏ" thì **chưa đạt**; đề xuất xếp nó vào nhóm "op 2 truy vấn: +200 ms" hoặc gộp 2 truy vấn thành một JOIN (việc cho RT-1162).
+- Thực đo trên dữ liệu demo: menu 1-3, 5, 10 đều trả mảng rỗng (2 byte), nên chưa phản ánh thời gian truyền/đọc của thực đơn thật vài trăm món; số trên là cận dưới.
+- `pos.check.pay` vẫn không đo: không có dry-run, không ghi thử trên khách sạn thật; lý do bỏ này cần chủ dự án duyệt cùng ngưỡng ở 8.1.

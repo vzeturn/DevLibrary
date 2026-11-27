@@ -8,7 +8,7 @@ import { foLogin, posLogin, timed, summarize } from './lib.mjs';
 export const ROUTES = [
   { name: 'health', auth: null, path: '/../../health', ops: [] },
   { name: 'fo.hotelDate.get', auth: 'pos', path: '/pos/hotel-date', ops: ['fo.hotelDate.get'] },
-  { name: 'pos.menu.items', auth: 'pos', path: '/pos/menu/items', ops: ['pos.menu.items'] },
+  { name: 'pos.menu.items', auth: 'pos', path: '/pos/menu/items?menuNo=1', ops: ['pos.menu.items'] },
   { name: 'pos.check.list', auth: 'pos', path: '/pos/terminal/checks', ops: ['pos.check.list'] },
   { name: 'fo.inhouse.list', auth: 'fo', path: '/workspace/frontdesk/today?blocks=inHouse', ops: ['fo.hotelDate.get', 'fo.inhouse.list'] },
   { name: 'fo.reservation.list', auth: 'fo', path: '/reservations', ops: ['fo.hotelDate.get', 'fo.reservation.list', 'fo.inhouse.list'] },
