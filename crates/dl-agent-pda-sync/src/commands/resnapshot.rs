@@ -81,6 +81,7 @@ impl ResnapshotCommandHandler {
                 result: None,
                 at_utc: utc_now(&self.clock),
                 exec_ms: None,
+                hops: Default::default(),
             });
         };
         let result = self.schedule(command, &p)?;
@@ -91,6 +92,7 @@ impl ResnapshotCommandHandler {
             result: Some(result.to_element()),
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 

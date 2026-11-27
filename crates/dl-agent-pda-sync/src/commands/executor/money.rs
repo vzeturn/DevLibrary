@@ -16,7 +16,7 @@ impl SiteCommandExecutor {
     pub(super) fn tender_add(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.tender_add", OrderTenderAddPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -34,7 +34,7 @@ impl SiteCommandExecutor {
     pub(super) fn room_charge(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.room_charge", OrderRoomChargePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -56,7 +56,7 @@ impl SiteCommandExecutor {
             OrderTenderRemovePayload::problem,
         ) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -73,7 +73,7 @@ impl SiteCommandExecutor {
     pub(super) fn check_close(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.check_close", OrderCheckClosePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,

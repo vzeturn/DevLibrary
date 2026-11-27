@@ -118,6 +118,7 @@ fn empty_batch(stream: &str, seq: i64, mode: SyncMode, watermark: Option<&str>) 
         rows: vec![],
         tombstones: vec![],
         watermark: watermark.map(str::to_owned),
+        hops: Default::default(),
     }
 }
 
@@ -144,6 +145,7 @@ fn padded_batch(stream: &str, seq: i64, watermark: Option<&str>, pad: usize) -> 
         }],
         tombstones: vec![],
         watermark: watermark.map(str::to_owned),
+        hops: Default::default(),
     }
 }
 

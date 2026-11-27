@@ -98,6 +98,7 @@ impl CommandExecutor for RejectingCommandExecutor {
             result: None,
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 }
@@ -326,6 +327,7 @@ impl SiteCommandExecutor {
             result,
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 
@@ -337,6 +339,7 @@ impl SiteCommandExecutor {
             result: None,
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 
@@ -350,11 +353,13 @@ impl SiteCommandExecutor {
         c: &SyncCommand,
         what: &str,
         problem: impl Fn(&T) -> Option<&'static str>,
-    ) -> std::result::Result<T, SyncCommandResult> {
+    ) -> std::result::Result<T, Box<SyncCommandResult>> {
         match T::from_element(&c.payload) {
-            None => Err(self.invalid(c, &format!("payload is not {what} object"))),
+            None => Err(Box::new(
+                self.invalid(c, &format!("payload is not {what} object")),
+            )),
             Some(p) => match problem(&p) {
-                Some(why) => Err(self.invalid(c, why)),
+                Some(why) => Err(Box::new(self.invalid(c, why))),
                 None => Ok(p),
             },
         }
@@ -400,7 +405,7 @@ impl SiteCommandExecutor {
     fn kds_line_state(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "a kds.line_state", KdsLineStatePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -439,7 +444,7 @@ impl SiteCommandExecutor {
     fn reservation_save(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "a reservation.save", ReservationSavePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -454,7 +459,7 @@ impl SiteCommandExecutor {
     fn reservation_cancel(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "a reservation.cancel", ReservationCancelPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -497,7 +502,7 @@ impl SiteCommandExecutor {
     fn check_open(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.check_open", OrderCheckOpenPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -512,7 +517,7 @@ impl SiteCommandExecutor {
     fn item_post(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.item_post", OrderItemPostPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -541,7 +546,7 @@ impl SiteCommandExecutor {
     fn send(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.send", OrderSendPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -564,7 +569,7 @@ impl SiteCommandExecutor {
     fn item_void(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.item_void", OrderItemVoidPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -604,7 +609,7 @@ impl SiteCommandExecutor {
     fn covers(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.covers", OrderCoversPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -637,7 +642,7 @@ impl SiteCommandExecutor {
     fn combo_post(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.combo.post", OrderComboPostPayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -689,7 +694,7 @@ impl SiteCommandExecutor {
     fn table_change(&self, c: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let p = match self.payload(c, "an order.table_change", OrderTableChangePayload::problem) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -714,7 +719,7 @@ impl SiteCommandExecutor {
             OrderTableTransferPayload::problem,
         ) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.run_guarded(
             c,
@@ -764,7 +769,7 @@ impl SiteCommandExecutor {
             },
         ) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.store.run_once(
             c.command_id,
@@ -830,7 +835,7 @@ impl SiteCommandExecutor {
             p.problem().or_else(|| Self::multi_check_problem(c))
         }) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         self.store.run_once(
             c.command_id,
@@ -876,7 +881,7 @@ impl SiteCommandExecutor {
             p.problem().or_else(|| Self::multi_check_problem(c))
         }) {
             Ok(p) => p,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         // The legacy service refuses a move onto the source itself before it reads.
         if p.from_check_no == p.to_check_no {

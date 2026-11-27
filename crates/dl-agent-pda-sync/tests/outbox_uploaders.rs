@@ -88,6 +88,7 @@ impl Fx {
             }],
             tombstones: vec![],
             watermark: watermark.map(str::to_owned),
+            hops: Default::default(),
         }
     }
 

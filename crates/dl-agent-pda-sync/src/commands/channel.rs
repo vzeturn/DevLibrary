@@ -23,12 +23,14 @@ use crate::config::time::SharedClock;
 use crate::config::{AgentError, AgentOptions, codes};
 use crate::contracts::WireJson;
 use crate::contracts::wire::{
-    CommandStatus, SyncCommand, SyncCommandResult, site_command_contract, table_command_types,
+    CommandStatus, ResultHops, SyncCommand, SyncCommandResult, site_command_contract,
+    table_command_types,
 };
 use crate::reporting::{Exception, Level, Logger, Value};
 use crate::transport::signer::{NONCE_HEADER, SIGNATURE_HEADER, TIMESTAMP_HEADER};
 use crate::transport::{RetryPolicy, SyncHttpClient, TokenProvider};
 use crate::util::ctx::Ctx;
+use crate::util::hop_clock;
 
 /// The WebSocket of the command channel.
 pub const WEB_SOCKET_PATH: &str = "/sync/v1/commands/ws";
@@ -70,6 +72,16 @@ pub fn next_failure_count(failures: i32, link_was_up: bool) -> i32 {
         1
     } else {
         failures.saturating_add(1)
+    }
+}
+
+/// The stamps of a command got at `received` that started at `started` and is finished
+/// now (RT-1318); a remembered result answering a redelivery gets this delivery's stamps.
+fn run_hops(received: i64, started: i64) -> ResultHops {
+    ResultHops {
+        t_received: hop_clock::field(received),
+        t_started: hop_clock::field(started),
+        t_finished: hop_clock::now_field(),
     }
 }
 
@@ -205,7 +217,19 @@ impl CommandChannel {
     /// Answers `command` (a redelivery gets the stored result, never a second run) and
     /// keeps the answer until the cloud acknowledged it. `None` when `ctx` ended.
     pub fn answer(&self, command: &SyncCommand, ctx: &Ctx) -> Option<SyncCommandResult> {
-        let result = self.handle(command, ctx)?;
+        self.answer_received(command, hop_clock::now_micros(), ctx)
+    }
+
+    /// [`answer`](Self::answer) for a command the agent got at `received` (epoch µs).
+    fn answer_received(
+        &self,
+        command: &SyncCommand,
+        received: i64,
+        ctx: &Ctx,
+    ) -> Option<SyncCommandResult> {
+        let started = hop_clock::now_micros();
+        let mut result = self.handle(command, ctx)?;
+        result.hops = run_hops(received, started);
         self.outbox.enqueue(&result);
         Some(result)
     }
@@ -326,8 +350,12 @@ impl CommandChannel {
         let (answers, finished) = mpsc::channel::<Option<SyncCommandResult>>();
         keyed_pool::run(
             workers,
-            |command: SyncCommand| {
-                let answer = self.handle_guarded(&command, ctx);
+            |(command, received): (SyncCommand, i64)| {
+                let started = hop_clock::now_micros();
+                let answer = self.handle_guarded(&command, ctx).map(|mut result| {
+                    result.hops = run_hops(received, started);
+                    result
+                });
                 if let Some(result) = &answer {
                     self.outbox.enqueue_for_socket(result);
                 }
@@ -354,7 +382,7 @@ impl CommandChannel {
     fn socket_loop(
         &self,
         ws: &mut dl_ws::WebSocket<dl_http::Upgraded>,
-        queue: &KeyedQueue<SyncCommand>,
+        queue: &KeyedQueue<(SyncCommand, i64)>,
         finished: &mpsc::Receiver<Option<SyncCommandResult>>,
         intake: usize,
         ctx: &Ctx,
@@ -421,6 +449,7 @@ impl CommandChannel {
                 Err(dl_ws::Error::Closed) => return Ok(()),
                 Err(e) => return Err(e.into()),
             };
+            let received = hop_clock::now_micros();
             if let Some(id) = parse_result_ack(&text) {
                 self.outbox.confirm(id);
                 continue;
@@ -435,9 +464,9 @@ impl CommandChannel {
                 continue;
             };
             if runs_alone(&command) {
-                queue.submit_alone(command);
+                queue.submit_alone((command, received));
             } else {
-                queue.submit(&command.aggregate_key.clone(), command);
+                queue.submit(&command.aggregate_key.clone(), (command, received));
             }
         }
     }
@@ -459,6 +488,7 @@ impl CommandChannel {
         let Some(Json::Array(list)) = resp.data()? else {
             return Ok(());
         };
+        let received = hop_clock::now_micros();
         for item in list {
             let Ok(command) = SyncCommand::from_value(&item) else {
                 if let Some(result) = self.unreadable(&item) {
@@ -467,7 +497,7 @@ impl CommandChannel {
                 }
                 continue;
             };
-            if self.answer(&command, ctx).is_none() {
+            if self.answer_received(&command, received, ctx).is_none() {
                 return Err(ChannelError::Cancelled);
             }
             self.outbox.flush(ctx, false)?;
@@ -505,6 +535,7 @@ impl CommandChannel {
             result: None,
             at_utc: utc_now(&self.parts.clock),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 
@@ -535,6 +566,7 @@ impl CommandChannel {
                     result: None,
                     at_utc: utc_now(&self.parts.clock),
                     exec_ms: None,
+                    hops: Default::default(),
                 })
             }
         }
@@ -664,6 +696,7 @@ impl CommandChannel {
             result: None,
             at_utc: utc_now(&self.parts.clock),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 
@@ -678,6 +711,7 @@ impl CommandChannel {
             result: None,
             at_utc: utc_now(&self.parts.clock),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 

@@ -295,6 +295,7 @@ fn the_column_probe_names_the_columns_this_store_lacks() {
                     result: None,
                     at_utc: dl_agent_pda_sync::contracts::time::DateTimeOffset::now_utc(),
                     exec_ms: None,
+                    hops: Default::default(),
                 })
             },
             &Ctx::background(),

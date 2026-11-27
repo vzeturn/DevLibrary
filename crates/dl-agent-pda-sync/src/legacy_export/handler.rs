@@ -186,6 +186,7 @@ impl LegacyExportCommandHandler {
             result: None,
             at_utc: self.now(),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 
@@ -200,6 +201,7 @@ impl LegacyExportCommandHandler {
             result: Some(Json::Object(m)),
             at_utc: self.now(),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 

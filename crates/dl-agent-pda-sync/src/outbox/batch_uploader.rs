@@ -26,11 +26,12 @@ use super::parent_pending::{ParentPendingEpisode, ParentPendingTracker};
 use crate::config::codes;
 use crate::config::time::{SharedClock, SystemClock, Timestamp};
 use crate::contracts::time::{DateTimeOffset, TICKS_PER_SECOND};
-use crate::contracts::wire::sync_streams;
+use crate::contracts::wire::{sync_streams, with_t_sent};
 use crate::reporting::{Exception, Logger, Value};
 use crate::transport::retry::is_transient;
 use crate::transport::{SyncHttpClient, SyncResponse, TokenProvider};
 use crate::util::ctx::Ctx;
+use crate::util::hop_clock;
 
 mod drain;
 
@@ -259,9 +260,11 @@ impl BatchUploader {
     ) -> Result<(SyncResponse, Duration), UploadError> {
         self.outbox.mark_attempt(item.id)?;
         let sending = std::time::Instant::now();
+        // RT-1318: the batch is handed to the transport now (`t_sent`).
+        let body = with_t_sent(&item.payload, hop_clock::now_field());
         let resp = self
             .http
-            .send(ctx, Method::Post, BATCHES_PATH, &item.payload, Some(bearer))?;
+            .send(ctx, Method::Post, BATCHES_PATH, &body, Some(bearer))?;
         Ok((resp, sending.elapsed()))
     }
 
@@ -465,9 +468,10 @@ impl BatchUploader {
     ) -> Result<Outcome, UploadError> {
         let bearer = self.tokens.get_access_token(ctx)?;
         let path = format!("{BATCHES_PATH}?{}", sync_streams::SKIP_ORPHANS_QUERY);
+        let body = with_t_sent(&item.payload, hop_clock::now_field());
         let resp = self
             .http
-            .send(ctx, Method::Post, &path, &item.payload, Some(&bearer))?;
+            .send(ctx, Method::Post, &path, &body, Some(&bearer))?;
         if resp.is_success() {
             self.outbox.ack(item.id)?;
             self.parents.resolve(&item.stream);
