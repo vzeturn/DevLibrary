@@ -91,3 +91,36 @@ Các ngưỡng trên là điểm khởi đầu hợp lý, không phải kết qu
 ### 7.3 Chạy lại (giờ cao điểm hoặc sau tối ưu)
 
 Công cụ: `scripts/latency-probe/` (README ở đó). Khoá `AZOLO_DEMO_VIRTUAL_CLERK_*`, `AZOLO_DEMO_POS_CASHIER_PIN` đã có trong kit cloud của DevLibrary (RT-1232) và trong `~/.config/rt-kits/smile-pms.env` trên iMac. Đường đo là HTTPS công khai tới `azolo-demo-pms.pms.id.vn`, nên phiên cloud chạy được nếu proxy cho ra host đó; nếu bị chặn thì iMac chạy.
+
+## 8. Số đo lần 3 (RT-1161, 2026-11-27 02:43–02:53 UTC = 09:43–09:53 GMT+7, giờ cao điểm sáng)
+
+Cùng cách đo mục 7: `node scripts/latency-probe/probe.mjs --samples 200 --gap 150` từ iMac, qua `azolo-demo-pms` tới dl-agent ở SR; 5 lần khởi động bỏ đi, 200 mẫu tuần tự mỗi route, một lượt 10 song song. Đơn vị ms, đầu-cuối. "Phần SaaS->SR" = trừ mốc `/health` (p50 163.3).
+
+| Route | n | p50 | p95 | p99 | Phần SaaS->SR p50 | 10 song song p50 / p95 |
+|---|---|---|---|---|---|---|
+| `/health` (không qua agent) | 200 | 163.3 | 206.6 | 222.3 | - | 195.7 / 264.5 |
+| `fo.hotelDate.get` | 200 | 224.4 | 259.8 | 290.2 | ~61 | 203.3 / 287.8 |
+| `pos.check.list` | 200 | 224.2 | 237.1 | 274.9 | ~61 | 213.5 / 292.7 |
+| `fo.inhouse.list` (+hotelDate; cache 5 s trúng) | 200 | 176.0 | 233.3 | 259.7 | ~13 | 214.9 / 276.2 |
+| `frontdesk.today` (4 op; cache 5 s trúng) | 200 | 180.8 | 301.9 | 335.6 | ~18 | 192.4 / 257.7 |
+| `dashboard.overview` (7 op; cache một phần) | 200 | 233.1 | 327.5 | 359.8 | ~70 | 230.8 / 292.0 |
+| `fo.reservation.list` (`/reservations`, 3 op, không cache) | 200 | **604.5** | **721.6** | 884.2 | ~441 | 1681.3 / 2669.7 |
+
+- Không có lỗi 5xx nào trong lượt này (lần 1-2 có `SITE_OFFLINE` rải rác).
+- `pos.menu.items` không đo được: route trả `422 VALIDATION` (cần tham số mà probe chưa gửi), probe dừng sau 5 lỗi liên tiếp. Việc sửa probe để gửi tham số hợp lệ là bước tiếp theo, không đổi kết luận bên dưới.
+- Giờ cao điểm gần như không làm chậm so với lần 2 ngoài giờ: `/reservations` 604/722 so với 647/770, `dashboard.overview` 233/328 so với 285/387. Nghĩa là độ trễ bị chi phối bởi số op tuần tự và RTT, không phải tải SR.
+- 10 song song trên `/reservations` p95 2.67 s: hàng đợi tuần tự của agent trên một kết nối; đây là điểm RT-1162 cần giải quyết trước.
+
+### 8.1 Đề xuất ngưỡng p95 (chờ chủ dự án chốt, tiêu chí 3)
+
+Chủ dự án (25/11) không cần so IIS: mục tiêu là cloud sát độ trễ IIS -> DB trong cùng LAN (vài ms mỗi truy vấn), nên phần agent cộng thêm phải nhỏ so với RTT internet. Số đo cho thấy op đọc nhỏ đã cách mốc `/health` chừng 60 ms p50; màn nhiều op nặng hơn nhiều. Đề xuất, tính **trên mốc `/health` đo cùng lúc**:
+
+| Loại lệnh | Ngưỡng p95 đề xuất (cộng vào `/health` p95) | Hiện tại (lần 3) | Đạt? |
+|---|---|---|---|
+| Op đọc nhỏ (1-2 op: `fo.hotelDate.get`, `pos.check.list`, `fo.inhouse.list`) | +80 ms | +30 đến +55 ms | Đạt |
+| Màn tổng hợp 4-7 op (`frontdesk.today`, `dashboard.overview`) | +150 ms | +95 đến +120 ms | Đạt |
+| Màn 3 op không cache (`/reservations`) | +350 ms | +515 ms | **Chưa** (ứng viên tối ưu RT-1162) |
+| Lệnh ghi (`pos.check.pay`) | +120 ms | chưa đo (không có dry-run) | Chưa đo |
+| 10 yêu cầu song song, màn nặng | p95 <= 1.0 s | 2.67 s | **Chưa** |
+
+Đo lại bằng cùng lệnh sau mỗi bước tối ưu; `/health` p95 dao động ~160-210 ms giữa các lần nên luôn so theo mốc cùng lượt.
