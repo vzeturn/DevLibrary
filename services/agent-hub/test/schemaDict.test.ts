@@ -93,6 +93,56 @@ describe('POST /admin/schema/coverage', () => {
     expect(r.sites[0]).toMatchObject({ agent_id: other.id, missing: 4, percent: 0 });
   });
 
+  it('judges an optional object a site lacks as optional_absent with its reason, outside the percent', async () => {
+    await upload(snap([db('SMILE_POS', 'b', [['Check', ['Id']]])]));
+    const r = await coverage({
+      expected: [
+        { feature: 'pda-sync:class-A', database: 'SMILE_POS', table: 'Check' },
+        { feature: 'pda-sync:class-A', database: 'SMILE_POS', table: 'TRVCItem', optional_reason: 'second raw source; RVCItem carries the menu' },
+        { feature: 'pda-sync:class-B', database: 'SMILE_POS', table: 'Orphan' },
+        { feature: 'pms:x', database: 'SMILE_POS', routine: 'OptProc', optional_reason: 'only on builds with the module' },
+      ],
+    });
+    const site = r.sites[0]!;
+    expect(site.cells.map((c: any) => c.status)).toEqual(['present', 'optional_absent', 'missing', 'optional_absent']);
+    expect(site.cells[1]).toEqual({
+      feature: 'pda-sync:class-A',
+      object: 'SMILE_POS.dbo.TRVCItem',
+      status: 'optional_absent',
+      missing_columns: [],
+      reason: 'second raw source; RVCItem carries the menu',
+    });
+    expect(site.cells[3].reason).toBe('only on builds with the module');
+    expect(site.cells[2]).not.toHaveProperty('reason');
+    expect(site).toMatchObject({ present: 1, drift: 0, missing: 1, optional_absent: 2, total: 4, percent: 50 });
+  });
+
+  it('judges an optional object that is there like any other, and keeps it missing when the database was never snapshotted', async () => {
+    await upload(snap([db('SMILE_POS', 'b', [['TRVCItem', ['ID']]])]));
+    const r = await coverage({
+      expected: [
+        { feature: 'a', database: 'SMILE_POS', table: 'TRVCItem', columns: ['ID', 'SoldOut'], optional_reason: 'touch-menu extras' },
+        { feature: 'b', database: 'SMILE_FO', table: 'Folio', optional_reason: 'no FO snapshot yet' },
+      ],
+    });
+    const site = r.sites[0]!;
+    expect(site.cells.map((c: any) => c.status)).toEqual(['drift', 'missing']);
+    expect(site.cells[0].missing_columns).toEqual(['SoldOut']);
+    expect(site).toMatchObject({ optional_absent: 0, percent: 0 });
+  });
+
+  it('counts a site whose only expected objects are optional and absent as fully covered', async () => {
+    await upload(snap([db('SMILE_POS', 'b', [['Check', ['Id']]])]));
+    const r = await coverage({ expected: [{ feature: 'a', database: 'SMILE_POS', table: 'ItemTimeDef', optional_reason: 'kitchen targets live in the cloud' }] });
+    expect(r.sites[0]).toMatchObject({ present: 0, optional_absent: 1, total: 1, percent: 100 });
+  });
+
+  it('rejects an empty or oversized optional_reason', async () => {
+    const item = { feature: 'x', database: 'SMILE_POS', table: 't' };
+    expect((await admin(env, 'POST', '/admin/schema/coverage', { expected: [{ ...item, optional_reason: '' }] })).status).toBe(400);
+    expect((await admin(env, 'POST', '/admin/schema/coverage', { expected: [{ ...item, optional_reason: 'r'.repeat(501) }] })).status).toBe(400);
+  });
+
   it('rejects an item with both table and routine, and an empty list', async () => {
     expect((await admin(env, 'POST', '/admin/schema/coverage', { expected: [{ feature: 'x', database: 'd', table: 't', routine: 'r' }] })).status).toBe(400);
     expect((await admin(env, 'POST', '/admin/schema/coverage', { expected: [] })).status).toBe(400);

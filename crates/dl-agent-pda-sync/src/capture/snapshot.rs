@@ -109,7 +109,7 @@ impl<'a> InitialSnapshotRunner<'a> {
     ) -> Result<bool> {
         for p in tables {
             if !self.cx.exists(p.name(), ctx)? {
-                report.table_missing(p.name());
+                report.table_missing(p.name(), p.table.optional_on_site);
                 continue;
             }
             // Already skipped by the win phase of this run: one fault per table and run.

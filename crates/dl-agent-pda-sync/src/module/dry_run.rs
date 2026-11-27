@@ -99,6 +99,17 @@ fn report_json(r: &CaptureReport) -> Map {
         "missing_tables",
         Value::Array(r.missing_tables.iter().cloned().map(Value::from).collect()),
     );
+    // The subset absent by design (optional_on_site, ADR 0184): not a gap of the site.
+    m.insert(
+        "optional_missing_tables",
+        Value::Array(
+            r.optional_missing_tables
+                .iter()
+                .cloned()
+                .map(Value::from)
+                .collect(),
+        ),
+    );
     m
 }
 

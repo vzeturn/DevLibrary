@@ -54,7 +54,11 @@ export const schemaSnapshotBody = z
 export type SchemaSnapshotBody = z.infer<typeof schemaSnapshotBody>;
 export type SnapshotDatabase = z.infer<typeof database>;
 
-/** One expected object of a PMS/PDAOrder feature, to compare with the stored dictionary. */
+/**
+ * One expected object of a PMS/PDAOrder feature, to compare with the stored dictionary.
+ * `optional_reason` marks an object some SMILE builds lack by design (PDAOrder catalog
+ * `optional_on_site`, ADR 0184): a site without it is healthy, so it is not a gap.
+ */
 export const expectedItem = z
   .object({
     feature: z.string().min(1).max(200),
@@ -63,6 +67,7 @@ export const expectedItem = z
     table: ident.optional(),
     columns: z.array(ident).max(200).default([]),
     routine: ident.optional(),
+    optional_reason: z.string().min(1).max(500).optional(),
   })
   .strict()
   .refine((i) => (i.table === undefined) !== (i.routine === undefined), 'give exactly one of table or routine');

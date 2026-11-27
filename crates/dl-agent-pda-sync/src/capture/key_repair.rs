@@ -146,7 +146,7 @@ impl<'a> KeyRepairCapture<'a> {
                 continue;
             };
             if !self.cx.exists(p.name(), ctx)? {
-                report.table_missing(p.name());
+                report.table_missing(p.name(), p.table.optional_on_site);
                 self.queue.complete(&ids, ctx)?;
                 continue;
             }

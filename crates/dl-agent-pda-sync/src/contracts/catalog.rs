@@ -138,6 +138,10 @@ pub struct CatalogTable {
     pub pg_raw: bool,
     /// Why raw.
     pub pg_raw_reason: Option<String>,
+    /// Absent on some SMILE builds by design (RT-1381..1390): skipped and logged once at info level.
+    pub optional_on_site: bool,
+    /// Why the table is optional.
+    pub optional_reason: Option<String>,
     /// Blob columns excluded from the hash.
     pub hash_exclude: Option<Vec<String>>,
     /// PG key column to the constant a NULL vendor value maps to (ADR 0106).
@@ -241,6 +245,7 @@ impl SyncCatalog {
         let mut catalog = read_catalog(o)?;
         for t in &catalog.tables {
             validate_null_key_defaults(t)?;
+            validate_optional_on_site(t)?;
         }
         let Some(keys_json) = logical_keys_json else {
             return Ok(catalog);
@@ -404,6 +409,8 @@ fn read_table(
         pg_constants: string_map(&o, "pg_constants")?,
         pg_raw: o.bool("pg_raw")?,
         pg_raw_reason: o.opt_string("pg_raw_reason")?,
+        optional_on_site: o.bool("optional_on_site")?,
+        optional_reason: o.opt_string("optional_reason")?,
         hash_exclude: strings(&o, "hash_exclude")?,
         null_key_defaults: string_map(&o, "null_key_defaults")?,
         keys_from_overlay: false,
@@ -427,6 +434,18 @@ fn read_sqlite(
         reason: o.opt_string("reason")?,
         note: o.opt_string("note")?,
     })
+}
+
+/// `optional_on_site` (ADR 0184) needs the `optional_reason` a report shows for the absent table.
+fn validate_optional_on_site(t: &CatalogTable) -> Result<(), CatalogError> {
+    let reason = t.optional_reason.as_deref().unwrap_or("");
+    if t.optional_on_site && reason.trim().is_empty() {
+        return Err(CatalogError::Invalid(format!(
+            "{}: optional_on_site needs an optional_reason.",
+            t.table
+        )));
+    }
+    Ok(())
 }
 
 /// `null_key_defaults` (ADR 0106) may only name a vendor-fed PG key column of a typed

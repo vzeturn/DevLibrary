@@ -82,7 +82,7 @@ impl<'a> LedgerCapture<'a> {
                 break;
             }
             if !self.cx.exists(p.name(), ctx)? {
-                report.table_missing(p.name());
+                report.table_missing(p.name(), p.table.optional_on_site);
                 continue;
             }
             CaptureContext::guard_table(p, &mut report, ctx, |r| {
@@ -180,7 +180,7 @@ impl<'a> LedgerCapture<'a> {
                 break;
             }
             if !self.cx.exists(p.name(), ctx)? {
-                report.table_missing(p.name());
+                report.table_missing(p.name(), p.table.optional_on_site);
                 continue;
             }
             let ok = CaptureContext::guard_table(p, &mut report, ctx, |r| {
