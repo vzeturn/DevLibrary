@@ -211,6 +211,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dl-agent-smile-shared"
+version = "0.2.1"
+dependencies = [
+ "dl-tds",
+]
+
+[[package]]
 name = "dl-agent-speaker"
 version = "0.2.1"
 dependencies = [

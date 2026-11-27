@@ -1,0 +1,16 @@
+[package]
+name = "dl-agent-smile-shared"
+description = "Shared SMILE read layer (SA_ objects) installed and self-repaired by dl-agent: one definition of the TransactionCode + SubCode join for every project (RT-1432)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+dl-tds.workspace = true
+
+[lints]
+workspace = true

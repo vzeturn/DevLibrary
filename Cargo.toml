@@ -53,6 +53,7 @@ dl-agent-hotellink = { path = "crates/dl-agent-hotellink" }
 dl-agent-arrival = { path = "crates/dl-agent-arrival" }
 dl-agent-pda-sync = { path = "crates/dl-agent-pda-sync" }
 dl-agent-rt = { path = "crates/dl-agent-rt" }
+dl-agent-smile-shared = { path = "crates/dl-agent-smile-shared" }
 dl-agent-speaker = { path = "crates/dl-agent-speaker" }
 
 [workspace.lints.rust]
