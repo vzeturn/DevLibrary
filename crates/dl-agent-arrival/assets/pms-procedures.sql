@@ -1484,12 +1484,16 @@ BEGIN
         FT.FolioNum,
         FT.FolioBalanceCode AS BalanceCode,
         FT.TransactionAmount AS Amount,
-        FT.Qty,
-        FT.UnitPrice,
+        -- SMILE leaves Qty, UnitPrice and Description empty on most lines: a line is one unit of its amount, named
+        -- after its transaction code (the way the e-invoice collector reads it).
+        ISNULL(NULLIF(FT.Qty, 0), 1) AS Qty,
+        ISNULL(NULLIF(FT.UnitPrice, 0), FT.TransactionAmount / ISNULL(NULLIF(FT.Qty, 0), 1)) AS UnitPrice,
         FT.TransactionDate AS TransDate,
-        FT.Description,
+        COALESCE(NULLIF(RTRIM(FT.Description), ''), NULLIF(RTRIM(TC.Description), ''), '') AS Description,
         CAST(FT.RefNumber AS VARCHAR(30)) AS RefNo
     FROM dbo.FolioTransaction FT WITH (NOLOCK)
+    OUTER APPLY (SELECT TOP 1 T.Description FROM dbo.TransactionCode T WITH (NOLOCK)
+                 WHERE T.TransactionCode = FT.TransactionCode ORDER BY T.TransactionCode) TC
     WHERE FT.FolioNum = @sFolioNum
       AND (ISNULL(@sBalanceCode,'') = '' OR FT.FolioBalanceCode = @sBalanceCode)
       AND LTRIM(RTRIM(FT.FolioBalanceCode)) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
