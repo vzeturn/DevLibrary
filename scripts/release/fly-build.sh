@@ -11,6 +11,12 @@
 # destroys it on timeout, error or Ctrl-C, so no machine is left running. The release seed
 # never leaves this machine: rel.sh fetch + sign run here.
 #
+# Warm mode (RT-1340, default when the machine dl-xbuild-warm exists, made by warm-setup.sh):
+# instead of creating and destroying a machine, the same warm machine is updated with this
+# release's environment, started, waited on and stopped again. Its image already holds the
+# toolchain and its volume keeps the git checkout, cargo registry and target dir, so a release
+# recompiles only what changed. FLY_BUILD_MODE=oneshot forces the machine-per-release path.
+#
 # Environment (values never printed):
 #   FLY_API_TOKEN         deploy token of FLY_BUILD_APP (create/delete machines)
 #   FLY_BUILD_APP         Fly app that hosts build machines, default dl-xbuild
@@ -21,6 +27,7 @@
 #   CLOUDFLARE_API_TOKEN  R2 edit on the hub's account; handed to the machine for staging
 #   MMEI_BUILD_DEFAULT_SQL_PASSWORD  compiled into einvoice-enroll (optional, see build-dl-agent.sh)
 #   DL_AGENT_RELEASE_KEYS public release keys, default ~/.config/devlibrary-agent-hub/release.pub
+#   FLY_BUILD_MODE        warm | oneshot (default: warm if dl-xbuild-warm exists)
 #   FLY_BUILD_DRY_RUN=1   print the machine config (secrets masked) and stop
 set -euo pipefail
 # shellcheck source=scripts/release/lib.sh
@@ -73,17 +80,63 @@ git -C "$root" branch -r --contains "$ref" 2>/dev/null | grep -q . || [ -n "${DL
 stage="dl-agent-builds/$v"
 r2 DELETE "$stage/status" -o /dev/null 2>/dev/null || true
 id=
+warm=
+if [ "${FLY_BUILD_MODE:-}" != oneshot ]; then
+  wm=$(bearer "$FLY_API_TOKEN" "$api" | python3 -c "import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d=[]
+m=[x for x in d if isinstance(x,dict) and x.get('name')=='dl-xbuild-warm']
+print(m[0]['id']+' '+m[0]['state'] if m else '')")
+  if [ -n "$wm" ]; then warm=${wm% *}; wstate=${wm#* }; fi
+fi
+[ "${FLY_BUILD_MODE:-}" != warm ] || [ -n "$warm" ] || die "FLY_BUILD_MODE=warm but dl-xbuild-warm does not exist: run warm-setup.sh"
 cleanup() {
+  if [ -n "$warm" ]; then
+    bearer "$FLY_API_TOKEN" -o /dev/null -X POST "$api/$warm/stop" 2>/dev/null || true
+    bearer "$FLY_API_TOKEN" -o /dev/null "$api/$warm/wait?state=stopped&timeout=60" 2>/dev/null || true
+    # A stopped machine keeps its config at rest: drop the tokens it was handed (the next build
+    # sets them again).
+    bearer "$FLY_API_TOKEN" "$api/$warm" 2>/dev/null | python3 -c "import json,sys
+c=json.load(sys.stdin)['config']
+for k in ('CLOUDFLARE_API_TOKEN','MMEI_BUILD_DEFAULT_SQL_PASSWORD'): c['env'][k]=''
+print(json.dumps({'config':c,'skip_launch':True}))" 2>/dev/null \
+      | bearer "$FLY_API_TOKEN" -o /dev/null -X POST "$api/$warm" -H 'content-type: application/json' --data-binary @- 2>/dev/null || true
+    echo "warm machine $warm stopped"; return 0
+  fi
   [ -n "$id" ] || return 0
   bearer "$FLY_API_TOKEN" -o /dev/null -X DELETE "$api/$id?force=true" 2>/dev/null || true
   echo "machine $id destroyed"
 }
 trap cleanup EXIT INT TERM
+if [ -n "$warm" ]; then
+  tc=$(cat "$root/scripts/xbuild/Dockerfile" "$root/scripts/xbuild/setup.sh" | shasum -a 256 | cut -c1-12)
+  bearer "$FLY_API_TOKEN" "$api/$warm" | grep -q "tc-$tc" || die "warm machine toolchain image is stale or unset: run scripts/release/warm-setup.sh"
+  case $wstate in stopped|created) ;; *) die "warm machine $warm is $wstate (another build running?)" ;; esac
+  # Keep the machine's image, size and volume mount; replace the environment and /build.sh.
+  upd=$(config | python3 -c "import json,sys,subprocess,os
+want=json.load(sys.stdin)['config']
+cur=json.loads(subprocess.run(['curl','-sS','-K','-',sys.argv[1]],input='header = \"Authorization: Bearer %s\"\n'%os.environ['FLY_API_TOKEN'],capture_output=True,text=True).stdout)['config']
+for k in ('env','files','init','metadata'): cur[k]=want[k]
+cur['auto_destroy']=False; cur['restart']={'policy':'no'}
+print(json.dumps({'config':cur,'skip_launch':True}))" "$api/$warm")
+  code=$(printf '%s' "$upd" | bearer "$FLY_API_TOKEN" -o /dev/null -w '%{http_code}' -X POST "$api/$warm" -H 'content-type: application/json' --data-binary @-)
+  [ "$code" = 200 ] || die "warm machine update failed: HTTP $code"
+  for _ in 1 2 3 4 5 6; do # the update is still settling right after it returns: 412 until it has
+    code=$(bearer "$FLY_API_TOKEN" -o /dev/null -w '%{http_code}' -X POST "$api/$warm/start")
+    [ "$code" != 412 ] && break
+    sleep 5
+  done
+  [ "$code" = 200 ] || die "warm machine start failed: HTTP $code"
+  id=$warm
+  bearer "$FLY_API_TOKEN" -o /dev/null "$api/$warm/wait?state=started&timeout=60" || true  # avoid reading the pre-start "stopped"
+  echo "warm machine $id building $v at ${ref:0:12}: ${TARGETS[*]}"
+else
 resp=$(config | bearer "$FLY_API_TOKEN" -X POST "$api" -H 'content-type: application/json' --data-binary @- -w '\n%{http_code}')
 code=${resp##*$'\n'}
 [ "$code" = 200 ] || die "machine create failed: HTTP $code ${resp%$'\n'*}"
 id=$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['id'])" "${resp%$'\n'*}")
 echo "machine $id ($FLY_BUILD_SIZE, $FLY_BUILD_REGION) building $v at ${ref:0:12}: ${TARGETS[*]}"
+fi
 
 deadline=$(( $(date +%s) + ${FLY_BUILD_TIMEOUT:-5400} ))
 state=
@@ -98,7 +151,7 @@ while :; do
   [ "$(date +%s)" -lt "$deadline" ] || { echo "timeout after ${FLY_BUILD_TIMEOUT:-5400}s (state $state)" >&2; break; }
   sleep 20
 done
-[ "$state" = destroyed ] && id=  # Fly already removed it; nothing to clean up
+[ "$state" = destroyed ] && [ -z "$warm" ] && id=  # Fly already removed it; nothing to clean up
 rc=$(r2 GET "$stage/status" 2>/dev/null || echo missing)
 echo "--- build log (tail) ---"
 r2 GET "$stage/build.log" 2>/dev/null | tail -n "${FLY_BUILD_LOG_LINES:-40}" || echo "(no log staged)"
