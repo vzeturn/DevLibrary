@@ -255,9 +255,10 @@ BEGIN
         OriginAmount    = ' + @oamtExpr + N',
         RptExRate       = ' + @rptRateExpr + N'
     FROM dbo.FolioTransaction ft
+    OUTER APPLY dbo.SA_TrnCode_Resolve(ft.TransactionCode, ft.TransactionSubCode, 0, 0) trn
     LEFT JOIN dbo.TransactionCode tc
-        ON tc.TransactionCode = ft.TransactionCode
-       AND tc.TransactionSubCode = CAST(ft.TransactionSubCode AS varchar)
+        ON tc.TransactionCode = trn.TransactionCode
+       AND tc.TransactionSubCode = trn.TransactionSubCode
     ' + @rateJoin + N'
     WHERE ft.BillID = @BillID
       AND (' + @pred + N');';

@@ -113,9 +113,10 @@ BEGIN
                 /*{{FO_RATE_EXPR}}*/'')) AS bigint) % 999999999989) AS varchar(40)), '0'),
             N':', CAST(COUNT(*) AS varchar(20)))
         FROM dbo.FolioTransaction ft
+        OUTER APPLY dbo.SA_TrnCode_Resolve(ft.TransactionCode, ft.TransactionSubCode, 0, 0) trn
         LEFT JOIN dbo.TransactionCode tc
-            ON tc.TransactionCode = ft.TransactionCode
-           AND tc.TransactionSubCode = CAST(ft.TransactionSubCode AS varchar)
+            ON tc.TransactionCode = trn.TransactionCode
+           AND tc.TransactionSubCode = trn.TransactionSubCode
         /*{{FO_RATE_JOIN}}*/
         WHERE ft.BillID = @BillID
           AND (/*{{FO_STATIC_PRED}}*/1 = 1);
