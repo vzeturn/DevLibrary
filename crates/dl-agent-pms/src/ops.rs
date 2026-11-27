@@ -543,6 +543,7 @@ mod tests {
                 "fo.masterdata.roomexposures@1",
                 "fo.masterdata.rooms@1",
                 "fo.masterdata.roomtypes@1",
+                "fo.masterdata.transactioncodes@1",
                 "fo.masterdata.wings@1",
                 "fo.pos.post@1",
                 "fo.ratecodes.list@1",

@@ -485,6 +485,11 @@
     {
       "name": "TransactionCode",
       "columns": [
+        "Description",
+        "TransactionCode",
+        "TransactionGroup",
+        "TransactionSubCode",
+        "TransactionType",
         "TrnCode",
         "TrnType"
       ]
@@ -3028,6 +3033,32 @@
               "CruiseCode",
               "TrnCode",
               "TrnSubCode"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.transactioncodes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TransactionCode",
+              "TransactionSubCode",
+              "Description",
+              "TransactionType",
+              "TransactionGroup"
             ],
             "where": [],
             "order_by": [],

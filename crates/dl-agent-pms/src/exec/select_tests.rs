@@ -196,4 +196,23 @@ fn the_embedded_manifest_still_loads() {
     );
     assert!(m.lookup("fo.availability.source").is_some());
     assert!(!m.implemented_ops().is_empty());
+    // RT-1422 (fo.masterdata.transactioncodes): the SMILE_FO TransactionCode columns it reads.
+    let trn_code = m
+        .tables
+        .iter()
+        .find(|t| t.name == "TransactionCode")
+        .expect("TransactionCode");
+    for col in [
+        "TransactionCode",
+        "TransactionSubCode",
+        "Description",
+        "TransactionType",
+        "TransactionGroup",
+    ] {
+        assert!(
+            trn_code.columns.iter().any(|c| c == col),
+            "TransactionCode.{col}"
+        );
+    }
+    assert!(m.lookup("fo.masterdata.transactioncodes").is_some());
 }
