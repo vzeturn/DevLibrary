@@ -188,6 +188,7 @@ impl OrderGrantsMonitor {
             let mut note = outcome.summary();
             if let Some(identity) = outcome.applied_by() {
                 let identity = identity.to_owned();
+                self.steps_applied(&identity, &outcome);
                 missing = self.probe(instance, database, &password, ctx, true)?;
                 if missing.is_empty() {
                     self.repaired(&identity, &outcome);
@@ -207,6 +208,22 @@ impl OrderGrantsMonitor {
             self.report_missing(&missing, repair.as_ref());
         }
         Some(true)
+    }
+
+    /// RT-1425: one `SQL_GRANT_APPLIED` site event per bootstrap step the repair ran (the
+    /// full read/write script among them), whether or not the grants are complete after.
+    fn steps_applied(&self, identity: &str, outcome: &RepairOutcome) {
+        for step in &outcome.applied_steps {
+            let mut detail = dl_json::Map::new();
+            detail.insert("step", step.as_str());
+            detail.insert("identity", identity);
+            self.events.report(
+                site_event_levels::INFO,
+                codes::SQL_GRANT_APPLIED,
+                &format!("The agent applied the SQL setup step {step} itself as {identity}"),
+                Some(detail),
+            );
+        }
     }
 
     fn repaired(&self, identity: &str, outcome: &RepairOutcome) {

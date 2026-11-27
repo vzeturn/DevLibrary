@@ -20,6 +20,17 @@ internal static partial class OrderCommandSql
         "CASE WHEN EXISTS (SELECT 1 FROM dbo.TmpTrn WHERE CheckNo = @CheckNo AND RVC = @RVCNo AND TrnCode BETWEEN 101 AND 189) " +
         "THEN 1 ELSE 0 END;";
 
+    /// <summary>
+    /// The facts the empty-bill cleanup guards on (ADR 0144). Params: @CheckNo, @RVCNo, @OpenedBefore (<c>yyyy-MM-ddTHH:mm:ss</c>,
+    /// store local). One row: the trimmed table, 1 when <c>OpenTime</c> is earlier than the cutoff, the count of every
+    /// <c>TmpTrn</c> line of the check (any code: an empty check has none); no row when the check is not in the RVC.
+    /// </summary>
+    internal const string EmptyBillFacts =
+        "SELECT ISNULL(RTRIM(LTRIM(i.TableNo)), ''), " +
+        "CASE WHEN i.OpenTime < CONVERT(datetime, @OpenedBefore, 126) THEN 1 ELSE 0 END, " +
+        "(SELECT COUNT(*) FROM dbo.TmpTrn t WHERE t.CheckNo = @CheckNo AND t.RVC = @RVCNo) " +
+        "FROM dbo.TmpInvoice i WHERE i.CheckNo = @CheckNo AND i.RVC = @RVCNo;";
+
     /// <summary>The prefix of the column probe; <see cref="SqlTableCommandUnit.MissingColumnsSql"/> adds one VALUES row per column.</summary>
     internal const string MissingColumnsHead = "SELECT need.t, need.c FROM (VALUES ";
 
@@ -76,6 +87,33 @@ internal sealed class SqlTableCommandUnit(SqlConnection connection, SqlTransacti
         var tender = Convert.ToInt32(r.GetValue(1), CultureInfo.InvariantCulture) == 1;
         var discount = Convert.ToInt32(r.GetValue(2), CultureInfo.InvariantCulture) == 1;
         return new CheckMoneyFacts(tender || paid != 0m, discount);
+    }
+
+    public async Task<EmptyBillFacts?> EmptyBillFactsAsync(int rvcNo, long checkNo, string openedBefore, CancellationToken ct)
+    {
+        await using var cmd = Command(OrderCommandSql.EmptyBillFacts);
+        EmptyBillFactsParameters(cmd, rvcNo, checkNo, openedBefore);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct)) return null;
+        var table = await r.IsDBNullAsync(0, ct) ? "" : Convert.ToString(r.GetValue(0), CultureInfo.InvariantCulture)!.Trim();
+        return new EmptyBillFacts(
+            table,
+            Convert.ToInt32(r.GetValue(1), CultureInfo.InvariantCulture) == 1,
+            Convert.ToInt32(r.GetValue(2), CultureInfo.InvariantCulture));
+    }
+
+    public async Task CancelEmptyAsync(OrderCheckCancelEmptyPayload payload, CancellationToken ct)
+    {
+        await using var cancel = Command(OrderCommandSql.CancelOrder);
+        CancelEmptyParameters(cancel, payload);
+        await cancel.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task SetPoNumberAsync(OrderPoNumberPayload payload, CancellationToken ct)
+    {
+        await using var cmd = Command(OrderCommandSql.SetPoNumber);
+        PoNumberParameters(cmd, payload);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task ChangeTableAsync(OrderTableChangePayload payload, CancellationToken ct)
@@ -225,6 +263,12 @@ internal sealed class SqlTableCommandUnit(SqlConnection connection, SqlTransacti
         cmd.Parameters.Add("@NumGuest", SqlDbType.Int).Value = payload.NumGuest;
     }
 
+    internal static void PoNumberParameters(SqlCommand cmd, OrderPoNumberPayload payload)
+    {
+        LockParameters(cmd, payload.RvcNo, payload.CheckNo);
+        Text(cmd, "@PONumber", payload.PoNumber);
+    }
+
     internal static void TransferHeaderParameters(SqlCommand cmd, OrderTableTransferPayload payload)
     {
         Text(cmd, "@ToTableNo", payload.ToTableNo.Trim());
@@ -247,6 +291,19 @@ internal sealed class SqlTableCommandUnit(SqlConnection connection, SqlTransacti
     {
         cmd.Parameters.Add("@Target", SqlDbType.BigInt).Value = payload.TargetCheckNo;
         cmd.Parameters.Add("@Source", SqlDbType.BigInt).Value = payload.SourceCheckNo;
+    }
+
+    internal static void EmptyBillFactsParameters(SqlCommand cmd, int rvcNo, long checkNo, string openedBefore)
+    {
+        LockParameters(cmd, rvcNo, checkNo);
+        Text(cmd, "@OpenedBefore", openedBefore);
+    }
+
+    /// <summary>The cancel batch of the empty-bill cleanup: the same three free variables as the merge's cancel, <c>@CancelBy</c> is the cashier.</summary>
+    internal static void CancelEmptyParameters(SqlCommand cmd, OrderCheckCancelEmptyPayload payload)
+    {
+        LockParameters(cmd, payload.RvcNo, payload.CheckNo);
+        Text(cmd, "@CancelBy", payload.Cashier);
     }
 
     internal static void CancelParameters(SqlCommand cmd, OrderCheckMergePayload payload)

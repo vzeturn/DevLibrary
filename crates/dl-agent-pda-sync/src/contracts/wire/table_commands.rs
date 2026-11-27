@@ -18,6 +18,9 @@ pub mod table_command_types {
     /// Close a stale empty check on the named table (ADR 0144, RT-0775): the agent
     /// re-checks emptiness, table, age and payment in its own transaction first.
     pub const CHECK_CANCEL_EMPTY: &str = "order.check_cancel_empty";
+    /// Write the guest of an open check to the store's `TmpInvoice.PONumber` (RT-1413);
+    /// an empty value clears it.
+    pub const PO_NUMBER: &str = "order.po_number";
     /// All of them.
     pub const ALL: &[&str] = &[
         TABLE_CHANGE,
@@ -25,6 +28,7 @@ pub mod table_command_types {
         CHECK_MERGE,
         ITEMS_MOVE,
         CHECK_CANCEL_EMPTY,
+        PO_NUMBER,
     ];
     /// The verbs whose payload carries the expected state of every check they touch.
     pub const MULTI_CHECK: &[&str] = &[CHECK_MERGE, ITEMS_MOVE];
@@ -271,6 +275,71 @@ impl WireJson for OrderCheckCancelEmptyPayload {
             table_no: o.string("table_no")?,
             cashier: o.string("cashier")?,
             opened_before: o.string("opened_before")?,
+        })
+    }
+}
+
+/// Payload of [`table_command_types::PO_NUMBER`] (RT-1413): `"<room>-<guest>"`, composed
+/// and capped by the cloud; empty clears the column. The agent writes it TCVN3-encoded and
+/// cut to the store column's own length.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OrderPoNumberPayload {
+    /// RVC.
+    pub rvc_no: i32,
+    /// Check.
+    pub check_no: i64,
+    /// The text for `TmpInvoice.PONumber`; `None` only when the member is missing or
+    /// null, which is refused like the C# null.
+    pub po_number: Option<String>,
+}
+
+impl OrderPoNumberPayload {
+    /// The cloud's cap, in UTF-16 units like the .NET `string.Length`.
+    pub const MAX_LENGTH: usize = 50;
+
+    /// The aggregate the command is queued under: apart from `check:{rvc}:{check}`, so the
+    /// guest write never waits behind the check's order verbs (and they never wait on it).
+    pub fn aggregate_key(rvc_no: i32, check_no: i64) -> String {
+        format!("checkguest:{rvc_no}:{check_no}")
+    }
+
+    /// The validation problem, `None` when valid (an empty value is valid: it clears).
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.rvc_no <= 0 {
+            return Some("rvc_no must be positive");
+        }
+        if self.check_no <= 0 {
+            return Some("check_no must be positive");
+        }
+        let Some(text) = self.po_number.as_deref() else {
+            return Some("po_number is required (empty clears it)");
+        };
+        if utf16_len(text) > Self::MAX_LENGTH {
+            return Some("po_number must be at most 50 characters");
+        }
+        if text.chars().any(char::is_control) {
+            return Some("po_number must not carry control characters");
+        }
+        None
+    }
+}
+
+impl WireJson for OrderPoNumberPayload {
+    fn write_json(&self, w: &mut Writer) {
+        w.begin_object();
+        w.key("rvc_no").int(self.rvc_no.into());
+        w.key("check_no").int(self.check_no);
+        if let Some(text) = &self.po_number {
+            w.key("po_number").string(text);
+        }
+        w.end_object();
+    }
+
+    fn read_json(o: Obj<'_>) -> Result<Self, ReadError> {
+        Ok(OrderPoNumberPayload {
+            rvc_no: o.int("rvc_no")?,
+            check_no: o.int("check_no")?,
+            po_number: o.opt_string("po_number")?,
         })
     }
 }

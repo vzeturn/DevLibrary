@@ -76,6 +76,13 @@ const CHECK_CANCEL_EMPTY: &[StoreColumn] = &[
     c("checkopenlog", "RVC"),
 ];
 
+// RT-1413: the guest of a check, written to the header only.
+const PO_NUMBER: &[StoreColumn] = &[
+    c("tmpInvoice", "PONumber"),
+    c("tmpInvoice", "CheckNo"),
+    c("tmpInvoice", "RVC"),
+];
+
 const ITEMS_MOVE: &[StoreColumn] = &[
     c("TmpInvoice", "CheckNo"),
     c("TmpInvoice", "RVC"),
@@ -97,6 +104,7 @@ pub fn columns(verb: &str) -> Option<&'static [StoreColumn]> {
         t::CHECK_MERGE => Some(CHECK_MERGE),
         t::ITEMS_MOVE => Some(ITEMS_MOVE),
         t::CHECK_CANCEL_EMPTY => Some(CHECK_CANCEL_EMPTY),
+        t::PO_NUMBER => Some(PO_NUMBER),
         _ => None,
     }
 }

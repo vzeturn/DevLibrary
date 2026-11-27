@@ -11,7 +11,7 @@ use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
+    OrderPoNumberPayload, OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
     OrderTenderAddPayload, OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
@@ -201,6 +201,10 @@ pub trait TableCommandUnit {
 
     /// Cancels the empty check with the legacy cancel batch.
     fn cancel_empty(&mut self, payload: &OrderCheckCancelEmptyPayload, ctx: &Ctx) -> Result<()>;
+
+    /// Sets `TmpInvoice.PONumber` of the check (RT-1413) and nothing else: the batch
+    /// encodes the text and cuts it to the column; empty clears it.
+    fn set_po_number(&mut self, payload: &OrderPoNumberPayload, ctx: &Ctx) -> Result<()>;
 
     /// The item lines (TrnCode 100) of the check, update-locked until commit.
     fn lock_item_lines(&mut self, rvc_no: i32, check_no: i64, ctx: &Ctx) -> Result<Vec<i64>>;

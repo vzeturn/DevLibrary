@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 13] = [
+pub const STEPS: [BootstrapStep; 15] = [
     step(
         "login",
         StepKind::Login,
@@ -135,10 +135,27 @@ pub const STEPS: [BootstrapStep; 13] = [
         "Sql.195_post_to_smile_grants.sql",
         false,
     ),
+    // RT-1425: order.po_number (RT-1413) writes the check guest to tmpInvoice.PONumber.
+    step(
+        "po_number_grants",
+        StepKind::PoNumberGrants,
+        LOGIN_NAME,
+        "Sql.200_po_number_grants.sql",
+        false,
+    ),
+    // RT-1425 owner decision (temporary): full read/write on the SMILE databases. Revert
+    // this step (with its existence check and the probe's FULL_RW_SQL) to tighten again.
+    step(
+        "full_rw_grants",
+        StepKind::FullRwGrants,
+        LOGIN_NAME,
+        "Sql.210_full_rw_grants.sql",
+        false,
+    ),
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 13] = [
+const SCRIPTS: [(&str, &str); 15] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -190,6 +207,14 @@ const SCRIPTS: [(&str, &str); 13] = [
     (
         "Sql.195_post_to_smile_grants.sql",
         include_str!("../../assets/sql/195_post_to_smile_grants.sql"),
+    ),
+    (
+        "Sql.200_po_number_grants.sql",
+        include_str!("../../assets/sql/200_po_number_grants.sql"),
+    ),
+    (
+        "Sql.210_full_rw_grants.sql",
+        include_str!("../../assets/sql/210_full_rw_grants.sql"),
     ),
 ];
 
@@ -575,7 +600,9 @@ mod tests {
                 "sequence_grants",
                 "money_grants",
                 "fo_inhouse_grants",
-                "post_to_smile_grants"
+                "post_to_smile_grants",
+                "po_number_grants",
+                "full_rw_grants"
             ]
         );
         for s in &STEPS {
