@@ -40,6 +40,7 @@
       "columns": [
         "ALMStatus",
         "Cancel",
+        "ContractID",
         "ContractNo",
         "FromDate",
         "NumRoom",
@@ -52,9 +53,22 @@
     {
       "name": "AllotmentContractWeekday",
       "columns": [
+        "ContractID",
         "ContractNo",
         "DayOfWk",
         "TANo"
+      ]
+    },
+    {
+      "name": "Building",
+      "columns": [
+        "BuildingCode",
+        "Description",
+        "DisplayOrder",
+        "HotelID",
+        "isFuncRoom",
+        "VATForm",
+        "VATSeri"
       ]
     },
     {
@@ -167,18 +181,26 @@
         "TransactionAmount",
         "TransactionCode",
         "TransactionDate",
-        "TransactionSubCode",
         "VoidTransactionFlag"
+      ]
+    },
+    {
+      "name": "GlobalParameter",
+      "columns": [
+        "ParaName",
+        "ParaString"
       ]
     },
     {
       "name": "GroupBlockDetail",
       "columns": [
         "AllocationID",
+        "Cancelled",
         "DReleaseDays",
         "FromDate",
         "NumRoom",
         "RoomTypeCode",
+        "SubGroupCode",
         "ToDate"
       ]
     },
@@ -286,26 +308,79 @@
       ]
     },
     {
+      "name": "RateCode",
+      "columns": [
+        "DailyRate",
+        "Description",
+        "IsDisabled",
+        "isPackage",
+        "LastChangeClerkID",
+        "LastChangeTime",
+        "OnlineRate",
+        "PackageCode",
+        "RateCode",
+        "RateCurr",
+        "RateLevel",
+        "RatePP"
+      ]
+    },
+    {
       "name": "Room",
       "columns": [
+        "AreaMap",
         "BuildingCode",
+        "DisplayOrder",
         "ExposureCode",
         "Floor",
         "HSKPClean",
         "HSKPOccupied",
+        "NumBed",
+        "NumConnectedRoom",
         "RoomAttributeCode",
         "RoomCode",
+        "RoomComment",
+        "RoomName",
+        "RoomRateCode",
         "RoomTypeCode",
+        "SlaveRoom",
         "WingCode"
+      ]
+    },
+    {
+      "name": "RoomAttribute",
+      "columns": [
+        "Description",
+        "HotelID",
+        "RoomAttributeCode"
+      ]
+    },
+    {
+      "name": "RoomExposure",
+      "columns": [
+        "Description",
+        "HotelID",
+        "IsDisabled",
+        "RoomExposureCode"
       ]
     },
     {
       "name": "RoomType",
       "columns": [
+        "ClassCode",
+        "CruiseCode",
         "Description",
         "DisplayOrder",
+        "HSKPCOTime",
+        "HSKPCOUnit",
+        "HSKPStayTime",
+        "HSKPStayUnit",
+        "NumGuestAvailability",
         "NumRoom",
-        "RoomTypeCode"
+        "RateCode",
+        "RoomTypeCode",
+        "TrnCode",
+        "TrnSubCode",
+        "WebRoomType"
       ]
     },
     {
@@ -458,6 +533,15 @@
         "TrnQty",
         "TrnSeq",
         "TrnTime"
+      ]
+    },
+    {
+      "name": "Wing",
+      "columns": [
+        "Description",
+        "HotelID",
+        "IsDisabled",
+        "WingCode"
       ]
     }
   ],
@@ -1180,6 +1264,400 @@
             "where": [],
             "order_by": [],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.availability.summary",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "HotelParameter",
+            "columns": [
+              "HotelDate"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 100
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate",
+              "RoomTypeCode",
+              "FolioStatus",
+              "GroupCode",
+              "SubGroupCode",
+              "CancelNum",
+              "ShareNum",
+              "AllotmentTA",
+              "AllotmentContract"
+            ],
+            "where": [
+              {
+                "column": "ArrivalDate",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              },
+              {
+                "column": "FolioStatus",
+                "op": "<",
+                "param": {
+                  "name": "live",
+                  "type": "int",
+                  "value": 4
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate",
+              "RoomTypeCode",
+              "FolioStatus",
+              "GroupCode",
+              "SubGroupCode",
+              "CancelNum",
+              "ShareNum",
+              "AllotmentTA",
+              "AllotmentContract"
+            ],
+            "where": [
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              },
+              {
+                "column": "FolioStatus",
+                "op": "<",
+                "param": {
+                  "name": "live",
+                  "type": "int",
+                  "value": 4
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "ArrivalDate",
+              "DepartureDate",
+              "RoomTypeCode",
+              "FolioStatus",
+              "GroupCode",
+              "SubGroupCode",
+              "CancelNum",
+              "ShareNum",
+              "AllotmentTA",
+              "AllotmentContract"
+            ],
+            "where": [
+              {
+                "column": "ArrivalDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "FolioStatus",
+                "op": "<",
+                "param": {
+                  "name": "live",
+                  "type": "int",
+                  "value": 4
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "GroupBlockDetail",
+            "columns": [
+              "AllocationID",
+              "SubGroupCode",
+              "RoomTypeCode",
+              "FromDate",
+              "ToDate",
+              "NumRoom",
+              "Cancelled"
+            ],
+            "where": [
+              {
+                "column": "FromDate",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "FromDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "GroupBlockDetail",
+            "columns": [
+              "AllocationID",
+              "SubGroupCode",
+              "RoomTypeCode",
+              "FromDate",
+              "ToDate",
+              "NumRoom",
+              "Cancelled"
+            ],
+            "where": [
+              {
+                "column": "ToDate",
+                "op": ">=",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              },
+              {
+                "column": "ToDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "GroupBlockDetail",
+            "columns": [
+              "AllocationID",
+              "SubGroupCode",
+              "RoomTypeCode",
+              "FromDate",
+              "ToDate",
+              "NumRoom",
+              "Cancelled"
+            ],
+            "where": [
+              {
+                "column": "FromDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              },
+              {
+                "column": "ToDate",
+                "op": ">",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "GroupFolio",
+            "columns": [
+              "GroupCode",
+              "ReleaseDate",
+              "IsCanceled"
+            ],
+            "where": [
+              {
+                "column": "ReleaseDate",
+                "op": ">=",
+                "param": {
+                  "name": "releaseFrom",
+                  "type": "date",
+                  "arg": "releaseFrom"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "AllotmentContract",
+            "columns": [
+              "ContractID",
+              "TANo",
+              "ContractNo",
+              "RoomTypeCode",
+              "FromDate",
+              "ToDate",
+              "NumRoom",
+              "ReleasedDay",
+              "Cancel"
+            ],
+            "where": [
+              {
+                "column": "FromDate",
+                "op": "<",
+                "param": {
+                  "name": "endDate",
+                  "type": "date",
+                  "arg": "endDate"
+                }
+              },
+              {
+                "column": "ToDate",
+                "op": ">",
+                "param": {
+                  "name": "startDate",
+                  "type": "date",
+                  "arg": "startDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "AllotmentContractWeekday",
+            "columns": [
+              "ContractID",
+              "TANo",
+              "ContractNo",
+              "DayOfWk"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "RoomType",
+            "columns": [
+              "RoomTypeCode"
+            ],
+            "where": [
+              {
+                "column": "CruiseCode",
+                "op": "=",
+                "param": {
+                  "name": "cruise",
+                  "type": "varchar",
+                  "arg": "cruise",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 1000
+          }
+        },
+        {
+          "select": {
+            "table": "GlobalParameter",
+            "columns": [
+              "ParaName",
+              "ParaString"
+            ],
+            "where": [
+              {
+                "column": "ParaName",
+                "op": "=",
+                "param": {
+                  "name": "para",
+                  "type": "varchar",
+                  "value": "AllotmentAvailSum",
+                  "size": 30
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 100
           }
         }
       ]
@@ -2410,6 +2888,180 @@
       ]
     },
     {
+      "name": "fo.masterdata.buildings",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Building",
+            "columns": [
+              "BuildingCode",
+              "Description",
+              "DisplayOrder",
+              "VATForm",
+              "VATSeri",
+              "isFuncRoom",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.roomattributes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "RoomAttribute",
+            "columns": [
+              "RoomAttributeCode",
+              "Description",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.roomexposures",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "RoomExposure",
+            "columns": [
+              "RoomExposureCode",
+              "Description",
+              "IsDisabled",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.rooms",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Room",
+            "columns": [
+              "RoomCode",
+              "RoomTypeCode",
+              "Floor",
+              "RoomName",
+              "BuildingCode",
+              "WingCode",
+              "RoomRateCode",
+              "NumBed",
+              "AreaMap",
+              "NumConnectedRoom",
+              "SlaveRoom",
+              "RoomComment",
+              "RoomAttributeCode",
+              "ExposureCode",
+              "DisplayOrder"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.roomtypes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "RoomType",
+            "columns": [
+              "RoomTypeCode",
+              "Description",
+              "ClassCode",
+              "DisplayOrder",
+              "NumRoom",
+              "NumGuestAvailability",
+              "RateCode",
+              "HSKPStayUnit",
+              "HSKPStayTime",
+              "HSKPCOUnit",
+              "HSKPCOTime",
+              "WebRoomType",
+              "CruiseCode",
+              "TrnCode",
+              "TrnSubCode"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.masterdata.wings",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Wing",
+            "columns": [
+              "WingCode",
+              "Description",
+              "IsDisabled",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
       "name": "fo.pos.post",
       "contract_ver": 1,
       "kind": "write",
@@ -2459,6 +3111,39 @@
               "size": "max"
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "fo.ratecodes.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "RateCode",
+            "columns": [
+              "RateCode",
+              "Description",
+              "RateLevel",
+              "RateCurr",
+              "RatePP",
+              "IsDisabled",
+              "isPackage",
+              "PackageCode",
+              "DailyRate",
+              "OnlineRate",
+              "LastChangeClerkID",
+              "LastChangeTime"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
         }
       ]
     },
