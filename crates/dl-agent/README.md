@@ -400,5 +400,17 @@ process-substitution config, never argv; the machine sees the Cloudflare token f
 only while it lives. `FLY_BUILD_DRY_RUN=1 scripts/release/fly-build.sh <version>` prints the
 machine config with secrets masked.
 
+**Warm build machine (RT-1340).** One-time: `scripts/release/warm-setup.sh` builds the toolchain image
+on Fly's remote builder, creates the 30 GB volume `dlxcache` and the stopped machine `dl-xbuild-warm`
+(re-run it after `scripts/xbuild/` changes; the volume is kept). `fly-build.sh` then uses it
+automatically: it updates the machine's environment, starts it, waits for it to stop and stops it
+again (so only the volume is billed between releases), and clears the Cloudflare token from the
+machine config. The machine keeps a git checkout in `/cache/src` (unchanged files keep their mtimes,
+so cargo recompiles only what changed), `/cache/registry`, `/cache/git` and `/cache/target`.
+`FLY_BUILD_MODE=oneshot` forces the old create-and-destroy path. Measured with all five targets at one
+commit: one-shot 824 s, warm cold cache 741 s, warm filled cache 29 s. The iMac native build
+(`scripts/build-dl-agent.sh` with `DL_XBUILD_NATIVE=1`) is not an option here: the Windows and Win7
+targets need mingw and wine, which the iMac lacks.
+
 `--data DIR` (or `DL_AGENT_DATA`) picks the state directory; the default is
 `%ProgramData%\dl-agent` or `/var/lib/dl-agent`.

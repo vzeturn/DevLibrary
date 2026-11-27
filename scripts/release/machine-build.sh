@@ -20,8 +20,24 @@ put() { # put <key> <file>
 build() {
   set -euo pipefail
   echo "build $v from $DL_BUILD_REPO@$DL_BUILD_REF targets: $DL_BUILD_TARGETS ($(nproc) cpu)"
-  mkdir -p /src
-  curl -fsSL "https://codeload.github.com/$DL_BUILD_REPO/tar.gz/$DL_BUILD_REF" | tar -xz -C /src --strip-components=1
+  if mountpoint -q /cache; then
+    # Warm machine (RT-1340): the checkout, cargo registry and target dir live on the volume, so
+    # only changed files are recompiled. git rewrites just the files that differ, which keeps
+    # the mtimes cargo's fingerprints depend on; a fresh tarball would touch every file.
+    mkdir -p /cache/registry /cache/git /cache/target
+    rm -rf /usr/local/cargo/registry /usr/local/cargo/git
+    ln -s /cache/registry /usr/local/cargo/registry; ln -s /cache/git /usr/local/cargo/git
+    if [ ! -d /cache/src/.git ]; then git init -q /cache/src && git -C /cache/src remote add origin "https://github.com/$DL_BUILD_REPO.git"; fi
+    git -C /cache/src fetch -q --depth 1 origin "$DL_BUILD_REF"
+    git -C /cache/src checkout -q -f "$DL_BUILD_REF"
+    git -C /cache/src clean -q -fdx -e target
+    rm -rf /src; ln -s /cache/src /src
+    ln -sfn /cache/target /cache/src/target
+    df -h /cache | tail -1
+  else
+    mkdir -p /src
+    curl -fsSL "https://codeload.github.com/$DL_BUILD_REPO/tar.gz/$DL_BUILD_REF" | tar -xz -C /src --strip-components=1
+  fi
   if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then /src/scripts/xbuild/setup.sh >/tmp/setup.log 2>&1 || { tail -40 /tmp/setup.log; exit 1; }; fi
   cd /src
   # shellcheck disable=SC2086 # target list is word-split on purpose
