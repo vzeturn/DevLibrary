@@ -10,7 +10,8 @@ use crate::commands::schema_columns;
 use crate::commands::sql_text as q;
 use crate::contracts::wire::{OrderPoNumberPayload, table_command_types};
 
-const CS_PO_NUMBER: &str = include_str!("../../../testdata/cs/Commands/OrderCommandSql.PoNumber.cs");
+const CS_PO_NUMBER: &str =
+    include_str!("../../../testdata/cs/Commands/OrderCommandSql.PoNumber.cs");
 
 fn payload(text: &str) -> OrderPoNumberPayload {
     OrderPoNumberPayload {

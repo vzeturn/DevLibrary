@@ -11,8 +11,9 @@ use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderItemsMovePayload,
-    OrderPoNumberPayload, OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload,
-    OrderTenderAddPayload, OrderTenderRemovePayload, ReservationSavePayload, SyncCommandResult,
+    OrderPoNumberPayload, OrderRoomChargePayload, OrderSendPayload, OrderTableChangePayload,
+    OrderTableTransferPayload, OrderTenderAddPayload, OrderTenderRemovePayload,
+    ReservationSavePayload, SyncCommandResult,
 };
 use crate::util::ctx::Ctx;
 

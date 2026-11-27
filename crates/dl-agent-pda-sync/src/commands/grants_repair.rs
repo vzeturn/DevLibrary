@@ -97,25 +97,26 @@ impl BootstrapGrantsRepair {
     /// the real bootstrapper for `identity`'s SQL target; `log` is the root logger.
     pub fn new(secrets: SharedSecretStore, identity: AgentIdentity, log: &Logger) -> Self {
         let root = log.clone();
-        let apply = move |credential: &SqlAdminCredential, ctx: &Ctx| -> Result<Vec<String>, Error> {
-            let bootstrapper = crate::hosting::enroll::real_bootstrapper(
-                secrets.clone(),
-                credential.clone(),
-                &root,
-            )?;
-            let preflight = bootstrapper.preflight(
-                identity.sql_instance.as_deref(),
-                identity.sql_database.as_deref(),
-                ctx,
-            )?;
-            let report = bootstrapper.apply(&preflight, false, ctx)?;
-            Ok(report
-                .steps
-                .iter()
-                .filter(|s| s.executed)
-                .map(|s| s.id.clone())
-                .collect())
-        };
+        let apply =
+            move |credential: &SqlAdminCredential, ctx: &Ctx| -> Result<Vec<String>, Error> {
+                let bootstrapper = crate::hosting::enroll::real_bootstrapper(
+                    secrets.clone(),
+                    credential.clone(),
+                    &root,
+                )?;
+                let preflight = bootstrapper.preflight(
+                    identity.sql_instance.as_deref(),
+                    identity.sql_database.as_deref(),
+                    ctx,
+                )?;
+                let report = bootstrapper.apply(&preflight, false, ctx)?;
+                Ok(report
+                    .steps
+                    .iter()
+                    .filter(|s| s.executed)
+                    .map(|s| s.id.clone())
+                    .collect())
+            };
         Self::with_parts(
             default_attempts(&DefaultLogin::from_process()),
             Box::new(apply),

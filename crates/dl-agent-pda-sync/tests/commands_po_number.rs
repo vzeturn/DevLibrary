@@ -5,8 +5,6 @@
 
 mod commands_support;
 
-use dl_json::Value as Json;
-use dl_uuid::Uuid;
 use dl_agent_pda_sync::commands::{SiteCommandExecutor, reasons};
 use dl_agent_pda_sync::contracts::WireJson;
 use dl_agent_pda_sync::contracts::wire::{
@@ -16,6 +14,8 @@ use dl_agent_pda_sync::contracts::wire::{
 use dl_agent_pda_sync::reporting::Logger;
 use dl_agent_pda_sync::util::ctx::Ctx;
 use dl_agent_pda_sync::util::stj;
+use dl_json::Value as Json;
+use dl_uuid::Uuid;
 
 use commands_support::{Check, FakeStore, clock};
 use std::sync::Arc;
