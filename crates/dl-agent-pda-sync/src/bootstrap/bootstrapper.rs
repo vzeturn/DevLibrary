@@ -144,7 +144,7 @@ pub const STEPS: [BootstrapStep; 15] = [
         false,
     ),
     // RT-1425 owner decision (temporary): full read/write on the SMILE databases. Revert
-    // this step (with its existence check and the probe's FULL_RW_SQL) to tighten again.
+    // this step (with the checks of `super::full_rw`) to tighten again.
     step(
         "full_rw_grants",
         StepKind::FullRwGrants,
