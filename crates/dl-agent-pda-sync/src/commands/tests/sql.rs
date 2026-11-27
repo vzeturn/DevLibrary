@@ -675,6 +675,7 @@ fn each_order_batch_is_bound_exactly_its_free_parameters() {
         check_no: 1,
         table_no: None,
         cashier: "c".into(),
+        pda_handled: None,
     };
     let covers = OrderCoversPayload {
         rvc_no: RVC,

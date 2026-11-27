@@ -232,6 +232,7 @@ fn send(check: i64) -> SyncCommand {
         check_no: check,
         table_no: Some("T4".to_owned()),
         cashier: "clerk-7".to_owned(),
+        pda_handled: None,
     };
     command(o::SEND, p.to_element(), &key(check), None)
 }

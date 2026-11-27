@@ -73,6 +73,7 @@ fn seed_check(t: &Live, rvc: i32, sent: bool) -> (i64, i64) {
             check_no: check,
             table_no: None,
             cashier: CLERK.to_owned(),
+            pda_handled: None,
         };
         t.applied(&command(o::SEND, p.to_element(), &key, None));
     }
