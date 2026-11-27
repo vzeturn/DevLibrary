@@ -136,3 +136,21 @@ Probe đã sửa gửi `?menuNo=1` (route bắt buộc `menuNo`). Cùng cách đ
 - So với mốc `/health` (~160 ms p50): phần SaaS->SR khoảng **+160 ms p50 / +180 ms p95**, cao hơn op đọc nhỏ khác (+60 ms) vì op này chạy 2 truy vấn tuần tự (`RVCItemMenu`, `ItemDef`). Với ngưỡng đề xuất "+80 ms cho op đọc nhỏ" thì **chưa đạt**; đề xuất xếp nó vào nhóm "op 2 truy vấn: +200 ms" hoặc gộp 2 truy vấn thành một JOIN (việc cho RT-1162).
 - Thực đo trên dữ liệu demo: menu 1-3, 5, 10 đều trả mảng rỗng (2 byte), nên chưa phản ánh thời gian truyền/đọc của thực đơn thật vài trăm món; số trên là cận dưới.
 - `pos.check.pay` vẫn không đo: không có dry-run, không ghi thử trên khách sạn thật; lý do bỏ này cần chủ dự án duyệt cùng ngưỡng ở 8.1.
+
+## 9. Số đo lần 4 và A/B (RT-1162, 2026-11-27 19:45-20:20 GMT+7, buổi tối)
+
+Cùng cách đo mục 8 (`probe.mjs --samples 200 --gap 150`, iMac -> `azolo-demo-pms` -> dl-agent máy SR). Thay đổi thử: PR #191, agent đọc socket 2 ms thay vì 25 ms khi còn op đang chạy.
+
+| Lệnh | Lần 3 (sáng, agent cũ hơn, chưa ghi phiên bản) p50 / p95 | 1.3.63 (có PR #191) p50 / p95 | 1.3.64 (bỏ PR #191) p50 / p95 |
+|---|---|---|---|
+| `/health` (không qua agent) | 163.3 / 206.6 | 157.2 / 223.2 | 153.1 / 189.6 |
+| `fo.hotelDate.get` | 224.4 / 259.8 | 320.5 / 366.7 | 336.7 / 400.0 |
+| `pos.check.list` | 224.2 / 237.1 | 320.3 / 368.7 | 336.2 / 397.3 |
+| `fo.reservation.list` | 604.5 / 721.6 | 926.6 / 1288 | dừng sau 10 mẫu (một mẫu > 5 s) |
+
+Đọc số:
+- PR #191 không gây chậm: bản bỏ PR #191 (1.3.64) còn chậm hơn một chút (+16 ms p50 trên op đọc nhỏ) nên lợi ích thật của PR khoảng 15-20 ms/op, đúng kỳ vọng "bớt phần chờ đọc socket".
+- Cả hai bản đều chậm hơn lần 3 khoảng +95 ms p50 trên op đọc nhỏ và +320 ms trên `/reservations`, trong khi `/health` giữ nguyên. Nên phần tăng nằm sau SaaS (agent, SQL SR hoặc phía azolo-demo-pms), không do PR #191 và không do mạng iMac -> Fly.
+- Nghi vấn chưa kiểm chứng: máy SR hiện chạy thêm einvoice (30 s/chu kỳ), backup, pda-sync, arrival; pool SQL `SMILE_FO` max 4 đã có `waits: 7`; đo vào buổi tối khác buổi sáng; agent đã qua nhiều bản từ lần 3 tới 1.3.63 (phiên bản lần 3 chưa ghi lại).
+- Tiêu chí 1 (p95 đạt ngưỡng) **chưa đạt**: op đọc nhỏ +143 ms p95 so với ngưỡng +80 ms; `/reservations` chưa đạt. Tiêu chí 2 (có số trước/sau cùng cách đo) đã có. Chưa thấy lệnh lỗi hay mất lệnh trong lượt đo (`ops_failed` 7 trên 517 op là tích lũy từ trước, chưa phân tích).
+- Việc tiếp theo đề xuất: (a) đo lại buổi sáng cùng giờ lần 3 để loại yếu tố giờ; (b) thêm số đo thời gian từng op trong agent (hàng đợi, SQL, đóng gói) vào heartbeat; (c) tăng `max` pool `SMILE_FO` và so `waits`; (d) phía SaaS gộp/song song 3 op của `/reservations`; (e) `pos.menu.items` JOIN 1 truy vấn trong manifest.
