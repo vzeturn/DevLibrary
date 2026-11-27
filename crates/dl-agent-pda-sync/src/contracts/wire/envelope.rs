@@ -4,6 +4,7 @@
 use dl_json::Value;
 use dl_uuid::Uuid;
 
+use super::hops::{BatchHops, ResultHops};
 use crate::contracts::json::{self, WireJson, string_enum};
 use crate::contracts::map::StrMap;
 use crate::contracts::time::DateTimeOffset;
@@ -134,6 +135,8 @@ pub struct SyncBatch {
     pub tombstones: Vec<SyncTombstone>,
     /// Watermark after the batch.
     pub watermark: Option<String>,
+    /// Per-hop latency stamps (RT-1318).
+    pub hops: BatchHops,
 }
 
 impl WireJson for SyncBatch {
@@ -150,6 +153,7 @@ impl WireJson for SyncBatch {
         w.key("tombstones");
         json::write_items(w, &self.tombstones);
         json::opt_str(w, "watermark", &self.watermark);
+        self.hops.write(w);
         w.end_object();
     }
 
@@ -164,6 +168,7 @@ impl WireJson for SyncBatch {
             rows: o.list("rows", json::item)?,
             tombstones: o.list("tombstones", json::item)?,
             watermark: o.opt_string("watermark")?,
+            hops: BatchHops::read(&o)?,
         })
     }
 }
@@ -246,6 +251,8 @@ pub struct SyncCommandResult {
     pub at_utc: DateTimeOffset,
     /// Milliseconds spent against SMILE_POS (ADR 0100).
     pub exec_ms: Option<i64>,
+    /// Per-hop latency stamps (RT-1318).
+    pub hops: ResultHops,
 }
 
 impl WireJson for SyncCommandResult {
@@ -257,6 +264,7 @@ impl WireJson for SyncCommandResult {
         json::opt_value(w, "result", &self.result);
         w.key("at_utc").unescaped(&self.at_utc.to_json_string());
         json::opt_int(w, "exec_ms", self.exec_ms);
+        self.hops.write(w);
         w.end_object();
     }
 
@@ -268,6 +276,7 @@ impl WireJson for SyncCommandResult {
             result: json::opt_element(&o, "result"),
             at_utc: json::dto(&o, "at_utc")?,
             exec_ms: o.opt_int("exec_ms")?,
+            hops: ResultHops::read(&o)?,
         })
     }
 }

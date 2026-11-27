@@ -13,8 +13,9 @@ use super::sinks::{BatchSink, BlobSink};
 use super::state::{CaptureState, ShadowEntry, ShadowWrite, StateCommit};
 use crate::contracts::map::{OrderedMap, StrMap};
 use crate::contracts::utf16_len;
-use crate::contracts::wire::{SyncBatch, SyncMode, wire_version};
+use crate::contracts::wire::{BatchHops, SyncBatch, SyncMode, wire_version};
 use crate::util::ctx::Ctx;
+use crate::util::hop_clock;
 
 /// Where a flush goes: the stream and the vendor table (the catalog key and the batch's
 /// wire table name; never the `pg_target`).
@@ -91,6 +92,8 @@ impl BatchWriter<'_> {
         report: &mut CaptureReport,
         ctx: &Ctx,
     ) -> Result<()> {
+        // RT-1318: the rows are read and mapped once they reach the writer.
+        let t_read = hop_clock::now_field();
         let chunks = self.split(changes);
         let mut blobs_by_row: HashMap<&str, Vec<&BlobChange>> = HashMap::new();
         for b in &changes.blobs {
@@ -121,6 +124,11 @@ impl BatchWriter<'_> {
                 rows: rows.iter().map(|r| r.row.clone()).collect(),
                 tombstones: tombs.iter().map(|t| t.tombstone.clone()).collect(),
                 watermark: watermark.map(str::to_owned),
+                hops: BatchHops {
+                    t_detected: hop_clock::pass_started(),
+                    t_read,
+                    t_sent: None,
+                },
             };
             self.sink.send(&batch, ctx)?;
             report.batches += 1;

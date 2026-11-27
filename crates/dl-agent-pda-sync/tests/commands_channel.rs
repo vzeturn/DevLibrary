@@ -106,6 +106,7 @@ impl CommandExecutor for ScriptedExecutor {
             result: None,
             at_utc: DateTimeOffset::from_unix_seconds(START).unwrap(),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 
@@ -252,6 +253,7 @@ fn an_expired_command_is_refused_unless_it_already_ran() {
         result: Some(Json::Null),
         at_utc: DateTimeOffset::from_unix_seconds(START - 5).unwrap(),
         exec_ms: None,
+        hops: Default::default(),
     };
     let ran = scripted(Some(logged.clone()), false);
     assert_eq!(channel(ran, None).handle(&cmd, &ctx).unwrap(), logged);
@@ -293,6 +295,7 @@ impl CommandExecutor for PanicOnceExecutor {
             result: None,
             at_utc: DateTimeOffset::from_unix_seconds(START).unwrap(),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 
@@ -686,4 +689,34 @@ fn the_service_rechecks_while_the_grants_are_missing_and_sleeps_when_they_are_pr
 #[test]
 fn the_probe_covers_the_guest_count_grant_of_ow1c() {
     assert!(CHECKED.contains(&("dbo.tmpInvoice", "UPDATE", Some("NGuest"))));
+}
+
+#[test]
+fn an_answer_carries_when_the_agent_got_ran_and_finished_the_command() {
+    use dl_agent_pda_sync::contracts::wire::ResultHops;
+    use dl_agent_pda_sync::util::hop_clock;
+    let ch = channel(scripted(None, false), None);
+    let cmd = command();
+    let ctx = Ctx::background();
+    let before = hop_clock::now_micros();
+
+    let first = ch.answer(&cmd, &ctx).unwrap();
+    let h = first.hops;
+    let (got, ran, done) = (
+        h.t_received.unwrap(),
+        h.t_started.unwrap(),
+        h.t_finished.unwrap(),
+    );
+    assert!(before <= got && got <= ran && ran <= done, "{h:?}");
+    assert!(first.to_json().contains(&format!("\"t_finished\":{done}")));
+
+    // A redelivery gets the remembered result with this delivery's stamps.
+    let again = ch.answer(&cmd, &ctx).unwrap();
+    assert_eq!(again.status, first.status);
+    assert!(again.hops.t_received.unwrap() >= done);
+    assert_eq!(
+        ch.handle(&cmd, &ctx).unwrap().hops,
+        ResultHops::default(),
+        "the remembered result itself holds no stamps"
+    );
 }

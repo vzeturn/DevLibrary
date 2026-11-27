@@ -73,6 +73,7 @@ impl Fx {
                     }],
                     tombstones: vec![],
                     watermark: None,
+                    hops: Default::default(),
                 },
                 true,
             )

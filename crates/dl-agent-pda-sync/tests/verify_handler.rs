@@ -94,6 +94,7 @@ impl Kit {
                     rows: Vec::new(),
                     tombstones: Vec::new(),
                     watermark: None,
+                    hops: Default::default(),
                 },
                 true,
             )
@@ -448,6 +449,7 @@ fn a_stream_with_batches_queued_before_or_during_the_comparison_is_left_out() {
                         rows: Vec::new(),
                         tombstones: Vec::new(),
                         watermark: None,
+                        hops: Default::default(),
                     },
                     true,
                 )

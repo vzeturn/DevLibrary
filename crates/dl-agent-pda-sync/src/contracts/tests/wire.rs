@@ -375,6 +375,7 @@ fn result_carries_store_execution_time() {
         result: None,
         at_utc: DateTimeOffset::UNIX_EPOCH,
         exec_ms: Some(840),
+        hops: Default::default(),
     };
     assert!(r.to_json().contains("\"exec_ms\":840"));
 }
@@ -405,6 +406,7 @@ fn sample_batch() -> SyncBatch {
             reason: Some("voided".into()),
         }],
         watermark: Some("500001234".into()),
+        hops: Default::default(),
     }
 }
 
@@ -462,6 +464,7 @@ fn command_and_result_round_trip() {
         result: Some(stj::parse(r#"{"trn_seq":9}"#).unwrap()),
         at_utc: DateTimeOffset::utc(2026, 10, 24, 1, 2, 4).unwrap(),
         exec_ms: None,
+        hops: Default::default(),
     };
     let json = result.to_json();
     assert!(json.contains("\"status\":\"Rejected\""));

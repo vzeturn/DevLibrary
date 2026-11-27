@@ -333,6 +333,7 @@ fn batch(stream: &str, seq: i64) -> SyncBatch {
         rows: vec![],
         tombstones: vec![],
         watermark: None,
+        hops: Default::default(),
     }
 }
 

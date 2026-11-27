@@ -5,6 +5,7 @@ mod blobs;
 mod envelope;
 mod fingerprint;
 mod fo_inhouse;
+mod hops;
 mod legacy_import;
 mod money;
 mod order;
@@ -23,6 +24,7 @@ pub use envelope::{
 };
 pub use fingerprint::{CheckStateFingerprint, CheckStateHeader, CheckStateLine, check_aggregate};
 pub use fo_inhouse::{FoInHouseGuest, FoInHouseSearchPayload, FoInHouseSearchResult, txn_reasons};
+pub use hops::{BatchHops, ResultHops, with_t_sent};
 pub use legacy_import::{
     LegacyImportAck, LegacyImportBranchAck, LegacyImportHostPrinterAck, LegacyImportTableAck,
     legacy_import_wire,

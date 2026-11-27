@@ -77,6 +77,7 @@ fn sync_batch_with_unicode_nulls_and_repair_mode() {
             },
         ],
         watermark: None,
+        hops: Default::default(),
     };
     let expected = r#"{"agent_id":"agent-1","stream":"Invoice","seq":42,"mapper_ver":1,"table":"Invoice","mode":"Repair","rows":[{"key":{"check_no":"500001234"},"columns":{"check_no":"500001234","note":null,"desc":"Ph\u1EDF b\u00F2 \u003C\u0026\u003E \u0022q\u0022 \u0027x\u0027 \u002B \u0060y\u0060 \uD83D\uDE00\u0001\u007F\n","z":""},"hash":"ab12","src_ver":7}],"tombstones":[{"key":{"check_no":"9"},"src_ver":8,"reason":"voided"},{"key":{"k":null},"src_ver":9}]}"#;
     assert_eq!(batch.to_json(), expected);
@@ -147,6 +148,7 @@ fn sync_command_result() {
         result: Some(stj::parse(r#"{"trn_seq":9,"x":"é"}"#).unwrap()),
         at_utc: DateTimeOffset::UNIX_EPOCH,
         exec_ms: Some(840),
+        hops: Default::default(),
     };
     assert_eq!(
         r.to_json(),
@@ -159,6 +161,7 @@ fn sync_command_result() {
         result: None,
         at_utc: local((2026, 11, 4, 0, 30, 0), -150, 1_230_000),
         exec_ms: None,
+        hops: Default::default(),
     };
     let expected = r#"{"command_id":"11111111-2222-3333-4444-555555555555","status":"Rejected","reason":"check_changed","at_utc":"2026-11-04T00:30:00.123-02:30"}"#;
     assert_eq!(r2.to_json(), expected);

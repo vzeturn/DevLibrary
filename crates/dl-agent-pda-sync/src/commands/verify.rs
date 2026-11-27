@@ -191,6 +191,7 @@ impl VerifyCommandHandler {
                 result: None,
                 at_utc: utc_now(&self.p.clock),
                 exec_ms: None,
+                hops: Default::default(),
             });
         };
         let state = (self.p.open_state)().map_err(capture_error)?;
@@ -203,6 +204,7 @@ impl VerifyCommandHandler {
             result: Some(result.to_element()),
             at_utc: utc_now(&self.p.clock),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 

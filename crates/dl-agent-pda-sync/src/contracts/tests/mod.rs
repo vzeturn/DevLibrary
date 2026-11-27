@@ -4,6 +4,7 @@
 mod catalog;
 mod dotnet;
 mod hashing;
+mod hops;
 mod legacy;
 mod mapper;
 mod wire;

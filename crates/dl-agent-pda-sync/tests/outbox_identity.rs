@@ -27,6 +27,7 @@ fn batch(agent_id: &str, stream: &str, seq: i64) -> SyncBatch {
         rows: vec![],
         tombstones: vec![],
         watermark: None,
+        hops: Default::default(),
     }
 }
 

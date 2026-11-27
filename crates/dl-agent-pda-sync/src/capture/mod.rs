@@ -32,6 +32,8 @@ pub mod util;
 pub mod writer;
 
 #[cfg(test)]
+mod hop_stamp_tests;
+#[cfg(test)]
 mod open_check_two_phase_tests;
 #[cfg(test)]
 mod state_tests;

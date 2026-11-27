@@ -20,7 +20,9 @@ use dl_agent_pda_sync::config::{
     AgentError, AgentOptions, AgentPaths, ManualClock, SharedClock, Timestamp, codes,
 };
 use dl_agent_pda_sync::contracts::time::DateTimeOffset;
-use dl_agent_pda_sync::contracts::wire::{CommandStatus, SyncCommand, SyncCommandResult};
+use dl_agent_pda_sync::contracts::wire::{
+    CommandStatus, ResultHops, SyncCommand, SyncCommandResult,
+};
 use dl_agent_pda_sync::reporting::Logger;
 use dl_agent_pda_sync::security::{SecretError, SecretStore, SharedSecretStore};
 use dl_agent_pda_sync::transport::{RetryPolicy, SyncHttpClient, TokenProvider};
@@ -29,6 +31,15 @@ use dl_json::Value as Json;
 use dl_uuid::Uuid;
 
 const START: i64 = 1_794_729_600;
+
+/// The stored result without its per-delivery stamps (RT-1318): every answer is stamped
+/// when it was received and handled, a redelivery included.
+fn unstamped(result: SyncCommandResult) -> SyncCommandResult {
+    SyncCommandResult {
+        hops: ResultHops::default(),
+        ..result
+    }
+}
 
 #[derive(Default)]
 struct MemorySecrets(Mutex<HashMap<String, Vec<u8>>>);
@@ -74,6 +85,7 @@ impl CommandExecutor for CountingExecutor {
             result: None,
             at_utc: DateTimeOffset::from_unix_seconds(START).unwrap(),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 }
@@ -260,7 +272,7 @@ fn a_redelivered_command_is_answered_again_with_the_same_result_and_runs_once() 
     ch.flush_results(&ctx, false).unwrap();
     // The cloud redelivers after its lease: answered again, never silently dropped.
     let again = ch.answer(&cmd, &ctx).unwrap();
-    assert_eq!(again, first, "the same stored result");
+    assert_eq!(unstamped(again), unstamped(first), "the same stored result");
     assert_eq!(executor.runs.load(Ordering::SeqCst), 1, "executed once");
     assert_eq!(
         ch.pending_results(),
@@ -284,7 +296,7 @@ fn a_redelivery_after_the_result_was_acknowledged_is_answered_again_too() {
     assert!(ch.pending_results().is_empty());
     let again = ch.answer(&cmd, &ctx).unwrap();
     ch.flush_results(&ctx, false).unwrap();
-    assert_eq!(again, first);
+    assert_eq!(unstamped(again), unstamped(first));
     assert_eq!(executor.runs.load(Ordering::SeqCst), 1);
     assert_eq!(poster.posted(), vec![cmd.command_id, cmd.command_id]);
 }

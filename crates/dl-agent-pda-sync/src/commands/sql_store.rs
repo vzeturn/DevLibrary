@@ -129,6 +129,7 @@ impl SqlSiteCommandStore {
             result: None,
             at_utc: at,
             exec_ms: None,
+            hops: Default::default(),
         }))
     }
 

@@ -126,6 +126,7 @@ impl FoInHouseSearchCommandHandler {
             result: Some(result.to_element()),
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         })
     }
 
@@ -137,6 +138,7 @@ impl FoInHouseSearchCommandHandler {
             result: None,
             at_utc: utc_now(&self.clock),
             exec_ms: None,
+            hops: Default::default(),
         }
     }
 }

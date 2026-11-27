@@ -33,6 +33,7 @@ fn batch(stream: &str, seq: i64, wm: Option<&str>) -> SyncBatch {
         }],
         tombstones: vec![],
         watermark: wm.map(str::to_owned),
+        hops: Default::default(),
     }
 }
 

@@ -185,6 +185,8 @@ impl CaptureScheduler {
 
     fn run_job(&self, job: &mut Job, ctx: &Ctx) -> Result<()> {
         let started = Instant::now();
+        // RT-1318: the batches of this pass carry its start as `t_detected`.
+        let _pass = crate::util::hop_clock::PassStamp::begin();
         let mut failed = false;
         match (job.run)(&self.engine, ctx) {
             Ok(report) => self.emit(job.name, Some(&report), None),
