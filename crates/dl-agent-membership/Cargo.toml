@@ -24,6 +24,7 @@ dl-winsvc.workspace = true
 dl-log.workspace = true
 dl-cli.workspace = true
 dl-vn.workspace = true
+dl-agent-smile-shared.workspace = true
 
 [lints]
 workspace = true

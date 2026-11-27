@@ -28,6 +28,22 @@ pub fn split_batches(body: &str) -> Vec<String> {
     out.into_iter().filter(|b| !b.trim().is_empty()).collect()
 }
 
+/// Installs the layer only when an object is missing (read-mostly agents call this on every
+/// new session; it costs one tiny batch when everything is already there).
+///
+/// # Errors
+/// The install error when objects are missing and the login cannot create them.
+pub fn ensure_installed(c: &mut Client) -> Result<(), String> {
+    let present = c.batch(
+        "IF OBJECT_ID('dbo.SA_TrnKey') IS NULL OR OBJECT_ID('dbo.SA_TrnCode_Resolve') IS NULL \
+         RAISERROR('SA layer missing', 16, 1)",
+    );
+    if present.is_ok() {
+        return Ok(());
+    }
+    install_into(c)
+}
+
 /// Installs (drop + create, idempotent) every script into the connection's database.
 ///
 /// # Errors

@@ -122,12 +122,11 @@ pub fn revenue_lines_sql(scope: &str, qualifies: Option<&str>) -> String {
     });
     format!(
         "SELECT t.TransactionCode,
-       ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0') AS TransactionSubCode,
+       (SELECT K FROM dbo.SA_TrnKey(t.TransactionSubCode)) AS TransactionSubCode,
        tc.Description, t.TransactionAmount AS Amount{flag}
 FROM Folio f
 {FOLIO_TRANSACTION_JOIN}
-LEFT JOIN TransactionCode tc ON tc.TransactionCode = t.TransactionCode
-    AND tc.TransactionSubCode = ISNULL(NULLIF(LTRIM(RTRIM(t.TransactionSubCode)), ''), '0')
+OUTER APPLY dbo.SA_TrnCode_Resolve(t.TransactionCode, t.TransactionSubCode, 0, 0) tc
 WHERE {scope}
 {CHECKED_OUT_CHARGE_FILTER}"
     )
