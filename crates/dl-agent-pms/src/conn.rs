@@ -145,6 +145,11 @@ pub fn backoff(attempt: u32) -> Duration {
 /// worker's result can see on an otherwise idle stream.
 const READ_SLICE: Duration = Duration::from_millis(25);
 
+/// The read wait while ops are in flight (RT-1162): a finished op's result is written at
+/// the next turn of the session loop, so a short wait there cuts the idle-stream delay
+/// (up to [`READ_SLICE`]) every result used to pay. Idle streams keep the long wait.
+const BUSY_READ_SLICE: Duration = Duration::from_millis(2);
+
 /// The stream loop.
 pub struct Client {
     o: Options,
@@ -208,6 +213,15 @@ fn send_ws(ws: &mut Ws, f: &Frame) -> Result<(), String> {
         ws.send_text(&String::from_utf8_lossy(&msg.data))
     };
     r.map_err(|e| format!("write {}: {e}", f.frame_type()))
+}
+
+/// The socket read wait for `inflight` running ops.
+fn read_slice(inflight: usize) -> Duration {
+    if inflight > 0 {
+        BUSY_READ_SLICE
+    } else {
+        READ_SLICE
+    }
 }
 
 fn pump(ws: &mut Ws, rx: &Receiver<(Frame, Reply)>, wait: Duration) {
@@ -406,10 +420,16 @@ impl Client {
         ready: &mut bool,
     ) -> Option<ConnError> {
         let mut last = Instant::now();
+        let mut slice = READ_SLICE;
         loop {
             pump(ws, rx, Duration::ZERO);
             if ctx.is_done() {
                 return None;
+            }
+            let want = read_slice(shared.inflight.load(Ordering::SeqCst));
+            if want != slice {
+                slice = want;
+                let _ = ws.set_read_timeout(Some(slice));
             }
             let (data, binary) = match ws.read() {
                 Ok(Message::Text(s)) => (s.into_bytes(), false),
@@ -601,6 +621,14 @@ fn run_op(shared: &Arc<Shared>, exec: Arc<dyn Executor>, log: &Logger, tel: &Tel
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_stream_reads_in_short_slices() {
+        assert_eq!(read_slice(0), READ_SLICE);
+        assert_eq!(read_slice(1), BUSY_READ_SLICE);
+        assert_eq!(read_slice(8), BUSY_READ_SLICE);
+        assert!(BUSY_READ_SLICE < READ_SLICE);
+    }
 
     #[test]
     fn backoff_doubles_with_jitter_and_caps() {
