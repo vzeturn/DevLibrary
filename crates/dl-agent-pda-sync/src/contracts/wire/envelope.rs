@@ -358,6 +358,9 @@ pub struct SyncHeartbeat {
     pub capture_error: Option<String>,
     /// Clean resnapshots of the last hours (ADR 0102).
     pub resnapshots: Option<Vec<StreamResnapshot>>,
+    /// The command types the agent runs (RT-1327, ADR 0178): the PDA offers a verb only
+    /// some agents build when the store's agent lists it. Absent from older agents.
+    pub commands: Option<Vec<String>>,
 }
 
 impl WireJson for SyncHeartbeat {
@@ -379,6 +382,10 @@ impl WireJson for SyncHeartbeat {
             w.key("resnapshots");
             json::write_items(w, r);
         }
+        if let Some(c) = &self.commands {
+            w.key("commands");
+            json::write_strings(w, c);
+        }
         w.end_object();
     }
 
@@ -396,6 +403,7 @@ impl WireJson for SyncHeartbeat {
             blob_queue_depth: o.opt_int("blob_queue_depth")?,
             capture_error: o.opt_string("capture_error")?,
             resnapshots: o.opt_list("resnapshots", json::item)?,
+            commands: o.opt_list("commands", json::string_item)?,
         })
     }
 }

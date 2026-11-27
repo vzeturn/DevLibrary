@@ -10,7 +10,8 @@ use super::sql;
 use super::sql_store::SqlSiteCommandUnit;
 use super::units::{OrderCloseOutcome, OrderPostOutcome};
 use crate::contracts::wire::{
-    OrderCheckClosePayload, OrderCheckCloseResult, OrderTenderAddPayload, OrderTenderRemovePayload,
+    OrderCheckClosePayload, OrderCheckCloseResult, OrderRoomChargePayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload,
 };
 use crate::util::ctx::Ctx;
 
@@ -40,6 +41,21 @@ pub fn tender_add_parameters(p: &OrderTenderAddPayload) -> Vec<Param> {
         sql::text_param("Reference", Some(p.reference.as_deref().unwrap_or(""))),
         Param::new("CardType", p.card_type),
         Param::new("BillNo", ParamValue::VarChar(bill_no)),
+        Param::new("CfgTrnCode", p.trn_code),
+        Param::new("CfgTrnSub", p.trn_sub),
+    ]
+}
+
+/// The parameters of [`b::ROOM_CHARGE_ADD`] (`SqlOrderCommandUnit.RoomChargeParameters`).
+pub fn room_charge_parameters(p: &OrderRoomChargePayload) -> Vec<Param> {
+    vec![
+        rvc(p.rvc_no),
+        check(p.check_no),
+        sql::text_param("Cashier", Some(&p.cashier)),
+        sql::text_param("RoomNo", Some(&p.room_no)),
+        Param::new("FolioNum", p.folio_num),
+        sql::money_param("Amount", p.amount),
+        sql::text_param("Reference", Some(p.reference.as_deref().unwrap_or(""))),
         Param::new("CfgTrnCode", p.trn_code),
         Param::new("CfgTrnSub", p.trn_sub),
     ]
@@ -129,6 +145,30 @@ pub(super) fn add_tender(
     } else {
         Err(CommandError::invalid(
             "The tender batch reported success without a line number.",
+        ))
+    }
+}
+
+pub(super) fn add_room_charge(
+    u: &mut SqlSiteCommandUnit<'_>,
+    p: &OrderRoomChargePayload,
+    ctx: &Ctx,
+) -> Result<OrderPostOutcome> {
+    let r = sql::query(u.c, b::ROOM_CHARGE_ADD, &room_charge_parameters(p), ctx)?;
+    let Some(row) = status_row(&r, 3)? else {
+        return Err(CommandError::invalid(
+            "The room-charge batch returned no status row.",
+        ));
+    };
+    if row.is_out != 0 {
+        return Ok(OrderPostOutcome::refused(&row.reason));
+    }
+    let trn_seq = sql::int64(row.values, 2)?;
+    if trn_seq > 0 {
+        Ok(OrderPostOutcome::posted(trn_seq))
+    } else {
+        Err(CommandError::invalid(
+            "The room-charge batch reported success without a line number.",
         ))
     }
 }

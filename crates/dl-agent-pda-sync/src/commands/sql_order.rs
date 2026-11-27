@@ -14,8 +14,8 @@ use crate::contracts::mapping::tcvn3;
 use crate::contracts::wire::{
     CheckStateHeader, OrderCheckClosePayload, OrderCheckLine, OrderCheckOpenPayload,
     OrderCheckResult, OrderComboPostPayload, OrderCoversPayload, OrderItemPostPayload,
-    OrderItemVoidPayload, OrderSendPayload, OrderTenderAddPayload, OrderTenderRemovePayload,
-    order_command_reasons as reasons,
+    OrderItemVoidPayload, OrderRoomChargePayload, OrderSendPayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, order_command_reasons as reasons,
 };
 use crate::util::ctx::Ctx;
 use crate::util::store_text;
@@ -381,6 +381,14 @@ impl OrderCommandUnit for SqlSiteCommandUnit<'_> {
         ctx: &Ctx,
     ) -> Result<OrderPostOutcome> {
         sql_money::add_tender(self, payload, ctx)
+    }
+
+    fn add_room_charge(
+        &mut self,
+        payload: &OrderRoomChargePayload,
+        ctx: &Ctx,
+    ) -> Result<OrderPostOutcome> {
+        sql_money::add_room_charge(self, payload, ctx)
     }
 
     fn remove_tender(

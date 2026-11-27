@@ -8,6 +8,7 @@ use super::batch_uploader::to_dto;
 use super::batches::SqliteOutbox;
 use super::blobs::SqliteBlobOutbox;
 use super::error::{OutboxError, UploadError};
+use crate::commands::runnable_order_types;
 use crate::config::time::SharedClock;
 use crate::config::{AgentHealth, AgentIdentity, RuntimeConfigStore};
 use crate::contracts::WireJson;
@@ -113,6 +114,7 @@ impl HeartbeatSender {
             blob_queue_depth: Some(self.blobs.depth()?),
             capture_error: self.capture.capture_error(),
             resnapshots: (!resnapshots.is_empty()).then(|| resnapshots.to_vec()),
+            commands: Some(runnable_order_types()),
         })
     }
 

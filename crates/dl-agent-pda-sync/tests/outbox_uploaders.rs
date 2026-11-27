@@ -1096,6 +1096,19 @@ mod heartbeat {
         assert_eq!(beat.capture_error.as_deref(), Some("SQL_LOGIN_FAILED"));
         assert_eq!(beat.agent_id, hb.fx.cloud.agent_id.to_string());
         assert_eq!(beat.resnapshots, None);
+        // RT-1327: the command types this agent runs, so the PDA offers order.room_charge only to a store that can.
+        let commands = beat
+            .commands
+            .as_deref()
+            .expect("the heartbeat lists its commands");
+        for verb in [
+            "order.room_charge",
+            "order.tender_add",
+            "order.check_close",
+            "order.check_open",
+        ] {
+            assert!(commands.iter().any(|c| c == verb), "{verb}");
+        }
         let st = hb.status();
         assert_eq!(
             (st.state.as_str(), st.error_code.as_deref()),

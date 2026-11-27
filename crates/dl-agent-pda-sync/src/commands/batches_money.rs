@@ -154,6 +154,12 @@ BEGIN SELECT 1 AS IsOut, 'tender_not_found' AS Reason; RETURN; END;
 DELETE FROM dbo.tmpPayment WHERE TrnNo = @TrnSeq AND CheckNo = @CheckNo;
 DELETE FROM dbo.tmpTrn WHERE TrnSeq = @TrnSeq AND CheckNo = @CheckNo AND RVC = @RVCNo;
 
+-- ADR 0179: the room-charge line goes, the room, folio and payment mode it set on the header go with it (no FO reversal: the post is at close).
+IF NOT EXISTS (SELECT 1 FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+               WHERE tc.TrnType = 106 AND tn.CheckNo = @CheckNo)
+   AND EXISTS (SELECT 1 FROM dbo.tmpInvoice WHERE CheckNo = @CheckNo AND ISNULL(FolioNum, 0) <> 0)
+    UPDATE dbo.tmpInvoice SET RoomCode = N'', FolioNum = 0, PaymentMode = NULL, PaymentType = NULL, PaymentInfo = NULL WHERE CheckNo = @CheckNo;
+
 EXEC dbo.UpdateTmpInvoice @CheckNo;
 
 SELECT 0 AS IsOut, 'ok' AS Reason;"#;
@@ -191,6 +197,238 @@ IF @Close_Balance <> 0
 BEGIN
     SELECT 1 AS IsOut, CASE WHEN @Close_Balance > 0 THEN 'not_balanced_underpaid' ELSE 'not_balanced_overpaid' END AS Reason,
            CAST(0 AS BIGINT) AS CloseNo, CAST(0 AS DECIMAL(18,2)) AS SubTotal, CAST(0 AS DECIMAL(18,2)) AS TotalPaid;
+    RETURN;
+END;
+
+-- PostToSmile (ADR 0179, RT-1297): POS WIN's mdlMain.PostToSmile (mdlMain.cs:1252-1633), run in the close transaction before the bill
+-- moves to the permanent tables, as POS WIN does (BeginTransaction, PostToSmile, ProcessMbrPoint, CloseCheck, Commit). Gate, as POS WIN:
+-- dbo.Para InterfaceType = 1 and InterfaceDB set for the RVC, and the check's payment mode has PaymentMode.Interface = 1; a check
+-- with a room-charge line (TrnType 106) whose gate is off is refused, never closed without its post. Folio, in POS WIN's order: the
+-- TrnType 106 line (ItemCode = folio, StsCode2 = balance code; the line itself is not posted), the first TrnLinkByRVC.LinkFolio,
+-- the city-ledger folio (GlobPara CityLedgerFolio), PaymentMode.IntFolio. Posted: the TrnLinkByRVC lines (TrnType 110, 190, 104, 107
+-- and TrnCode 800, 810, 710), credit-card lines, the tender currencies, the revenue by RVCLinkCode and the discounts by DiscountDtl;
+-- the lines must sum to zero (POS WIN: 'Unbalance Interface!'). Every post goes through the vendor procedure
+-- PostInterfaceTransactionToFolio of the Front Office database named by Para InterfaceDB (checked against ^[A-Za-z0-9_]+$,
+-- HAS_DBACCESS = 1 and bracketed: the only text interpolated), with named parameters. A failed post rolls back to a savepoint and
+-- answers folio_post_required (a status row, the close then writes nothing); a missing grant is re-raised so the agent answers
+-- sql_grants_missing. Not carried over from the PDA-original procedure: the PostToSmileEnabled switch and the GuestID argument.
+DECLARE @PS_Fail BIT = 0;
+DECLARE @PS_IfType INT, @PS_FODB VARCHAR(128), @PS_Iface INT, @PS_IntFolio VARCHAR(50);
+DECLARE @PS_Meal INT = 0, @PS_NGuest INT = 0, @PS_PONumber VARCHAR(200) = '', @PS_ExRate NUMERIC(28,16) = 1;
+DECLARE @PS_S1 VARCHAR(20) = '', @PS_S2 VARCHAR(20) = '', @PS_S3 VARCHAR(20) = '', @PS_S4 VARCHAR(20) = '',
+        @PS_S5 VARCHAR(20) = '', @PS_S6 VARCHAR(20) = '', @PS_S7 VARCHAR(20) = '', @PS_S8 VARCHAR(20) = CAST(@RVCNo AS VARCHAR(20));
+SELECT TOP 1 @PS_IfType = TRY_CONVERT(INT, LTRIM(RTRIM(ParaStr))) FROM dbo.Para WHERE ParaName = 'InterfaceType' AND RVC = @RVCNo;
+SELECT TOP 1 @PS_FODB = LEFT(LTRIM(RTRIM(ParaStr)), 128) FROM dbo.Para WHERE ParaName = 'InterfaceDB' AND RVC = @RVCNo;
+SELECT TOP 1 @PS_Iface = ISNULL(P.Interface, 0), @PS_IntFolio = LTRIM(RTRIM(P.IntFolio)),
+       @PS_Meal = ISNULL(I.MealPeriod, 0), @PS_NGuest = ISNULL(I.NGuest, 0), @PS_PONumber = ISNULL(I.PONumber, ''), @PS_ExRate = ISNULL(I.ExRate, 1),
+       @PS_S1 = LEFT(ISNULL(I.StsCode1, ''), 20), @PS_S2 = LEFT(ISNULL(I.StsCode2, ''), 20), @PS_S3 = LEFT(ISNULL(I.StsCode3, ''), 20),
+       @PS_S4 = LEFT(ISNULL(I.StsCode4, ''), 20), @PS_S5 = LEFT(ISNULL(I.StsCode5, ''), 20), @PS_S6 = LEFT(ISNULL(I.StsCode6, ''), 20),
+       @PS_S7 = LEFT(ISNULL(I.StsCode7, ''), 20)
+FROM dbo.tmpInvoice I
+LEFT JOIN dbo.PaymentMode P ON LTRIM(RTRIM(ISNULL(I.PaymentMode, ''))) = LTRIM(RTRIM(ISNULL(P.PMode, '')))
+WHERE I.CheckNo = @CheckNo AND I.RVC = @RVCNo;
+
+DECLARE @PS_On BIT = CASE WHEN ISNULL(@PS_IfType, 0) = 1 AND ISNULL(@PS_FODB, '') <> '' AND ISNULL(@PS_Iface, 0) = 1 THEN 1 ELSE 0 END;
+IF @PS_On = 0 AND EXISTS (SELECT 1 FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+                          WHERE tc.TrnType = 106 AND tn.CheckNo = @CheckNo)
+    SET @PS_Fail = 1;
+
+DECLARE @PS_DecDiv NUMERIC(18,2) = ISNULL((SELECT DecDiv FROM dbo.CurrencyDef WHERE CrCode = 1), 1);
+IF @PS_DecDiv = 0 SET @PS_DecDiv = 1;
+DECLARE @PS_Now DATETIME = GETDATE();
+DECLARE @PS_Sql NVARCHAR(MAX), @PS_FO NVARCHAR(300), @PS_x INT = 0;
+DECLARE @PS_Folio FLOAT = 0, @PS_Run NUMERIC(18,2) = 0, @PS_Bal VARCHAR(10) = '', @PS_HasMarker BIT = 0;
+DECLARE @PS_Lines TABLE (Seq INT IDENTITY(1,1) PRIMARY KEY, TCode INT, Link BIGINT, LinkFolio VARCHAR(50), LinkTax VARCHAR(30),
+                         BaseTTL NUMERIC(18,2), TrnDesc VARCHAR(255), CrCode VARCHAR(20), OrgAmount NUMERIC(18,2));
+DECLARE @PS_Rev TABLE (IsDsc INT, LinkCode VARCHAR(30), LinkTax VARCHAR(30), LinkSrc VARCHAR(30), LinkSTax VARCHAR(30),
+                       SubAmount NUMERIC(18,2), SrcAmount NUMERIC(18,2), TaxAmount NUMERIC(18,2), STaxAmount NUMERIC(18,2), TTLAmount NUMERIC(18,2));
+DECLARE @PS_Post TABLE (Seq INT IDENTITY(1,1) PRIMARY KEY, Major VARCHAR(10), Minor VARCHAR(10), Amount NUMERIC(18,2), Sub NUMERIC(18,2),
+                        Tax NUMERIC(18,2), TaxCode VARCHAR(10), Srv NUMERIC(18,2), SrvCode VARCHAR(10), Cnt INT, Comment NVARCHAR(200),
+                        Org NUMERIC(18,9), OrgCur VARCHAR(20), STax NUMERIC(18,2), STaxCode VARCHAR(10));
+DECLARE @PS_FolioText VARCHAR(10), @PS_Major VARCHAR(10), @PS_Minor VARCHAR(10), @PS_Ref VARCHAR(30), @PS_Amount NUMERIC(18,2),
+        @PS_Sub NUMERIC(18,2), @PS_Tax NUMERIC(18,2), @PS_TaxCode VARCHAR(10), @PS_Srv NUMERIC(18,2), @PS_SrvCode VARCHAR(10),
+        @PS_Count INT, @PS_Comment NVARCHAR(200), @PS_Org NUMERIC(18,9), @PS_OrgCur VARCHAR(20), @PS_STax NUMERIC(18,2), @PS_STaxCode VARCHAR(10);
+DECLARE @PS_i INT = 1, @PS_n INT = 0;
+
+WHILE @PS_On = 1 AND @PS_Fail = 0
+BEGIN
+    IF @@TRANCOUNT = 0 OR @PS_FODB LIKE '%[^A-Za-z0-9_]%' OR ISNULL(HAS_DBACCESS(@PS_FODB), 0) <> 1
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+    SET @PS_FO = QUOTENAME(@PS_FODB) + N'.dbo.';
+
+    -- (a) the room-charge line: its ItemCode is the folio, its StsCode2 the balance code; the line itself is not posted.
+    SELECT TOP 1 @PS_Folio = ISNULL(TRY_CONVERT(FLOAT, LTRIM(RTRIM(tn.ItemCode))), 0), @PS_Run = CAST(tn.BaseTTL / @PS_DecDiv AS NUMERIC(18,2)),
+           @PS_Bal = UPPER(LTRIM(RTRIM(ISNULL(tn.StsCode2, '')))), @PS_HasMarker = 1
+    FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+    WHERE tc.TrnType = 106 AND tn.CheckNo = @CheckNo ORDER BY tn.TrnSeq;
+    IF @PS_HasMarker = 1 AND @PS_Folio = 0
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    IF @PS_Bal = '' OR LEN(@PS_Bal) > 1 OR @PS_Bal IN ('P', 'V')
+        SET @PS_Bal = 'A';
+    ELSE
+    BEGIN
+        SET @PS_Sql = N'SELECT @PS_x = COUNT(*) FROM ' + @PS_FO + N'FolioBalanceCode WHERE BalanceCode = @PS_Bal;';
+        EXEC sp_executesql @PS_Sql, N'@PS_Bal VARCHAR(10), @PS_x INT OUTPUT', @PS_Bal = @PS_Bal, @PS_x = @PS_x OUTPUT;
+        IF @PS_x = 0 SET @PS_Bal = 'A';
+    END;
+
+    IF @PS_HasMarker = 1
+    BEGIN
+        SET @PS_Sql = N'SELECT @PS_x = COUNT(*) FROM ' + @PS_FO + N'Folio WHERE COALESCE(NoPostFlag, 0) = 0 AND FolioStatus = 2 AND FolioNum = @PS_Folio;';
+        EXEC sp_executesql @PS_Sql, N'@PS_Folio FLOAT, @PS_x INT OUTPUT', @PS_Folio = @PS_Folio, @PS_x = @PS_x OUTPUT;
+        IF @PS_x = 0
+        BEGIN SET @PS_Fail = 1; BREAK; END;
+    END;
+
+    -- (b) the link lines of the RVC, card lines and the tender currencies.
+    INSERT INTO @PS_Lines (TCode, Link, LinkFolio, LinkTax, BaseTTL, TrnDesc, CrCode, OrgAmount)
+    SELECT u.TCode, TRY_CONVERT(BIGINT, ROUND(TRY_CONVERT(FLOAT, LTRIM(RTRIM(u.LinkCode))), 0)), LTRIM(RTRIM(u.LinkFolio)), LTRIM(RTRIM(u.LinkTax)),
+           CAST(u.BaseTTL / @PS_DecDiv AS NUMERIC(18,2)), u.TrnDesc, LTRIM(RTRIM(u.CrCode)), CAST(u.OrgAmount AS NUMERIC(18,2))
+    FROM (
+        SELECT tc.TrnCode AS TCode, L.LinkCode AS LinkCode, L.LinkFolio AS LinkFolio, L.LinkTaxCode AS LinkTax,
+               tn.BaseTTL AS BaseTTL, tn.TrnDesc AS TrnDesc, CAST('' AS VARCHAR(20)) AS CrCode, CAST(0 AS NUMERIC(18,2)) AS OrgAmount, tn.TrnSeq AS Ord
+        FROM dbo.tmpTrn tn
+        JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+        JOIN (SELECT * FROM dbo.TrnLinkByRVC WHERE RVC = @RVCNo) L ON L.TrnCode = tc.TrnCode AND L.TrnSubCode = tc.TrnSubCode
+        WHERE tn.TrnCode <> 720 AND (tc.TrnType IN (110, 190, 104, 107) OR tn.TrnCode IN (800, 810, 710)) AND tn.CheckNo = @CheckNo
+        UNION ALL
+        SELECT tc.TrnCode, cc.MidAccLink, cc.PostAccLink, '', tn.BaseTTL, tn.TrnDesc, '', 0, tn.TrnSeq
+        FROM dbo.tmpTrn tn
+        JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+        JOIN dbo.CCardDef cc ON CAST(cc.CCardNo AS VARCHAR(20)) = LTRIM(RTRIM(tn.ItemCode))
+        WHERE tc.TrnType = 102 AND tn.CheckNo = @CheckNo
+        UNION ALL
+        SELECT 200, cd.MidAccLink, cd.PostAccLink, '', SUM(pm.AmountBase) * -1, '', cd.PreAccLink, SUM(pm.AmountOrg / cd.DecDiv) * -1, 2147483647
+        FROM dbo.tmpPayment pm JOIN dbo.CurrencyDef cd ON pm.CrCode = cd.CrCode
+        WHERE pm.PmtApp = 1 AND pm.CheckNo = @CheckNo
+        GROUP BY cd.PreAccLink, cd.MidAccLink, cd.PostAccLink
+    ) u ORDER BY u.Ord;
+
+    IF EXISTS (SELECT 1 FROM @PS_Lines WHERE ISNULL(Link, 0) < 100)
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    -- (b) the folio of the first link line.
+    IF @PS_Folio = 0
+        SELECT TOP 1 @PS_Folio = TRY_CONVERT(FLOAT, LinkFolio) FROM @PS_Lines
+        WHERE TCode NOT IN (800, 810) AND ISNULL(TRY_CONVERT(FLOAT, LinkFolio), 0) <> 0 ORDER BY Seq;
+
+    SET @PS_Run = @PS_Run + ISNULL((SELECT SUM(BaseTTL) FROM @PS_Lines), 0);
+    INSERT INTO @PS_Post (Major, Minor, Amount, Sub, Tax, TaxCode, Srv, SrvCode, Cnt, Comment, Org, OrgCur, STax, STaxCode)
+    SELECT CAST(Link / 100 AS VARCHAR(10)), CAST(Link % 100 AS VARCHAR(10)), BaseTTL, 0, 0, LEFT(ISNULL(LinkTax, ''), 10), 0, '', 0,
+           LEFT(CASE WHEN TCode = 810 THEN @PS_PONumber ELSE LTRIM(RTRIM(ISNULL(TrnDesc, ''))) END, 200),
+           CASE WHEN ISNULL(CrCode, '') <> '' THEN OrgAmount ELSE 0 END, ISNULL(CrCode, ''), NULL, ''
+    FROM @PS_Lines ORDER BY Seq;
+
+    -- (c) the city ledger: a 104/107 line without a link posts nothing itself but names the folio.
+    IF @PS_HasMarker = 0 AND NOT EXISTS (SELECT 1 FROM @PS_Post)
+        AND EXISTS (SELECT 1 FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+                    WHERE tc.TrnType IN (104, 107) AND tn.CheckNo = @CheckNo)
+    BEGIN
+        SELECT TOP 1 @PS_Run = CAST(tn.BaseTTL / @PS_DecDiv AS NUMERIC(18,2))
+        FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+        WHERE tc.TrnType IN (104, 107) AND tn.CheckNo = @CheckNo ORDER BY tn.TrnSeq;
+        SELECT TOP 1 @PS_Folio = ISNULL(TRY_CONVERT(FLOAT, LTRIM(RTRIM(ParaStr))), 0) FROM dbo.GlobPara WHERE ParaName = 'CityLedgerFolio';
+        IF @PS_Folio = 0
+        BEGIN SET @PS_Fail = 1; BREAK; END;
+    END;
+
+    -- (d) the payment mode's own folio.
+    IF @PS_Folio = 0
+        SET @PS_Folio = ISNULL(TRY_CONVERT(FLOAT, @PS_IntFolio), 0);
+    IF @PS_Folio = 0
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    SET @PS_Sql = N'SELECT @PS_x = COUNT(*) FROM ' + @PS_FO + N'Folio WHERE FolioStatus IN (2, 6) AND FolioNum = @PS_Folio;';
+    EXEC sp_executesql @PS_Sql, N'@PS_Folio FLOAT, @PS_x INT OUTPUT', @PS_Folio = @PS_Folio, @PS_x = @PS_x OUTPUT;
+    IF @PS_x = 0
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    -- The revenue by RVCLinkCode and the discounts by DiscountDtl, with their tax and service links.
+    INSERT INTO @PS_Rev (IsDsc, LinkCode, LinkTax, LinkSrc, LinkSTax, SubAmount, SrcAmount, TaxAmount, STaxAmount, TTLAmount)
+    SELECT 0, rl.LinkCode, td.PreAccLink, sd.PreAccLink, st.LinkCode,
+           SUM(tn.BaseSub) / @PS_DecDiv, SUM(tn.BaseSrc) / @PS_DecDiv, SUM(tn.BaseTax) / @PS_DecDiv, SUM(tn.BaseSTax) / @PS_DecDiv, SUM(tn.BaseTTL) / @PS_DecDiv
+    FROM (SELECT ClassCode, TrnCode, TrnSub, BaseSub, BaseSrc, BaseTax, BaseSTax, BaseTTL FROM dbo.tmpTrn WHERE CheckNo = @CheckNo) tn
+    JOIN dbo.IClassDef ic ON ic.ClsCode = tn.ClassCode
+    JOIN dbo.TaxClassDef td ON td.TaxCode = ic.TaxClass
+    JOIN dbo.STaxDef st ON st.STaxCode = ic.STaxClass
+    JOIN dbo.SurChgDef sd ON sd.SurChgCode = ic.SurChgCls
+    JOIN (SELECT LinkItem, LinkCode FROM dbo.RVCLinkCode WHERE RVC = @RVCNo AND LinkType = 0 AND MealPeriod = @PS_Meal) rl ON rl.LinkItem = tn.ClassCode
+    WHERE (tn.TrnCode < 200 OR tn.TrnCode = 720) AND tn.TrnCode <> 110
+    GROUP BY rl.LinkCode, td.PreAccLink, sd.PreAccLink, st.LinkCode;
+
+    INSERT INTO @PS_Rev (IsDsc, LinkCode, LinkTax, LinkSrc, LinkSTax, SubAmount, SrcAmount, TaxAmount, STaxAmount, TTLAmount)
+    SELECT 1, rl.LinkCode, td.PreAccLink, sd.PreAccLink, st.LinkCode,
+           SUM(tn.BaseSub) / @PS_DecDiv, SUM(tn.BaseSrc) / @PS_DecDiv, SUM(tn.BaseTax) / @PS_DecDiv, SUM(tn.BaseSTax) / @PS_DecDiv, SUM(tn.BaseTTL) / @PS_DecDiv
+    FROM (SELECT ItemCode, ClassCode, TrnCode, TrnSub, BaseSub, BaseSrc, BaseTax, BaseSTax, BaseTTL FROM dbo.tmpTrn WHERE CheckNo = @CheckNo) tn
+    JOIN dbo.IClassDef ic ON ic.ClsCode = tn.ClassCode
+    JOIN dbo.TaxClassDef td ON td.TaxCode = ic.TaxClass
+    JOIN dbo.STaxDef st ON st.STaxCode = ic.STaxClass
+    JOIN dbo.SurChgDef sd ON sd.SurChgCode = ic.SurChgCls
+    JOIN (SELECT DscCode, ClsCode, LinkCode FROM dbo.DiscountDtl WHERE RVC = @RVCNo AND MealPeriod = @PS_Meal) rl
+         ON rl.ClsCode = tn.ClassCode AND LTRIM(RTRIM(tn.ItemCode)) = LTRIM(RTRIM(rl.DscCode))
+    WHERE tn.TrnCode = 110
+    GROUP BY rl.LinkCode, td.PreAccLink, sd.PreAccLink, st.LinkCode;
+
+    IF EXISTS (SELECT 1 FROM @PS_Rev WHERE ISNULL(TRY_CONVERT(BIGINT, ROUND(TRY_CONVERT(FLOAT, LTRIM(RTRIM(LinkCode))), 0)), 0) < 100)
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    SET @PS_Run = @PS_Run + ISNULL((SELECT SUM(TTLAmount) FROM @PS_Rev), 0);
+    INSERT INTO @PS_Post (Major, Minor, Amount, Sub, Tax, TaxCode, Srv, SrvCode, Cnt, Comment, Org, OrgCur, STax, STaxCode)
+    SELECT CAST(x.Link / 100 AS VARCHAR(10)), CAST(x.Link % 100 AS VARCHAR(10)), SUM(x.TTLAmount), SUM(x.SubAmount), SUM(x.TaxAmount),
+           LEFT(ISNULL(x.LinkTax, ''), 10), SUM(x.SrcAmount), LEFT(ISNULL(x.LinkSrc, ''), 10), @PS_NGuest, LEFT(@PS_PONumber, 200), 0, '',
+           SUM(x.STaxAmount), LEFT(ISNULL(x.LinkSTax, ''), 10)
+    FROM (SELECT TRY_CONVERT(BIGINT, ROUND(TRY_CONVERT(FLOAT, LTRIM(RTRIM(LinkCode))), 0)) AS Link, * FROM @PS_Rev) x
+    GROUP BY x.Link, x.LinkTax, x.LinkSrc, x.LinkSTax;
+
+    -- POS WIN: 'Unbalance Interface!' when the lines do not sum to zero.
+    IF ROUND(@PS_Run, 2) <> 0
+    BEGIN SET @PS_Fail = 1; BREAK; END;
+
+    SELECT @PS_n = COUNT(*) FROM @PS_Post;
+    IF @PS_n = 0 BREAK;
+
+    SET @PS_FolioText = CONVERT(VARCHAR(10), CONVERT(BIGINT, @PS_Folio));
+    SET @PS_Ref = CONVERT(VARCHAR(30), @CheckNo);
+    SET @PS_Sql = N'EXEC ' + @PS_FO + N'PostInterfaceTransactionToFolio @FolioNum = @PS_FolioText, @FolioBalanceCode = @PS_Bal, '
+        + N'@TransactionCode = @PS_Major, @TransactionSubCode = @PS_Minor, @RefNumber = @PS_Ref, @TransactionAmount = @PS_Amount, '
+        + N'@SubAmount = @PS_Sub, @TaxAmount = @PS_Tax, @TaxCode = @PS_TaxCode, @ServiceAmount = @PS_Srv, @ServiceChargeCode = @PS_SrvCode, '
+        + N'@Count = @PS_Count, @MealPeriodNumber = @PS_Meal, @Comment = @PS_Comment, @OriginAmount = @PS_Org, @OriginCurrency = @PS_OrgCur, '
+        + N'@TransactionTime = @PS_Now, @RptExRate = @PS_ExRate, @StsCode1 = @PS_S1, @StsCode2 = @PS_S2, @StsCode3 = @PS_S3, @StsCode4 = @PS_S4, '
+        + N'@StsCode5 = @PS_S5, @StsCode6 = @PS_S6, @StsCode7 = @PS_S7, @StsCode8 = @PS_S8, @STaxAmount = @PS_STax, @STaxCode = @PS_STaxCode;';
+
+    SAVE TRANSACTION PS_Post;
+    BEGIN TRY
+        WHILE @PS_i <= @PS_n
+        BEGIN
+            SELECT @PS_Major = Major, @PS_Minor = Minor, @PS_Amount = Amount, @PS_Sub = Sub, @PS_Tax = Tax, @PS_TaxCode = TaxCode,
+                   @PS_Srv = Srv, @PS_SrvCode = SrvCode, @PS_Count = Cnt, @PS_Comment = Comment, @PS_Org = Org, @PS_OrgCur = OrgCur,
+                   @PS_STax = STax, @PS_STaxCode = STaxCode
+            FROM @PS_Post WHERE Seq = @PS_i;
+            EXEC sp_executesql @PS_Sql,
+                N'@PS_FolioText VARCHAR(10), @PS_Bal VARCHAR(10), @PS_Major VARCHAR(10), @PS_Minor VARCHAR(10), @PS_Ref VARCHAR(30), @PS_Amount NUMERIC(18,2), @PS_Sub NUMERIC(18,2), @PS_Tax NUMERIC(18,2), @PS_TaxCode VARCHAR(10), @PS_Srv NUMERIC(18,2), @PS_SrvCode VARCHAR(10), @PS_Count INT, @PS_Meal INT, @PS_Comment NVARCHAR(200), @PS_Org NUMERIC(18,9), @PS_OrgCur VARCHAR(20), @PS_Now DATETIME, @PS_ExRate NUMERIC(28,16), @PS_S1 VARCHAR(20), @PS_S2 VARCHAR(20), @PS_S3 VARCHAR(20), @PS_S4 VARCHAR(20), @PS_S5 VARCHAR(20), @PS_S6 VARCHAR(20), @PS_S7 VARCHAR(20), @PS_S8 VARCHAR(20), @PS_STax NUMERIC(18,2), @PS_STaxCode VARCHAR(10)',
+                @PS_FolioText = @PS_FolioText, @PS_Bal = @PS_Bal, @PS_Major = @PS_Major, @PS_Minor = @PS_Minor, @PS_Ref = @PS_Ref, @PS_Amount = @PS_Amount,
+                @PS_Sub = @PS_Sub, @PS_Tax = @PS_Tax, @PS_TaxCode = @PS_TaxCode, @PS_Srv = @PS_Srv, @PS_SrvCode = @PS_SrvCode, @PS_Count = @PS_Count,
+                @PS_Meal = @PS_Meal, @PS_Comment = @PS_Comment, @PS_Org = @PS_Org, @PS_OrgCur = @PS_OrgCur, @PS_Now = @PS_Now, @PS_ExRate = @PS_ExRate,
+                @PS_S1 = @PS_S1, @PS_S2 = @PS_S2, @PS_S3 = @PS_S3, @PS_S4 = @PS_S4, @PS_S5 = @PS_S5, @PS_S6 = @PS_S6, @PS_S7 = @PS_S7, @PS_S8 = @PS_S8,
+                @PS_STax = @PS_STax, @PS_STaxCode = @PS_STaxCode;
+            SET @PS_i = @PS_i + 1;
+        END;
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() IN (229, 230, 262, 297, 300) THROW;
+        IF XACT_STATE() <> 1 THROW;
+        ROLLBACK TRANSACTION PS_Post;
+        SET @PS_Fail = 1;
+        BREAK;
+    END CATCH;
+    BREAK;
+END;
+
+IF @PS_Fail = 1
+BEGIN
+    SELECT 1 AS IsOut, 'folio_post_required' AS Reason, CAST(0 AS BIGINT) AS CloseNo, CAST(0 AS DECIMAL(18,2)) AS SubTotal,
+           CAST(0 AS DECIMAL(18,2)) AS TotalPaid;
     RETURN;
 END;
 
@@ -317,3 +555,114 @@ UPDATE dbo.checkopenlog
     WHERE CheckNo = @CheckNo AND RVC = @RVCNo;
 
 SELECT 0 AS IsOut, 'ok' AS Reason, @Close_CloseNo AS CloseNo, @Close_SubTotal AS SubTotal, @Close_TotalPaid AS TotalPaid;"#;
+
+/// C# `OrderCommandSql.RoomChargeAdd`, verbatim.
+pub const ROOM_CHARGE_ADD: &str = r#"SET NOCOUNT ON;
+
+DECLARE @RC_Status INT;
+SELECT @RC_Status = Status FROM dbo.tmpInvoice WITH (UPDLOCK, HOLDLOCK) WHERE CheckNo = @CheckNo AND RVC = @RVCNo;
+IF @RC_Status IS NULL BEGIN SELECT 1 AS IsOut, 'check_not_found' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+IF @RC_Status <> 1 BEGIN SELECT 1 AS IsOut, 'bill_not_open' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+-- Tender lock: a room charge is the only settlement of its check.
+IF EXISTS (SELECT 1 FROM dbo.tmpTrn WHERE CheckNo = @CheckNo AND TrnCode >= 200 AND TrnCode <> 810)
+   OR EXISTS (SELECT 1 FROM dbo.tmpTrn tn JOIN dbo.TransactionCode tc ON tn.TrnCode = tc.TrnCode AND tn.TrnSub = tc.TrnSubCode
+              WHERE tc.TrnType = 106 AND tn.CheckNo = @CheckNo)
+BEGIN SELECT 1 AS IsOut, 'tender_locked' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+-- The room-charge TransactionCode (TrnType 106): the cloud's code when this store has it, else the store's own (900 first).
+DECLARE @RC_TrnCode DECIMAL(18,0), @RC_TrnSub DECIMAL(18,0) = 0;
+IF @CfgTrnCode IS NOT NULL
+    SELECT TOP 1 @RC_TrnCode = TrnCode, @RC_TrnSub = TrnSubCode FROM dbo.TransactionCode
+    WHERE TrnCode = @CfgTrnCode AND TrnSubCode = ISNULL(@CfgTrnSub, 0) AND TrnType = 106;
+ELSE
+    SELECT TOP 1 @RC_TrnCode = TrnCode, @RC_TrnSub = TrnSubCode FROM dbo.TransactionCode
+    WHERE TrnType = 106 ORDER BY CASE WHEN TrnCode = 900 THEN 0 ELSE 1 END, TrnCode, TrnSubCode;
+IF @RC_TrnCode IS NULL
+BEGIN SELECT 1 AS IsOut, 'tender_not_configured' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+-- The ROOM CHARGE payment mode: it names the header's PaymentMode and must be an interface mode (Interface = 1).
+DECLARE @RC_PMode VARCHAR(30), @RC_PType VARCHAR(20), @RC_Iface INT;
+SELECT TOP 1 @RC_PMode = LTRIM(RTRIM(pm.PMode)), @RC_PType = NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(20), pm.TrnCode))), ''), @RC_Iface = ISNULL(pm.Interface, 0)
+FROM dbo.PaymentMode pm
+WHERE UPPER(LTRIM(RTRIM(pm.PType))) IN ('ROOM CHARGE', 'ROOM') OR UPPER(LTRIM(RTRIM(pm.PMode))) IN ('ROOM CHARGE', 'ROOM')
+ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(pm.PType))) = 'ROOM CHARGE' THEN 0 ELSE 1 END;
+IF @RC_PMode IS NULL
+BEGIN SELECT 1 AS IsOut, 'tender_not_configured' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+-- Fail closed: the interface (Para InterfaceType = 1, InterfaceDB, PaymentMode.Interface = 1) must be configured and reachable.
+DECLARE @RC_IfType INT, @RC_FODB VARCHAR(128);
+SELECT TOP 1 @RC_IfType = TRY_CONVERT(INT, LTRIM(RTRIM(ParaStr))) FROM dbo.Para WHERE ParaName = 'InterfaceType' AND RVC = @RVCNo;
+SELECT TOP 1 @RC_FODB = LEFT(LTRIM(RTRIM(ParaStr)), 128) FROM dbo.Para WHERE ParaName = 'InterfaceDB' AND RVC = @RVCNo;
+IF ISNULL(@RC_IfType, 0) <> 1 OR ISNULL(@RC_Iface, 0) <> 1 OR ISNULL(@RC_FODB, '') = ''
+   OR @RC_FODB LIKE '%[^A-Za-z0-9_]%' OR ISNULL(HAS_DBACCESS(@RC_FODB), 0) <> 1
+BEGIN SELECT 1 AS IsOut, 'folio_post_required' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+-- The folio, re-validated in the Front Office database (SELECTs only): an in-house (FolioStatus 2), postable (NoPostFlag 0) folio of the room.
+DECLARE @RC_Sql NVARCHAR(MAX), @RC_Room NVARCHAR(10) = @RoomNo;
+DECLARE @RC_Live INT = 0, @RC_NoPost INT = 0, @RC_Pick FLOAT = 0, @RC_Given INT = 0, @RC_GivenAny INT = 0, @RC_Folio FLOAT = 0;
+SET @RC_Sql = N'SELECT @RC_Live = SUM(CASE WHEN FolioStatus = 2 AND COALESCE(NoPostFlag, 0) = 0 THEN 1 ELSE 0 END), '
+    + N'@RC_NoPost = SUM(CASE WHEN FolioStatus = 2 AND COALESCE(NoPostFlag, 0) <> 0 THEN 1 ELSE 0 END), '
+    + N'@RC_Pick = ISNULL(MIN(CASE WHEN FolioStatus = 2 AND COALESCE(NoPostFlag, 0) = 0 THEN FolioNum END), 0), '
+    + N'@RC_Given = SUM(CASE WHEN FolioStatus = 2 AND COALESCE(NoPostFlag, 0) = 0 AND FolioNum = @RC_Folio THEN 1 ELSE 0 END) '
+    + N'FROM ' + QUOTENAME(@RC_FODB) + N'.dbo.Folio WHERE LTRIM(RTRIM(RoomCode)) = @RC_Room;'
+    + N' SELECT @RC_GivenAny = COUNT(*) FROM ' + QUOTENAME(@RC_FODB) + N'.dbo.Folio WHERE FolioNum = @RC_Folio;';
+SET @RC_Folio = @FolioNum;
+EXEC sp_executesql @RC_Sql,
+    N'@RC_Room NVARCHAR(10), @RC_Folio FLOAT, @RC_Live INT OUTPUT, @RC_NoPost INT OUTPUT, @RC_Pick FLOAT OUTPUT, @RC_Given INT OUTPUT, @RC_GivenAny INT OUTPUT',
+    @RC_Room = @RC_Room, @RC_Folio = @RC_Folio, @RC_Live = @RC_Live OUTPUT, @RC_NoPost = @RC_NoPost OUTPUT, @RC_Pick = @RC_Pick OUTPUT,
+    @RC_Given = @RC_Given OUTPUT, @RC_GivenAny = @RC_GivenAny OUTPUT;
+SET @RC_Live = ISNULL(@RC_Live, 0); SET @RC_NoPost = ISNULL(@RC_NoPost, 0); SET @RC_Given = ISNULL(@RC_Given, 0);
+
+IF @RC_Live = 0 AND @RC_NoPost > 0
+BEGIN SELECT 1 AS IsOut, 'room_no_post' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+IF @FolioNum = 0
+BEGIN
+    IF @RC_Live = 0 BEGIN SELECT 1 AS IsOut, 'room_not_in_house' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+    IF @RC_Live > 1 BEGIN SELECT 1 AS IsOut, 'folio_ambiguous' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+    SET @RC_Folio = @RC_Pick;
+END
+ELSE IF @RC_Given = 0
+BEGIN
+    SELECT 1 AS IsOut, CASE WHEN @RC_GivenAny > 0 THEN 'folio_mismatch' ELSE 'room_not_in_house' END AS Reason, CAST(0 AS BIGINT) AS TrnSeq;
+    RETURN;
+END;
+
+DECLARE @RC_BaseDecDiv NUMERIC(18,2);
+SELECT @RC_BaseDecDiv = DecDiv FROM dbo.CurrencyDef WHERE CrCode = 1;
+IF ISNULL(@RC_BaseDecDiv, 0) = 0 SET @RC_BaseDecDiv = 1;
+
+DECLARE @RC_Amount NUMERIC(16,0) = -ROUND(@Amount * @RC_BaseDecDiv, 0);
+EXEC dbo.UpdateTmpInvoice @CheckNo;
+IF -@RC_Amount > ISNULL((SELECT SUM(BaseTTL) FROM dbo.tmpTrn WHERE CheckNo = @CheckNo), 0)
+BEGIN SELECT 1 AS IsOut, 'room_charge_above_balance' AS Reason, CAST(0 AS BIGINT) AS TrnSeq; RETURN; END;
+
+DECLARE @RC_IYear INT, @RC_IMonth INT, @RC_IDay INT;
+SELECT @RC_IYear = IYear, @RC_IMonth = IMonth, @RC_IDay = IDay FROM dbo.tmpInvoice WHERE CheckNo = @CheckNo;
+
+DECLARE @RC_NewSeq TABLE (v BIGINT);
+DECLARE @RC_ParaStr BIGINT;
+INSERT INTO @RC_NewSeq (v) EXEC dbo.GetRVCSeqNumber 'LastTrn', @RVCNo, @Cashier, '';
+SELECT @RC_ParaStr = v FROM @RC_NewSeq;
+DECLARE @RC_TrnSeq NUMERIC(11,0) = CAST(@RVCNo AS BIGINT) * 100000000 + @RC_ParaStr;
+
+INSERT INTO dbo.tmpTrn
+    (NYear, NMonth, NDay, TrnSeq, CheckNo, TrnTime, Cashier, TrnCode, TrnSub,
+     ItemCode, TrnDesc, ItemPrice, BaseSub, BaseTax, BaseTTL, TrnOrg, TrnBase, TrnPref,
+     TrnQty, RVC, OrgCrCode, NewTrn, Refund, Status, OrderNo, OrgCheck, StsCode2, Rsv1)
+VALUES
+    (@RC_IYear, @RC_IMonth, @RC_IDay, @RC_TrnSeq, @CheckNo, GETDATE(), @Cashier, @RC_TrnCode, @RC_TrnSub,
+     CONVERT(VARCHAR(12), CONVERT(BIGINT, @RC_Folio)), LEFT(@RC_PMode, 255), 0, 0, 0, @RC_Amount, @RC_Amount, @RC_Amount, 0,
+     1, @RVCNo, 1, 1, 0, 1, 0, @CheckNo, 'A', LEFT(ISNULL(dbo.Unicode2TCVN(@Reference), ''), 50));
+
+UPDATE dbo.tmpInvoice
+   SET RoomCode = @RC_Room,
+       FolioNum = @RC_Folio,
+       PaymentMode = @RC_PMode,
+       PaymentType = CASE WHEN ISNULL(@RC_PType, '') <> '' THEN @RC_PType ELSE PaymentType END,
+       PaymentInfo = LEFT(ISNULL(@Reference, N''), 50)
+ WHERE CheckNo = @CheckNo;
+
+EXEC dbo.UpdateTmpInvoice @CheckNo;
+
+SELECT 0 AS IsOut, 'ok' AS Reason, CAST(@RC_TrnSeq AS BIGINT) AS TrnSeq;"#;

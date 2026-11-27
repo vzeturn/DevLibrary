@@ -339,6 +339,7 @@ const TYPES: &[&str] = &[
     "BIT",
     "DECIMAL",
     "NUMERIC",
+    "FLOAT",
     "MONEY",
     "VARCHAR",
     "NVARCHAR",

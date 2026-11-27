@@ -28,8 +28,8 @@ pub use legacy_import::{
     legacy_import_wire,
 };
 pub use money::{
-    OrderCheckClosePayload, OrderCheckCloseResult, OrderTenderAddPayload, OrderTenderRemovePayload,
-    money_command_reasons, money_command_types,
+    OrderCheckClosePayload, OrderCheckCloseResult, OrderRoomChargePayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, money_command_reasons, money_command_types,
 };
 pub use order::{
     OrderCheckLine, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,

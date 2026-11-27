@@ -11,9 +11,9 @@ use dl_agent_pda_sync::commands::{SiteCommandExecutor, reasons};
 use dl_agent_pda_sync::contracts::WireJson;
 use dl_agent_pda_sync::contracts::wire::{
     CommandStatus, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckOpenPayload,
-    OrderCheckResult, OrderItemPostPayload, OrderTenderAddPayload, OrderTenderRemovePayload,
-    SyncCommand, SyncCommandResult, money_command_reasons as money, money_command_types as m,
-    order_aggregate, order_command_types as o,
+    OrderCheckResult, OrderItemPostPayload, OrderRoomChargePayload, OrderTenderAddPayload,
+    OrderTenderRemovePayload, SyncCommand, SyncCommandResult, money_command_reasons as money,
+    money_command_types as m, order_aggregate, order_command_types as o,
 };
 use dl_agent_pda_sync::reporting::Logger;
 use dl_agent_pda_sync::util::ctx::Ctx;
@@ -205,9 +205,38 @@ fn a_removed_tender_reopens_the_balance() {
 }
 
 #[test]
+fn a_room_charge_answers_with_the_check_and_a_bad_payload_writes_nothing() {
+    let t = T::new();
+    let check = t.check_with_item(120_000);
+    let charge = |amount: i64| {
+        let p = OrderRoomChargePayload {
+            rvc_no: RVC,
+            check_no: check,
+            cashier: "clerk-7".into(),
+            room_no: "0501".into(),
+            folio_num: 0,
+            amount: Decimal::from(amount),
+            reference: None,
+            trn_code: None,
+            trn_sub: None,
+        };
+        command(m::ROOM_CHARGE, p.to_element(), &key(check))
+    };
+
+    let bad = t.exec(&charge(0));
+    let ok = t.exec(&charge(120_000));
+
+    assert_eq!(bad.status, CommandStatus::Rejected);
+    assert_eq!(t.calls_starting("roomcharge"), 1);
+    assert_eq!(ok.status, CommandStatus::Applied, "{:?}", ok.reason);
+    let seq = OrderCheckResult::result_from(ok.result.as_ref()).and_then(|r| r.trn_seq);
+    assert!(seq.is_some_and(|s| s > 0));
+}
+
+#[test]
 fn the_money_grant_script_runs_after_the_order_grants_and_only_grants_table_writes_to_pda_sync() {
-    // RT-1296: the Front Office read grants (190) follow it.
-    let step = &STEPS[STEPS.len() - 2];
+    // RT-1296/RT-1297: the Front Office read grants (190) and the post grants (195) follow it.
+    let step = &STEPS[STEPS.len() - 3];
     assert_eq!(
         (step.id, step.kind, step.resource_name),
         (

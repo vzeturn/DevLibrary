@@ -57,6 +57,9 @@ pub enum StepKind {
     /// The read of `dbo.Folio` in the Front Office database by `fo.inhouse_search`
     /// (RT-1296, ADR 0172 §7).
     FoInhouseGrants,
+    /// The Front Office reads and the posting procedure of the close and the room charge
+    /// (`195_post_to_smile_grants.sql`, ADR 0179, RT-1297).
+    PostToSmileGrants,
 }
 
 impl StepKind {
@@ -74,6 +77,7 @@ impl StepKind {
             StepKind::SequenceGrants => "SequenceGrants",
             StepKind::MoneyGrants => "MoneyGrants",
             StepKind::FoInhouseGrants => "FoInhouseGrants",
+            StepKind::PostToSmileGrants => "PostToSmileGrants",
         }
     }
 }
