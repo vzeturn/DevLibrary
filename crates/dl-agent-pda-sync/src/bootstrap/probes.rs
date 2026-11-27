@@ -146,28 +146,6 @@ pub const CHECKED: [(&str, &str, Option<&str>); 5] = [
     ("dbo.tmpInvoice", "UPDATE", Some("PONumber")),
 ];
 
-/// The full read/write of script 210 (owner decision RT-1425, temporary), read as
-/// `pda_sync` in the POS database: a writer-role membership and the database-wide EXECUTE.
-/// A missing one makes the service self-repair apply the script. Revert with the step.
-pub const FULL_RW_SQL: &str =
-    "SELECT IS_ROLEMEMBER(N'db_datawriter'), HAS_PERMS_BY_NAME(NULL, N'DATABASE', N'EXECUTE');";
-
-/// The missing-permission entries of [`FULL_RW_SQL`]'s row: `0` is missing, `NULL` (unknown)
-/// is not reported.
-pub fn full_rw_missing(
-    writer: Option<&dl_tds::Value>,
-    execute: Option<&dl_tds::Value>,
-) -> Vec<String> {
-    let mut out = Vec::new();
-    if writer == Some(&dl_tds::Value::I32(0)) {
-        out.push("ROLE db_datawriter".to_owned());
-    }
-    if execute == Some(&dl_tds::Value::I32(0)) {
-        out.push("EXECUTE DATABASE".to_owned());
-    }
-    out
-}
-
 /// The per-RVC counters of `100_sequence_grants.sql` (RT-0654) that `pda_sync` may not
 /// update, as `dbo.LastCheck4` (`SqlOrderGrantsProbe.CounterGrantsSql`). The candidates are
 /// every RVC of `dbo.Para` under both prefixes plus the counters `pda_sync` can already see:
@@ -278,12 +256,9 @@ impl OrderGrantsProbe for SqlOrderGrantsProbe {
             .filter_map(|row| row.value(0).cloned())
             .collect();
         missing.extend(counter_grants_missing(&names));
-        let r = run(&mut c, FULL_RW_SQL, &[], PROBE_TIMEOUT, ctx)?;
-        let row = r.rows().first();
-        missing.extend(full_rw_missing(
-            row.and_then(|row| row.value(0)),
-            row.and_then(|row| row.value(1)),
-        ));
+        // Script 210 (RT-1425, temporary): both roles and EXECUTE in POS, SMILE_FO and
+        // SMILE_BO; a missing one makes the service self-repair apply the script.
+        missing.extend(super::full_rw::probe(&mut c, PROBE_TIMEOUT, ctx)?);
         Ok(missing)
     }
 }
@@ -296,19 +271,6 @@ pub fn is_permission_denied(f: &SqlFailure) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn full_rw_probe_reports_only_a_refused_writer_role_or_execute() {
-        assert!(FULL_RW_SQL.contains("IS_ROLEMEMBER(N'db_datawriter')"));
-        assert!(FULL_RW_SQL.contains("HAS_PERMS_BY_NAME(NULL, N'DATABASE', N'EXECUTE')"));
-        let (no, yes) = (dl_tds::Value::I32(0), dl_tds::Value::I32(1));
-        assert_eq!(
-            full_rw_missing(Some(&no), Some(&no)),
-            ["ROLE db_datawriter", "EXECUTE DATABASE"]
-        );
-        assert!(full_rw_missing(Some(&yes), Some(&yes)).is_empty());
-        assert!(full_rw_missing(Some(&dl_tds::Value::Null), None).is_empty());
-    }
 
     #[test]
     fn counter_grants_probe_names_each_counter_pda_sync_may_not_update() {

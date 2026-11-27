@@ -5,6 +5,7 @@
 //! - [`fingerprint`]: `SchemaFingerprint.cs`; [`discovery`]: `LocalSqlDiscovery.cs`.
 //! - [`admin`]: `ISqlAdmin.cs`, `SqlServerAdmin.cs` (setup identity, connection failures).
 //! - [`probes`]: `AgentLoginProbe.cs`, `OrderGrantsProbe.cs` (reads as `pda_sync`).
+//! - [`full_rw`]: the checks of script 210 (full read/write on every SMILE database, RT-1425).
 //! - [`bootstrapper`]: `SqlBootstrapper.cs` and the embedded `Sql/*.sql` scripts.
 //! - [`cloud_probe`]: `CloudProbe.cs`; [`workflow`]: `EnrollWorkflow.cs` (with
 //!   `WindowsServiceRecovery`).
@@ -15,6 +16,7 @@ pub mod cloud_probe;
 pub mod discovery;
 pub mod error;
 pub mod fingerprint;
+pub mod full_rw;
 pub mod models;
 pub mod preflight;
 pub mod probes;
