@@ -132,14 +132,17 @@
         "CancelTime",
         "CheckInTime",
         "CheckOutTime",
+        "CompanyName",
         "CompFlag",
         "DelayCheckOutFlag",
         "DepartureDate",
+        "FirstName",
         "FolioNum",
         "FolioStatus",
         "FolioSubNum",
         "GroupCode",
         "HouseUseFlag",
+        "LastName",
         "MarketSegmentCode",
         "NoShowFlag",
         "NumAdult",
@@ -147,8 +150,10 @@
         "OriginCode",
         "ProfileNumber",
         "RateAmount",
+        "RateOverideFlag",
         "ReservationTime",
         "RoomCode",
+        "RoomRateCode",
         "RoomTypeCode",
         "ShareNum",
         "SubGroupCode",
@@ -283,10 +288,15 @@
     {
       "name": "Room",
       "columns": [
+        "BuildingCode",
+        "ExposureCode",
+        "Floor",
         "HSKPClean",
         "HSKPOccupied",
+        "RoomAttributeCode",
         "RoomCode",
-        "RoomTypeCode"
+        "RoomTypeCode",
+        "WingCode"
       ]
     },
     {
@@ -2331,6 +2341,53 @@
       ]
     },
     {
+      "name": "fo.housekeeping.blocks",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "RoomCode",
+              "ArrivalDate",
+              "DepartureDate",
+              "CompanyName",
+              "FolioNum",
+              "FolioSubNum",
+              "CancelNum"
+            ],
+            "where": [
+              {
+                "column": "FolioStatus",
+                "op": "=",
+                "param": {
+                  "name": "status",
+                  "type": "int",
+                  "arg": "status"
+                }
+              },
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
       "name": "fo.inhouse.list",
       "contract_ver": 1,
       "kind": "read",
@@ -2558,6 +2615,138 @@
             ],
             "order_by": [],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.roomplan.bars",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Folio",
+            "columns": [
+              "FolioNum",
+              "FolioSubNum",
+              "ShareNum",
+              "LastName",
+              "FirstName",
+              "ArrivalDate",
+              "DepartureDate",
+              "RoomCode",
+              "FolioStatus",
+              "BookStatus",
+              "CancelNum",
+              "RoomRateCode",
+              "RateAmount",
+              "RateOverideFlag"
+            ],
+            "where": [
+              {
+                "column": "DepartureDate",
+                "op": ">=",
+                "param": {
+                  "name": "fromDate",
+                  "type": "date",
+                  "arg": "fromDate"
+                }
+              },
+              {
+                "column": "ArrivalDate",
+                "op": "<",
+                "param": {
+                  "name": "toDate",
+                  "type": "date",
+                  "arg": "toDate"
+                }
+              },
+              {
+                "column": "FolioStatus",
+                "op": "<>",
+                "param": {
+                  "name": "checkedOut",
+                  "type": "int",
+                  "value": 3
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Room",
+            "columns": [
+              "RoomCode",
+              "RoomTypeCode",
+              "BuildingCode",
+              "WingCode",
+              "Floor",
+              "RoomAttributeCode",
+              "ExposureCode"
+            ],
+            "where": [
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "fo.roomplan.rooms",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Room",
+            "columns": [
+              "RoomCode",
+              "RoomTypeCode",
+              "BuildingCode",
+              "WingCode",
+              "Floor",
+              "RoomAttributeCode",
+              "ExposureCode",
+              "HSKPClean",
+              "HSKPOccupied"
+            ],
+            "where": [
+              {
+                "column": "RoomTypeCode",
+                "op": "<>",
+                "param": {
+                  "name": "pseudo",
+                  "type": "varchar",
+                  "value": "**",
+                  "size": 10
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
           }
         }
       ]
