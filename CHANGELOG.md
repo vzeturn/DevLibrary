@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `dl-agent-arrival`: `srCI_InformationBill` fills the description from `dbo.TransactionCode`, counts a missing quantity as 1 and derives the unit price, so the signed Check-In bill has no blank columns (RT-1348).
+
 - dl-agent-arrival: the embedded `pms-procedures.sql` is byte for byte the Check-In .NET one again: bill lines carry `RefNo` (`FolioTransaction.RefNumber`), balance codes C, V and P never reach a signed bill, the registration card reads `ConfirmPrintFlag`, and `srCI_GetFolioRates` is installed. Sites on dl-agent had none of these, so the signed bill showed no Ref no.
 
 ### Added
