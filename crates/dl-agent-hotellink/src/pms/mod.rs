@@ -1,6 +1,7 @@
 //! SMILE FO data access (Go `internal/pms`): the rows, the repository contract the
 //! reconciler depends on, and the SQL Server implementation.
 
+mod audit;
 mod entities;
 pub(crate) mod insert;
 mod mapping;
@@ -13,12 +14,13 @@ use std::collections::BTreeMap;
 
 use dl_time::{Date, DateTime};
 
+pub use audit::{AuditQuery, AuditResult, normalize_audit_keys};
 pub use entities::{Folio, Val, sql_time, ymd, zero_time};
 pub use mapping::validate_mapping;
 pub use repo::SqlRepo;
 pub use rows::{AdditionalName, ClientContact, ClientSts, FolioRate, SmileClient};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::jobmodel::{AvailRow, MappingRow};
 
 /// `LastChangeClerkID` the agent writes when it cancels a folio, so a later
@@ -143,6 +145,11 @@ pub trait PmsRepo: Send + Sync {
 
 /// Everything the run loops use (Go `agent.FullRepo`).
 pub trait FullRepo: PmsRepo {
+    /// The read-only PMS audit (RT-0702). A repository without it answers every audit
+    /// request with an error snapshot instead of staying silent.
+    fn audit_folios(&self, _q: &AuditQuery) -> Result<AuditResult> {
+        Err(Error::other("this agent build cannot read the PMS audit"))
+    }
     /// `SELECT 1`.
     fn test_connection(&self) -> Result<()>;
     /// Creates `RoomTypeMapped` if missing and seeds it from `RoomType` when empty;

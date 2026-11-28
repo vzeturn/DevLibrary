@@ -145,7 +145,7 @@ fn bodies_match_go() {
     assert_eq!(reqs[3].body, r#"{"hash":"h","rows":[]}"#);
     assert_eq!(
         reqs[4].body,
-        r#"{"version":"dl-agent-1","pmsOk":true,"breakerState":"closed","queueDepth":2,"recentErrors":null,"capabilities":["hub-policy","actions-v2"],"loopsStalled":["booking"]}"#
+        r#"{"version":"dl-agent-1","pmsOk":true,"breakerState":"closed","queueDepth":2,"recentErrors":null,"capabilities":["hub-policy","actions-v2","pms-audit"],"loopsStalled":["booking"]}"#
     );
 }
 

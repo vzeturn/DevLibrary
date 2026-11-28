@@ -2,6 +2,7 @@
 //! hub on a local socket and the reconcile fake repository extended with the mapping and
 //! availability calls (`fullFakeRepo`).
 
+mod audit;
 mod jobs;
 mod loops;
 
@@ -24,6 +25,14 @@ use crate::reconcile::tests::FakeRepo;
 use crate::testhub::{FakeHub, Req};
 
 impl FullRepo for FakeRepo {
+    fn audit_folios(&self, q: &crate::pms::AuditQuery) -> Result<crate::pms::AuditResult> {
+        let mut st = self.st();
+        st.audit_queries.push(q.clone());
+        match &st.audit_result {
+            Some(r) => Ok(r.clone()),
+            None => Err(Error::other("this agent build cannot read the PMS audit")),
+        }
+    }
     fn test_connection(&self) -> Result<()> {
         let mut st = self.st();
         if st.sql_down_calls > 0 {
@@ -94,6 +103,8 @@ pub(crate) struct HubSt {
     pub availability: Vec<Vec<AvailRow>>,
     pub inv_sync_headers: Vec<String>,
     pub config: String,
+    /// `pmsAudits` handed out with the next poll (raw JSON objects).
+    pub audits: Vec<String>,
 }
 
 /// `newFakeHub`.
@@ -147,12 +158,14 @@ fn handle(st: &Mutex<HubSt>, r: &Req) -> (u16, String) {
             .map(MappingCmd::to_json)
             .collect();
         let want = std::mem::take(&mut st.want_mapping);
+        let audits = std::mem::take(&mut st.audits);
         return (
             200,
             format!(
-                r#"{{"jobs":[{}],"wantMapping":{want},"mappingCmds":[{}]}}"#,
+                r#"{{"jobs":[{}],"wantMapping":{want},"mappingCmds":[{}],"pmsAudits":[{}]}}"#,
                 jobs.join(","),
-                cmds.join(",")
+                cmds.join(","),
+                audits.join(",")
             ),
         );
     }

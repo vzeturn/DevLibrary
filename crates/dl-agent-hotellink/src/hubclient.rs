@@ -11,13 +11,14 @@ use dl_json::Value;
 use crate::error::{Error, Kind, Result};
 use crate::gojson::{Obj, array, string};
 use crate::jobmodel::{
-    AvailRow, CancelPolicy, MappingRow, PmsResult, Poll, encode, policy_from_value, poll_from_value,
+    AuditSnapshot, AvailRow, CAP_PMS_AUDIT, CancelPolicy, MappingRow, PmsResult, Poll, encode,
+    policy_from_value, poll_from_value,
 };
 
 /// `DefaultHubFallback`.
 pub const DEFAULT_HUB_FALLBACK: &str = "https://smile-hl-hub.fly.dev";
 /// `AgentCapabilities`.
-pub const CAPABILITIES: [&str; 2] = ["hub-policy", "actions-v2"];
+pub const CAPABILITIES: [&str; 3] = ["hub-policy", "actions-v2", CAP_PMS_AUDIT];
 /// The request timeout (longer than the 25 s long-poll).
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// The response body limit.
@@ -311,6 +312,17 @@ impl HubClient {
             dl_http::encode_path_segment(job_id)
         );
         self.call(Method::Post, &path, Some(&out), &[]).map(drop)
+    }
+
+    /// `PostPMSAudit`: the read-only PMS snapshot the hub asked for.
+    pub fn post_pms_audit(&self, snap: &AuditSnapshot) -> Result<()> {
+        self.call(
+            Method::Post,
+            "/api/agent/pms-audit",
+            Some(&snap.to_json()),
+            &[],
+        )
+        .map(drop)
     }
 
     /// `PushMapping`.
