@@ -36,6 +36,7 @@ use crate::reporting::{Logger, Value};
 use crate::util::ctx::Ctx;
 
 mod money;
+mod pos_reads;
 
 /// Rejection reasons the cloud stores in `sync.commands.last_error`
 /// (`SiteCommandExecutor.Reasons`).
@@ -148,6 +149,7 @@ pub struct SiteCommandExecutor {
     nudge: Option<Arc<dyn CaptureNudge>>,
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
+    reads: pos_reads::PosReads,
 }
 
 struct LockedCheck {
@@ -174,6 +176,7 @@ impl SiteCommandExecutor {
             nudge: None,
             grants: None,
             schema,
+            reads: pos_reads::PosReads::default(),
         }
     }
 
@@ -294,6 +297,8 @@ impl SiteCommandExecutor {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
+            s::POS_REVENUE_SUMMARY => self.pos_revenue(c, ctx),
+            s::POS_BILL_LIST => self.pos_bills(c, ctx),
             LEGACY_EXPORT => match &self.legacy_export {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),

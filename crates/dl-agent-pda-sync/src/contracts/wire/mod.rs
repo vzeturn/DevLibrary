@@ -9,6 +9,8 @@ mod hops;
 mod legacy_import;
 mod money;
 mod order;
+mod pos_bills;
+mod pos_revenue;
 mod print;
 mod site_commands;
 mod site_events;
@@ -38,6 +40,10 @@ pub use order::{
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderSendPayload,
     order_aggregate, order_command_reasons, order_command_types,
 };
+pub use pos_bills::{
+    PosBill, PosBillListPayload, PosBillListResult, PosBillPayment, pos_bill_statuses,
+};
+pub use pos_revenue::{PosRevenueDay, PosRevenueSummaryPayload, PosRevenueSummaryResult};
 pub use print::{
     PrintQueueAutoFill, PrintQueueInfo, PrintQueueReport, PrintQueueReportResult,
     print_queue_kinds, print_queue_limits, print_spooler_address,

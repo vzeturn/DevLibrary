@@ -40,6 +40,10 @@ pub mod site_command_types {
     /// Store-cloud reconciliation (ADR 0126): compare the agent's shadow with the cloud
     /// manifest per bucket.
     pub const SYNC_VERIFY: &str = "sync.verify";
+    /// Read-only daily revenue totals of one RVC from SMILE_POS (ADR 0149, RT-0843).
+    pub const POS_REVENUE_SUMMARY: &str = "pos.revenue_summary";
+    /// Read-only POS WIN bills of one RVC and business date (RT-0842).
+    pub const POS_BILL_LIST: &str = "pos.bill_list";
     /// Read-only search of the in-house guests of an RVC's Front Office database (RT-1296).
     pub const FO_INHOUSE_SEARCH: &str = "fo.inhouse_search";
 }
@@ -107,6 +111,9 @@ pub mod site_command_contract {
         spec(site_command_types::RESERVATION_CANCEL, Durable, 8),
         spec(site_command_types::SYNC_RESNAPSHOT, Durable, 8),
         spec(site_command_types::SYNC_VERIFY, Durable, 3),
+        // RT-1427: the read-only SMILE_POS reads, ported from the PDAOrder agent.
+        spec(site_command_types::POS_REVENUE_SUMMARY, Durable, 3),
+        spec(site_command_types::POS_BILL_LIST, Durable, 3),
         spec(site_command_types::FO_INHOUSE_SEARCH, Interactive, 1),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),

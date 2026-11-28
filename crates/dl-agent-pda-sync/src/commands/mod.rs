@@ -9,7 +9,8 @@
 //! - [`SiteCommandExecutor`]: runs each command once in the store's transaction;
 //!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
-//!   `fo.inhouse_search` (RT-1296).
+//!   `fo.inhouse_search` (RT-1296); [`PosRevenueSource`] and [`PosBillSource`] answer the
+//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`ChangeTrackingMonitor`]: the Change Tracking check run
 //!   beside it behind the flag `capture.change_tracking` (RT-1318), one round of which
@@ -30,6 +31,8 @@ pub mod grants;
 pub mod grants_repair;
 pub mod keyed_pool;
 mod po_number;
+pub mod pos_bills;
+pub mod pos_revenue;
 mod resnapshot;
 pub mod result_outbox;
 mod schema_guard;
@@ -60,6 +63,8 @@ pub use grants::{
     BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, OrderGrantsService, RepairAttempt,
     RepairOutcome,
 };
+pub use pos_bills::{POS_BILL_TENDERS, POS_BILLS, PosBillSource, pos_bill_parameters};
+pub use pos_revenue::{DAILY_REVENUE, PosRevenueSource, daily_revenue_parameters};
 pub use resnapshot::ResnapshotCommandHandler;
 pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_columns};
 pub use service::{CommandExtras, CommandService};
