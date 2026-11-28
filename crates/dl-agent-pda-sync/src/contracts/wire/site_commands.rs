@@ -42,6 +42,9 @@ pub mod site_command_types {
     pub const SYNC_VERIFY: &str = "sync.verify";
     /// Read-only search of the in-house guests of an RVC's Front Office database (RT-1296).
     pub const FO_INHOUSE_SEARCH: &str = "fo.inhouse_search";
+    /// Read-only reconcile of the order rows the agent's commands left in SMILE_POS
+    /// (RT-1365, ADR 0182). Check numbers only.
+    pub const POS_ORDER_RESIDUE: &str = "pos.order_residue";
 }
 
 /// Values of [`KdsLineStatePayload::action`].
@@ -108,6 +111,7 @@ pub mod site_command_contract {
         spec(site_command_types::SYNC_RESNAPSHOT, Durable, 8),
         spec(site_command_types::SYNC_VERIFY, Durable, 3),
         spec(site_command_types::FO_INHOUSE_SEARCH, Interactive, 1),
+        spec(site_command_types::POS_ORDER_RESIDUE, Durable, 3),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),
         spec(o::SEND, Interactive, 3),

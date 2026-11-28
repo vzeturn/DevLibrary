@@ -29,6 +29,7 @@ pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
 pub mod keyed_pool;
+pub mod order_residue;
 mod po_number;
 mod resnapshot;
 pub mod result_outbox;
@@ -37,6 +38,7 @@ pub mod service;
 mod sql;
 mod sql_money;
 mod sql_order;
+mod sql_order_residue;
 mod sql_store;
 mod sql_table;
 pub mod sql_text;
@@ -59,6 +61,10 @@ pub use fo_inhouse::{
 pub use grants::{
     BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, OrderGrantsService, RepairAttempt,
     RepairOutcome,
+};
+pub use order_residue::{
+    OrderResidueSnapshot, OrderResidueSource, ResidueCheck, ResidueCleaned, ResidueInfoRow,
+    ResidueReport,
 };
 pub use resnapshot::ResnapshotCommandHandler;
 pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_columns};

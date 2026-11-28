@@ -420,8 +420,10 @@ impl FakeRepair {
 
     /// RT-1425: the same, with the bootstrap steps the applying identity ran.
     fn with_steps(mut self: Arc<Self>, steps: &[&str]) -> Arc<FakeRepair> {
-        Arc::get_mut(&mut self).expect("not shared yet").outcome.applied_steps =
-            steps.iter().map(|s| (*s).to_owned()).collect();
+        Arc::get_mut(&mut self)
+            .expect("not shared yet")
+            .outcome
+            .applied_steps = steps.iter().map(|s| (*s).to_owned()).collect();
         self
     }
 }

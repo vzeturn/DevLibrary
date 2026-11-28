@@ -58,7 +58,7 @@ impl SqlSiteCommandStore {
         self
     }
 
-    fn open(&self, ctx: &Ctx) -> Result<Client> {
+    pub(super) fn open(&self, ctx: &Ctx) -> Result<Client> {
         check_ctx(ctx)?;
         loop {
             let pooled = self
@@ -78,7 +78,7 @@ impl SqlSiteCommandStore {
         Ok(c)
     }
 
-    fn release(&self, c: Client) {
+    pub(super) fn release(&self, c: Client) {
         if !c.is_broken() && !c.in_transaction() {
             let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
             if idle.len() < self.max_idle {
