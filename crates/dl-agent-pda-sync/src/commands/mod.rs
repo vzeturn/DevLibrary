@@ -11,7 +11,8 @@
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
 //!   `fo.inhouse_search` (RT-1296); [`PosRevenueSource`] and [`PosBillSource`] answer the
 //!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427); [`TxnCommandUnit`]
-//!   is the seam of `txn.snapshot` (ADR 0159, RT-1427).
+//!   is the seam of `txn.snapshot` (ADR 0159, RT-1427); [`TxnStockUnit`] the SMILE_BO seam
+//!   of the stock verbs and [`PosStockSource`] the read of `pos.stock_balance` (RT-1427).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`ChangeTrackingMonitor`]: the Change Tracking check run
 //!   beside it behind the flag `capture.change_tracking` (RT-1318), one round of which
@@ -35,6 +36,7 @@ pub mod order_residue;
 mod po_number;
 pub mod pos_bills;
 pub mod pos_revenue;
+pub mod pos_stock;
 mod resnapshot;
 pub mod result_outbox;
 mod schema_guard;
@@ -43,12 +45,16 @@ mod sql;
 mod sql_money;
 mod sql_order;
 mod sql_order_residue;
+mod sql_stock;
+mod sql_stock_post;
+mod sql_stock_text;
 mod sql_store;
 mod sql_table;
 pub mod sql_text;
 mod sql_txn;
 mod sql_txn_counters;
 mod sql_txn_room_charge;
+pub mod stock_unit;
 mod txn;
 mod txn_counters;
 mod txn_room_charge;
@@ -79,6 +85,7 @@ pub use order_residue::{
 };
 pub use pos_bills::{POS_BILL_TENDERS, POS_BILLS, PosBillSource, pos_bill_parameters};
 pub use pos_revenue::{DAILY_REVENUE, PosRevenueSource, daily_revenue_parameters};
+pub use pos_stock::{PosStockRead, PosStockSource, stock_source_of};
 pub use resnapshot::ResnapshotCommandHandler;
 pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_columns};
 pub use service::{CommandExtras, CommandService};
@@ -87,6 +94,13 @@ pub use sql_txn::{
     COLUMNS_SQL as TXN_COLUMNS_SQL, LOCK_SQL as TXN_LOCK_SQL, SAVE_SQL as TXN_SAVE_SQL,
     SAVEPOINT as TXN_SAVEPOINT, delete_sql as txn_delete_sql, insert_sql as txn_insert_sql,
     select_sql as txn_select_sql,
+};
+pub use stock_unit::{
+    StockApplied, StockCodeCount, StockCountDifference, StockCountLine, StockCountPosted,
+    StockCountSession, StockError, StockHeldLine, StockIssueLine, StockIssuePosted,
+    StockLedgerProfile, StockReceipt, StockReceiptLedger, StockReceiptLine, StockReceiptPosted,
+    StockReceiptPostedLine, StockResult, StockSettings, StockStoreMap, StockVoucher,
+    StockVoucherLine, TxnStockUnit,
 };
 pub use txn::{
     TxnAppliedState, TxnCommandUnit, aggregate_hash as txn_aggregate_hash,

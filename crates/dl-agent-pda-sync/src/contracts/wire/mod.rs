@@ -12,6 +12,7 @@ mod order;
 mod pos_bills;
 mod pos_order_residue;
 mod pos_revenue;
+mod pos_stock;
 mod print;
 mod site_commands;
 mod site_events;
@@ -23,6 +24,10 @@ mod txn_commands;
 mod txn_counters;
 mod txn_room_charge;
 mod txn_shift;
+mod txn_stock;
+mod txn_stock_count;
+mod txn_stock_issue;
+mod txn_stock_receipt;
 
 pub use blobs::{SyncBlobRef, SyncBlobRefBatch, SyncBlobRefsAck, blob_contract};
 pub use envelope::{
@@ -52,6 +57,9 @@ pub use pos_order_residue::{
     PosOrderResiduePayload, PosOrderResidueResult, PosResidueCheck, PosResidueInfo,
 };
 pub use pos_revenue::{PosRevenueDay, PosRevenueSummaryPayload, PosRevenueSummaryResult};
+pub use pos_stock::{
+    PosStockBalance, PosStockBalancePayload, PosStockBalanceResult, pos_stock_types,
+};
 pub use print::{
     PrintQueueAutoFill, PrintQueueInfo, PrintQueueReport, PrintQueueReportResult,
     print_queue_kinds, print_queue_limits, print_spooler_address,
@@ -94,4 +102,20 @@ pub use txn_room_charge::{
 pub use txn_shift::{
     TxnCashPayload, TxnShiftMoneyLine, TxnShiftPayload, TxnShiftResult, is_amount as txn_is_amount,
     is_moment as txn_is_moment,
+};
+pub use txn_stock::{
+    TxnStockDepletePayload, TxnStockLine, TxnStockRestorePayload, TxnStockResult, stock_hash_line,
+    txn_stock_reasons, txn_stock_scope, txn_stock_types,
+};
+pub use txn_stock_count::{
+    TxnStockCountLine, TxnStockCountPayload, TxnStockCountResult, stock_count_hash_line,
+    txn_stock_count_scope, txn_stock_count_types,
+};
+pub use txn_stock_issue::{
+    TxnStockIssueLine, TxnStockIssuePayload, TxnStockIssueResult, stock_issue_hash_line,
+    txn_stock_issue_scope, txn_stock_issue_types,
+};
+pub use txn_stock_receipt::{
+    TxnStockReceiptLine, TxnStockReceiptPayload, TxnStockReceiptResult, stock_receipt_hash_line,
+    txn_stock_receipt_scope, txn_stock_receipt_types,
 };

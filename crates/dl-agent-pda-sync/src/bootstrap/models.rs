@@ -64,6 +64,13 @@ pub enum StepKind {
     /// The Front Office database user and folio grants of `txn.room_charge` (ADR 0162,
     /// script 160; RT-1427 for this agent); acts in the database `Para InterfaceDB` names.
     FoRoomChargeGrants,
+    /// The SMILE_BO stock voucher grants of `txn.stock_deplete` / `txn.stock_restore` /
+    /// `txn.stock_issue` (ADR 0164, script 175; RT-1427 for this agent).
+    BoStockGrants,
+    /// The SMILE_BO count session grants of `txn.stock_count` (ADR 0167, script 176).
+    BoCountGrants,
+    /// The SMILE_BO goods receipt grants of `txn.stock_receipt` (ADR 0169, script 177).
+    BoReceiptGrants,
     /// The tender and close table writes of `order.tender_*` / `order.check_close`
     /// (ADR 0174, RT-1297).
     MoneyGrants,
@@ -99,6 +106,9 @@ impl StepKind {
             StepKind::TxnStoreKey => "TxnStoreKey",
             StepKind::TxnShiftGrants => "TxnShiftGrants",
             StepKind::FoRoomChargeGrants => "FoRoomChargeGrants",
+            StepKind::BoStockGrants => "BoStockGrants",
+            StepKind::BoCountGrants => "BoCountGrants",
+            StepKind::BoReceiptGrants => "BoReceiptGrants",
             StepKind::MoneyGrants => "MoneyGrants",
             StepKind::FoInhouseGrants => "FoInhouseGrants",
             StepKind::PostToSmileGrants => "PostToSmileGrants",

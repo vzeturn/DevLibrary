@@ -7,6 +7,7 @@
 use dl_uuid::Uuid;
 
 use super::error::Result;
+use super::stock_unit::TxnStockUnit;
 use super::txn::TxnCommandUnit;
 use super::txn_counters::TxnCounterUnit;
 use super::txn_room_charge::TxnRoomChargeUnit;
@@ -90,6 +91,10 @@ pub trait SiteCommandUnit {
     /// The Front Office reads and writes of the room-charge verbs (ADR 0162) in the same
     /// transaction.
     fn room_charge(&mut self) -> &mut dyn TxnRoomChargeUnit;
+
+    /// The SMILE_BO reads and writes of the stock verbs (ADR 0164, 0167, 0168, 0169) in the
+    /// same transaction.
+    fn stock(&mut self) -> &mut dyn TxnStockUnit;
 }
 
 /// The SMILE_POS writes and reads of the order verbs (OW1b, ADR 0104). Every write is a

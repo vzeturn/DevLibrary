@@ -11,10 +11,13 @@ mod wire;
 mod wire_po_number;
 mod wire_pos_order_residue;
 mod wire_pos_reads;
+mod wire_pos_stock;
 mod wire_txn;
 mod wire_txn_counters;
 mod wire_txn_room_charge;
 mod wire_txn_shift;
+mod wire_txn_stock;
+mod wire_txn_stock_issue;
 
 use super::catalog::SyncCatalog;
 use super::map::{OrderedMap, StrMap};

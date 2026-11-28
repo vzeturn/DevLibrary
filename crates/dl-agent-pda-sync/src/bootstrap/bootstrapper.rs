@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 20] = [
+pub const STEPS: [BootstrapStep; 24] = [
     step(
         "login",
         StepKind::Login,
@@ -152,6 +152,35 @@ pub const STEPS: [BootstrapStep; 20] = [
         "Sql.160_fo_room_charge_grants.sql",
         false,
     ),
+    // RT-1427: the stock verbs' table and SMILE_BO grants (170..177), as the .NET agent.
+    step(
+        "txn_stock",
+        StepKind::Table,
+        "Pda_TxnStockHeld",
+        "Sql.170_txn_stock.sql",
+        false,
+    ),
+    step(
+        "bo_stock_grants",
+        StepKind::BoStockGrants,
+        LOGIN_NAME,
+        "Sql.175_bo_stock_grants.sql",
+        false,
+    ),
+    step(
+        "bo_count_grants",
+        StepKind::BoCountGrants,
+        LOGIN_NAME,
+        "Sql.176_bo_count_grants.sql",
+        false,
+    ),
+    step(
+        "bo_receipt_grants",
+        StepKind::BoReceiptGrants,
+        LOGIN_NAME,
+        "Sql.177_bo_receipt_grants.sql",
+        false,
+    ),
     step(
         "money_grants",
         StepKind::MoneyGrants,
@@ -193,7 +222,7 @@ pub const STEPS: [BootstrapStep; 20] = [
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 20] = [
+const SCRIPTS: [(&str, &str); 24] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -253,6 +282,22 @@ const SCRIPTS: [(&str, &str); 20] = [
     (
         "Sql.160_fo_room_charge_grants.sql",
         include_str!("../../assets/sql/160_fo_room_charge_grants.sql"),
+    ),
+    (
+        "Sql.170_txn_stock.sql",
+        include_str!("../../assets/sql/170_txn_stock.sql"),
+    ),
+    (
+        "Sql.175_bo_stock_grants.sql",
+        include_str!("../../assets/sql/175_bo_stock_grants.sql"),
+    ),
+    (
+        "Sql.176_bo_count_grants.sql",
+        include_str!("../../assets/sql/176_bo_count_grants.sql"),
+    ),
+    (
+        "Sql.177_bo_receipt_grants.sql",
+        include_str!("../../assets/sql/177_bo_receipt_grants.sql"),
     ),
     (
         "Sql.180_money_grants.sql",
@@ -661,6 +706,10 @@ mod tests {
                 "txn_store_key",
                 "txn_shift_grants",
                 "fo_room_charge_grants",
+                "txn_stock",
+                "bo_stock_grants",
+                "bo_count_grants",
+                "bo_receipt_grants",
                 "money_grants",
                 "fo_inhouse_grants",
                 "post_to_smile_grants",

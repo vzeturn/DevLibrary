@@ -75,8 +75,9 @@ pub mod site_command_reasons {
 pub mod site_command_contract {
     use super::*;
     use crate::contracts::wire::{
-        money_command_types as m, order_command_types as o, table_command_types as t,
-        txn_command_types as x,
+        money_command_types as m, order_command_types as o, pos_stock_types,
+        table_command_types as t, txn_command_types as x, txn_stock_count_types,
+        txn_stock_issue_types, txn_stock_receipt_types, txn_stock_types,
     };
 
     /// Contract version.
@@ -120,6 +121,8 @@ pub mod site_command_contract {
         spec(site_command_types::POS_BILL_LIST, Durable, 3),
         spec(site_command_types::FO_INHOUSE_SEARCH, Interactive, 1),
         spec(site_command_types::POS_ORDER_RESIDUE, Durable, 3),
+        // RT-1024 (ADR 0165): read-only SMILE_BO stock balance; ported to Rust by RT-1427.
+        spec(pos_stock_types::STOCK_BALANCE, Durable, 3),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),
         spec(o::SEND, Interactive, 3),
@@ -148,6 +151,19 @@ pub mod site_command_contract {
         // delivery as the other txn verbs.
         spec(x::ROOM_CHARGE, Durable, 10),
         spec(x::ROOM_CHARGE_VOID, Durable, 10),
+        // ADR 0164 (RT-1022): recipe stock depletion and its restore into SMILE_BO, same delivery
+        // as the other txn verbs (RT-1427: ported from the PDAOrder agent).
+        spec(txn_stock_types::DEPLETE, Durable, 10),
+        spec(txn_stock_types::RESTORE, Durable, 10),
+        // ADR 0167 (RT-1114): the physical count voucher into SMILE_BO, same delivery as the
+        // other stock verbs.
+        spec(txn_stock_count_types::STOCK_COUNT, Durable, 10),
+        // ADR 0169 (RT-1113): the goods receipt (100 / 10) into SMILE_BO, same delivery as the
+        // other stock verbs.
+        spec(txn_stock_receipt_types::STOCK_RECEIPT, Durable, 10),
+        // ADR 0168 (RT-1112): the stock issue voucher (200 / 50) into SMILE_BO, same delivery as
+        // the other stock verbs.
+        spec(txn_stock_issue_types::STOCK_ISSUE, Durable, 10),
     ];
 
     /// The spec of a type (ordinal).

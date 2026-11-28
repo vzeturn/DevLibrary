@@ -105,6 +105,9 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
             script.contains("CREATE USER")
                 && !script.contains("dbo.Folio")
                 && !script.contains("db_datawriter")
+                && !script.contains("INVUpdateGLAvg")
+                && !script.contains("dbo.InvSession")
+                && !script.contains("dbo.RCVUpdateGL")
         }
         StepKind::Grants => grant && script.contains("Pda_SyncState"),
         StepKind::CommandGrants => grant && script.contains("dbo.TableReservation"),
@@ -115,6 +118,15 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
         StepKind::TxnApplied => grant && script.contains("CREATE TABLE dbo.Pda_TxnApplied"),
         StepKind::TxnGrants => grant && script.contains("dbo.TmpPayment"),
         StepKind::TxnStoreKey => script.contains("ADD StoreKey BIGINT NULL"),
+        StepKind::BoStockGrants => {
+            grant && script.contains("GRANT EXECUTE ON OBJECT::dbo.INVUpdateGLAvg")
+        }
+        StepKind::BoCountGrants => {
+            grant && script.contains("GRANT SELECT, INSERT ON OBJECT::dbo.InvSession")
+        }
+        StepKind::BoReceiptGrants => {
+            grant && script.contains("GRANT EXECUTE ON OBJECT::dbo.RCVUpdateGL")
+        }
         StepKind::TxnShiftGrants => grant && script.contains("dbo.DailyCashLog TO"),
         StepKind::FoRoomChargeGrants => {
             script.contains("PostInterfaceTransactionToFolio") && !script.contains("ADR 0179")
