@@ -223,12 +223,14 @@ impl Runner {
         ) {
             Ok(p) => {
                 if let Some(e) = p.edit_error {
-                    // Edit detection failed; the never-sent keys are still valid.
-                    log::error(
-                        "read: select pending collect failed",
+                    // Edit detection failed; the never-sent keys are still valid and the
+                    // sweep retries with a smaller page or later (RT-1101), so this is a
+                    // warning (item_errors -> einvoice_collect_failed), not an SQL error.
+                    log::warn(
+                        "read: edit detection failed, will retry",
                         &[("source", V::S(source)), ("error", V::S(&e))],
                     );
-                    failed.sql.push(e);
+                    failed.items.push(e);
                 }
                 p.keys
             }
