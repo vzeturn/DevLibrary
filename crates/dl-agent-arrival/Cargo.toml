@@ -23,6 +23,7 @@ dl-decimal.workspace = true
 dl-uuid.workspace = true
 dl-http.workspace = true
 dl-tds.workspace = true
+dl-agent-smile-shared.workspace = true
 dl-winsvc.workspace = true
 
 [lints]

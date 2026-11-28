@@ -56,7 +56,18 @@ pub struct Bundle {
 pub fn bundle() -> &'static Bundle {
     static BUNDLE: OnceLock<Bundle> = OnceLock::new();
     BUNDLE.get_or_init(|| {
-        let text = SOURCE.replace("\r\n", "\n");
+        // RT-1432: the shared SA_ layer goes first, as ordinary `pms` batches, so the procedures
+        // below can call it and a changed layer changes the bundle hash (reinstall).
+        let mut text = String::new();
+        for (_, body) in dl_agent_smile_shared::SCRIPTS {
+            for b in dl_agent_smile_shared::split_batches(&body.replace("\r\n", "\n")) {
+                text.push_str(MARKER);
+                text.push_str("pms\n");
+                text.push_str(b.trim());
+                text.push('\n');
+            }
+        }
+        text.push_str(&SOURCE.replace("\r\n", "\n"));
         let batches = parse(&text);
         let picture: Vec<&str> = batches
             .iter()
