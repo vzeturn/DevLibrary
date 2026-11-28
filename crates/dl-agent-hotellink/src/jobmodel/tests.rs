@@ -242,6 +242,17 @@ fn content_hash_stable() {
 }
 
 #[test]
+fn room_variant_is_agent_local() {
+    // RT-1474: the reconciler's variant suffix never reaches the wire or the hash.
+    let mut j = sample_job();
+    j.rooms.as_mut().unwrap()[0].variant = "e7f122ef".into();
+    assert_eq!(j.to_json(), golden("sample"));
+    assert_eq!(j.content_hash(), golden("sampleHash"));
+    let back = Job::from_value(&dl_json::parse(&j.to_json()).unwrap());
+    assert!(back.rooms()[0].variant.is_empty());
+}
+
+#[test]
 fn content_hash_ignores_hl_fields() {
     let mut f = full_job();
     // full_job adds a second room and an item id, which are business fields.

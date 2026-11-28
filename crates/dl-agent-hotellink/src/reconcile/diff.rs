@@ -9,7 +9,7 @@ use super::build::{rates_equal, room_rates};
 use super::history::{CreateLog, create_summary, update_summary};
 use super::{
     Reconciler, build_folio, item_key, manual_conflict_err, merge_rooms_by_item, next_seq,
-    pick_to_cancel, room_item_key,
+    pick_to_cancel, room_key,
 };
 use crate::error::{Error, Result};
 use crate::gofmt::f0;
@@ -71,7 +71,7 @@ impl Reconciler {
                     job.booking_id, room.room_type_code
                 )));
             }
-            let key = room_item_key(&room.room_type_code, &room.rate_plan_id);
+            let key = room_key(room);
             let seq_start = seq_start_by_item
                 .and_then(|m| m.get(&key).copied())
                 .unwrap_or(0);
@@ -131,10 +131,7 @@ impl Reconciler {
         }
         self.log_merge_conflicts(job);
         let want_rooms = merge_rooms_by_item(job.rooms());
-        let job_items: HashSet<String> = want_rooms
-            .iter()
-            .map(|r| room_item_key(&r.room_type_code, &r.rate_plan_id))
-            .collect();
+        let job_items: HashSet<String> = want_rooms.iter().map(room_key).collect();
 
         let op = self.op_modify();
         let in_house = || {
@@ -157,7 +154,7 @@ impl Reconciler {
                     }
                 }
                 for room in &want_rooms {
-                    if room_item_key(&room.room_type_code, &room.rate_plan_id) != *key {
+                    if room_key(room) != *key {
                         continue;
                     }
                     let have = cur.len() as i64;
@@ -205,7 +202,7 @@ impl Reconciler {
         // PHASE A: update survivors, create what is missing.
         let mut seq_start_by_item: HashMap<String, i64> = HashMap::new();
         for room in &want_rooms {
-            let key = room_item_key(&room.room_type_code, &room.rate_plan_id);
+            let key = room_key(room);
             let empty = Vec::new();
             let cur = cur_by_item.get(&key).unwrap_or(&empty);
             let cancel_ids: HashSet<i32> = reduce_cancel_by_item

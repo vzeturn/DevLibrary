@@ -5,6 +5,7 @@ mod cancel;
 mod history;
 mod lookup;
 mod modify;
+mod multirate;
 mod policy;
 mod save;
 mod split;
@@ -439,6 +440,22 @@ pub(crate) fn repo_with(folios: Vec<Folio>) -> Arc<FakeRepo> {
         s.folios = folios;
     }
     repo
+}
+
+/// Makes the inserted folios the live ones and clears the recorded writes.
+pub(crate) fn reset_to_inserted(repo: &FakeRepo, want: usize) {
+    let mut s = repo.st();
+    assert_eq!(s.inserted.len(), want, "inserted");
+    let ins = std::mem::take(&mut s.inserted);
+    s.folios = ins.iter().map(|i| i.f.clone()).collect();
+    s.folio_rates = ins
+        .iter()
+        .map(|i| (i.f.folio_num as i64, i.rates.clone()))
+        .collect();
+    s.cancelled.clear();
+    s.updates.clear();
+    s.replaced_rates.clear();
+    s.confirm_num_calls = 0;
 }
 
 /// `(updates, inserted, cancelled, replacedRates)` counts.
