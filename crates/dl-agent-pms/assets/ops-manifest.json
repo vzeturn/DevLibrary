@@ -1743,7 +1743,8 @@
             "table": "Folio",
             "columns": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "where": [
               {
@@ -1765,15 +1766,6 @@
                 }
               },
               {
-                "column": "CancelNum",
-                "op": "=",
-                "param": {
-                  "name": "noCancel",
-                  "type": "int",
-                  "value": 0
-                }
-              },
-              {
                 "column": "RoomTypeCode",
                 "op": "<>",
                 "param": {
@@ -1804,7 +1796,8 @@
             ],
             "order_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "max_rows": 10000,
             "aggregates": [
@@ -1820,7 +1813,8 @@
             ],
             "group_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "date_bucket": [
               "ArrivalDate",
@@ -1833,7 +1827,8 @@
             "table": "Folio",
             "columns": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "where": [
               {
@@ -1846,15 +1841,6 @@
                 }
               },
               {
-                "column": "CancelNum",
-                "op": "=",
-                "param": {
-                  "name": "noCancel",
-                  "type": "int",
-                  "value": 0
-                }
-              },
-              {
                 "column": "RoomTypeCode",
                 "op": "<>",
                 "param": {
@@ -1885,7 +1871,8 @@
             ],
             "order_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "max_rows": 10000,
             "aggregates": [
@@ -1901,7 +1888,8 @@
             ],
             "group_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "date_bucket": [
               "ArrivalDate",
@@ -1914,7 +1902,8 @@
             "table": "Folio",
             "columns": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "where": [
               {
@@ -1924,15 +1913,6 @@
                   "name": "stOoi",
                   "type": "int",
                   "value": 4
-                }
-              },
-              {
-                "column": "CancelNum",
-                "op": "=",
-                "param": {
-                  "name": "noCancel",
-                  "type": "int",
-                  "value": 0
                 }
               },
               {
@@ -1966,7 +1946,8 @@
             ],
             "order_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "max_rows": 10000,
             "aggregates": [
@@ -1982,7 +1963,8 @@
             ],
             "group_by": [
               "ArrivalDate",
-              "DepartureDate"
+              "DepartureDate",
+              "CancelNum"
             ],
             "date_bucket": [
               "ArrivalDate",
@@ -2450,7 +2432,8 @@
           "select": {
             "table": "Folio",
             "columns": [
-              "MarketSegmentCode"
+              "MarketSegmentCode",
+              "CancelNum"
             ],
             "where": [
               {
@@ -2460,15 +2443,6 @@
                   "name": "inHouse",
                   "type": "int",
                   "value": 2
-                }
-              },
-              {
-                "column": "CancelNum",
-                "op": "=",
-                "param": {
-                  "name": "noCancel",
-                  "type": "int",
-                  "value": 0
                 }
               },
               {
@@ -2501,7 +2475,8 @@
               }
             ],
             "order_by": [
-              "MarketSegmentCode"
+              "MarketSegmentCode",
+              "CancelNum"
             ],
             "max_rows": 10000,
             "aggregates": [
@@ -2516,7 +2491,8 @@
               }
             ],
             "group_by": [
-              "MarketSegmentCode"
+              "MarketSegmentCode",
+              "CancelNum"
             ],
             "date_bucket": []
           }
