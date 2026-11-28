@@ -148,8 +148,20 @@ impl SqlSiteCommandStore {
             return Ok(recorded);
         }
         let result = {
-            let mut unit = SqlSiteCommandUnit { c: &mut *c };
-            work(&mut unit, ctx)?
+            let mut unit = SqlSiteCommandUnit {
+                c: &mut *c,
+                long_timeout: false,
+            };
+            let done = work(&mut unit, ctx);
+            // The stock unit runs at SqlClient's default 30 s; the pooled connection goes back
+            // to the command timeout (a failed restore only matters when the command succeeded).
+            if unit.long_timeout && !unit.c.is_broken() {
+                let restored = unit.c.set_timeout(Some(COMMAND_TIMEOUT));
+                if done.is_ok() {
+                    restored?;
+                }
+            }
+            done?
         };
         if result.command_id != command_id {
             return Err(CommandError::invalid(format!(
@@ -213,6 +225,8 @@ impl SiteCommandStore for SqlSiteCommandStore {
 /// [`SqlSiteCommandStore`] (`SqlSiteCommandUnit`).
 pub struct SqlSiteCommandUnit<'c> {
     pub(crate) c: &'c mut Client,
+    /// The connection runs at the stock unit's 30 s timeout (`sql_stock`, RT-1427).
+    pub(crate) long_timeout: bool,
 }
 
 impl SqlSiteCommandUnit<'_> {
@@ -371,6 +385,10 @@ impl SiteCommandUnit for SqlSiteCommandUnit<'_> {
     }
 
     fn room_charge(&mut self) -> &mut dyn super::txn_room_charge::TxnRoomChargeUnit {
+        self
+    }
+
+    fn stock(&mut self) -> &mut dyn super::stock_unit::TxnStockUnit {
         self
     }
 }

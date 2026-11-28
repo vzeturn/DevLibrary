@@ -1,5 +1,6 @@
-//! The read-only SMILE_POS verbs (RT-1427, ported from the PDAOrder agent):
-//! `pos.revenue_summary` (ADR 0149, RT-0843) and `pos.bill_list` (RT-0842). Each answers
+//! The read-only store verbs (RT-1427, ported from the PDAOrder agent):
+//! `pos.revenue_summary` (ADR 0149, RT-0843), `pos.bill_list` (RT-0842) and the SMILE_BO
+//! `pos.stock_balance` (RT-1024, ADR 0165). Each answers
 //! from SELECTs on its source: no write transaction and no `Pda_SyncCommandLog` row, so a
 //! redelivery simply reads again. An invalid payload is the `invalid_payload` rejection
 //! that never reaches the source; an error (cancellation, SQL) propagates unchanged, since
@@ -11,10 +12,11 @@ use super::{SiteCommandExecutor, reasons};
 use crate::commands::error::Result;
 use crate::commands::pos_bills::PosBillSource;
 use crate::commands::pos_revenue::PosRevenueSource;
+use crate::commands::pos_stock::PosStockSource;
 use crate::contracts::WireJson;
 use crate::contracts::wire::{
     PosBillListPayload, PosBillListResult, PosRevenueSummaryPayload, PosRevenueSummaryResult,
-    SyncCommand, SyncCommandResult,
+    PosStockBalancePayload, PosStockBalanceResult, SyncCommand, SyncCommandResult,
 };
 use crate::reporting::Value;
 use crate::util::ctx::Ctx;
@@ -24,6 +26,7 @@ use crate::util::ctx::Ctx;
 pub(super) struct PosReads {
     revenue: Option<Arc<dyn PosRevenueSource>>,
     bills: Option<Arc<dyn PosBillSource>>,
+    stock: Option<Arc<dyn PosStockSource>>,
 }
 
 impl SiteCommandExecutor {
@@ -36,6 +39,12 @@ impl SiteCommandExecutor {
     /// Runs `pos.bill_list` from `source` (without one the type is unknown).
     pub fn with_bills(mut self, source: Arc<dyn PosBillSource>) -> Self {
         self.reads.bills = Some(source);
+        self
+    }
+
+    /// Runs `pos.stock_balance` reading from `source` (without one the type is unknown).
+    pub fn with_stock_balance(mut self, source: Arc<dyn PosStockSource>) -> Self {
+        self.reads.stock = Some(source);
         self
     }
 
@@ -103,6 +112,55 @@ impl SiteCommandExecutor {
             business_date: p.business_date,
             bills,
             truncated,
+        };
+        Ok(self.applied(c, Some(result.to_element())))
+    }
+
+    /// Runs `pos.stock_balance`: Applied with a [`PosStockBalanceResult`], or a rejection.
+    pub(super) fn pos_stock_balance(
+        &self,
+        c: &SyncCommand,
+        ctx: &Ctx,
+    ) -> Result<SyncCommandResult> {
+        let Some(p) = PosStockBalancePayload::from_element(&c.payload) else {
+            return Ok(self.invalid(c, "payload is not a pos.stock_balance object"));
+        };
+        if let Some(problem) = p.problem() {
+            return Ok(self.invalid(c, &problem));
+        }
+        let Some(source) = self.reads.stock.clone() else {
+            return Ok(self.reject(c, reasons::UNKNOWN_TYPE));
+        };
+        let codes: Vec<String> = p.item_codes.iter().map(|c| c.trim().to_owned()).collect();
+        let read = source.read(p.store_code, &codes, ctx)?;
+        if let Some(refusal) = read.refusal {
+            self.log.warn(
+                "pos.stock_balance {Id}: store {Store} refused: {Reason}",
+                &[
+                    Value::from(c.command_id),
+                    Value::from(p.store_code),
+                    Value::from(refusal),
+                ],
+            );
+            return Ok(self.reject(c, refusal));
+        }
+        self.log.info(
+            "pos.stock_balance {Id}: store {Store} -> SMILE_BO {Database} store {Rvc} reason {Reason}: {Asked} item(s) asked, {Found} with ledger lines",
+            &[
+                Value::from(c.command_id),
+                Value::from(p.store_code),
+                Value::from(read.database.as_str()),
+                Value::from(read.store_rvc),
+                p.reason.as_deref().map_or(Value::Null, Value::from),
+                Value::from(p.item_codes.len()),
+                Value::from(read.items.len()),
+            ],
+        );
+        let result = PosStockBalanceResult {
+            store_code: p.store_code,
+            database: read.database,
+            store_rvc: read.store_rvc,
+            items: read.items,
         };
         Ok(self.applied(c, Some(result.to_element())))
     }

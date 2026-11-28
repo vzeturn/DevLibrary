@@ -43,6 +43,10 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "txn_store_key",
             "txn_shift_grants",
             "fo_room_charge_grants",
+            "txn_stock",
+            "bo_stock_grants",
+            "bo_count_grants",
+            "bo_receipt_grants",
             "money_grants",
             "fo_inhouse_grants",
             "post_to_smile_grants",
@@ -362,7 +366,7 @@ fn expect(rows: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
 
 /// An agent-owned table: `Pda_Sync*` or `Pda_TxnApplied` (ADR 0159).
 fn agent_owned(t: &str) -> bool {
-    t.starts_with("Pda_Sync") || t == "Pda_TxnApplied"
+    t.starts_with("Pda_Sync") || t == "Pda_TxnApplied" || t.starts_with("Pda_TxnStock")
 }
 
 #[test]
@@ -379,6 +383,9 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::TxnStoreKey
                 | StepKind::TxnShiftGrants
                 | StepKind::FoRoomChargeGrants
+                | StepKind::BoStockGrants
+                | StepKind::BoCountGrants
+                | StepKind::BoReceiptGrants
                 | StepKind::MoneyGrants
                 | StepKind::FoInhouseGrants
                 | StepKind::PostToSmileGrants
@@ -519,10 +526,11 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
     assert_eq!(step.id, "sequence_grants");
     assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
     // RT-1427: the txn steps (130, 140, 145, 150, 160) run after the sequence grants, then
-    // the money grants (180, ADR 0174).
+    // the stock steps (170..177) and the money grants (180, ADR 0174).
     let at = STEPS.iter().position(|s| s == step).unwrap();
     assert_eq!(STEPS[at + 1].kind, StepKind::TxnApplied);
-    assert_eq!(STEPS[at + 6].kind, StepKind::MoneyGrants);
+    assert_eq!(STEPS[at + 6].kind, StepKind::Table);
+    assert_eq!(STEPS[at + 10].kind, StepKind::MoneyGrants);
     let sql = code(read_script(step.resource_name).unwrap());
     // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
     // and is quoted, and the grant follows the object's kind.

@@ -7,11 +7,17 @@
 #![allow(dead_code)]
 
 mod money;
+mod nudge;
 mod orders;
+mod stock;
+pub mod stock_cmd;
 mod txn;
 mod txn_fo;
 
+#[allow(unused_imports)]
+pub use nudge::CountingNudge;
 pub use orders::{Check, Line, OrderBook};
+pub use stock::StockState;
 pub use txn::TxnState;
 #[allow(unused_imports)]
 pub use txn_fo::{CounterBook, FakeFolioRow, FolioBook};
@@ -20,11 +26,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dl_agent_pda_sync::capture::CaptureNudge;
 use dl_agent_pda_sync::commands::{
     CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCloseOutcome,
     OrderCommandUnit, OrderLineFacts, OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit,
-    StoreColumn, TableCommandUnit, TxnCommandUnit, TxnCounterUnit, TxnRoomChargeUnit,
+    StoreColumn, TableCommandUnit, TxnCommandUnit, TxnCounterUnit, TxnRoomChargeUnit, TxnStockUnit,
 };
 use dl_agent_pda_sync::config::{ManualClock, SharedClock, Timestamp};
 use dl_agent_pda_sync::contracts::wire::{
@@ -55,6 +60,8 @@ pub struct State {
     pub orders: OrderBook,
     /// txn.snapshot rows (ADR 0159).
     pub txn: TxnState,
+    /// SMILE_BO stock (ADR 0164, 0167, 0168, 0169).
+    pub stock: StockState,
 }
 
 impl Default for State {
@@ -67,6 +74,7 @@ impl Default for State {
             fingerprints: HashMap::new(),
             orders: OrderBook::default(),
             txn: TxnState::default(),
+            stock: StockState::default(),
         }
     }
 }
@@ -361,6 +369,10 @@ impl SiteCommandUnit for Unit<'_> {
     }
 
     fn room_charge(&mut self) -> &mut dyn TxnRoomChargeUnit {
+        self
+    }
+
+    fn stock(&mut self) -> &mut dyn TxnStockUnit {
         self
     }
 }
@@ -760,32 +772,6 @@ impl TableCommandUnit for Unit<'_> {
         self.touch(p.rvc_no, p.from_check_no);
         self.touch(p.rvc_no, p.to_check_no);
         Ok(self.owner.knobs().move_audit_error)
-    }
-}
-
-/// Counts capture nudges and records the checks a nudge asked to re-read (RT-1309).
-#[derive(Default)]
-pub struct CountingNudge(pub AtomicUsize, pub Mutex<Vec<String>>);
-
-impl CountingNudge {
-    pub fn count(&self) -> usize {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    #[allow(dead_code)]
-    pub fn checks(&self) -> Vec<String> {
-        self.1.lock().unwrap().clone()
-    }
-}
-
-impl CaptureNudge for CountingNudge {
-    fn nudge_open_checks(&self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn nudge_open_check(&self, check_key: &str) {
-        self.1.lock().unwrap().push(check_key.to_owned());
-        self.nudge_open_checks();
     }
 }
 

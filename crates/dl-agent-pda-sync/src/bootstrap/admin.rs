@@ -603,6 +603,17 @@ impl SqlAdmin for SqlServerAdmin {
         if step.kind == StepKind::FoRoomChargeGrants {
             return super::fo_room_charge_check::fo_room_charge_grants_exist(&mut c, step, ctx);
         }
+        if matches!(
+            step.kind,
+            StepKind::BoStockGrants | StepKind::BoCountGrants | StepKind::BoReceiptGrants
+        ) {
+            return super::bo_grant_checks::bo_grants_exist(
+                &mut c,
+                step.kind,
+                step.object_name,
+                ctx,
+            );
+        }
         let r = run(
             &mut c,
             &exists_query(),

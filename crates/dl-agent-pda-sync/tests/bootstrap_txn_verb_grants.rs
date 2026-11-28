@@ -76,8 +76,9 @@ fn the_txn_verb_scripts_run_right_after_the_txn_grants() {
             ),
         ]
     );
-    // The money verbs' 180 follows (this agent has no stock scripts yet).
-    assert_eq!(STEPS[at + 4].id, "money_grants");
+    // The stock verbs' scripts (170..177) follow, then the money verbs' 180.
+    assert_eq!(STEPS[at + 4].id, "txn_stock");
+    assert_eq!(STEPS[at + 8].id, "money_grants");
 }
 
 #[test]

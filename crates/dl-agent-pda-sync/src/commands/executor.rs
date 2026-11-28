@@ -29,8 +29,9 @@ use crate::contracts::wire::{
     OrderSendPayload, OrderTableChangePayload, OrderTableTransferPayload, ReservationCancelPayload,
     ReservationSavePayload, ReservationSavedResult, SyncCommand, SyncCommandResult,
     check_aggregate, kds_line_actions, money_command_types, order_command_reasons as order,
-    order_command_types, site_command_reasons, site_command_types, table_command_reasons as table,
-    table_command_types, txn_command_types,
+    order_command_types, pos_stock_types, site_command_reasons, site_command_types,
+    table_command_reasons as table, table_command_types, txn_command_types, txn_stock_count_types,
+    txn_stock_issue_types, txn_stock_receipt_types, txn_stock_types,
 };
 use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
@@ -38,6 +39,11 @@ use crate::util::ctx::Ctx;
 
 mod money;
 mod pos_reads;
+mod stock_bill;
+mod stock_count;
+mod stock_issue;
+mod stock_receipt;
+mod stock_run;
 mod txn;
 mod txn_counters;
 mod txn_room_charge;
@@ -156,6 +162,8 @@ pub struct SiteCommandExecutor {
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
     reads: pos_reads::PosReads,
+    /// The SMILE_BO databases the stock verbs already checked in this run.
+    stock_caches: stock_run::StockCaches,
     mapper: Option<Arc<CatalogRowMapper>>,
 }
 
@@ -185,6 +193,7 @@ impl SiteCommandExecutor {
             grants: None,
             schema,
             reads: pos_reads::PosReads::default(),
+            stock_caches: stock_run::StockCaches::default(),
             mapper: None,
         }
     }
@@ -322,6 +331,7 @@ impl SiteCommandExecutor {
             s::POS_ORDER_RESIDUE => self.pos_order_residue(c, ctx),
             s::POS_REVENUE_SUMMARY => self.pos_revenue(c, ctx),
             s::POS_BILL_LIST => self.pos_bills(c, ctx),
+            pos_stock_types::STOCK_BALANCE => self.pos_stock_balance(c, ctx),
             LEGACY_EXPORT => match &self.legacy_export {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
@@ -343,6 +353,11 @@ impl SiteCommandExecutor {
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             t::PO_NUMBER => self.po_number(c, ctx),
             txn_command_types::SNAPSHOT => self.txn_snapshot(c, ctx),
+            txn_stock_types::DEPLETE => self.txn_stock_deplete(c, ctx),
+            txn_stock_types::RESTORE => self.txn_stock_restore(c, ctx),
+            txn_stock_count_types::STOCK_COUNT => self.txn_stock_count(c, ctx),
+            txn_stock_receipt_types::STOCK_RECEIPT => self.txn_stock_receipt(c, ctx),
+            txn_stock_issue_types::STOCK_ISSUE => self.txn_stock_issue(c, ctx),
             txn_command_types::SHIFT_OPEN | txn_command_types::SHIFT_CLOSE => {
                 self.txn_shift(c, ctx)
             }
