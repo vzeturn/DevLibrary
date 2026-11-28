@@ -58,6 +58,7 @@ impl SqlSiteCommandStore {
         self
     }
 
+    /// A pooled (or new) connection; hand it back with [`release`](Self::release).
     pub(super) fn open(&self, ctx: &Ctx) -> Result<Client> {
         check_ctx(ctx)?;
         loop {
@@ -78,6 +79,7 @@ impl SqlSiteCommandStore {
         Ok(c)
     }
 
+    /// Keeps `c` for the next command unless it broke or holds a transaction.
     pub(super) fn release(&self, c: Client) {
         if !c.is_broken() && !c.in_transaction() {
             let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
