@@ -4,6 +4,7 @@
 //!
 //! The self-update path of the Go agent is not ported: dl-agent updates itself.
 
+mod audit;
 mod booking;
 pub mod side;
 

@@ -4,8 +4,8 @@
 use dl_json::Value;
 
 use super::{
-    CancelPolicy, HlExtra, HlPayment, Job, MappingCmd, MappingRow, OpPolicy, PmsFolio, PmsResult,
-    RateNight, RateNightExtra, Room,
+    AuditRequest, CancelPolicy, HlExtra, HlPayment, Job, MappingCmd, MappingRow, OpPolicy,
+    PmsFolio, PmsResult, RateNight, RateNightExtra, Room,
 };
 
 pub(crate) fn s(v: &Value, k: &str) -> String {
@@ -241,7 +241,7 @@ pub fn policy_from_value(v: &Value) -> CancelPolicy {
     }
 }
 
-/// The long-poll answer: `{jobs, wantMapping, mappingCmds}`.
+/// The long-poll answer: `{jobs, wantMapping, mappingCmds, pmsAudits}`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Poll {
     /// `jobs`.
@@ -250,6 +250,8 @@ pub struct Poll {
     pub want_mapping: bool,
     /// `mappingCmds`.
     pub mapping_cmds: Vec<MappingCmd>,
+    /// `pmsAudits`: read-only PMS audits the hub wants (RT-0702).
+    pub pms_audits: Vec<AuditRequest>,
 }
 
 /// Decodes the long-poll answer.
@@ -258,5 +260,6 @@ pub fn poll_from_value(v: &Value) -> Poll {
         jobs: list(v, "jobs", Job::from_value).unwrap_or_default(),
         want_mapping: b(v, "wantMapping"),
         mapping_cmds: list(v, "mappingCmds", MappingCmd::from_value).unwrap_or_default(),
+        pms_audits: list(v, "pmsAudits", AuditRequest::from_value).unwrap_or_default(),
     }
 }

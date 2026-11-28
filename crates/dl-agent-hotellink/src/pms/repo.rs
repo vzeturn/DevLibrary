@@ -8,6 +8,7 @@ use dl_agent::sql::SqlPool;
 use dl_tds::{Client, Param, Row};
 use dl_time::{Date, DateTime};
 
+use super::audit::{AuditQuery, AuditResult};
 use super::entities::{Folio, Val, ymd};
 use super::insert::{build_insert, truncation_message};
 use super::rows::{AdditionalName, ClientContact, ClientSts, FolioRate, SmileClient};
@@ -105,7 +106,7 @@ pub(super) fn clip_chars(s: &str, n: usize) -> &str {
     }
 }
 
-fn opt_str(row: &Row, i: usize) -> Result<String> {
+pub(super) fn opt_str(row: &Row, i: usize) -> Result<String> {
     Ok(row.get::<Option<String>>(i)?.unwrap_or_default())
 }
 
@@ -729,6 +730,10 @@ FROM ClientSts WHERE ClientCode = @p1",
 }
 
 impl FullRepo for SqlRepo {
+    fn audit_folios(&self, q: &AuditQuery) -> Result<AuditResult> {
+        self.audit_folios_impl(q)
+    }
+
     fn test_connection(&self) -> Result<()> {
         self.with_conn(|c| rows(c, "SELECT 1", &[]).map(|_| ()))
     }

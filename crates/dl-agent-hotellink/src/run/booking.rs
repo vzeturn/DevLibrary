@@ -97,6 +97,10 @@ impl Runner {
             }
             self.process_job(job, hotel_date);
         }
+        // Jobs first, so a booking just applied shows in the audit read (RT-0702).
+        if !poll.pms_audits.is_empty() {
+            self.run_pms_audits(&poll.pms_audits);
+        }
         // The hub hands pending jobs out again on every poll without waiting; with the PMS
         // down they would come straight back (Go polls again at once here).
         if !poll.jobs.is_empty() && self.breaker.state() == "open" {

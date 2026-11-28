@@ -4,11 +4,13 @@
 //! JSON written here is byte-identical to Go's `encoding/json` (field order, `omitempty`,
 //! HTML-safe escaping); [`Job::content_hash`] matches Go's `ContentHash` exactly.
 
+mod audit;
 mod decode;
 pub(crate) mod encode;
 #[cfg(test)]
 mod tests;
 
+pub use audit::{AuditFolio, AuditLogRow, AuditRate, AuditRequest, AuditSnapshot, CAP_PMS_AUDIT};
 pub use decode::{Poll, policy_from_value, poll_from_value};
 
 /// `ActionSave`: create or modify the booking's folios.

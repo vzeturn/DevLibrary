@@ -95,6 +95,10 @@ pub(crate) struct State {
     pub mapping_write_err: Option<Error>,
     /// `TestConnection` fails while this is above zero (counts down per call).
     pub sql_down_calls: usize,
+    /// What `audit_folios` returns (RT-0702); `None` = the default "cannot audit" error.
+    pub audit_result: Option<crate::pms::AuditResult>,
+    /// The queries `audit_folios` saw.
+    pub audit_queries: Vec<crate::pms::AuditQuery>,
     /// How long `InsertFolioWithRates` takes (module tests: a job in flight at stop).
     pub insert_delay: std::time::Duration,
 }
