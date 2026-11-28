@@ -7,8 +7,9 @@
 //! | `selftest` | the module's self-test checks, as JSON | nothing |
 //! | `collect_dry_run` | fetches and builds the bills of a date window ([`crate::dryrun`]) | nothing |
 //! | `writeback_probe` | the write-back target and the login's rights on it | nothing |
+//! | `sweep_probe` | times mode-3 pages of the select SP (the night sweep's query) | nothing |
 //!
-//! The last three block on SQL Server or the platform, so each runs on its own thread, one
+//! The last four block on SQL Server or the platform, so each runs on its own thread, one
 //! at a time, and answers when it ends; the module thread keeps answering everything else.
 
 use std::sync::Arc;
@@ -58,7 +59,7 @@ pub(super) fn answer(ctx: &ModuleContext, cmd: &Command, env: &Env<'_>, detail: 
             None => ctx.complete(&cmd.id, false, detail),
         },
         "selftest" => spawn_check(ctx, cmd, run_selftest),
-        "collect_dry_run" | "writeback_probe" => {
+        "collect_dry_run" | "writeback_probe" | "sweep_probe" => {
             let Some(eff) = env.shared.and_then(|s| s.effective()) else {
                 ctx.complete(&cmd.id, false, &format!("module not collecting: {detail}"));
                 return;
@@ -66,6 +67,10 @@ pub(super) fn answer(ctx: &ModuleContext, cmd: &Command, env: &Env<'_>, detail: 
             let (settings, args) = (env.settings.clone(), cmd.args.clone());
             if kind == "collect_dry_run" {
                 spawn_check(ctx, cmd, move |ctx| dry_run(ctx, &settings, &eff, &args));
+            } else if kind == "sweep_probe" {
+                spawn_check(ctx, cmd, move |ctx| {
+                    sweep_probe(ctx, &settings, &eff, &args)
+                });
             } else {
                 spawn_check(ctx, cmd, move |ctx| {
                     writeback_probe(ctx, &settings, &eff, &args)
@@ -259,6 +264,72 @@ fn writeback_probe(
     if blocked { Err(text) } else { Ok(text) }
 }
 
+/// `einvoice.sweep_probe` (`{"source": "FO"|"POS", "limit": 500, "pages": 3, "timeout_s": 120}`,
+/// all optional): runs mode-3 pages of the select SP in sequence from the top, timing each.
+/// Read-only. Fails when a page failed (the output still lists every page timed).
+fn sweep_probe(
+    ctx: &ModuleContext,
+    settings: &Settings,
+    eff: &Effective,
+    args: &Value,
+) -> Result<String, String> {
+    let source = match args.get("source").and_then(Value::as_str).map(str::trim) {
+        None | Some("") | Some("FO") => "FO",
+        Some("POS") => "POS",
+        Some(other) => return Err(format!("source {other:?}: expected FO or POS")),
+    };
+    let (limit, pages, timeout) = probe_limits(args);
+    let sql = open(ctx, settings, eff)?;
+    let mut out_pages = Vec::new();
+    let (mut after, mut failed) = (None, false);
+    for _ in 0..pages {
+        let (took, r) = sql.time_sweep_page(source, limit, after.clone(), timeout);
+        let mut m = Map::new();
+        m.insert("after", after.clone().map_or(Value::Null, Value::from));
+        m.insert("ms", took.as_millis() as u64);
+        let done = match r {
+            Ok(rows) => {
+                m.insert("rows", rows.len() as u64);
+                m.insert("changed", rows.iter().filter(|r| r.changed).count() as u64);
+                after = rows.last().map(|r| r.id.clone());
+                rows.len() < limit as usize
+            }
+            Err(e) => {
+                m.insert("error", e);
+                failed = true;
+                true
+            }
+        };
+        out_pages.push(Value::Object(m));
+        if done {
+            break;
+        }
+    }
+    report_steps(ctx, &sql);
+    let mut m = Map::new();
+    m.insert("source", source);
+    m.insert("limit", limit as u64);
+    m.insert("timeout_s", timeout.as_secs());
+    m.insert("pages", Value::Array(out_pages));
+    let text = dl_json::to_string(&Value::Object(m));
+    if failed { Err(text) } else { Ok(text) }
+}
+
+/// Clamped `sweep_probe` arguments: page size, page count, per-page timeout.
+fn probe_limits(args: &Value) -> (i64, u64, Duration) {
+    let n = |k: &str, d: u64, lo: u64, hi: u64| {
+        args.get(k)
+            .and_then(Value::as_u64)
+            .unwrap_or(d)
+            .clamp(lo, hi)
+    };
+    (
+        n("limit", 500, 1, 5000) as i64,
+        n("pages", 3, 1, 10),
+        Duration::from_secs(n("timeout_s", 120, 5, 600)),
+    )
+}
+
 fn probe_json(p: &WritebackProbe) -> Value {
     let mut m = Map::new();
     m.insert("database", p.database.as_str());
@@ -322,6 +393,16 @@ mod tests {
         assert_eq!(c.get("collect_sources").unwrap(), &Value::from("POS"));
         assert_eq!(c.get("pos_item_name").unwrap(), &Value::from("iname1"));
         assert_eq!(v.get("enrolled").unwrap(), &Value::from(true));
+    }
+
+    #[test]
+    fn sweep_probe_arguments_are_clamped() {
+        let v = dl_json::parse(r#"{"limit": 999999, "pages": 0, "timeout_s": 1}"#).unwrap();
+        assert_eq!(probe_limits(&v), (5000, 1, Duration::from_secs(5)));
+        assert_eq!(
+            probe_limits(&Value::Null),
+            (500, 3, Duration::from_secs(120))
+        );
     }
 
     #[test]
