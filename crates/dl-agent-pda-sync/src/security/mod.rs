@@ -6,6 +6,8 @@
 //! the installing administrator can both read it; elsewhere it is the plain value in a
 //! file with mode 0600.
 
+pub mod aes_gcm;
+
 use crate::config::{AgentError, AgentPaths, codes};
 use std::fmt;
 use std::io;

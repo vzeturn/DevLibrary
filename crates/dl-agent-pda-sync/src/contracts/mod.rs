@@ -11,7 +11,9 @@
 //! - [`legacy`]: the legacy bundle contract (`manifest.json`, builds, SQL store map).
 //! - [`staff`]: PIN lookup v2.
 //! - [`mapping`]: vendor row to canonical row, row hash and PG row.
+//! - [`cashier`]: the `cashier` master entity (row hash, sealed PIN, write).
 
+pub mod cashier;
 pub mod catalog;
 pub mod hashing;
 pub mod json;

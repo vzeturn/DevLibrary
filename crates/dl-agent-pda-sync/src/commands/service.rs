@@ -59,6 +59,9 @@ pub struct CommandExtras {
     pub events: Option<Arc<dyn SiteEvents>>,
     /// The capture runner's nudge.
     pub nudge: Option<Arc<dyn crate::capture::CaptureNudge>>,
+    /// The staff sync's wake-up; with it `master.upsert` entity `cashier` runs (ADR 0150),
+    /// without it the entity is unsupported.
+    pub staff_nudge: Option<Arc<crate::staff::StaffSyncNudge>>,
 }
 
 /// The executor, channel and grants check of the running agent.
@@ -175,6 +178,12 @@ pub fn build(
         .with_mapper(mapper);
     if let Some(n) = &extras.nudge {
         executor = executor.with_nudge(n.clone());
+    }
+    if let Some(n) = &extras.staff_nudge {
+        executor = executor.with_cashiers(Arc::new(crate::staff::hosting::cashier_support(
+            s,
+            n.clone(),
+        )));
     }
     let channel = Arc::new(CommandChannel::new(
         CommandChannelParts {

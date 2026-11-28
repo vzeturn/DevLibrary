@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 24] = [
+pub const STEPS: [BootstrapStep; 26] = [
     step(
         "login",
         StepKind::Login,
@@ -112,6 +112,22 @@ pub const STEPS: [BootstrapStep; 24] = [
         StepKind::SequenceGrants,
         LOGIN_NAME,
         "Sql.100_sequence_grants.sql",
+        false,
+    ),
+    // RT-1427: the master.upsert grants (ADR 0147) and those of its entity cashier
+    // (ADR 0150), as the .NET agent.
+    step(
+        "master_grants",
+        StepKind::MasterGrants,
+        LOGIN_NAME,
+        "Sql.110_master_grants.sql",
+        false,
+    ),
+    step(
+        "cashier_master_grants",
+        StepKind::CashierMasterGrants,
+        LOGIN_NAME,
+        "Sql.120_cashier_master_grants.sql",
         false,
     ),
     // RT-1427: the txn.snapshot table and grants (ADR 0159) and the keyed StoreKey column
@@ -222,7 +238,7 @@ pub const STEPS: [BootstrapStep; 24] = [
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 24] = [
+const SCRIPTS: [(&str, &str); 26] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -262,6 +278,14 @@ const SCRIPTS: [(&str, &str); 24] = [
     (
         "Sql.100_sequence_grants.sql",
         include_str!("../../assets/sql/100_sequence_grants.sql"),
+    ),
+    (
+        "Sql.110_master_grants.sql",
+        include_str!("../../assets/sql/110_master_grants.sql"),
+    ),
+    (
+        "Sql.120_cashier_master_grants.sql",
+        include_str!("../../assets/sql/120_cashier_master_grants.sql"),
     ),
     (
         "Sql.130_txn_applied.sql",
@@ -701,6 +725,8 @@ mod tests {
                 "order_grants_ow1c",
                 "order_grants_ow1e",
                 "sequence_grants",
+                "master_grants",
+                "cashier_master_grants",
                 "txn_applied",
                 "txn_grants",
                 "txn_store_key",

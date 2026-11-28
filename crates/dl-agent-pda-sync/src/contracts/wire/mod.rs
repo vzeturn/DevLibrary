@@ -65,10 +65,10 @@ pub use print::{
     print_queue_kinds, print_queue_limits, print_spooler_address,
 };
 pub use site_commands::{
-    KdsLineStatePayload, KdsLineStateResult, ReservationCancelPayload, ReservationSavePayload,
-    ReservationSavedResult, SiteCommandDelivery, SiteCommandSpec, SyncResnapshotPayload,
-    SyncResnapshotResult, kds_line_actions, site_command_contract, site_command_reasons,
-    site_command_types,
+    KdsLineStatePayload, KdsLineStateResult, MasterUpsertPayload, MasterUpsertResult,
+    ReservationCancelPayload, ReservationSavePayload, ReservationSavedResult, SiteCommandDelivery,
+    SiteCommandSpec, SyncResnapshotPayload, SyncResnapshotResult, kds_line_actions,
+    site_command_contract, site_command_reasons, site_command_types,
 };
 pub use site_events::{
     SiteEvent, SiteEventBatch, site_event_levels, site_event_limits, site_event_sources,

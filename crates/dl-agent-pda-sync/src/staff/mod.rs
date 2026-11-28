@@ -7,9 +7,11 @@
 //! - [`source`]: `SqlStaffSource.cs`.
 //! - [`runner`]: `StaffSyncRunner.cs`.
 //! - [`hosting`]: `StaffSyncHosting.cs` (the loop and its `after_capture` factory).
+//! - [`nudge`]: `StaffSyncNudge.cs` (the wake-up after a cashier write, ADR 0150).
 
 pub mod cloud;
 pub mod hosting;
+pub mod nudge;
 pub mod pin_hasher;
 pub mod pin_key;
 pub mod runner;
@@ -17,6 +19,7 @@ pub mod source;
 
 pub use cloud::{StaffCloud, StaffCloudClient, StaffCloudResult, StaffCloudStatus, StaffPinKey};
 pub use hosting::{STATE_FILE_NAME, StaffSyncService};
+pub use nudge::{CashierSupport, StaffSyncNudge};
 pub use pin_key::PinKeyProvider;
 pub use runner::{StaffSyncOutcome, StaffSyncParts, StaffSyncRunner, StaffSyncState};
 pub use source::{SqlStaffSource, StaffSource};

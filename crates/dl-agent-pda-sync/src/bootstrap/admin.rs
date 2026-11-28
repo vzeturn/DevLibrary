@@ -2,6 +2,7 @@
 //! `Bootstrap/ISqlAdmin.cs` and `Bootstrap/SqlServerAdmin.cs`).
 
 use super::error::{Error, Result, tds_failure};
+pub use super::exists_sql::exists_query;
 use super::models::{BootstrapStep, SqlInstance, StepKind, TableSet};
 use super::preflight::SqlServerInfo;
 use crate::capture::failure::code_for;
@@ -329,133 +330,6 @@ fn money_grants_exist(c: &mut Client, step: &BootstrapStep, ctx: &Ctx) -> Result
     };
     Ok(n == Some(1))
 }
-
-/// `SqlServerAdmin.ExistsAsync`'s query (CRLF line ends, as the C# raw literal built on
-/// Windows).
-pub fn exists_query() -> String {
-    EXISTS_SQL.replace('\n', "\r\n")
-}
-
-const EXISTS_SQL: &str = "SELECT CASE @kind
-  WHEN 'Login' THEN (SELECT COUNT(*) FROM sys.server_principals WHERE name = @name)
-  WHEN 'User'  THEN (SELECT COUNT(*) FROM sys.database_principals WHERE name = @name)
-  WHEN 'Table' THEN (SELECT COUNT(*) FROM sys.tables WHERE name = @name AND schema_id = SCHEMA_ID('dbo'))
-  WHEN 'Grants' THEN (SELECT CASE WHEN
-        EXISTS (SELECT 1 FROM sys.database_role_members m
-                JOIN sys.database_principals r ON r.principal_id = m.role_principal_id AND r.name = 'db_datareader'
-                JOIN sys.database_principals u ON u.principal_id = m.member_principal_id AND u.name = @name)
-        AND (SELECT COUNT(*) FROM sys.database_permissions p
-             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-             JOIN sys.objects o ON o.object_id = p.major_id AND o.name LIKE N'Pda[_]Sync%'
-             WHERE p.class = 1 AND p.state = 'G' AND p.permission_name IN ('INSERT','UPDATE')) >= 3
-        THEN 1 ELSE 0 END)
-  WHEN 'CommandGrants' THEN (SELECT CASE WHEN
-        (SELECT COUNT(DISTINCT p.permission_name) FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.major_id = OBJECT_ID(N'dbo.TableReservation')
-            AND p.permission_name IN ('INSERT','DELETE')) = 2
-        AND (SELECT COUNT(*) FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-           JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
-          WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.tmpTrnInfo')
-            AND c.name IN (N'IsDone', N'DoneTime', N'KdsAcceptedTime', N'KdsAcceptedBy'))
-          = (SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.tmpTrnInfo')
-              AND name IN (N'IsDone', N'DoneTime', N'KdsAcceptedTime', N'KdsAcceptedBy'))
-        THEN 1 ELSE 0 END)
-  WHEN 'OrderGrants' THEN (SELECT CASE WHEN
-        (SELECT COUNT(*) FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'EXECUTE'
-            AND p.major_id IN (OBJECT_ID(N'dbo.GetRVCSeqNumber'), OBJECT_ID(N'dbo.PostITrn'),
-                               OBJECT_ID(N'dbo.UpdateTmpInvoice'), OBJECT_ID(N'dbo.Unicode2TCVN'))) = 4
-        AND EXISTS (SELECT 1 FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'INSERT'
-            AND p.major_id = OBJECT_ID(N'dbo.VoidTrn'))
-        THEN 1 ELSE 0 END)
-  WHEN 'OrderGrantsOw1c' THEN (SELECT CASE WHEN
-        (SELECT COUNT(*) FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-           JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
-          WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.tmpInvoice')
-            AND c.name IN (N'NGuest', N'NChild', N'LastChgCashier', N'LastChgTime')) = 4
-        THEN 1 ELSE 0 END)
-  WHEN 'OrderGrantsOw1e' THEN (SELECT CASE WHEN
-        EXISTS (SELECT 1 FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-           JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
-          WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.tmpTrn')
-            AND c.name = N'CheckNo')
-        AND EXISTS (SELECT 1 FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'DELETE'
-            AND p.major_id = OBJECT_ID(N'dbo.tmpInvoice'))
-        THEN 1 ELSE 0 END)
-  WHEN 'SequenceGrants' THEN (SELECT CASE WHEN
-        NOT EXISTS (SELECT 1 FROM sys.objects o
-          WHERE o.schema_id = SCHEMA_ID(N'dbo') AND o.type IN ('SO', 'U')
-            AND ((o.name LIKE N'LastCheck[0-9]%' AND SUBSTRING(o.name, 10, 128) NOT LIKE N'%[^0-9]%')
-              OR (o.name LIKE N'LastTrn[0-9]%' AND SUBSTRING(o.name, 8, 128) NOT LIKE N'%[^0-9]%'))
-            AND NOT EXISTS (SELECT 1 FROM sys.database_permissions p
-               JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-              WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = CASE o.type WHEN 'U' THEN 'INSERT' ELSE 'UPDATE' END
-                AND p.major_id = o.object_id))
-        THEN 1 ELSE 0 END)
-  WHEN 'TxnApplied' THEN (SELECT CASE WHEN
-        OBJECT_ID(N'dbo.Pda_TxnApplied', N'U') IS NOT NULL
-        AND (SELECT COUNT(DISTINCT p.permission_name) FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = N'pda_sync'
-          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.major_id = OBJECT_ID(N'dbo.Pda_TxnApplied')
-            AND p.permission_name IN ('SELECT','INSERT','UPDATE')) = 3
-        THEN 1 ELSE 0 END)
-  WHEN 'TxnGrants' THEN (SELECT CASE WHEN
-        NOT EXISTS (SELECT 1 FROM (VALUES (N'dbo.TmpInvoice'), (N'dbo.TmpTrn'), (N'dbo.TmpPayment'), (N'dbo.Invoice'),
-                                          (N'dbo.Trn'), (N'dbo.Payment')) t(name)
-          CROSS JOIN (VALUES ('INSERT'), ('DELETE')) k(perm)
-          WHERE OBJECT_ID(t.name, N'U') IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM sys.database_permissions p
-               JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-              WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = k.perm
-                AND p.major_id = OBJECT_ID(t.name, N'U')))
-        THEN 1 ELSE 0 END)
-  WHEN 'TxnStoreKey' THEN (SELECT CASE WHEN
-        OBJECT_ID(N'dbo.Pda_TxnApplied', N'U') IS NULL
-        OR COL_LENGTH(N'dbo.Pda_TxnApplied', N'StoreKey') IS NOT NULL
-        THEN 1 ELSE 0 END)
-  WHEN 'TxnShiftGrants' THEN (SELECT CASE WHEN
-        (OBJECT_ID(N'dbo.CashierShift', N'U') IS NULL OR (
-          EXISTS (SELECT 1 FROM sys.database_permissions p
-             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'INSERT'
-              AND p.major_id = OBJECT_ID(N'dbo.CashierShift', N'U'))
-          AND EXISTS (SELECT 1 FROM sys.database_permissions p
-             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-             JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
-            WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE'
-              AND p.major_id = OBJECT_ID(N'dbo.CashierShift', N'U') AND c.name = N'CashEnd')))
-        AND (OBJECT_ID(N'dbo.ShiftMoney', N'U') IS NULL OR (SELECT COUNT(DISTINCT p.permission_name) FROM sys.database_permissions p
-             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name IN ('INSERT','DELETE')
-              AND p.major_id = OBJECT_ID(N'dbo.ShiftMoney', N'U')) = 2)
-        AND (OBJECT_ID(N'dbo.DailyCashLog', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
-             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'INSERT'
-              AND p.major_id = OBJECT_ID(N'dbo.DailyCashLog', N'U')))
-        THEN 1 ELSE 0 END)
-  WHEN 'PoNumberGrants' THEN (SELECT CASE WHEN
-        COL_LENGTH(N'dbo.tmpInvoice', N'PONumber') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-           JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
-          WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE' AND p.major_id = OBJECT_ID(N'dbo.tmpInvoice')
-            AND c.name = N'PONumber')
-        THEN 1 ELSE 0 END)
-  WHEN 'FullRwGrants' THEN (SELECT CASE WHEN
-        IS_ROLEMEMBER(N'db_datareader', @name) = 1 AND IS_ROLEMEMBER(N'db_datawriter', @name) = 1
-        AND EXISTS (SELECT 1 FROM sys.database_permissions p
-           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
-          WHERE p.class = 0 AND p.state = 'G' AND p.permission_name = 'EXECUTE')
-        THEN 1 ELSE 0 END)
-  ELSE 0 END";
 
 /// `SELECT name FROM sys.databases ...` of `ListDatabasesAsync`.
 pub const LIST_DATABASES_SQL: &str =

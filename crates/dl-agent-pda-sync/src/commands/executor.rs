@@ -37,6 +37,8 @@ use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
 use crate::util::ctx::Ctx;
 
+mod cashier;
+mod master;
 mod money;
 mod pos_reads;
 mod stock_bill;
@@ -165,6 +167,7 @@ pub struct SiteCommandExecutor {
     /// The SMILE_BO databases the stock verbs already checked in this run.
     stock_caches: stock_run::StockCaches,
     mapper: Option<Arc<CatalogRowMapper>>,
+    pub(super) cashiers: Option<Arc<dyn super::cashier::CashierCommandSupport>>,
 }
 
 struct LockedCheck {
@@ -195,6 +198,7 @@ impl SiteCommandExecutor {
             reads: pos_reads::PosReads::default(),
             stock_caches: stock_run::StockCaches::default(),
             mapper: None,
+            cashiers: None,
         }
     }
 
@@ -243,6 +247,16 @@ impl SiteCommandExecutor {
     /// Re-checks the grants after a permission error.
     pub fn with_grants(mut self, grants: Arc<dyn GrantsCheck>) -> Self {
         self.grants = Some(grants);
+        self
+    }
+
+    /// Runs `master.upsert` entity `cashier` (ADR 0150) with the staff sync's PIN key and
+    /// nudge (without one the entity is unsupported).
+    pub fn with_cashiers(
+        mut self,
+        support: Arc<dyn super::cashier::CashierCommandSupport>,
+    ) -> Self {
+        self.cashiers = Some(support);
         self
     }
 
@@ -316,6 +330,7 @@ impl SiteCommandExecutor {
             s::KDS_LINE_STATE => self.kds_line_state(c, ctx),
             s::RESERVATION_SAVE => self.reservation_save(c, ctx),
             s::RESERVATION_CANCEL => self.reservation_cancel(c, ctx),
+            s::MASTER_UPSERT => self.master_upsert(c, ctx),
             s::SYNC_RESNAPSHOT => match &self.resnapshot {
                 Some(h) => h.execute(c),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),

@@ -9,13 +9,16 @@ use dl_tds::{Client, Param};
 use dl_uuid::Uuid;
 
 use super::error::{CommandError, Result, check_ctx};
+use super::master::{self, MasterEntity, MasterKey};
 use super::sql::{self, COMMAND_TIMEOUT};
 use super::sql_text as q;
 use super::txn::TxnCommandUnit;
 use super::units::{
-    CommandWork, OrderCommandUnit, SiteCommandStore, SiteCommandUnit, TableCommandUnit,
+    CashierCommandUnit, CommandWork, OrderCommandUnit, SiteCommandStore, SiteCommandUnit,
+    TableCommandUnit,
 };
 use crate::contracts::WireJson;
+use crate::contracts::mapping::VendorRow;
 use crate::contracts::wire::{
     CheckStateFingerprint, CheckStateHeader, CheckStateLine, CommandStatus, ReservationSavePayload,
     SyncCommandResult,
@@ -150,6 +153,7 @@ impl SqlSiteCommandStore {
         let result = {
             let mut unit = SqlSiteCommandUnit {
                 c: &mut *c,
+                cashier_schema: None,
                 long_timeout: false,
             };
             let done = work(&mut unit, ctx);
@@ -225,6 +229,8 @@ impl SiteCommandStore for SqlSiteCommandStore {
 /// [`SqlSiteCommandStore`] (`SqlSiteCommandUnit`).
 pub struct SqlSiteCommandUnit<'c> {
     pub(crate) c: &'c mut Client,
+    /// The probed `CashierDef` (ADR 0150), once per unit.
+    pub(crate) cashier_schema: Option<super::sql_cashier::CashierSchema>,
     /// The connection runs at the stock unit's 30 s timeout (`sql_stock`, RT-1427).
     pub(crate) long_timeout: bool,
 }
@@ -368,6 +374,38 @@ impl SiteCommandUnit for SqlSiteCommandUnit<'_> {
         Ok(n > 0)
     }
 
+    fn read_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        for_create: bool,
+        exclude: &[String],
+        bytes_columns: &[String],
+        ctx: &Ctx,
+    ) -> Result<Option<VendorRow>> {
+        master::read_row(self.c, entity, key, for_create, exclude, bytes_columns, ctx)
+    }
+
+    fn update_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        values: &[(&str, &str)],
+        ctx: &Ctx,
+    ) -> Result<bool> {
+        master::update_row(self.c, entity, key, values, ctx)
+    }
+
+    fn insert_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        values: &[(&str, &str)],
+        ctx: &Ctx,
+    ) -> Result<bool> {
+        master::insert_row(self.c, entity, key, values, ctx)
+    }
+
     fn orders(&mut self) -> &mut dyn OrderCommandUnit {
         self
     }
@@ -377,6 +415,10 @@ impl SiteCommandUnit for SqlSiteCommandUnit<'_> {
     }
 
     fn txn(&mut self) -> &mut dyn TxnCommandUnit {
+        self
+    }
+
+    fn cashiers(&mut self) -> &mut dyn CashierCommandUnit {
         self
     }
 
