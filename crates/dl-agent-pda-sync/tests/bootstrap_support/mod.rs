@@ -112,6 +112,9 @@ fn matches(step: &BootstrapStep, script: &str) -> bool {
         StepKind::OrderGrantsOw1c => grant && script.contains("dbo.tmpInvoice (NGuest"),
         StepKind::OrderGrantsOw1e => grant && script.contains("dbo.tmpTrn (CheckNo"),
         StepKind::SequenceGrants => grant && script.contains("dbo.LastCheck"),
+        StepKind::TxnApplied => grant && script.contains("CREATE TABLE dbo.Pda_TxnApplied"),
+        StepKind::TxnGrants => grant && script.contains("dbo.TmpPayment"),
+        StepKind::TxnStoreKey => script.contains("ADD StoreKey BIGINT NULL"),
         StepKind::MoneyGrants => grant && script.contains("ADR 0174"),
         StepKind::FoInhouseGrants => {
             grant && script.contains("dbo.Folio") && !script.contains("ADR 0179")

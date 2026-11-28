@@ -8,13 +8,6 @@ use crate::contracts::json::{self, WireJson};
 use crate::contracts::utf16_len;
 use crate::util::stj::{Obj, ReadError, Writer};
 
-/// Rejection reasons of the room-charge family (`TxnReasons`) this read shares.
-pub mod txn_reasons {
-    /// The RVC's Front Office database (`dbo.Para InterfaceDB`) is not a usable database
-    /// for the agent's login.
-    pub const FOLIO_DATABASE_INVALID: &str = "txn_folio_database_invalid";
-}
-
 /// Payload of [`site_command_types::FO_INHOUSE_SEARCH`](super::site_command_types::FO_INHOUSE_SEARCH):
 /// at most `limit` in-house folios of RVC `rvc` whose room, folio number or name matches
 /// `query`.

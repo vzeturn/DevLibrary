@@ -11,6 +11,7 @@ mod wire;
 mod wire_po_number;
 mod wire_pos_order_residue;
 mod wire_pos_reads;
+mod wire_txn;
 
 use super::catalog::SyncCatalog;
 use super::map::{OrderedMap, StrMap};

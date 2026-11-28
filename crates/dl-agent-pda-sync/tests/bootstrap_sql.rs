@@ -38,6 +38,9 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "order_grants_ow1c",
             "order_grants_ow1e",
             "sequence_grants",
+            "txn_applied",
+            "txn_grants",
+            "txn_store_key",
             "money_grants",
             "fo_inhouse_grants",
             "post_to_smile_grants",
@@ -355,6 +358,11 @@ fn expect(rows: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
     )
 }
 
+/// An agent-owned table: `Pda_Sync*` or `Pda_TxnApplied` (ADR 0159).
+fn agent_owned(t: &str) -> bool {
+    t.starts_with("Pda_Sync") || t == "Pda_TxnApplied"
+}
+
 #[test]
 fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_tables() {
     for step in STEPS.iter().filter(|s| {
@@ -365,6 +373,8 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::OrderGrantsOw1c
                 | StepKind::OrderGrantsOw1e
                 | StepKind::SequenceGrants
+                | StepKind::TxnGrants
+                | StepKind::TxnStoreKey
                 | StepKind::MoneyGrants
                 | StepKind::FoInhouseGrants
                 | StepKind::PostToSmileGrants
@@ -385,10 +395,10 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
         );
         assert!(!squash(sql).contains("ALTER TABLE"), "{}", step.id);
         for t in idents_after(sql, "CREATE TABLE dbo.") {
-            assert!(t.starts_with("Pda_Sync"), "{}: {t}", step.id);
+            assert!(agent_owned(&t), "{}: {t}", step.id);
         }
         for t in idents_after(sql, "ON OBJECT::dbo.") {
-            assert!(t.starts_with("Pda_Sync"), "{}: {t}", step.id);
+            assert!(agent_owned(&t), "{}: {t}", step.id);
         }
     }
 }
@@ -504,9 +514,11 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         .unwrap();
     assert_eq!(step.id, "sequence_grants");
     assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
-    // ADR 0174: the money grants (180) run after the sequence grants.
+    // RT-1427: the txn steps (130, 140, 145) run after the sequence grants, then the money
+    // grants (180, ADR 0174).
     let at = STEPS.iter().position(|s| s == step).unwrap();
-    assert_eq!(STEPS[at + 1].kind, StepKind::MoneyGrants);
+    assert_eq!(STEPS[at + 1].kind, StepKind::TxnApplied);
+    assert_eq!(STEPS[at + 4].kind, StepKind::MoneyGrants);
     let sql = code(read_script(step.resource_name).unwrap());
     // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
     // and is quoted, and the grant follows the object's kind.
@@ -530,4 +542,62 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         assert!(sql.contains(needle), "{needle}");
     }
     assert_eq!(sql.matches("GRANT ").count(), 2);
+}
+
+#[test]
+fn txn_scripts_grant_only_the_bill_tables_and_the_applied_table() {
+    use dl_agent_pda_sync::contracts::wire::txn_scopes;
+    let at = STEPS
+        .iter()
+        .position(|s| s.kind == StepKind::TxnApplied)
+        .unwrap();
+    let ids: Vec<_> = STEPS[at..at + 3]
+        .iter()
+        .map(|s| (s.id, s.kind, s.resource_name))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            (
+                "txn_applied",
+                StepKind::TxnApplied,
+                "Sql.130_txn_applied.sql"
+            ),
+            ("txn_grants", StepKind::TxnGrants, "Sql.140_txn_grants.sql"),
+            (
+                "txn_store_key",
+                StepKind::TxnStoreKey,
+                "Sql.145_txn_store_key.sql"
+            )
+        ]
+    );
+    let code: String = read_script("Sql.140_txn_grants.sql")
+        .unwrap()
+        .lines()
+        .map(|l| l.split("--").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(code.matches("GRANT").count(), 6);
+    for table in txn_scopes::BILL_TABLES {
+        assert!(
+            code.contains(&format!("IF OBJECT_ID(N'dbo.{table}', N'U') IS NOT NULL")),
+            "{table}"
+        );
+        assert!(
+            code.contains(&format!(
+                "GRANT INSERT, DELETE ON OBJECT::dbo.{table} TO [pda_sync];"
+            )),
+            "{table}"
+        );
+    }
+    for word in [
+        "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "UPDATE", "SELECT",
+    ] {
+        assert!(!code.to_ascii_uppercase().contains(word), "{word}");
+    }
+    let applied = read_script("Sql.130_txn_applied.sql").unwrap();
+    assert_eq!(idents_after(applied, "ON OBJECT::dbo."), ["Pda_TxnApplied"]);
+    // ADR 0160: 145 alters only the agent-owned applied table.
+    let key = read_script("Sql.145_txn_store_key.sql").unwrap();
+    assert_eq!(idents_after(key, "ALTER TABLE dbo."), ["Pda_TxnApplied"]);
 }

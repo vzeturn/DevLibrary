@@ -19,6 +19,7 @@ use super::units::{CommandWork, SiteCommandStore, SiteCommandUnit};
 use crate::capture::CaptureNudge;
 use crate::config::time::SharedClock;
 use crate::contracts::WireJson;
+use crate::contracts::mapping::CatalogRowMapper;
 use crate::contracts::time::DateTimeOffset;
 use crate::contracts::wire::{
     CheckStateFingerprint, CommandStatus, KdsLineStatePayload, KdsLineStateResult,
@@ -29,7 +30,7 @@ use crate::contracts::wire::{
     ReservationSavePayload, ReservationSavedResult, SyncCommand, SyncCommandResult,
     check_aggregate, kds_line_actions, money_command_types, order_command_reasons as order,
     order_command_types, site_command_reasons, site_command_types, table_command_reasons as table,
-    table_command_types,
+    table_command_types, txn_command_types,
 };
 use crate::legacy_export::{LEGACY_EXPORT, LegacyExportCommandHandler};
 use crate::reporting::{Logger, Value};
@@ -37,6 +38,7 @@ use crate::util::ctx::Ctx;
 
 mod money;
 mod pos_reads;
+mod txn;
 
 /// Rejection reasons the cloud stores in `sync.commands.last_error`
 /// (`SiteCommandExecutor.Reasons`).
@@ -151,6 +153,7 @@ pub struct SiteCommandExecutor {
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
     reads: pos_reads::PosReads,
+    mapper: Option<Arc<CatalogRowMapper>>,
 }
 
 struct LockedCheck {
@@ -179,6 +182,7 @@ impl SiteCommandExecutor {
             grants: None,
             schema,
             reads: pos_reads::PosReads::default(),
+            mapper: None,
         }
     }
 
@@ -240,7 +244,11 @@ impl SiteCommandExecutor {
     pub fn execute(&self, command: &SyncCommand, ctx: &Ctx) -> Result<SyncCommandResult> {
         let result = match self.dispatch(command, ctx) {
             Ok(r) => r,
-            Err(e) if is_order_verb(&command.type_) && e.is_permission_denied() => {
+            Err(e)
+                if (is_order_verb(&command.type_)
+                    || txn_command_types::is_txn(Some(&command.type_)))
+                    && e.is_permission_denied() =>
+            {
                 // Terminal, not retried to dead (GR1): the transaction rolled back and
                 // nothing was written, so a replay after `grants` applies normally.
                 self.log.warn_ex(
@@ -331,6 +339,7 @@ impl SiteCommandExecutor {
             money_command_types::CHECK_CLOSE => self.check_close(c, ctx),
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             t::PO_NUMBER => self.po_number(c, ctx),
+            txn_command_types::SNAPSHOT => self.txn_snapshot(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
         }
     }

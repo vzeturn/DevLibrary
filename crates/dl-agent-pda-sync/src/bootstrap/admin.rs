@@ -401,6 +401,27 @@ const EXISTS_SQL: &str = "SELECT CASE @kind
               WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = CASE o.type WHEN 'U' THEN 'INSERT' ELSE 'UPDATE' END
                 AND p.major_id = o.object_id))
         THEN 1 ELSE 0 END)
+  WHEN 'TxnApplied' THEN (SELECT CASE WHEN
+        OBJECT_ID(N'dbo.Pda_TxnApplied', N'U') IS NOT NULL
+        AND (SELECT COUNT(DISTINCT p.permission_name) FROM sys.database_permissions p
+           JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = N'pda_sync'
+          WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.major_id = OBJECT_ID(N'dbo.Pda_TxnApplied')
+            AND p.permission_name IN ('SELECT','INSERT','UPDATE')) = 3
+        THEN 1 ELSE 0 END)
+  WHEN 'TxnGrants' THEN (SELECT CASE WHEN
+        NOT EXISTS (SELECT 1 FROM (VALUES (N'dbo.TmpInvoice'), (N'dbo.TmpTrn'), (N'dbo.TmpPayment'), (N'dbo.Invoice'),
+                                          (N'dbo.Trn'), (N'dbo.Payment')) t(name)
+          CROSS JOIN (VALUES ('INSERT'), ('DELETE')) k(perm)
+          WHERE OBJECT_ID(t.name, N'U') IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM sys.database_permissions p
+               JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+              WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = k.perm
+                AND p.major_id = OBJECT_ID(t.name, N'U')))
+        THEN 1 ELSE 0 END)
+  WHEN 'TxnStoreKey' THEN (SELECT CASE WHEN
+        OBJECT_ID(N'dbo.Pda_TxnApplied', N'U') IS NULL
+        OR COL_LENGTH(N'dbo.Pda_TxnApplied', N'StoreKey') IS NOT NULL
+        THEN 1 ELSE 0 END)
   WHEN 'PoNumberGrants' THEN (SELECT CASE WHEN
         COL_LENGTH(N'dbo.tmpInvoice', N'PONumber') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
            JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name

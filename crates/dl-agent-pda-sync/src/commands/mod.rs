@@ -10,7 +10,8 @@
 //!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
 //!   `fo.inhouse_search` (RT-1296); [`PosRevenueSource`] and [`PosBillSource`] answer the
-//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427).
+//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427); [`TxnCommandUnit`]
+//!   is the seam of `txn.snapshot` (ADR 0159, RT-1427).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`ChangeTrackingMonitor`]: the Change Tracking check run
 //!   beside it behind the flag `capture.change_tracking` (RT-1318), one round of which
@@ -45,6 +46,9 @@ mod sql_order_residue;
 mod sql_store;
 mod sql_table;
 pub mod sql_text;
+mod sql_txn;
+mod txn;
+mod txn_value;
 mod units;
 pub mod verify;
 pub mod verify_manifest;
@@ -75,6 +79,19 @@ pub use resnapshot::ResnapshotCommandHandler;
 pub use schema_guard::{LogOnlyEvents, TableSchemaGuard, columns as schema_columns};
 pub use service::{CommandExtras, CommandService};
 pub use sql_store::{ConfigSource, SqlSiteCommandStore, SqlSiteCommandUnit};
+pub use sql_txn::{
+    COLUMNS_SQL as TXN_COLUMNS_SQL, LOCK_SQL as TXN_LOCK_SQL, SAVE_SQL as TXN_SAVE_SQL,
+    SAVEPOINT as TXN_SAVEPOINT, delete_sql as txn_delete_sql, insert_sql as txn_insert_sql,
+    select_sql as txn_select_sql,
+};
+pub use txn::{
+    TxnAppliedState, TxnCommandUnit, aggregate_hash as txn_aggregate_hash,
+    aggregate_line as txn_aggregate_line, convert_rows as txn_convert_rows,
+};
+pub use txn_value::{
+    TCVN3_MAX_LENGTH, TxnInsertValue, TxnLiveColumn, TxnTableWrite, TxnValue,
+    max_chars as txn_max_chars, param as txn_param, try_convert as txn_try_convert,
+};
 pub use units::{
     CheckMoneyFacts, CommandWork, EmptyBillFacts, OrderCloseOutcome, OrderCommandUnit,
     OrderLineFacts, OrderPostOutcome, SiteCommandStore, SiteCommandUnit, StoreColumn,

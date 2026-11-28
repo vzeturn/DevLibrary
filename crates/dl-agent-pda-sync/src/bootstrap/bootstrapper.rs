@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 15] = [
+pub const STEPS: [BootstrapStep; 18] = [
     step(
         "login",
         StepKind::Login,
@@ -114,6 +114,29 @@ pub const STEPS: [BootstrapStep; 15] = [
         "Sql.100_sequence_grants.sql",
         false,
     ),
+    // RT-1427: the txn.snapshot table and grants (ADR 0159) and the keyed StoreKey column
+    // (ADR 0160) the shift verbs use, as the .NET agent.
+    step(
+        "txn_applied",
+        StepKind::TxnApplied,
+        "Pda_TxnApplied",
+        "Sql.130_txn_applied.sql",
+        false,
+    ),
+    step(
+        "txn_grants",
+        StepKind::TxnGrants,
+        LOGIN_NAME,
+        "Sql.140_txn_grants.sql",
+        false,
+    ),
+    step(
+        "txn_store_key",
+        StepKind::TxnStoreKey,
+        "Pda_TxnApplied",
+        "Sql.145_txn_store_key.sql",
+        false,
+    ),
     step(
         "money_grants",
         StepKind::MoneyGrants,
@@ -155,7 +178,7 @@ pub const STEPS: [BootstrapStep; 15] = [
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 15] = [
+const SCRIPTS: [(&str, &str); 18] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -195,6 +218,18 @@ const SCRIPTS: [(&str, &str); 15] = [
     (
         "Sql.100_sequence_grants.sql",
         include_str!("../../assets/sql/100_sequence_grants.sql"),
+    ),
+    (
+        "Sql.130_txn_applied.sql",
+        include_str!("../../assets/sql/130_txn_applied.sql"),
+    ),
+    (
+        "Sql.140_txn_grants.sql",
+        include_str!("../../assets/sql/140_txn_grants.sql"),
+    ),
+    (
+        "Sql.145_txn_store_key.sql",
+        include_str!("../../assets/sql/145_txn_store_key.sql"),
     ),
     (
         "Sql.180_money_grants.sql",
@@ -598,6 +633,9 @@ mod tests {
                 "order_grants_ow1c",
                 "order_grants_ow1e",
                 "sequence_grants",
+                "txn_applied",
+                "txn_grants",
+                "txn_store_key",
                 "money_grants",
                 "fo_inhouse_grants",
                 "post_to_smile_grants",
