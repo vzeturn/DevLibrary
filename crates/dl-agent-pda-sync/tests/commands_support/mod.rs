@@ -9,9 +9,12 @@
 mod money;
 mod orders;
 mod txn;
+mod txn_fo;
 
 pub use orders::{Check, Line, OrderBook};
 pub use txn::TxnState;
+#[allow(unused_imports)]
+pub use txn_fo::{CounterBook, FakeFolioRow, FolioBook};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,7 +24,7 @@ use dl_agent_pda_sync::capture::CaptureNudge;
 use dl_agent_pda_sync::commands::{
     CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCloseOutcome,
     OrderCommandUnit, OrderLineFacts, OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit,
-    StoreColumn, TableCommandUnit, TxnCommandUnit,
+    StoreColumn, TableCommandUnit, TxnCommandUnit, TxnCounterUnit, TxnRoomChargeUnit,
 };
 use dl_agent_pda_sync::config::{ManualClock, SharedClock, Timestamp};
 use dl_agent_pda_sync::contracts::wire::{
@@ -350,6 +353,14 @@ impl SiteCommandUnit for Unit<'_> {
     }
 
     fn txn(&mut self) -> &mut dyn TxnCommandUnit {
+        self
+    }
+
+    fn counters(&mut self) -> &mut dyn TxnCounterUnit {
+        self
+    }
+
+    fn room_charge(&mut self) -> &mut dyn TxnRoomChargeUnit {
         self
     }
 }

@@ -41,6 +41,8 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "txn_applied",
             "txn_grants",
             "txn_store_key",
+            "txn_shift_grants",
+            "fo_room_charge_grants",
             "money_grants",
             "fo_inhouse_grants",
             "post_to_smile_grants",
@@ -375,6 +377,8 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::SequenceGrants
                 | StepKind::TxnGrants
                 | StepKind::TxnStoreKey
+                | StepKind::TxnShiftGrants
+                | StepKind::FoRoomChargeGrants
                 | StepKind::MoneyGrants
                 | StepKind::FoInhouseGrants
                 | StepKind::PostToSmileGrants
@@ -514,11 +518,11 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         .unwrap();
     assert_eq!(step.id, "sequence_grants");
     assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
-    // RT-1427: the txn steps (130, 140, 145) run after the sequence grants, then the money
-    // grants (180, ADR 0174).
+    // RT-1427: the txn steps (130, 140, 145, 150, 160) run after the sequence grants, then
+    // the money grants (180, ADR 0174).
     let at = STEPS.iter().position(|s| s == step).unwrap();
     assert_eq!(STEPS[at + 1].kind, StepKind::TxnApplied);
-    assert_eq!(STEPS[at + 4].kind, StepKind::MoneyGrants);
+    assert_eq!(STEPS[at + 6].kind, StepKind::MoneyGrants);
     let sql = code(read_script(step.resource_name).unwrap());
     // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
     // and is quoted, and the grant follows the object's kind.
@@ -551,7 +555,7 @@ fn txn_scripts_grant_only_the_bill_tables_and_the_applied_table() {
         .iter()
         .position(|s| s.kind == StepKind::TxnApplied)
         .unwrap();
-    let ids: Vec<_> = STEPS[at..at + 3]
+    let ids: Vec<_> = STEPS[at..at + 5]
         .iter()
         .map(|s| (s.id, s.kind, s.resource_name))
         .collect();
@@ -568,6 +572,16 @@ fn txn_scripts_grant_only_the_bill_tables_and_the_applied_table() {
                 "txn_store_key",
                 StepKind::TxnStoreKey,
                 "Sql.145_txn_store_key.sql"
+            ),
+            (
+                "txn_shift_grants",
+                StepKind::TxnShiftGrants,
+                "Sql.150_txn_shift_grants.sql"
+            ),
+            (
+                "fo_room_charge_grants",
+                StepKind::FoRoomChargeGrants,
+                "Sql.160_fo_room_charge_grants.sql"
             )
         ]
     );

@@ -20,7 +20,7 @@ use crate::reporting::Value;
 use crate::util::ctx::Ctx;
 
 /// The message of the error that leaves `run_once` on a store-state refusal.
-const REFUSED: &str = "txn.snapshot refused by the store";
+pub(super) const REFUSED: &str = "txn.snapshot refused by the store";
 
 impl SiteCommandExecutor {
     /// Runs `txn.snapshot` with `mapper` (the catalog mapper capture hashes with; without

@@ -20,6 +20,9 @@ mod streams;
 mod sync_verify;
 mod table_commands;
 mod txn_commands;
+mod txn_counters;
+mod txn_room_charge;
+mod txn_shift;
 
 pub use blobs::{SyncBlobRef, SyncBlobRefBatch, SyncBlobRefsAck, blob_contract};
 pub use envelope::{
@@ -80,4 +83,15 @@ pub use table_commands::{
 pub use txn_commands::{
     TxnSnapshotPayload, TxnSnapshotResult, TxnTableRows, json_int64 as txn_json_int64,
     txn_command_types, txn_outcomes, txn_reasons, txn_scopes,
+};
+pub use txn_counters::{
+    TxnCounterFloor, TxnCounterState, TxnCountersPayload, TxnCountersResult, txn_counter_names,
+};
+pub use txn_room_charge::{
+    TxnRoomChargePayload, TxnRoomChargeResult, TxnRoomChargeVoidPayload, room_charge_hash_line,
+    txn_room_charge_scope,
+};
+pub use txn_shift::{
+    TxnCashPayload, TxnShiftMoneyLine, TxnShiftPayload, TxnShiftResult, is_amount as txn_is_amount,
+    is_moment as txn_is_moment,
 };

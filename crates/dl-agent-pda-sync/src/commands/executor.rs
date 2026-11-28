@@ -39,6 +39,9 @@ use crate::util::ctx::Ctx;
 mod money;
 mod pos_reads;
 mod txn;
+mod txn_counters;
+mod txn_room_charge;
+mod txn_shift;
 
 /// Rejection reasons the cloud stores in `sync.commands.last_error`
 /// (`SiteCommandExecutor.Reasons`).
@@ -340,6 +343,13 @@ impl SiteCommandExecutor {
             t::CHECK_CANCEL_EMPTY => self.check_cancel_empty(c, ctx),
             t::PO_NUMBER => self.po_number(c, ctx),
             txn_command_types::SNAPSHOT => self.txn_snapshot(c, ctx),
+            txn_command_types::SHIFT_OPEN | txn_command_types::SHIFT_CLOSE => {
+                self.txn_shift(c, ctx)
+            }
+            txn_command_types::CASH_IN | txn_command_types::CASH_OUT => self.txn_cash(c, ctx),
+            txn_command_types::COUNTERS => self.txn_counters(c, ctx),
+            txn_command_types::ROOM_CHARGE => self.txn_room_charge(c, ctx),
+            txn_command_types::ROOM_CHARGE_VOID => self.txn_room_charge_void(c, ctx),
             _ => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
         }
     }

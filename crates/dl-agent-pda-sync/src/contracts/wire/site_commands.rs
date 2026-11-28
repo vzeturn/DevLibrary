@@ -76,6 +76,7 @@ pub mod site_command_contract {
     use super::*;
     use crate::contracts::wire::{
         money_command_types as m, order_command_types as o, table_command_types as t,
+        txn_command_types as x,
     };
 
     /// Contract version.
@@ -136,6 +137,17 @@ pub mod site_command_contract {
         spec(t::CHECK_CANCEL_EMPTY, Durable, 8),
         // RT-1413: the guest of a check; waits for the store like the empty-bill cleanup.
         spec(t::PO_NUMBER, Durable, 8),
+        // ADR 0160 (RT-0935): shift and cash verbs of a cloud-authoritative tenant, same delivery
+        // as the snapshot (RT-1427: ported from the PDAOrder agent).
+        spec(x::SHIFT_OPEN, Durable, 10),
+        spec(x::SHIFT_CLOSE, Durable, 10),
+        spec(x::CASH_IN, Durable, 10),
+        spec(x::CASH_OUT, Durable, 10),
+        spec(x::COUNTERS, Durable, 10),
+        // ADR 0162 (RT-0908): room charge and its void into the Front Office folio, same
+        // delivery as the other txn verbs.
+        spec(x::ROOM_CHARGE, Durable, 10),
+        spec(x::ROOM_CHARGE_VOID, Durable, 10),
     ];
 
     /// The spec of a type (ordinal).

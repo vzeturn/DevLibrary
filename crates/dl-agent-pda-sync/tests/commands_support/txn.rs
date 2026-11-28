@@ -13,6 +13,7 @@ use dl_agent_pda_sync::contracts::mapping::{RawValue, VendorRow};
 use dl_agent_pda_sync::util::ctx::Ctx;
 use dl_uuid::Uuid;
 
+use super::txn_fo::{CounterBook, FolioBook};
 use super::{Unit, lock};
 
 /// The txn rows of the fake store.
@@ -28,6 +29,10 @@ pub struct TxnState {
     pub store_keys: HashMap<String, i64>,
     /// Last identity handed out per table (a rollback restores the clone).
     pub identities: HashMap<String, i64>,
+    /// `txn.counters`: the `dbo.Para` counters and their configuration.
+    pub counters: CounterBook,
+    /// The room-charge verbs' Front Office.
+    pub fo: FolioBook,
 }
 
 impl TxnState {
