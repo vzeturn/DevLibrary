@@ -7,10 +7,13 @@
 use dl_uuid::Uuid;
 
 use super::error::Result;
+use super::master::{MasterEntity, MasterKey};
 use super::stock_unit::TxnStockUnit;
 use super::txn::TxnCommandUnit;
 use super::txn_counters::TxnCounterUnit;
 use super::txn_room_charge::TxnRoomChargeUnit;
+use crate::contracts::mapping::VendorRow;
+use crate::contracts::wire::StaffClerk;
 use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
@@ -75,6 +78,39 @@ pub trait SiteCommandUnit {
     /// Deletes reservation `id` of RVC `rvc_no`; false when there is none.
     fn delete_reservation(&mut self, rvc_no: i32, id: i32, ctx: &Ctx) -> Result<bool>;
 
+    /// The row of `entity` for `key` the way capture reads it (live column list minus
+    /// `exclude`, the `bytes_columns` as raw bytes), update-locked until commit (for a
+    /// create, under the per-table create lock with the range held); `None` when absent
+    /// (`master.upsert`).
+    fn read_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        for_create: bool,
+        exclude: &[String],
+        bytes_columns: &[String],
+        ctx: &Ctx,
+    ) -> Result<Option<VendorRow>>;
+
+    /// Runs the entity's update with the `(column, value)` pairs; whether a row changed.
+    fn update_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        values: &[(&str, &str)],
+        ctx: &Ctx,
+    ) -> Result<bool>;
+
+    /// Runs the entity's insert (the caller checked the key is absent under the create
+    /// lock); false when it inserted nothing (no template row, ADR 0152).
+    fn insert_master_row(
+        &mut self,
+        entity: &MasterEntity,
+        key: &MasterKey,
+        values: &[(&str, &str)],
+        ctx: &Ctx,
+    ) -> Result<bool>;
+
     /// The order verbs' writes and reads (OW1b, ADR 0104) in the same transaction.
     fn orders(&mut self) -> &mut dyn OrderCommandUnit;
 
@@ -84,6 +120,10 @@ pub trait SiteCommandUnit {
 
     /// The `txn.*` verbs' reads and writes (ADR 0159) in the same transaction.
     fn txn(&mut self) -> &mut dyn TxnCommandUnit;
+
+    /// The cashier reads and writes of `master.upsert` entity `cashier` (ADR 0150) in the
+    /// same transaction.
+    fn cashiers(&mut self) -> &mut dyn CashierCommandUnit;
 
     /// The `txn.counters` reads and writes (ADR 0161) in the same transaction.
     fn counters(&mut self) -> &mut dyn TxnCounterUnit;
@@ -95,6 +135,55 @@ pub trait SiteCommandUnit {
     /// The SMILE_BO reads and writes of the stock verbs (ADR 0164, 0167, 0168, 0169) in the
     /// same transaction.
     fn stock(&mut self) -> &mut dyn TxnStockUnit;
+}
+
+/// What one cashier write changes at the store (`CashierApply`, ADR 0150): the
+/// `dbo.CashierDef` row (created when `create`), the full `dbo.CashierRVC` set and the
+/// mapped `dbo.ClerkPermission` rows (`allowed` on, every other mapped id off). `pin` is
+/// `None` when the PIN stays; it is never logged and `Debug` hides it.
+#[derive(Clone, Copy)]
+pub struct CashierApply<'a> {
+    /// The store's spelling of the clerk key.
+    pub key: &'a str,
+    /// Insert instead of update.
+    pub create: bool,
+    /// Display name.
+    pub name: &'a str,
+    /// Active (`IsDisable = 0`).
+    pub active: bool,
+    /// Security level.
+    pub security: i32,
+    /// The new PIN (`TouchID`), `None` to keep the stored one.
+    pub pin: Option<&'a str>,
+    /// The full RVC set.
+    pub rvcs: &'a [i32],
+    /// The mapped function ids to allow.
+    pub allowed: &'a [String],
+}
+
+impl std::fmt::Debug for CashierApply<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CashierApply {{ Key = {}, Create = {} }}",
+            self.key, self.create
+        )
+    }
+}
+
+/// The cashier reads and writes of `master.upsert` entity `cashier`
+/// (`ICashierCommandUnit`), inside the command transaction.
+pub trait CashierCommandUnit {
+    /// The clerk exactly as the staff sync projects it (`TouchID` hashed with `pin_key`,
+    /// never returned), its `CashierDef`, `CashierRVC` and `ClerkPermission` rows
+    /// update-locked until commit; `None` when there is no such clerk.
+    fn read(&mut self, key: &str, pin_key: &[u8], ctx: &Ctx) -> Result<Option<StaffClerk>>;
+
+    /// True when an active clerk other than `key` signs in with `pin` (RTRIM of `TouchID`).
+    fn pin_taken(&mut self, key: &str, pin: &str, ctx: &Ctx) -> Result<bool>;
+
+    /// Writes `apply`; a refusal reason when this store's `CashierDef` cannot hold it.
+    fn apply(&mut self, apply: &CashierApply<'_>, ctx: &Ctx) -> Result<Option<String>>;
 }
 
 /// The SMILE_POS writes and reads of the order verbs (OW1b, ADR 0104). Every write is a

@@ -53,6 +53,12 @@ pub struct CashierColumns {
 
 /// The clerk SELECT for the probed columns (`ClerkSql`).
 pub fn clerk_sql(cols: CashierColumns) -> String {
+    clerk_columns_sql(cols) + " FROM dbo.CashierDef c WHERE c.Initial IS NOT NULL;"
+}
+
+/// Key, name, disabled flag, security and `TouchID` of `dbo.CashierDef c`, in that order
+/// (`ClerkColumnsSql`), without the `FROM` clause.
+pub fn clerk_columns_sql(cols: CashierColumns) -> String {
     let mut s = String::from("SELECT RTRIM(c.Initial), ");
     s.push_str(if cols.full_name_is_unicode {
         "RTRIM(c.FullName), "
@@ -69,10 +75,99 @@ pub fn clerk_sql(cols: CashierColumns) -> String {
     } else {
         "CAST(NULL AS INT), "
     });
-    s.push_str(
-        "CAST(c.TouchID AS NVARCHAR(50)) FROM dbo.CashierDef c WHERE c.Initial IS NOT NULL;",
-    );
+    s.push_str("CAST(c.TouchID AS NVARCHAR(50))");
     s
+}
+
+/// One row of [`clerk_columns_sql`] as read (the trimmed key, `None` for a NULL key).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ClerkRow {
+    /// `RTRIM(Initial)`, trimmed.
+    pub key: Option<String>,
+    /// `FullName` (TCVN3-decoded on a `varchar` column), empty for NULL.
+    pub name: String,
+    /// Not `IsDisable`.
+    pub active: bool,
+    /// `Security`.
+    pub security: Option<i32>,
+    /// `TouchID`, the raw PIN: only for [`pin_hasher::hash`], never logged.
+    pub touch_id: Option<String>,
+}
+
+impl std::fmt::Debug for ClerkRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClerkRow")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Reads one row of [`clerk_columns_sql`] for the probed `columns`.
+pub fn clerk_row(v: &[Value], columns: CashierColumns) -> Result<ClerkRow, StaffError> {
+    let at = |i: usize| v.get(i).unwrap_or(&Value::Null);
+    let key = text(at(0))?.map(|k| trim(k).to_owned());
+    let name = match at(1) {
+        Value::Null => String::new(),
+        Value::String(s) if columns.full_name_is_unicode => s.clone(),
+        Value::Bytes(b) if !columns.full_name_is_unicode => tcvn3::decode(b),
+        _ => {
+            return Err(cast_error(if columns.full_name_is_unicode {
+                "System.String"
+            } else {
+                "System.Byte[]"
+            }));
+        }
+    };
+    let active = match at(2) {
+        Value::Bool(b) => !*b,
+        _ => return Err(cast_error("System.Boolean")),
+    };
+    let security = match at(3) {
+        Value::Null => None,
+        other => Some(to_i32(other)?),
+    };
+    let touch_id = text(at(4))?.map(str::to_owned);
+    Ok(ClerkRow {
+        key,
+        name,
+        active,
+        security,
+        touch_id,
+    })
+}
+
+/// The one projection of a clerk row into [`StaffClerk`] (`ToClerk`), shared with the
+/// cashier command (ADR 0150) so the row hash the agent checks equals the hash the cloud
+/// computed from the snapshot. `touch_id` goes straight to the hasher.
+#[allow(clippy::too_many_arguments)]
+pub fn to_clerk(
+    pin_key: &[u8],
+    key: &str,
+    name: &str,
+    active: bool,
+    security: Option<i32>,
+    touch_id: Option<&str>,
+    rvcs: &[i32],
+    functions: &[String],
+) -> StaffClerk {
+    let (lookup, status) = pin_hasher::hash(pin_key, touch_id, active);
+    let mut rvcs: Vec<i32> = rvcs.to_vec();
+    rvcs.sort_unstable();
+    rvcs.dedup();
+    rvcs.truncate(staff_sync_limits::MAX_RVCS);
+    let mut functions: Vec<String> = functions.iter().map(|f| canonical(f)).collect();
+    functions.sort_by(|a, b| ordinal_cmp(a, b));
+    functions.dedup();
+    StaffClerk {
+        key: key.to_owned(),
+        name: cut(trim(name), staff_sync_limits::MAX_NAME_LENGTH),
+        active,
+        pin_lookup: lookup,
+        pin_status: status.to_owned(),
+        security,
+        rvcs,
+        functions,
+    }
 }
 
 /// A read failure that is not a SQL Server error (the C# `InvalidOperationException` /
@@ -333,53 +428,23 @@ impl StaffSource for SqlStaffSource {
 
         let mut clerks = Vec::new();
         for r in rs.rows() {
-            let v = r.values();
-            let at = |i: usize| v.get(i).unwrap_or(&Value::Null);
-            let key = match text(at(0))? {
-                Some(k) => trim(k).to_owned(),
-                None => String::new(),
-            };
-            if key.is_empty() {
+            let row = clerk_row(r.values(), columns)?;
+            let Some(key) = row.key.filter(|k| !k.is_empty()) else {
                 continue;
-            }
-            let name = match at(1) {
-                Value::Null => String::new(),
-                Value::String(s) if columns.full_name_is_unicode => s.clone(),
-                Value::Bytes(b) if !columns.full_name_is_unicode => tcvn3::decode(b),
-                _ => {
-                    return Err(cast_error(if columns.full_name_is_unicode {
-                        "System.String"
-                    } else {
-                        "System.Byte[]"
-                    }));
-                }
             };
-            let active = match at(2) {
-                Value::Bool(b) => !*b,
-                _ => return Err(cast_error("System.Boolean")),
-            };
-            let security = match at(3) {
-                Value::Null => None,
-                other => Some(to_i32(other)?),
-            };
-            let touch_id = text(at(4))?;
-            let (lookup, status) = pin_hasher::hash(pin_key, touch_id, active);
             let folded = fold(&key);
-            let mut clerk_rvcs = rvcs.get(&folded).cloned().unwrap_or_default();
-            clerk_rvcs.sort_unstable();
-            clerk_rvcs.truncate(staff_sync_limits::MAX_RVCS);
-            let mut clerk_functions = functions.get(&folded).cloned().unwrap_or_default();
-            clerk_functions.sort_by(|a, b| ordinal_cmp(a, b));
-            clerks.push(StaffClerk {
-                name: cut(trim(&name), staff_sync_limits::MAX_NAME_LENGTH),
-                key,
-                active,
-                pin_lookup: lookup,
-                pin_status: status.to_owned(),
-                security,
-                rvcs: clerk_rvcs,
-                functions: clerk_functions,
-            });
+            let no_rvcs = Vec::new();
+            let no_functions = Vec::new();
+            clerks.push(to_clerk(
+                pin_key,
+                &key,
+                &row.name,
+                row.active,
+                row.security,
+                row.touch_id.as_deref(),
+                rvcs.get(&folded).unwrap_or(&no_rvcs),
+                functions.get(&folded).unwrap_or(&no_functions),
+            ));
         }
         Ok(clerks)
     }

@@ -1,6 +1,7 @@
 //! Ports of `tests/MM.PdaOrder.Sync.Tests/*.cs` (same cases, same expected values) and the
 //! byte-for-byte cross-checks against System.Text.Json output captured from .NET 10.
 
+mod cashier;
 mod catalog;
 mod dotnet;
 mod hashing;

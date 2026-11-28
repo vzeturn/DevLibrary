@@ -124,6 +124,7 @@ impl PosStockSource for SqlSiteCommandStore {
         let r = {
             let mut unit = SqlSiteCommandUnit {
                 c: &mut c,
+                cashier_schema: None,
                 long_timeout: false,
             };
             read_balances(&mut unit, store_code, item_codes, ctx)

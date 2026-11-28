@@ -10,7 +10,9 @@
 //!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
 //!   `fo.inhouse_search` (RT-1296); [`PosRevenueSource`] and [`PosBillSource`] answer the
-//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427); [`TxnCommandUnit`]
+//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427); [`master`] holds the
+//!   `master.upsert` allow-list (ADR 0147) and [`CashierCommandSupport`] /
+//!   [`CashierCommandUnit`] the seams of its entity `cashier` (ADR 0150); [`TxnCommandUnit`]
 //!   is the seam of `txn.snapshot` (ADR 0159, RT-1427); [`TxnStockUnit`] the SMILE_BO seam
 //!   of the stock verbs and [`PosStockSource`] the read of `pos.stock_balance` (RT-1427).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
@@ -20,6 +22,7 @@
 
 pub mod batches;
 pub mod batches_money;
+mod cashier;
 pub mod change_tracking;
 #[cfg(test)]
 pub(crate) mod change_tracking_fakes;
@@ -32,6 +35,7 @@ pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
 pub mod keyed_pool;
+pub mod master;
 pub mod order_residue;
 mod po_number;
 pub mod pos_bills;
@@ -42,6 +46,7 @@ pub mod result_outbox;
 mod schema_guard;
 pub mod service;
 mod sql;
+mod sql_cashier;
 mod sql_money;
 mod sql_order;
 mod sql_order_residue;
@@ -63,6 +68,7 @@ mod units;
 pub mod verify;
 pub mod verify_manifest;
 
+pub use cashier::{CashierCommandSupport, cashier_reasons};
 pub use change_tracking::{ChangeTrackingMonitor, CtParts, CtState};
 pub use channel::{
     ChannelError, CommandChannel, CommandChannelParts, next_failure_count, reconnect_delay,
@@ -113,9 +119,9 @@ pub use txn_value::{
     max_chars as txn_max_chars, param as txn_param, try_convert as txn_try_convert,
 };
 pub use units::{
-    CheckMoneyFacts, CommandWork, EmptyBillFacts, OrderCloseOutcome, OrderCommandUnit,
-    OrderLineFacts, OrderPostOutcome, SiteCommandStore, SiteCommandUnit, StoreColumn,
-    TableCommandUnit,
+    CashierApply, CashierCommandUnit, CheckMoneyFacts, CommandWork, EmptyBillFacts,
+    OrderCloseOutcome, OrderCommandUnit, OrderLineFacts, OrderPostOutcome, SiteCommandStore,
+    SiteCommandUnit, StoreColumn, TableCommandUnit,
 };
 pub use verify::{VerifyCommandHandler, VerifyParts};
 pub use verify_manifest::{
@@ -127,6 +133,10 @@ pub use verify_manifest::{
 /// `@variables` against them.
 pub mod params {
     pub use super::fo_inhouse::DATABASE_ACCESS_SQL;
+    pub use super::sql_cashier::{
+        DELETE_ALL_RVCS_SQL, DELETE_RVCS_SQL, INSERT_COLUMNS, INSERT_RVC_SQL, PERMISSION_SQL,
+        PERMISSION_UPSERT_SQL, PIN_TAKEN_SQL, RVC_SQL, SCHEMA_SQL, insert_sql, update_sql,
+    };
     pub use super::sql_money::{
         check_close_parameters, room_charge_parameters, tender_add_parameters,
         tender_remove_parameters,

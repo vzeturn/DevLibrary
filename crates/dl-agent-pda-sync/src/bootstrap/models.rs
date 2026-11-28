@@ -51,6 +51,11 @@ pub enum StepKind {
     /// `dbo.LastTrn<rvc>` that `dbo.GetRVCSeqNumber` reaches through dynamic SQL on some
     /// builds (RT-0654).
     SequenceGrants,
+    /// The column grant of `master.upsert` on `dbo.IClassDef` (ADR 0147).
+    MasterGrants,
+    /// The grants of `master.upsert` entity `cashier` on `dbo.CashierDef`,
+    /// `dbo.CashierRVC` and `dbo.ClerkPermission` (ADR 0150).
+    CashierMasterGrants,
     /// The agent-owned `dbo.Pda_TxnApplied` with its `pda_sync` grant (ADR 0159).
     TxnApplied,
     /// `INSERT, DELETE` on the six bill tables for `txn.snapshot` (ADR 0159).
@@ -101,6 +106,8 @@ impl StepKind {
             StepKind::OrderGrantsOw1c => "OrderGrantsOw1c",
             StepKind::OrderGrantsOw1e => "OrderGrantsOw1e",
             StepKind::SequenceGrants => "SequenceGrants",
+            StepKind::MasterGrants => "MasterGrants",
+            StepKind::CashierMasterGrants => "CashierMasterGrants",
             StepKind::TxnApplied => "TxnApplied",
             StepKind::TxnGrants => "TxnGrants",
             StepKind::TxnStoreKey => "TxnStoreKey",

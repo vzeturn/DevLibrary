@@ -23,8 +23,8 @@ use crate::util::ctx::Ctx;
 pub(super) const REFUSED: &str = "txn.snapshot refused by the store";
 
 impl SiteCommandExecutor {
-    /// Runs `txn.snapshot` with `mapper` (the catalog mapper capture hashes with; without
-    /// one the type is unknown).
+    /// Runs `txn.snapshot` and `master.upsert` with `mapper` (the catalog mapper capture
+    /// hashes with; without one the type is unknown).
     pub fn with_mapper(mut self, mapper: Arc<CatalogRowMapper>) -> Self {
         self.mapper = Some(mapper);
         self

@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::contracts::json::{self, WireJson};
+use crate::contracts::map::StrMap;
 use crate::contracts::time::DateTime;
 use crate::contracts::utf16_len;
 use crate::util::stj::{Obj, ReadError, Writer};
@@ -40,6 +41,8 @@ pub mod site_command_types {
     /// Store-cloud reconciliation (ADR 0126): compare the agent's shadow with the cloud
     /// manifest per bucket.
     pub const SYNC_VERIFY: &str = "sync.verify";
+    /// Cloud-originated master-data write (ADR 0147).
+    pub const MASTER_UPSERT: &str = "master.upsert";
     /// Read-only daily revenue totals of one RVC from SMILE_POS (ADR 0149, RT-0843).
     pub const POS_REVENUE_SUMMARY: &str = "pos.revenue_summary";
     /// Read-only POS WIN bills of one RVC and business date (RT-0842).
@@ -69,6 +72,8 @@ pub mod kds_line_actions {
 pub mod site_command_reasons {
     /// The check no longer matches the state the user saw.
     pub const CHECK_CHANGED: &str = "check_changed";
+    /// The master row changed on the site since the editor read it (ADR 0147).
+    pub const MASTER_CHANGED: &str = "master_changed";
 }
 
 /// Cloud to site command contract (ADR 0029).
@@ -114,6 +119,7 @@ pub mod site_command_contract {
         spec(site_command_types::KDS_LINE_STATE, Interactive, 3),
         spec(site_command_types::RESERVATION_SAVE, Durable, 8),
         spec(site_command_types::RESERVATION_CANCEL, Durable, 8),
+        spec(site_command_types::MASTER_UPSERT, Durable, 3),
         spec(site_command_types::SYNC_RESNAPSHOT, Durable, 8),
         spec(site_command_types::SYNC_VERIFY, Durable, 3),
         // RT-1427: the read-only SMILE_POS reads, ported from the PDAOrder agent.
@@ -504,6 +510,97 @@ impl WireJson for SyncResnapshotResult {
             full: o.bool("full")?,
             cooldown_bypassed: o.bool("cooldown_bypassed")?,
             already_pending: o.bool("already_pending")?,
+        })
+    }
+}
+
+/// Payload of [`site_command_types::MASTER_UPSERT`] (ADR 0147): `entity` is a master
+/// entity wire name, `key` its store key, `fields` the new column values. A `None`
+/// `expected_hash` means "create".
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MasterUpsertPayload {
+    /// Entity wire name (e.g. `item_class`).
+    pub entity: String,
+    /// Store key.
+    pub key: String,
+    /// New column values.
+    pub fields: StrMap,
+    /// The row hash the editor read; `None` when creating.
+    pub expected_hash: Option<String>,
+    /// Who edited.
+    pub actor: String,
+}
+
+impl MasterUpsertPayload {
+    /// The validation problem, `None` when valid (`MasterUpsertPayload.Problem`).
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.entity.trim().is_empty() {
+            return Some("Entity is required.");
+        }
+        if self.key.trim().is_empty() {
+            return Some("Key is required.");
+        }
+        if self.fields.is_empty() {
+            return Some("At least one field is required.");
+        }
+        if self.actor.trim().is_empty() {
+            Some("Actor is required.")
+        } else {
+            None
+        }
+    }
+}
+
+impl WireJson for MasterUpsertPayload {
+    fn write_json(&self, w: &mut Writer) {
+        w.begin_object();
+        w.key("entity").string(&self.entity);
+        w.key("key").string(&self.key);
+        w.key("fields");
+        json::write_str_map(w, &self.fields);
+        json::opt_str(w, "expected_hash", &self.expected_hash);
+        w.key("actor").string(&self.actor);
+        w.end_object();
+    }
+
+    fn read_json(o: Obj<'_>) -> Result<Self, ReadError> {
+        Ok(MasterUpsertPayload {
+            entity: o.string("entity")?,
+            key: o.string("key")?,
+            fields: json::str_map(&o, "fields")?,
+            expected_hash: o.opt_string("expected_hash")?,
+            actor: o.string("actor")?,
+        })
+    }
+}
+
+/// Result of an applied master upsert: the row hash re-read after the write, in the same
+/// transaction, so the editor's next edit is based on it. Snake_case on the wire like every
+/// result, as the C# `MasterUpsertResult`: `{"entity":..,"key":..,"row_hash":..}`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MasterUpsertResult {
+    /// Entity wire name.
+    pub entity: String,
+    /// Store key.
+    pub key: String,
+    /// Hash of the row after the update.
+    pub row_hash: String,
+}
+
+impl WireJson for MasterUpsertResult {
+    fn write_json(&self, w: &mut Writer) {
+        w.begin_object();
+        w.key("entity").string(&self.entity);
+        w.key("key").string(&self.key);
+        w.key("row_hash").string(&self.row_hash);
+        w.end_object();
+    }
+
+    fn read_json(o: Obj<'_>) -> Result<Self, ReadError> {
+        Ok(MasterUpsertResult {
+            entity: o.string("entity")?,
+            key: o.string("key")?,
+            row_hash: o.string("row_hash")?,
         })
     }
 }

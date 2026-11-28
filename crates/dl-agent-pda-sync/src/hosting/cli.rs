@@ -1,6 +1,7 @@
-//! Command line (port of `Hosting/Cli.cs`): `enroll`, `grants`, `diag`, `status`, the
+//! Command line (port of `Hosting/Cli.cs`): `enroll`, `grants`, `order-residue`, `diag`, `status`, the
 //! legacy and update verbs; no verb (or `run`) starts the service host.
 
+use super::order_residue::USAGE as ORDER_RESIDUE_USAGE;
 use super::verbs::{self, HostContext, VerbContext, VerbTable, dispatch};
 use crate::config::options::{base_directory, host_configuration, site_settings_file};
 use crate::config::{AgentOptions, AgentPaths};
@@ -40,7 +41,7 @@ pub fn usage() -> String {
     format!(
         "Usage: PdaSyncAgent [run | enroll --code <code> --url <url> [--dry-run] [--sql-instance <instance>] \
          [--database <name>] [--sql-admin-user <login>] | \
-         grants [--sql-instance <instance>] [--database <name>] [--sql-admin-user <login>] [--dry-run] | diag [--out file.zip] | {STATUS_USAGE} | \
+         grants [--sql-instance <instance>] [--database <name>] [--sql-admin-user <login>] [--dry-run] | {ORDER_RESIDUE_USAGE} | diag [--out file.zip] | {STATUS_USAGE} | \
          {LEGACY_EXPORT_USAGE} | {LEGACY_ARCHIVE_USAGE} | {LEGACY_UPLOAD_USAGE} | {APPLY_UPDATE_USAGE}]"
     )
 }
@@ -194,6 +195,7 @@ pub fn run_with(
     match verb {
         "enroll" => ctx(Some(&host), table.enroll),
         "grants" => ctx(Some(&host), table.grants),
+        "order-residue" => super::order_residue::run(&host, &opts, stdout, stderr),
         "status" => super::status::run_console(&host.paths, &opts, stdout, stderr),
         "run" => ctx(Some(&host), table.run),
         _ => {
@@ -251,6 +253,9 @@ mod tests {
             " | diag [--out file.zip] | status [--wait <seconds>] | legacy-export --out <dir> "
         ));
         assert!(u.contains("[--archive-db PDA_LEGACY_ARCHIVE] | legacy-upload --in <bundle dir>"));
+        assert!(u.contains(
+            "[--dry-run] | order-residue [--apply] [--older-than-minutes <n>] | diag [--out file.zip]"
+        ));
         assert!(u.ends_with("--result-file <file> [--wait <seconds>]]"));
         assert_eq!(EXIT_UNHANDLED, -532_462_766);
     }

@@ -1,6 +1,7 @@
 //! Port of `Staff/StaffSyncHosting.cs`: the staff sync loop and its wiring.
 
 use super::cloud::{StaffCloud, StaffCloudClient};
+use super::nudge::{CashierSupport, StaffSyncNudge};
 use super::pin_key::PinKeyProvider;
 use super::runner::{StaffSyncParts, StaffSyncRunner};
 use super::source::{SqlStaffSource, StaffSource};
@@ -25,6 +26,7 @@ pub struct StaffSyncService {
     runner: Arc<StaffSyncRunner>,
     first_delay: Duration,
     interval: Duration,
+    nudge: Option<Arc<StaffSyncNudge>>,
 }
 
 impl std::fmt::Debug for StaffSyncService {
@@ -49,7 +51,14 @@ impl StaffSyncService {
             runner,
             first_delay,
             interval,
+            nudge: None,
         }
+    }
+
+    /// Ends the interval wait early when `nudge` is pulsed (ADR 0150).
+    pub fn with_nudge(mut self, nudge: Arc<StaffSyncNudge>) -> StaffSyncService {
+        self.nudge = Some(nudge);
+        self
     }
 }
 
@@ -64,7 +73,11 @@ impl LoopService for StaffSyncService {
         }
         while !ctx.is_done() {
             self.runner.run_once(ctx)?;
-            if !ctx.sleep(self.interval) {
+            let go_on = match &self.nudge {
+                Some(n) => n.wait(self.interval, ctx),
+                None => ctx.sleep(self.interval),
+            };
+            if !go_on {
                 return Ok(());
             }
         }
@@ -77,8 +90,23 @@ impl LoopService for StaffSyncService {
 pub fn services(
     s: &AgentServices,
     _capture: &Arc<dyn CaptureStatus>,
+    nudge: Arc<StaffSyncNudge>,
 ) -> Result<Vec<Box<dyn LoopService>>, Unhandled> {
-    Ok(vec![Box::new(StaffSyncService::new(Arc::new(runner(s))))])
+    Ok(vec![Box::new(
+        StaffSyncService::new(Arc::new(runner(s))).with_nudge(nudge),
+    )])
+}
+
+/// `CashierCommandSupport` of the running agent: the staff sync's PIN key (the provider
+/// keeps no state of its own besides the secret store, so a second instance is the same
+/// key) and `nudge`.
+pub fn cashier_support(s: &AgentServices, nudge: Arc<StaffSyncNudge>) -> CashierSupport {
+    let cloud: Arc<dyn StaffCloud> =
+        Arc::new(StaffCloudClient::new(s.http.clone(), s.tokens.clone()));
+    CashierSupport::new(
+        Arc::new(PinKeyProvider::new(s.secrets.clone(), cloud)),
+        nudge,
+    )
 }
 
 /// The staff sync runner of the running agent.

@@ -202,6 +202,9 @@ pub struct RuntimeParts {
     pub site_events: Arc<dyn SiteEvents>,
     /// The capture runner's nudge; `None` without a capture runner.
     pub capture_nudge: Option<Arc<dyn CaptureNudge>>,
+    /// The staff sync's wake-up (`StaffSyncNudge`, ADR 0150): the cashier write pulses
+    /// it, the staff sync loop waits on it.
+    pub staff_nudge: Arc<crate::staff::StaffSyncNudge>,
 }
 
 impl std::fmt::Debug for RuntimeParts {
@@ -259,6 +262,7 @@ pub fn command_services(
         &crate::commands::service::CommandExtras {
             events: Some(rt.site_events.clone()),
             nudge: rt.capture_nudge.clone(),
+            staff_nudge: Some(rt.staff_nudge.clone()),
         },
     )
 }
@@ -268,7 +272,7 @@ pub fn staff_services(
     s: &AgentServices,
     rt: &RuntimeParts,
 ) -> Result<Vec<Box<dyn LoopService>>, Unhandled> {
-    crate::staff::hosting::services(s, &rt.capture)
+    crate::staff::hosting::services(s, &rt.capture, rt.staff_nudge.clone())
 }
 
 impl IdleWait for UploadWake {
@@ -762,6 +766,7 @@ pub fn build_host(
         capture: status.clone(),
         site_events: site.reporter.clone(),
         capture_nudge: capture.as_ref().and_then(|c| c.nudge.clone()),
+        staff_nudge: Arc::new(crate::staff::StaffSyncNudge::new()),
     };
     let mut loops: Vec<Box<dyn LoopService>> = Vec::new();
     if let Some(service) = site.service {

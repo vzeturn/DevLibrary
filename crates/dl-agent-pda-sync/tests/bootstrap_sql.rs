@@ -38,6 +38,8 @@ fn first_run_creates_login_user_tables_and_grants_in_order() {
             "order_grants_ow1c",
             "order_grants_ow1e",
             "sequence_grants",
+            "master_grants",
+            "cashier_master_grants",
             "txn_applied",
             "txn_grants",
             "txn_store_key",
@@ -379,6 +381,8 @@ fn embedded_scripts_only_create_agent_owned_objects_and_never_touch_vendor_table
                 | StepKind::OrderGrantsOw1c
                 | StepKind::OrderGrantsOw1e
                 | StepKind::SequenceGrants
+                | StepKind::MasterGrants
+                | StepKind::CashierMasterGrants
                 | StepKind::TxnGrants
                 | StepKind::TxnStoreKey
                 | StepKind::TxnShiftGrants
@@ -525,12 +529,15 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         .unwrap();
     assert_eq!(step.id, "sequence_grants");
     assert_eq!(step.resource_name, "Sql.100_sequence_grants.sql");
-    // RT-1427: the txn steps (130, 140, 145, 150, 160) run after the sequence grants, then
-    // the stock steps (170..177) and the money grants (180, ADR 0174).
+    // RT-1427: the master grants (110, 120), the txn steps (130, 140, 145, 150, 160) run
+    // after the sequence grants, then the stock steps (170..177) and the money grants (180,
+    // ADR 0174).
     let at = STEPS.iter().position(|s| s == step).unwrap();
-    assert_eq!(STEPS[at + 1].kind, StepKind::TxnApplied);
-    assert_eq!(STEPS[at + 6].kind, StepKind::Table);
-    assert_eq!(STEPS[at + 10].kind, StepKind::MoneyGrants);
+    assert_eq!(STEPS[at + 1].kind, StepKind::MasterGrants);
+    assert_eq!(STEPS[at + 2].kind, StepKind::CashierMasterGrants);
+    assert_eq!(STEPS[at + 3].kind, StepKind::TxnApplied);
+    assert_eq!(STEPS[at + 8].kind, StepKind::Table);
+    assert_eq!(STEPS[at + 12].kind, StepKind::MoneyGrants);
     let sql = code(read_script(step.resource_name).unwrap());
     // RT-0654: grants only; the counter name comes from sys.objects (prefix and digits)
     // and is quoted, and the grant follows the object's kind.
@@ -554,6 +561,133 @@ fn sequence_grants_script_grants_only_the_per_rvc_counters_by_their_kind() {
         assert!(sql.contains(needle), "{needle}");
     }
     assert_eq!(sql.matches("GRANT ").count(), 2);
+}
+
+#[test]
+fn master_grants_script_grants_only_the_master_columns() {
+    let step = STEPS
+        .iter()
+        .find(|s| s.kind == StepKind::MasterGrants)
+        .unwrap();
+    assert_eq!(step.id, "master_grants");
+    assert_eq!(step.resource_name, "Sql.110_master_grants.sql");
+    // RT-1427: after the sequence grants (100); the cashier grants (120) and the txn steps
+    // (130..) follow it.
+    let at = STEPS.iter().position(|s| s == step).unwrap();
+    assert_eq!(STEPS[at - 1].kind, StepKind::SequenceGrants);
+    assert_eq!(STEPS[at + 1].kind, StepKind::CashierMasterGrants);
+    let sql = code(read_script(step.resource_name).unwrap());
+    // ADR 0147, 0152: grants only; column-scoped UPDATE, INSERT only on the outlet and menu
+    // tables, no SELECT (reading comes from db_datareader).
+    assert!(!has_word(
+        &sql,
+        &[
+            "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "DELETE"
+        ]
+    ));
+    assert!(!a_line_starts_with(&sql, &["UPDATE", "INSERT"]));
+    assert_eq!(
+        sorted(grants(&sql)),
+        expect(&[
+            ("UPDATE", "IClassDef", "ClsName, LastChangeTime"),
+            ("UPDATE", "PaymentMode", "PDesc"),
+            ("UPDATE", "TaxClassDef", "TaxRate"),
+            ("UPDATE", "STaxDef", "STaxRate"),
+            ("UPDATE", "CurrencyDef", "ExRate"),
+            ("INSERT", "TableArea", ""),
+            ("UPDATE", "TableArea", "TableAreaName"),
+            ("INSERT", "TableList", ""),
+            (
+                "UPDATE",
+                "TableList",
+                "Description, TableArea, IsActive, LastChangedBy, LastChangedTime",
+            ),
+            ("INSERT", "Para", ""),
+            ("UPDATE", "Para", "ParaStr"),
+            // ADR 0157: the six menu entities can be created too (INSERT, no column list).
+            ("INSERT", "ItemDef", ""),
+            ("INSERT", "IGroupDef", ""),
+            ("INSERT", "ItemMenu", ""),
+            ("INSERT", "RVCItemMenu", ""),
+            ("INSERT", "DiscountCode", ""),
+            ("INSERT", "MealPeriod", ""),
+            // ADR 0160: combo components (PkgDef) are created and edited too.
+            ("INSERT", "PkgDef", ""),
+            ("UPDATE", "IGroupDef", "GName"),
+            (
+                "UPDATE",
+                "ItemDef",
+                "IName, Price, IGroup, IClass, IActive, OpenPrice, isPkg, LastChangeBy, LastChangeTime",
+            ),
+            (
+                "UPDATE",
+                "PkgDef",
+                "IQty, IPrice, UseItemPrice, DisplayOrder"
+            ),
+            ("UPDATE", "ItemMenu", "MenuName, MenuActive, MenuOrder"),
+            ("UPDATE", "RVCItemMenu", "ItemShow"),
+            ("UPDATE", "MealPeriod", "MealName, FromTime, ToTime, Status"),
+            (
+                "UPDATE",
+                "DiscountCode",
+                "DscName, DscByAmount, DscAmount, isOpen, IsVoided, VoidedBy, VoidedAt",
+            ),
+        ])
+    );
+    assert_eq!(sql.matches("GRANT ").count(), 25);
+}
+
+#[test]
+fn cashier_master_grants_script_grants_only_what_the_cashier_write_uses() {
+    let step = STEPS
+        .iter()
+        .find(|s| s.kind == StepKind::CashierMasterGrants)
+        .unwrap();
+    assert_eq!(step.id, "cashier_master_grants");
+    assert_eq!(step.resource_name, "Sql.120_cashier_master_grants.sql");
+    let at = STEPS.iter().position(|s| s == step).unwrap();
+    assert_eq!(
+        STEPS[at + 1].kind,
+        StepKind::TxnApplied,
+        "130 to 210 follow it"
+    );
+    let sql = code(read_script(step.resource_name).unwrap());
+    // ADR 0150: grants only; no SELECT (db_datareader) and no EXECUTE (Unicode2TCVN from 070).
+    assert!(!has_word(
+        &sql,
+        &[
+            "CREATE", "ALTER", "DROP", "TRUNCATE", "DENY", "REVOKE", "MERGE", "SELECT"
+        ]
+    ));
+    for line in sql.lines().map(str::trim) {
+        let upper = line.to_ascii_uppercase();
+        assert!(
+            !upper.starts_with("UPDATE")
+                && !upper.contains("INSERT INTO")
+                && !upper.contains("DELETE FROM")
+                && !upper.contains("EXECUTE ON"),
+            "{line}"
+        );
+    }
+    let found = grants(&sql);
+    assert_eq!(
+        sorted(found.clone()),
+        expect(&[
+            ("INSERT", "CashierDef", ""),
+            ("UPDATE", "CashierDef", "FullName"),
+            ("UPDATE", "CashierDef", "TouchID"),
+            ("UPDATE", "CashierDef", "IsDisable"),
+            ("UPDATE", "CashierDef", "Security"),
+            ("INSERT, DELETE", "CashierRVC", ""),
+            ("INSERT", "ClerkPermission", ""),
+            ("UPDATE", "ClerkPermission", "Allowed"),
+        ])
+    );
+    assert_eq!(
+        sql.matches("GRANT ").count(),
+        found.len(),
+        "every grant is one of the listed ones"
+    );
 }
 
 #[test]
