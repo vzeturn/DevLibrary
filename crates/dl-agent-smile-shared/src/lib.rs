@@ -2,15 +2,21 @@
 //! (re)installed by dl-agent; projects call the objects and never re-implement the join.
 //!
 //! Slice 1: `dbo.SA_TrnKey` + `dbo.SA_TrnCode_Resolve` (SMILE_FO `TransactionCode`).
+//! Slice 2 (RT-1484): `dbo.SA_FolioBill`, the bill lines of a folio with restaurant and minibar room charges in detail.
 
 use dl_tds::Client;
 
 /// Bump when any script changes so agents can tell an installed layer is stale.
-pub const LAYER_VERSION: u32 = 1;
+pub const LAYER_VERSION: u32 = 2;
 
 /// Embedded scripts in deploy order.
-pub const SCRIPTS: &[(&str, &str)] =
-    &[("001_trn_code.sql", include_str!("../sql/001_trn_code.sql"))];
+pub const SCRIPTS: &[(&str, &str)] = &[
+    ("001_trn_code.sql", include_str!("../sql/001_trn_code.sql")),
+    (
+        "002_folio_bill.sql",
+        include_str!("../sql/002_folio_bill.sql"),
+    ),
+];
 
 /// Splits a script on lines holding only `GO`, dropping blank batches.
 #[must_use]
@@ -36,6 +42,7 @@ pub fn split_batches(body: &str) -> Vec<String> {
 pub fn ensure_installed(c: &mut Client) -> Result<(), String> {
     let present = c.batch(
         "IF OBJECT_ID('dbo.SA_TrnKey') IS NULL OR OBJECT_ID('dbo.SA_TrnCode_Resolve') IS NULL \
+         OR OBJECT_ID('dbo.SA_FolioBill') IS NULL \
          RAISERROR('SA layer missing', 16, 1)",
     );
     if present.is_ok() {
