@@ -51,6 +51,52 @@ pub(super) fn count(c: &mut Client, sql: &str, params: &[Param]) -> Result<i64> 
 pub(super) const FOLIO_LOG_FIELD_MAX: usize = 50;
 pub(super) const FOLIO_LOG_VALUE_MAX: usize = 1000;
 
+/// Widths of one FolioLog row's columns (RT-1483: Sea Sense's value columns are narrower
+/// than the stock nvarchar(1000), so a long rates summary overflowed and the row was lost).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FolioLogLimits {
+    pub field: usize,
+    pub old: usize,
+    pub new: usize,
+    pub clerk: usize,
+}
+
+impl FolioLogLimits {
+    /// The stock widths, narrowed by the site's real column widths (`<= 0` = MAX: no change).
+    pub(super) fn from_column_lens(m: Option<&HashMap<String, i64>>) -> Self {
+        let mut l = Self {
+            field: FOLIO_LOG_FIELD_MAX,
+            old: FOLIO_LOG_VALUE_MAX,
+            new: FOLIO_LOG_VALUE_MAX,
+            clerk: 3,
+        };
+        let Some(m) = m else { return l };
+        let narrow = |col: &str, dst: &mut usize| {
+            if let Some(&n) = m.get(col)
+                && n > 0
+                && (n as usize) < *dst
+            {
+                *dst = n as usize;
+            }
+        };
+        narrow("fieldname", &mut l.field);
+        narrow("oldvalue", &mut l.old);
+        narrow("newvalue", &mut l.new);
+        narrow("changedclerk", &mut l.clerk);
+        l
+    }
+}
+
+/// `clip_chars` that marks the cut with an ellipsis while staying within `n` characters.
+pub(super) fn clip_mark(s: &str, n: usize) -> String {
+    if n <= 1 || s.chars().count() <= n {
+        return clip_chars(s, n).to_owned();
+    }
+    let mut out: String = s.chars().take(n - 1).collect();
+    out.push('…');
+    out
+}
+
 /// `clipRunes`: at most `n` characters of `s` (avoids SQL Server's truncation error).
 pub(super) fn clip_chars(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
@@ -152,6 +198,10 @@ WHERE {key_col} = @p1
                 "proc {proc}: sql: no rows in result set"
             ))),
         }
+    }
+
+    fn folio_log_limits(&self, c: &mut Client) -> FolioLogLimits {
+        FolioLogLimits::from_column_lens(self.column_max_lens(c, "FolioLog").as_ref())
     }
 
     /// `columnMaxLens`, read on `c` (the failed transaction's connection) and cached.
@@ -524,16 +574,17 @@ ORDER BY FolioNum",
     fn append_folio_log(&self, folio_num: f64, field: &str, old: &str, new: &str) -> Result<()> {
         // Same row shape as triggerFolioUpdate writes, for the live folio only.
         self.with_conn(|c| {
+            let lim = self.folio_log_limits(c);
             exec(
                 c,
                 "INSERT INTO FolioLog (FolioID, FolioNum, FolioSubNum, FieldName, OldValue, NewValue, ChangedClerk, ChangedTime)
 SELECT Id, FolioNum, ISNULL(FolioSubNum, 0), @p1, @p2, @p3, @p4, GETDATE()
 FROM Folio WHERE FolioNum = @p5 AND ISNULL(CancelNum, 0) = 0",
                 &[
-                    Param::new("p1", clip_chars(field, FOLIO_LOG_FIELD_MAX)),
-                    Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
-                    Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
-                    Param::new("p4", AGENT_CLERK_ID),
+                    Param::new("p1", clip_mark(field, lim.field)),
+                    Param::new("p2", clip_mark(old, lim.old)),
+                    Param::new("p3", clip_mark(new, lim.new)),
+                    Param::new("p4", clip_chars(AGENT_CLERK_ID, lim.clerk)),
                     Param::new("p5", folio_num),
                 ],
             )
@@ -550,16 +601,17 @@ FROM Folio WHERE FolioNum = @p5 AND ISNULL(CancelNum, 0) = 0",
         new: &str,
     ) -> Result<()> {
         self.with_conn(|c| {
+            let lim = self.folio_log_limits(c);
             exec(
                 c,
                 "INSERT INTO FolioLog (FolioID, FolioNum, FolioSubNum, FieldName, OldValue, NewValue, ChangedClerk, ChangedTime)
 SELECT TOP 1 Id, FolioNum, ISNULL(FolioSubNum, 0), @p1, @p2, @p3, @p4, GETDATE()
 FROM Folio WHERE FolioNum = @p5 ORDER BY Id DESC",
                 &[
-                    Param::new("p1", clip_chars(field, FOLIO_LOG_FIELD_MAX)),
-                    Param::new("p2", clip_chars(old, FOLIO_LOG_VALUE_MAX)),
-                    Param::new("p3", clip_chars(new, FOLIO_LOG_VALUE_MAX)),
-                    Param::new("p4", AGENT_CANCEL_CLERK_ID),
+                    Param::new("p1", clip_mark(field, lim.field)),
+                    Param::new("p2", clip_mark(old, lim.old)),
+                    Param::new("p3", clip_mark(new, lim.new)),
+                    Param::new("p4", clip_chars(AGENT_CANCEL_CLERK_ID, lim.clerk)),
                     Param::new("p5", folio_num),
                 ],
             )
@@ -827,7 +879,23 @@ impl FullRepo for SqlRepo {
 
 #[cfg(test)]
 mod tests {
-    use super::clip_chars;
+    use super::{FolioLogLimits, clip_chars, clip_mark};
+    use std::collections::HashMap;
+
+    #[test]
+    fn folio_log_limits_follow_the_site_columns() {
+        let m: HashMap<String, i64> = [("newvalue", 255), ("oldvalue", -1), ("fieldname", 50)]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v))
+            .collect();
+        let l = FolioLogLimits::from_column_lens(Some(&m));
+        assert_eq!((l.field, l.old, l.new, l.clerk), (50, 1000, 255, 3));
+        assert_eq!(FolioLogLimits::from_column_lens(None).new, 1000);
+        let cut = clip_mark(&"x".repeat(400), l.new);
+        assert_eq!(cut.chars().count(), 255);
+        assert!(cut.ends_with('…'));
+        assert_eq!(clip_mark("short", l.new), "short");
+    }
 
     #[test]
     fn clip_chars_counts_characters_not_bytes() {
