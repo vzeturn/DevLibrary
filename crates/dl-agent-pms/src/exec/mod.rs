@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dl_json::{Map, Number, Value as J};
 use dl_tds::{Param, ParamValue, Value as V};
@@ -300,8 +300,21 @@ impl SqlExecutor {
         spec: &ops::Op,
         calls: &[BoundCall],
     ) -> Result<OpResult, ExecErr> {
+        let waited = Instant::now();
         let mut conn = pool.get(ctx)?;
+        let pool_wait = waited.elapsed();
+        let ran = Instant::now();
         let res = self.attempt_on(ctx, &mut conn, spec, calls);
+        // Splits the agent's total per-op time into pool wait and SQL time (RT-1162).
+        self.log.info(
+            "exec.op.timing",
+            attrs![
+                "op" => &spec.name,
+                "pool_wait_ms" => i64::try_from(pool_wait.as_millis()).unwrap_or(i64::MAX),
+                "sql_ms" => i64::try_from(ran.elapsed().as_millis()).unwrap_or(i64::MAX),
+                "calls" => i64::try_from(calls.len()).unwrap_or(i64::MAX)
+            ],
+        );
         match &res {
             Ok(_) => {}
             Err(ExecErr::Commit) => {}
