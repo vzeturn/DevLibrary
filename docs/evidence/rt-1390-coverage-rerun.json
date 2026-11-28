@@ -1,0 +1,224 @@
+{
+ "gaps": [
+  {
+   "marker": "[schema-gap:SMILE_FO.dbo.SMILE_Fo_PostPosBatch]",
+   "object": "SMILE_FO.dbo.SMILE_Fo_PostPosBatch",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:fo.pos.post"
+   ],
+   "sites": 6,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_ClaimPost]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_ClaimPost",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.outbox.claim"
+   ],
+   "sites": 6,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_CompletePost]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_CompletePost",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.outbox.complete"
+   ],
+   "sites": 6,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_AddPayment]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_AddPayment",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.check.pay"
+   ],
+   "sites": 5,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_CloseBill]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_CloseBill",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.check.close"
+   ],
+   "sites": 5,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_OpenCheck]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_OpenCheck",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.check.open"
+   ],
+   "sites": 5,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_PostItem]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_PostItem",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.check.postItem"
+   ],
+   "sites": 5,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.SMILE_Pos_SendOrder]",
+   "object": "SMILE_POS.dbo.SMILE_Pos_SendOrder",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:pos.check.send"
+   ],
+   "sites": 5,
+   "project": "smile-pms",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.EmployeeShiftLog]",
+   "object": "SMILE_POS.dbo.EmployeeShiftLog",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pda-sync:class-D"
+   ],
+   "sites": 3,
+   "project": "pda-order",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.Member]",
+   "object": "SMILE_POS.dbo.Member",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pda-sync:class-E"
+   ],
+   "sites": 3,
+   "project": "pda-order",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.PdaReopenLineAudit]",
+   "object": "SMILE_POS.dbo.PdaReopenLineAudit",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pda-sync:class-E"
+   ],
+   "sites": 3,
+   "project": "pda-order",
+   "priority": "high"
+  },
+  {
+   "marker": "[schema-gap:SMILE_FO.dbo.AllotmentContract]",
+   "object": "SMILE_FO.dbo.AllotmentContract",
+   "status": "drift",
+   "missing_columns": [
+    "ALMStatus"
+   ],
+   "features": [
+    "pms:fo.availability.contractStatus",
+    "pms:fo.availability.source"
+   ],
+   "sites": 2,
+   "project": "smile-pms",
+   "priority": "normal"
+  },
+  {
+   "marker": "[schema-gap:SMILE_FO.dbo.AllotmentContractWeekday]",
+   "object": "SMILE_FO.dbo.AllotmentContractWeekday",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pms:fo.availability.source",
+    "pms:fo.availability.sourceV2",
+    "pms:fo.availability.summary"
+   ],
+   "sites": 2,
+   "project": "smile-pms",
+   "priority": "normal"
+  },
+  {
+   "marker": "[schema-gap:SMILE_POS.dbo.OrderHold]",
+   "object": "SMILE_POS.dbo.OrderHold",
+   "status": "missing",
+   "missing_columns": [],
+   "features": [
+    "pda-sync:class-B"
+   ],
+   "sites": 2,
+   "project": "pda-order",
+   "priority": "normal"
+  }
+ ],
+ "explained": [
+  {
+   "object": "SMILE_POS.dbo.IOrgInvoice",
+   "status": "optional_absent",
+   "reason": "check-number archive; read only as a floor for txn.counters, which guards it with OBJECT_ID, and never captured (unclassified). Absent on SMILE builds without the archive: no feature loss.",
+   "features": [
+    "pda-sync:class-unclassified"
+   ],
+   "sites": 6
+  },
+  {
+   "object": "SMILE_POS.dbo.TItemCGuild",
+   "status": "optional_absent",
+   "reason": "item-request log with no PG home and no cloud reader (cloud app.item_requests is cloud-owned, migration 0013). Absent on SMILE builds without it: nothing to sync.",
+   "features": [
+    "pda-sync:class-C"
+   ],
+   "sites": 6
+  },
+  {
+   "object": "SMILE_POS.dbo.TmpInvoiceDetail",
+   "status": "optional_absent",
+   "reason": "open-check satellite with no PG home and no cloud reader; the open-check bill is carried by TmpInvoice/TmpTrn. Absent on SMILE builds without it: nothing to sync.",
+   "features": [
+    "pda-sync:class-B"
+   ],
+   "sites": 6
+  },
+  {
+   "object": "SMILE_POS.dbo.TRVCItem",
+   "status": "optional_absent",
+   "reason": "second raw source of app.rvc_items; the typed source RVCItem carries the menu, so the menu and ordering work without it. Only the TRVCItem touch-menu extras (ImageItem photo, SoldOut) are not mirrored; the cloud sold-out flag is cloud-owned.",
+   "features": [
+    "pda-sync:class-A"
+   ],
+   "sites": 6
+  },
+  {
+   "object": "SMILE_POS.dbo.ItemTimeDef",
+   "status": "optional_absent",
+   "reason": "configured prep times with no PG home; the cloud reads kitchen targets from cloud-owned app.kds_item_sla. Absent on SMILE builds without it: nothing to sync.",
+   "features": [
+    "pda-sync:class-A"
+   ],
+   "sites": 4
+  }
+ ]
+}
