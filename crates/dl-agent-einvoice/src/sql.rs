@@ -420,6 +420,35 @@ impl Sql {
         ))
     }
 
+    /// One mode-3 sweep page, timed (RT-1453): the same call the night sweep makes, read-only,
+    /// without touching the collector's schedule. Returns the elapsed time and the page.
+    pub fn time_sweep_page(
+        &self,
+        source: &str,
+        limit: i64,
+        after: Option<String>,
+        timeout: Duration,
+    ) -> (Duration, Result<Vec<PendingRow>, String>) {
+        let started = std::time::Instant::now();
+        let r = validate_sp_name(self.select_sp(source)).and_then(|()| {
+            let q = SelectQuerier { sql: self, timeout };
+            if !q.supports_split(source)? {
+                return Err("select procedure has no @Mode (mode 3 unavailable)".into());
+            }
+            q.query(
+                source,
+                &PendingCall {
+                    mode: MODE_SWEEP,
+                    limit,
+                    collect_from: None,
+                    changed_from: None,
+                    after,
+                },
+            )
+        });
+        (started.elapsed(), r)
+    }
+
     /// Replaces the planner clock (tests pin the Vietnam time of day).
     pub fn with_pending_clock(mut self, now: Box<dyn Fn() -> OffsetDateTime + Send + Sync>) -> Sql {
         self.pending = PendingPlanner::new(now);
