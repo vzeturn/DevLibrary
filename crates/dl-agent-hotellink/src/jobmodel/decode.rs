@@ -143,6 +143,7 @@ impl Room {
             commission: f(v, "commission"),
             item_status: s(v, "itemStatus"),
             special_name: s(v, "specialName"),
+            variant: String::new(),
         }
     }
 }

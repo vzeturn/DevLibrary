@@ -1,12 +1,13 @@
 //! Pure helpers of the reconciler: item keys, room merging, folio building and dates.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 
 use dl_time::{Date, DateTime, OffsetDateTime};
 
 use crate::error::{Error, Result};
 use crate::gofmt::{quote, scan_int};
-use crate::jobmodel::{Job, PmsFolio, Room};
+use crate::jobmodel::{Job, PmsFolio, Room, sha256_hex};
 use crate::pms::{AGENT_CLERK_ID, AdditionalName, ClientSts, Folio, FolioRate, SmileClient, ymd};
 
 /// `itemKey`: the item a folio belongs to, from `UserInfo1` (`<key>#<seq>`); legacy folios
@@ -34,19 +35,70 @@ pub(crate) fn room_item_key(room_type_code: &str, rate_plan_id: &str) -> String 
     }
 }
 
+/// `roomKey`: the folio item key of a (merged) room, the legacy `room_item_key` plus
+/// `|v:<variant>` when the booking has diverging items of that key (RT-1474).
+pub(crate) fn room_key(room: &Room) -> String {
+    let key = room_item_key(&room.room_type_code, &room.rate_plan_id);
+    if room.variant.is_empty() {
+        key
+    } else {
+        format!("{key}|v:{}", room.variant)
+    }
+}
+
+/// `roomSignature`: the business fields written to a folio (guests, breakfast, nightly
+/// rates and extras), formatted as Go's `fmt` does; an equal signature means the rooms are
+/// interchangeable.
+fn room_signature(r: &Room) -> String {
+    let mut s = format!(
+        "a{};c{};bf{};{};",
+        r.adults, r.children, r.include_bf, r.breakfast_code
+    );
+    for rn in r.rates() {
+        let _ = write!(s, "{}={:.2};", rn.date, rn.rate);
+        for ex in &rn.extras {
+            let _ = write!(s, "{}:{:.2},", ex.kind, ex.amount);
+        }
+    }
+    s
+}
+
+/// `roomSignatureHash`: hex of the first 4 bytes of the signature's sha256.
+pub(crate) fn room_signature_hash(r: &Room) -> String {
+    let mut hex = sha256_hex(room_signature(r).as_bytes());
+    hex.truncate(8);
+    hex
+}
+
 /// `mergeRoomsByItem`: one room per item key (first item's details, summed quantity), in
-/// first-seen order.
+/// first-seen order. Items sharing `room_item_key` but differing in guests, breakfast or
+/// rates are not merged: each variant becomes its own group keyed `|v:<hash>` (RT-1474).
+/// Keys stay legacy unless a booking really has diverging items.
 pub(crate) fn merge_rooms_by_item(rooms: &[Room]) -> Vec<Room> {
+    let mut variants: HashMap<String, HashSet<String>> = HashMap::new();
+    for room in rooms {
+        variants
+            .entry(room_item_key(&room.room_type_code, &room.rate_plan_id))
+            .or_default()
+            .insert(room_signature(room));
+    }
     let mut out: Vec<Room> = Vec::with_capacity(rooms.len());
     let mut idx: HashMap<String, usize> = HashMap::new();
     for room in rooms {
-        let key = room_item_key(&room.room_type_code, &room.rate_plan_id);
+        let mut room = room.clone();
+        if variants
+            .get(&room_item_key(&room.room_type_code, &room.rate_plan_id))
+            .is_some_and(|v| v.len() > 1)
+        {
+            room.variant = room_signature_hash(&room);
+        }
+        let key = room_key(&room);
         if let Some(&i) = idx.get(&key) {
             out[i].quantity += room.quantity;
             continue;
         }
         idx.insert(key, out.len());
-        out.push(room.clone());
+        out.push(room);
     }
     out
 }

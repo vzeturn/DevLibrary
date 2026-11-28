@@ -175,6 +175,10 @@ pub struct Room {
     pub item_status: String,
     /// `specialName` (omitempty).
     pub special_name: String,
+    /// `Variant` (Go `json:"-"`): agent-local suffix of the folio item key, set by the
+    /// reconciler when several items share room type and rate plan but differ in rates,
+    /// guests or breakfast (RT-1474). Never encoded, decoded or part of the content hash.
+    pub variant: String,
 }
 
 impl Room {

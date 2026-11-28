@@ -23,7 +23,7 @@ use crate::pms::{ClientSts, Folio, PmsRepo, SmileClient};
 
 pub(crate) use build::{
     build_folio, folios_to_pms, item_key, merge_rooms_by_item, merge_rooms_conflicts, next_seq,
-    parse_day, pick_to_cancel, room_item_key,
+    parse_day, pick_to_cancel, room_key,
 };
 
 /// A clock returning the current instant.
@@ -385,7 +385,7 @@ impl Reconciler {
         for key in merge_rooms_conflicts(job.rooms()) {
             log::warn(
                 "HL gửi nhiều room-item cùng loại nhưng khác thông tin (số khách/giá) — \
-                 các folio trong nhóm sẽ dùng thông tin của item đầu, cần kiểm tra tay",
+                 mỗi biến thể được giữ thành nhóm folio riêng (khóa |v:<hash>)",
                 &[
                     ("bookingId", V::S(&job.booking_id)),
                     ("itemKey", V::S(&key)),
