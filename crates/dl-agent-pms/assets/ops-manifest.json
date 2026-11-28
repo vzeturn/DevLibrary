@@ -60,6 +60,27 @@
       ]
     },
     {
+      "name": "AssetItem",
+      "columns": [
+        "AssetClassName",
+        "AssetItemCode",
+        "HotelID",
+        "Manufacturer",
+        "ProductionCountry",
+        "ProductionYear",
+        "RemarkedName",
+        "SerialNumber"
+      ]
+    },
+    {
+      "name": "BankInfo",
+      "columns": [
+        "BankAddress",
+        "BankName",
+        "BankNumber"
+      ]
+    },
+    {
       "name": "Building",
       "columns": [
         "BuildingCode",
@@ -105,6 +126,14 @@
       ]
     },
     {
+      "name": "CLIENT",
+      "columns": [
+        "Address1",
+        "ClientFolioNum",
+        "ClientName"
+      ]
+    },
+    {
       "name": "CurrencyDef",
       "columns": [
         "CrCode",
@@ -123,6 +152,13 @@
         "RVCNo",
         "RVCType",
         "Status"
+      ]
+    },
+    {
+      "name": "Department",
+      "columns": [
+        "DepartmentCode",
+        "Location"
       ]
     },
     {
@@ -178,10 +214,31 @@
     {
       "name": "FolioTransaction",
       "columns": [
+        "FolioBalanceCode",
+        "FolioNum",
+        "HotelID",
+        "PostingClerkID",
+        "ServiceCharge",
+        "STaxAmount",
+        "TaxAmount",
         "TransactionAmount",
         "TransactionCode",
         "TransactionDate",
+        "TransactionID",
+        "TransactionSubCode",
         "VoidTransactionFlag"
+      ]
+    },
+    {
+      "name": "GLCOA",
+      "columns": [
+        "AccLevel",
+        "AccName",
+        "AccNo",
+        "AccParent",
+        "AccPL",
+        "AccType",
+        "RptName"
       ]
     },
     {
@@ -189,6 +246,17 @@
       "columns": [
         "ParaName",
         "ParaString"
+      ]
+    },
+    {
+      "name": "GLTRN",
+      "columns": [
+        "AccNo",
+        "DeptCode",
+        "GApp",
+        "GPeriod",
+        "TrnCr",
+        "TrnDb"
       ]
     },
     {
@@ -249,6 +317,33 @@
       ]
     },
     {
+      "name": "ISInvoice",
+      "columns": [
+        "DiscountCode",
+        "HotelID",
+        "IExRate",
+        "InvoiceNumber",
+        "InvoiceSeri",
+        "isHold",
+        "PaymentMode",
+        "PUser",
+        "TotalAmount",
+        "VDate",
+        "VDesc",
+        "VendorCode",
+        "VendorName",
+        "VNo",
+        "VPeriod",
+        "VSeq"
+      ]
+    },
+    {
+      "name": "ISInvoiceDetail",
+      "columns": [
+        "CheckNo"
+      ]
+    },
+    {
       "name": "ItemDef",
       "columns": [
         "IActive",
@@ -267,6 +362,14 @@
         "MenuOrder",
         "ParentMenu",
         "RVC"
+      ]
+    },
+    {
+      "name": "JType",
+      "columns": [
+        "Description",
+        "JType",
+        "VoucherType"
       ]
     },
     {
@@ -447,6 +550,35 @@
       ]
     },
     {
+      "name": "tmpISInvoice",
+      "columns": [
+        "DiscountCode",
+        "HotelID",
+        "IExRate",
+        "InvoiceNumber",
+        "InvoiceSeri",
+        "isHold",
+        "PaymentMode",
+        "PUser",
+        "ReceiveBy",
+        "TotalAmount",
+        "VDate",
+        "VDesc",
+        "VendorCode",
+        "VendorName",
+        "VNo",
+        "VPeriod",
+        "VRef",
+        "VSeq"
+      ]
+    },
+    {
+      "name": "tmpISInvoiceDetail",
+      "columns": [
+        "CheckNo"
+      ]
+    },
+    {
       "name": "TmpPayment",
       "columns": [
         "AmountBase",
@@ -485,7 +617,14 @@
     {
       "name": "TransactionCode",
       "columns": [
+        "AutoPost",
+        "DASAccount",
+        "DASAccountS",
+        "DASAccountT",
+        "DeptCode",
         "Description",
+        "DrAccount",
+        "STaxAccount",
         "TransactionCode",
         "TransactionGroup",
         "TransactionSubCode",
@@ -558,6 +697,754 @@
     "^xp_\\w+$"
   ],
   "ops": [
+    {
+      "name": "bo.faDetail.asset",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "AssetItem",
+            "columns": [
+              "AssetItemCode",
+              "RemarkedName",
+              "AssetClassName",
+              "SerialNumber",
+              "ProductionYear",
+              "ProductionCountry",
+              "Manufacturer",
+              "HotelID"
+            ],
+            "where": [
+              {
+                "column": "AssetItemCode",
+                "op": "=",
+                "param": {
+                  "name": "assetCode",
+                  "type": "varchar",
+                  "arg": "assetCode",
+                  "size": 35
+                }
+              }
+            ],
+            "order_by": [
+              "HotelID"
+            ],
+            "max_rows": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.faDetail.items",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ItemDef",
+            "columns": [
+              "ICode",
+              "IName",
+              "IActive",
+              "Price"
+            ],
+            "where": [
+              {
+                "column": "ICode",
+                "op": ">",
+                "param": {
+                  "name": "after",
+                  "type": "varchar",
+                  "arg": "after",
+                  "size": 20
+                }
+              }
+            ],
+            "order_by": [
+              "ICode"
+            ],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.foTrn.codes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TransactionCode",
+              "TransactionSubCode",
+              "Description",
+              "TransactionGroup",
+              "DeptCode",
+              "DrAccount",
+              "DASAccount",
+              "DASAccountS",
+              "DASAccountT",
+              "STaxAccount"
+            ],
+            "where": [],
+            "order_by": [
+              "TransactionCode",
+              "TransactionSubCode"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.foTrn.lines",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "FO",
+      "target_db": "SMILE_FO",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "FolioTransaction",
+            "columns": [
+              "TransactionID",
+              "FolioNum",
+              "FolioBalanceCode",
+              "TransactionCode",
+              "TransactionSubCode",
+              "TransactionAmount",
+              "ServiceCharge",
+              "TaxAmount",
+              "STaxAmount",
+              "PostingClerkID",
+              "HotelID"
+            ],
+            "where": [
+              {
+                "column": "TransactionDate",
+                "op": ">=",
+                "param": {
+                  "name": "date",
+                  "type": "date",
+                  "arg": "date"
+                }
+              },
+              {
+                "column": "TransactionDate",
+                "op": "<",
+                "param": {
+                  "name": "nextDate",
+                  "type": "date",
+                  "arg": "nextDate"
+                }
+              }
+            ],
+            "order_by": [
+              "TransactionID"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TransactionCode",
+              "TransactionSubCode",
+              "Description",
+              "TransactionGroup",
+              "DeptCode",
+              "DrAccount",
+              "DASAccount",
+              "DASAccountS",
+              "DASAccountT",
+              "STaxAccount"
+            ],
+            "where": [],
+            "order_by": [
+              "TransactionCode",
+              "TransactionSubCode"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.gl.tbByDept",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "GLCOA",
+            "columns": [
+              "AccNo",
+              "AccName",
+              "RptName",
+              "AccType",
+              "AccLevel",
+              "AccParent"
+            ],
+            "where": [
+              {
+                "column": "AccPL",
+                "op": "=",
+                "param": {
+                  "name": "pl",
+                  "type": "varchar",
+                  "value": "P",
+                  "size": 1
+                }
+              }
+            ],
+            "order_by": [
+              "AccNo"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "Department",
+            "columns": [
+              "DepartmentCode",
+              "Location"
+            ],
+            "where": [],
+            "order_by": [
+              "DepartmentCode"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "GLTRN",
+            "columns": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "where": [
+              {
+                "column": "GPeriod",
+                "op": ">=",
+                "param": {
+                  "name": "firstPeriod",
+                  "type": "int",
+                  "arg": "firstPeriod"
+                }
+              },
+              {
+                "column": "GPeriod",
+                "op": "<",
+                "param": {
+                  "name": "fromPeriod",
+                  "type": "int",
+                  "arg": "fromPeriod"
+                }
+              }
+            ],
+            "order_by": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "sum",
+                "column": "TrnDb",
+                "as": "debit"
+              },
+              {
+                "fn": "sum",
+                "column": "TrnCr",
+                "as": "credit"
+              }
+            ],
+            "group_by": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "date_bucket": []
+          }
+        },
+        {
+          "select": {
+            "table": "GLTRN",
+            "columns": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "where": [
+              {
+                "column": "GPeriod",
+                "op": ">=",
+                "param": {
+                  "name": "fromPeriod",
+                  "type": "int",
+                  "arg": "fromPeriod"
+                }
+              },
+              {
+                "column": "GPeriod",
+                "op": "<=",
+                "param": {
+                  "name": "toPeriod",
+                  "type": "int",
+                  "arg": "toPeriod"
+                }
+              }
+            ],
+            "order_by": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "sum",
+                "column": "TrnDb",
+                "as": "debit"
+              },
+              {
+                "fn": "sum",
+                "column": "TrnCr",
+                "as": "credit"
+              }
+            ],
+            "group_by": [
+              "DeptCode",
+              "AccNo",
+              "GApp"
+            ],
+            "date_bucket": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.isInvoice.lineCounts",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpISInvoiceDetail",
+            "columns": [
+              "CheckNo"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": ">=",
+                "param": {
+                  "name": "pendingFirst",
+                  "type": "bigint",
+                  "arg": "pendingFirst"
+                }
+              },
+              {
+                "column": "CheckNo",
+                "op": "<=",
+                "param": {
+                  "name": "pendingLast",
+                  "type": "bigint",
+                  "arg": "pendingLast"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "n"
+              }
+            ],
+            "group_by": [
+              "CheckNo"
+            ],
+            "date_bucket": []
+          }
+        },
+        {
+          "select": {
+            "table": "ISInvoiceDetail",
+            "columns": [
+              "CheckNo"
+            ],
+            "where": [
+              {
+                "column": "CheckNo",
+                "op": ">=",
+                "param": {
+                  "name": "postedFirst",
+                  "type": "bigint",
+                  "arg": "postedFirst"
+                }
+              },
+              {
+                "column": "CheckNo",
+                "op": "<=",
+                "param": {
+                  "name": "postedLast",
+                  "type": "bigint",
+                  "arg": "postedLast"
+                }
+              }
+            ],
+            "order_by": [
+              "CheckNo"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "n"
+              }
+            ],
+            "group_by": [
+              "CheckNo"
+            ],
+            "date_bucket": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.isInvoice.list",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpISInvoice",
+            "columns": [
+              "VSeq",
+              "VNo",
+              "InvoiceSeri",
+              "InvoiceNumber",
+              "VDesc",
+              "VDate",
+              "VPeriod",
+              "VendorCode",
+              "VendorName",
+              "PaymentMode",
+              "TotalAmount",
+              "PUser",
+              "HotelID",
+              "isHold",
+              "IExRate",
+              "DiscountCode"
+            ],
+            "where": [
+              {
+                "column": "VPeriod",
+                "op": ">=",
+                "param": {
+                  "name": "pendingFirst",
+                  "type": "int",
+                  "arg": "pendingFirst"
+                }
+              },
+              {
+                "column": "VPeriod",
+                "op": "<=",
+                "param": {
+                  "name": "pendingLast",
+                  "type": "int",
+                  "arg": "pendingLast"
+                }
+              }
+            ],
+            "order_by": [
+              "VPeriod",
+              "VSeq"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "ISInvoice",
+            "columns": [
+              "VSeq",
+              "VNo",
+              "InvoiceSeri",
+              "InvoiceNumber",
+              "VDesc",
+              "VDate",
+              "VPeriod",
+              "VendorCode",
+              "VendorName",
+              "PaymentMode",
+              "TotalAmount",
+              "PUser",
+              "HotelID",
+              "isHold",
+              "IExRate",
+              "DiscountCode"
+            ],
+            "where": [
+              {
+                "column": "VPeriod",
+                "op": ">=",
+                "param": {
+                  "name": "postedFirst",
+                  "type": "int",
+                  "arg": "postedFirst"
+                }
+              },
+              {
+                "column": "VPeriod",
+                "op": "<=",
+                "param": {
+                  "name": "postedLast",
+                  "type": "int",
+                  "arg": "postedLast"
+                }
+              }
+            ],
+            "order_by": [
+              "VPeriod",
+              "VSeq"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.isInvoice.scope",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 60000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpISInvoice",
+            "columns": [
+              "VPeriod"
+            ],
+            "where": [],
+            "order_by": [
+              "VPeriod"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "n"
+              }
+            ],
+            "group_by": [
+              "VPeriod"
+            ],
+            "date_bucket": []
+          }
+        },
+        {
+          "select": {
+            "table": "ISInvoice",
+            "columns": [
+              "VPeriod"
+            ],
+            "where": [],
+            "order_by": [
+              "VPeriod"
+            ],
+            "max_rows": 10000,
+            "aggregates": [
+              {
+                "fn": "count",
+                "as": "n"
+              }
+            ],
+            "group_by": [
+              "VPeriod"
+            ],
+            "date_bucket": []
+          }
+        },
+        {
+          "select": {
+            "table": "JType",
+            "columns": [
+              "JType",
+              "VoucherType"
+            ],
+            "where": [],
+            "order_by": [
+              "JType"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "TransactionCode",
+            "columns": [
+              "TransactionCode"
+            ],
+            "where": [
+              {
+                "column": "AutoPost",
+                "op": "=",
+                "param": {
+                  "name": "autoPost",
+                  "type": "int",
+                  "value": 8
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.isVoucher.client",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "CLIENT",
+            "columns": [
+              "ClientFolioNum",
+              "ClientName",
+              "Address1"
+            ],
+            "where": [
+              {
+                "column": "ClientFolioNum",
+                "op": "=",
+                "param": {
+                  "name": "clientCode",
+                  "type": "int",
+                  "arg": "clientCode"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.isVoucher.form",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 30000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpISInvoice",
+            "columns": [
+              "VSeq",
+              "VRef",
+              "ReceiveBy",
+              "VendorCode",
+              "VendorName",
+              "HotelID"
+            ],
+            "where": [
+              {
+                "column": "VSeq",
+                "op": "=",
+                "param": {
+                  "name": "vSeq",
+                  "type": "bigint",
+                  "arg": "vSeq"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 100
+          }
+        },
+        {
+          "select": {
+            "table": "JType",
+            "columns": [
+              "JType",
+              "Description",
+              "VoucherType"
+            ],
+            "where": [],
+            "order_by": [
+              "JType"
+            ],
+            "max_rows": 10000
+          }
+        },
+        {
+          "select": {
+            "table": "BankInfo",
+            "columns": [
+              "BankName",
+              "BankAddress",
+              "BankNumber"
+            ],
+            "where": [],
+            "order_by": [
+              "BankName",
+              "BankNumber"
+            ],
+            "max_rows": 10000
+          }
+        }
+      ]
+    },
     {
       "name": "fo.arrivals.expected",
       "contract_ver": 1,

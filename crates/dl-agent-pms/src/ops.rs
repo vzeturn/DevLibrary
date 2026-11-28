@@ -519,6 +519,16 @@ mod tests {
         assert_eq!(
             m.implemented_ops(),
             [
+                "bo.faDetail.asset@1",
+                "bo.faDetail.items@1",
+                "bo.foTrn.codes@1",
+                "bo.foTrn.lines@1",
+                "bo.gl.tbByDept@1",
+                "bo.isInvoice.lineCounts@1",
+                "bo.isInvoice.list@1",
+                "bo.isInvoice.scope@1",
+                "bo.isVoucher.client@1",
+                "bo.isVoucher.form@1",
                 "fo.arrivals.expected@1",
                 "fo.availability.chart@1",
                 "fo.availability.contractStatus@1",
