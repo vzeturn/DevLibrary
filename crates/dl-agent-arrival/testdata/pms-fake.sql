@@ -279,6 +279,8 @@ CREATE TABLE dbo.Folio (
     CheckOutTime DATETIME NULL
 );
 GO
+CREATE TABLE dbo.TransactionCode (TransactionCode DECIMAL(18,0) NULL, TransactionSubCode DECIMAL(18,0) NULL, Description NVARCHAR(200) NULL);
+GO
 CREATE TABLE dbo.FolioTransaction (
     TransID BIGINT NOT NULL IDENTITY(1,1) PRIMARY KEY, FolioNum DECIMAL(18,0) NULL,
     ArrivalDate DATETIME NULL,
@@ -338,6 +340,11 @@ CREATE TABLE dbo.FolioTransaction (
     TraceDate DATETIME NULL,
     TraceNote NVARCHAR(200) NULL,
     TransactionAmount DECIMAL(18,4) NULL,
+    TransactionCode DECIMAL(18,0) NULL,
+    TransactionSubCode DECIMAL(18,0) NULL,
+    Qty DECIMAL(18,4) NULL,
+    UnitPrice DECIMAL(18,4) NULL,
+    RefNumber DECIMAL(18,0) NULL,
     TransactionDate DATETIME NULL,
     UnexpectedDepartureFlag DECIMAL(18,0) NULL,
     UpdateExRateAtCI NVARCHAR(200) NULL,
