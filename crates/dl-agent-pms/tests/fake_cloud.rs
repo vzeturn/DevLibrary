@@ -205,6 +205,9 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
     assert_eq!(
         ops,
         [
+            "bo.auth.clerk@1",
+            "bo.auth.functions@1",
+            "bo.auth.permissions@1",
             "bo.faDetail.asset@1",
             "bo.faDetail.items@1",
             "bo.foTrn.codes@1",
@@ -215,6 +218,30 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
             "bo.isInvoice.scope@1",
             "bo.isVoucher.client@1",
             "bo.isVoucher.form@1",
+            "bo.pur.clerknames@1",
+            "bo.pur.departments@1",
+            "bo.pur.departmentsec@1",
+            "bo.pur.itemclasses@1",
+            "bo.pur.itemgroups@1",
+            "bo.pur.items@1",
+            "bo.pur.itemsubgroups@1",
+            "bo.pur.locations@1",
+            "bo.pur.po@1",
+            "bo.pur.pofinlog@1",
+            "bo.pur.polines@1",
+            "bo.pur.porcv@1",
+            "bo.pur.pr@1",
+            "bo.pur.prhidden@1",
+            "bo.pur.prholds@1",
+            "bo.pur.prlines@1",
+            "bo.pur.rcvheaders@1",
+            "bo.pur.rvc@1",
+            "bo.pur.stockinterface@1",
+            "bo.pur.taxes@1",
+            "bo.pur.units@1",
+            "bo.pur.vendorcontracts@1",
+            "bo.pur.vendorprices@1",
+            "bo.pur.vendors@1",
             "fo.arrivals.expected@1",
             "fo.availability.chart@1",
             "fo.availability.contractStatus@1",
@@ -290,7 +317,7 @@ fn hello_names_the_ops_and_replays_are_answered_from_the_journal() {
     assert_eq!(journal.get("entries").and_then(Value::as_u64), Some(1));
     assert_eq!(journal.get("full").and_then(Value::as_bool), Some(false));
     let ops = status.get("ops").and_then(Value::as_array).expect("ops");
-    assert_eq!(ops.len(), 61);
+    assert_eq!(ops.len(), 88);
 
     // An op for a database outside SMILE_FO/POS/BO is a bad frame: the agent closes.
     assert!(r.command("pms.reconnect").ok);
