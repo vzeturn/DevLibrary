@@ -140,11 +140,12 @@ pub fn runnable_order_types() -> Vec<String> {
 pub struct SiteCommandExecutor {
     store: Arc<dyn SiteCommandStore>,
     clock: SharedClock,
-    log: Logger,
+    pub(super) log: Logger,
     resnapshot: Option<Arc<ResnapshotCommandHandler>>,
     verify: Option<Arc<super::verify::VerifyCommandHandler>>,
     legacy_export: Option<Arc<LegacyExportCommandHandler>>,
     fo_inhouse: Option<Arc<super::fo_inhouse::FoInHouseSearchCommandHandler>>,
+    pub(super) residue: Option<Arc<dyn super::order_residue::OrderResidueSource>>,
     nudge: Option<Arc<dyn CaptureNudge>>,
     grants: Option<Arc<dyn GrantsCheck>>,
     schema: Arc<TableSchemaGuard>,
@@ -171,6 +172,7 @@ impl SiteCommandExecutor {
             verify: None,
             legacy_export: None,
             fo_inhouse: None,
+            residue: None,
             nudge: None,
             grants: None,
             schema,
@@ -186,6 +188,15 @@ impl SiteCommandExecutor {
     /// Runs `sync.verify` with `handler` (without one the type is unknown).
     pub fn with_verify(mut self, handler: Arc<super::verify::VerifyCommandHandler>) -> Self {
         self.verify = Some(handler);
+        self
+    }
+
+    /// Runs `pos.order_residue` reading from `source` (without one the type is unknown).
+    pub fn with_residue(
+        mut self,
+        source: Arc<dyn super::order_residue::OrderResidueSource>,
+    ) -> Self {
+        self.residue = Some(source);
         self
     }
 
@@ -294,6 +305,7 @@ impl SiteCommandExecutor {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
             },
+            s::POS_ORDER_RESIDUE => self.pos_order_residue(c, ctx),
             LEGACY_EXPORT => match &self.legacy_export {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
@@ -332,7 +344,7 @@ impl SiteCommandExecutor {
         }
     }
 
-    fn reject(&self, c: &SyncCommand, reason: &str) -> SyncCommandResult {
+    pub(super) fn reject(&self, c: &SyncCommand, reason: &str) -> SyncCommandResult {
         SyncCommandResult {
             command_id: c.command_id,
             status: CommandStatus::Rejected,

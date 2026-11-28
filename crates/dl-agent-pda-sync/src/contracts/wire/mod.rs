@@ -9,6 +9,7 @@ mod hops;
 mod legacy_import;
 mod money;
 mod order;
+mod pos_order_residue;
 mod print;
 mod site_commands;
 mod site_events;
@@ -37,6 +38,9 @@ pub use order::{
     OrderCheckLine, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
     OrderCoversPayload, OrderItemPostPayload, OrderItemVoidPayload, OrderSendPayload,
     order_aggregate, order_command_reasons, order_command_types,
+};
+pub use pos_order_residue::{
+    PosOrderResiduePayload, PosOrderResidueResult, PosResidueCheck, PosResidueInfo,
 };
 pub use print::{
     PrintQueueAutoFill, PrintQueueInfo, PrintQueueReport, PrintQueueReportResult,

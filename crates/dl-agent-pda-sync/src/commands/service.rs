@@ -87,6 +87,7 @@ pub fn build(
     let workers = usize::try_from(s.options.command_workers).unwrap_or(1);
     let store = Arc::new(SqlSiteCommandStore::new(config).with_max_idle(workers));
 
+    let residue = super::order_residue::source_of(&store);
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
     let resnapshot = Arc::new(ResnapshotCommandHandler::new(
         s.outbox.clone(),
@@ -152,6 +153,7 @@ pub fn build(
         .with_resnapshot(resnapshot)
         .with_verify(verify)
         .with_legacy_export(legacy_export)
+        .with_residue(residue)
         .with_fo_inhouse(fo_inhouse)
         .with_grants(grants.clone())
         .with_schema(schema);
