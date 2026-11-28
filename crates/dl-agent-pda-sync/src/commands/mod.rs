@@ -10,7 +10,8 @@
 //!   [`ResnapshotCommandHandler`] runs `sync.resnapshot`; [`VerifyCommandHandler`] runs
 //!   `sync.verify` (ADR 0126/0128); [`FoInHouseSearchCommandHandler`] runs the read-only
 //!   `fo.inhouse_search` (RT-1296); [`PosRevenueSource`] and [`PosBillSource`] answer the
-//!   read-only `pos.revenue_summary` and `pos.bill_list` (RT-1427).
+//!   read-only `pos.revenue_summary` and `pos.bill_list`, [`OrderResidueSource`] the
+//!   read-only `pos.order_residue` (RT-1427).
 //! - [`CommandChannel`]: WebSocket / long-poll link to the cloud; [`OrderGrantsMonitor`]:
 //!   the grants self-check; [`ChangeTrackingMonitor`]: the Change Tracking check run
 //!   beside it behind the flag `capture.change_tracking` (RT-1318), one round of which
@@ -30,6 +31,7 @@ pub mod fo_inhouse_match;
 pub mod grants;
 pub mod grants_repair;
 pub mod keyed_pool;
+pub mod order_residue;
 mod po_number;
 pub mod pos_bills;
 pub mod pos_revenue;
@@ -40,6 +42,7 @@ pub mod service;
 mod sql;
 mod sql_money;
 mod sql_order;
+mod sql_order_residue;
 mod sql_store;
 mod sql_table;
 pub mod sql_text;
@@ -62,6 +65,10 @@ pub use fo_inhouse::{
 pub use grants::{
     BootstrapGrantsRepair, GrantsRepair, OrderGrantsMonitor, OrderGrantsService, RepairAttempt,
     RepairOutcome,
+};
+pub use order_residue::{
+    OrderResidueSnapshot, OrderResidueSource, ResidueCheck, ResidueCleaned, ResidueInfoRow,
+    ResidueReport,
 };
 pub use pos_bills::{POS_BILL_TENDERS, POS_BILLS, PosBillSource, pos_bill_parameters};
 pub use pos_revenue::{DAILY_REVENUE, PosRevenueSource, daily_revenue_parameters};

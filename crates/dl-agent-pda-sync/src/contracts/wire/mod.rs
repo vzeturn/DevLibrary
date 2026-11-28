@@ -10,6 +10,7 @@ mod legacy_import;
 mod money;
 mod order;
 mod pos_bills;
+mod pos_order_residue;
 mod pos_revenue;
 mod print;
 mod site_commands;
@@ -42,6 +43,9 @@ pub use order::{
 };
 pub use pos_bills::{
     PosBill, PosBillListPayload, PosBillListResult, PosBillPayment, pos_bill_statuses,
+};
+pub use pos_order_residue::{
+    PosOrderResiduePayload, PosOrderResidueResult, PosResidueCheck, PosResidueInfo,
 };
 pub use pos_revenue::{PosRevenueDay, PosRevenueSummaryPayload, PosRevenueSummaryResult};
 pub use print::{

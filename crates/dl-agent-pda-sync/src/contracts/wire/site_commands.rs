@@ -44,6 +44,9 @@ pub mod site_command_types {
     pub const POS_REVENUE_SUMMARY: &str = "pos.revenue_summary";
     /// Read-only POS WIN bills of one RVC and business date (RT-0842).
     pub const POS_BILL_LIST: &str = "pos.bill_list";
+    /// Read-only reconcile of the order rows the agent's commands left in SMILE_POS
+    /// (RT-1365, ADR 0182). Check numbers only.
+    pub const POS_ORDER_RESIDUE: &str = "pos.order_residue";
     /// Read-only search of the in-house guests of an RVC's Front Office database (RT-1296).
     pub const FO_INHOUSE_SEARCH: &str = "fo.inhouse_search";
 }
@@ -114,6 +117,7 @@ pub mod site_command_contract {
         // RT-1427: the read-only SMILE_POS reads, ported from the PDAOrder agent.
         spec(site_command_types::POS_REVENUE_SUMMARY, Durable, 3),
         spec(site_command_types::POS_BILL_LIST, Durable, 3),
+        spec(site_command_types::POS_ORDER_RESIDUE, Durable, 3),
         spec(site_command_types::FO_INHOUSE_SEARCH, Interactive, 1),
         spec(o::CHECK_OPEN, Interactive, 3),
         spec(o::ITEM_POST, Interactive, 3),

@@ -89,6 +89,7 @@ pub fn build(
     // The read-only POS verbs (RT-1427) share the keyed store pool; they keep no log row.
     let revenue = super::pos_revenue::source_of(&store);
     let bills = super::pos_bills::source_of(&store);
+    let residue = super::order_residue::source_of(&store);
 
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
     let resnapshot = Arc::new(ResnapshotCommandHandler::new(
@@ -158,6 +159,7 @@ pub fn build(
         .with_fo_inhouse(fo_inhouse)
         .with_revenue(revenue)
         .with_bills(bills)
+        .with_residue(residue)
         .with_grants(grants.clone())
         .with_schema(schema);
     if let Some(n) = &extras.nudge {

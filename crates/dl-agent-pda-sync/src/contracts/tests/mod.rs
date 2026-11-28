@@ -9,6 +9,7 @@ mod legacy;
 mod mapper;
 mod wire;
 mod wire_po_number;
+mod wire_pos_order_residue;
 mod wire_pos_reads;
 
 use super::catalog::SyncCatalog;

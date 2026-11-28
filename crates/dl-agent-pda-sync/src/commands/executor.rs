@@ -299,6 +299,7 @@ impl SiteCommandExecutor {
             },
             s::POS_REVENUE_SUMMARY => self.pos_revenue(c, ctx),
             s::POS_BILL_LIST => self.pos_bills(c, ctx),
+            s::POS_ORDER_RESIDUE => self.pos_order_residue(c, ctx),
             LEGACY_EXPORT => match &self.legacy_export {
                 Some(h) => h.execute(c, ctx),
                 None => Ok(self.reject(c, reasons::UNKNOWN_TYPE)),
