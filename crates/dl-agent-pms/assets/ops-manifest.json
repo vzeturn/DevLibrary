@@ -119,6 +119,23 @@
       ]
     },
     {
+      "name": "ChucNang",
+      "columns": [
+        "MaCha",
+        "Muc",
+        "ShortcutString",
+        "TenChucNang"
+      ]
+    },
+    {
+      "name": "Clerk",
+      "columns": [
+        "ClerkID",
+        "DisabledFlag",
+        "LastName"
+      ]
+    },
+    {
       "name": "ClerkPermission",
       "columns": [
         "ClerkID",
@@ -129,8 +146,34 @@
       "name": "CLIENT",
       "columns": [
         "Address1",
+        "Address2",
+        "APAccGroup",
+        "APBalance",
+        "APBillingCycleCode",
+        "APClassCode",
+        "APDueDays",
+        "ARExternalNum",
+        "Attention",
         "ClientFolioNum",
-        "ClientName"
+        "ClientName",
+        "ContactPerson",
+        "Country",
+        "CurrencyConversionCode",
+        "Deleted",
+        "Email",
+        "Fax",
+        "HotelID",
+        "InvoiceName",
+        "isAP",
+        "isAR",
+        "IsCompany",
+        "isTA",
+        "LastChangeTime",
+        "SwiftCode",
+        "Tel1",
+        "Tel2",
+        "VATCode",
+        "WebSite"
       ]
     },
     {
@@ -147,6 +190,8 @@
       "name": "DefRVCList",
       "columns": [
         "DeptCode",
+        "EName",
+        "HotelID",
         "isBOShop",
         "RVCName",
         "RVCNo",
@@ -158,7 +203,17 @@
       "name": "Department",
       "columns": [
         "DepartmentCode",
+        "DepartmentName",
+        "HotelID",
         "Location"
+      ]
+    },
+    {
+      "name": "DepartmentSec",
+      "columns": [
+        "AllowDept",
+        "ClerkID",
+        "HotelID"
       ]
     },
     {
@@ -290,10 +345,37 @@
     {
       "name": "IClassDef",
       "columns": [
+        "AllowMinus",
         "ClsCode",
+        "ClsEName",
+        "ClsName",
+        "HotelID",
+        "IsAsset",
+        "isINV",
+        "isSale",
+        "isService",
+        "PriceIncludeTax",
+        "Status",
         "STaxClass",
         "SurChgCls",
+        "Tax1Code",
+        "Tax2Code",
+        "Tax3Code",
+        "Tax4Code",
+        "Tax5Code",
         "TaxClass"
+      ]
+    },
+    {
+      "name": "IGroupDef",
+      "columns": [
+        "GCode",
+        "GLevel",
+        "GName",
+        "GParent",
+        "HotelID",
+        "RptGroup",
+        "Status"
       ]
     },
     {
@@ -314,6 +396,16 @@
         "StsCode5",
         "StsCode6",
         "StsCode7"
+      ]
+    },
+    {
+      "name": "ISGroupDef",
+      "columns": [
+        "HotelID",
+        "SGCode",
+        "SGEName",
+        "SGName",
+        "Status"
       ]
     },
     {
@@ -346,10 +438,30 @@
     {
       "name": "ItemDef",
       "columns": [
+        "AllLoc",
+        "HotelID",
         "IActive",
+        "IBarCode",
+        "IClass",
         "ICode",
+        "ICost",
+        "IGroup",
         "IName",
-        "Price"
+        "IName1",
+        "InTaxCode",
+        "ISGroup",
+        "isPOSItem",
+        "IUnit",
+        "IUnit1",
+        "IUnit1Cnv",
+        "IUnit2",
+        "IUnit2Cnv",
+        "LastChangeBy",
+        "LastChangeTime",
+        "Price",
+        "PrintName",
+        "PRLevel",
+        "WPrice"
       ]
     },
     {
@@ -362,6 +474,16 @@
         "MenuOrder",
         "ParentMenu",
         "RVC"
+      ]
+    },
+    {
+      "name": "IUnitDef",
+      "columns": [
+        "HotelID",
+        "RVC",
+        "Status",
+        "UnitCode",
+        "UnitName"
       ]
     },
     {
@@ -404,6 +526,130 @@
       ]
     },
     {
+      "name": "POFinishOrderLog",
+      "columns": [
+        "ActionTime",
+        "ClerkID",
+        "FieldName",
+        "HotelID",
+        "ItemCode",
+        "NewValues",
+        "OldValues",
+        "POID"
+      ]
+    },
+    {
+      "name": "PR",
+      "columns": [
+        "AppClerk",
+        "Approvedby",
+        "ApprovedLevel",
+        "AppTime",
+        "AssignBy",
+        "AssignSendLevel",
+        "AssSendClerk",
+        "AssSendTime",
+        "BackAssignBy",
+        "BackAssignReason",
+        "BackAssignTime",
+        "BackLastAppBy",
+        "BackLastAppReason",
+        "BackLastAppTime",
+        "CanceledBy",
+        "CanceledTime",
+        "CancelReason",
+        "CreatedClerk",
+        "CreatedTime",
+        "Department",
+        "DueDate",
+        "HotelID",
+        "IsCanceled",
+        "IsFromHoldItem",
+        "IsMarketList",
+        "LastApproveClerkID",
+        "LastAssignTime",
+        "Location",
+        "MarketListID",
+        "myDescription",
+        "NotAllow",
+        "NotAllowBy",
+        "NotAllowReason",
+        "NotAllowTime",
+        "Notice",
+        "Orderby",
+        "OrgPRNumber",
+        "PRDate",
+        "PRNumber",
+        "PRSendClerk",
+        "PRSendTime",
+        "ReCreateFromPR",
+        "Reference",
+        "SendPRLevel",
+        "StatePR"
+      ]
+    },
+    {
+      "name": "PRDtl",
+      "columns": [
+        "AppNotes",
+        "AppReason",
+        "ApproveAmount",
+        "ApprovedBy",
+        "ApprovedHold",
+        "ApprovedLevel",
+        "ApprovedPrice",
+        "ApprovedQty",
+        "ApprovedTime",
+        "ApprovedVendor",
+        "AssignAmount",
+        "AssignBy",
+        "AssignedPrice",
+        "AssignedVendor",
+        "AssignNotes",
+        "AssignReason",
+        "AssignTime",
+        "AutoAssigned",
+        "CanceledBy",
+        "CanceledTime",
+        "CancelReason",
+        "DiscountPct",
+        "ExRate",
+        "Hold",
+        "ID",
+        "IName1",
+        "IsCanceled",
+        "ItemCode",
+        "ItemLevel",
+        "ItemName",
+        "ManualStkQty",
+        "Notes",
+        "POQTY",
+        "Price",
+        "PRNumber",
+        "PRTime",
+        "Qty",
+        "VATCode"
+      ]
+    },
+    {
+      "name": "PRHoldItemLog",
+      "columns": [
+        "HoldBy",
+        "HoldTime",
+        "ICode",
+        "PRHoldSts",
+        "PRNumber"
+      ]
+    },
+    {
+      "name": "PRNotShowByUser",
+      "columns": [
+        "ClerkID",
+        "HotelID",
+        "PRNumber"
+      ]
+    },
+    {
       "name": "Profile",
       "columns": [
         "ProfileNumber",
@@ -425,6 +671,36 @@
         "RateCurr",
         "RateLevel",
         "RatePP"
+      ]
+    },
+    {
+      "name": "ReceivingDetail",
+      "columns": [
+        "CheckNo",
+        "HotelID",
+        "IPONo",
+        "ITrnDate",
+        "ITrnSeq",
+        "IVCode",
+        "Location",
+        "podtlID",
+        "Status",
+        "subAmount",
+        "TaTolAmount",
+        "TrnQty",
+        "UPrice"
+      ]
+    },
+    {
+      "name": "ReceivingHeader",
+      "columns": [
+        "InvoiceNumber",
+        "InvoiceSeri",
+        "ReceiveBy",
+        "VDate",
+        "VNo",
+        "VSeq",
+        "VStatus"
       ]
     },
     {
@@ -513,6 +789,15 @@
       ]
     },
     {
+      "name": "StockInterface",
+      "columns": [
+        "Enable",
+        "IClass",
+        "RVCNo",
+        "StockAccount"
+      ]
+    },
+    {
       "name": "SurChgDef",
       "columns": [
         "PreAccLink",
@@ -524,6 +809,15 @@
       "columns": [
         "PreAccLink",
         "TaxCode"
+      ]
+    },
+    {
+      "name": "TaxDef",
+      "columns": [
+        "HotelID",
+        "ID",
+        "TaxCode",
+        "TaxRate"
       ]
     },
     {
@@ -588,6 +882,67 @@
         "PayTime",
         "RVC",
         "TrnNo"
+      ]
+    },
+    {
+      "name": "tmpPO",
+      "columns": [
+        "Approvedby",
+        "ChangedBy",
+        "ChangedTime",
+        "CreateBy",
+        "CreateTime",
+        "DeptCode",
+        "DueDate",
+        "HotelID",
+        "IsManual",
+        "IsPrinted",
+        "IsSendEmail",
+        "IsTotalPO",
+        "Location",
+        "ManualBy",
+        "ManualTime",
+        "Orderby",
+        "PODate",
+        "POID",
+        "POName",
+        "PRNo",
+        "StatePO",
+        "VendorCode",
+        "VendorName"
+      ]
+    },
+    {
+      "name": "tmpPODtl",
+      "columns": [
+        "Department",
+        "Discount",
+        "ExRate",
+        "FinishedBy",
+        "FinishedTime",
+        "ForcedFinishedBy",
+        "ForcedFinishedTime",
+        "IsFinished",
+        "isForcedFinished",
+        "itemCode",
+        "itemName",
+        "LastDate",
+        "LastPrice",
+        "LastVendor",
+        "OnStock",
+        "POID",
+        "Price",
+        "PRNo",
+        "PRNotes",
+        "PRQty",
+        "Qty",
+        "ReceivedQty",
+        "SubAmount",
+        "subID",
+        "TotalAmount",
+        "UnitCode",
+        "VATCode",
+        "VATRate"
       ]
     },
     {
@@ -666,6 +1021,41 @@
       ]
     },
     {
+      "name": "VendorContract",
+      "columns": [
+        "ContractAmount",
+        "ContractDate",
+        "ContractName",
+        "ContractNo",
+        "ExpDate",
+        "HotelID",
+        "LastChangeBy",
+        "LastChangeTime",
+        "Notice",
+        "nSeq",
+        "SignatureDate",
+        "VendorCode"
+      ]
+    },
+    {
+      "name": "VendorPriceList",
+      "columns": [
+        "ExRate",
+        "HotelID",
+        "ItemCode",
+        "LastChangeBy",
+        "LastChangeTime",
+        "Notes",
+        "PrefPrice",
+        "Price",
+        "Priority",
+        "ValidFrom",
+        "ValidTo",
+        "VATCode",
+        "VendorCode"
+      ]
+    },
+    {
       "name": "VoidTrn",
       "columns": [
         "BaseTTL",
@@ -697,6 +1087,100 @@
     "^xp_\\w+$"
   ],
   "ops": [
+    {
+      "name": "bo.auth.clerk",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Clerk",
+            "columns": [
+              "ClerkID",
+              "LastName",
+              "DisabledFlag"
+            ],
+            "where": [
+              {
+                "column": "ClerkID",
+                "op": "=",
+                "param": {
+                  "name": "clerkId",
+                  "type": "varchar",
+                  "arg": "clerkId",
+                  "size": 10
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.auth.functions",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ChucNang",
+            "columns": [
+              "TenChucNang",
+              "Muc",
+              "MaCha",
+              "ShortcutString"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.auth.permissions",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ClerkPermission",
+            "columns": [
+              "ClerkID",
+              "FunctionID"
+            ],
+            "where": [
+              {
+                "column": "ClerkID",
+                "op": "=",
+                "param": {
+                  "name": "clerkId",
+                  "type": "varchar",
+                  "arg": "clerkId",
+                  "size": 10
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
     {
       "name": "bo.faDetail.asset",
       "contract_ver": 1,
@@ -1441,6 +1925,980 @@
               "BankNumber"
             ],
             "max_rows": 10000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.clerknames",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Clerk",
+            "columns": [
+              "ClerkID",
+              "LastName"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.departments",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "Department",
+            "columns": [
+              "DepartmentCode",
+              "DepartmentName",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.departmentsec",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "DepartmentSec",
+            "columns": [
+              "ClerkID",
+              "AllowDept",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.itemclasses",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "IClassDef",
+            "columns": [
+              "ClsCode",
+              "ClsName",
+              "ClsEName",
+              "Status",
+              "TaxClass",
+              "PriceIncludeTax",
+              "Tax1Code",
+              "Tax2Code",
+              "Tax3Code",
+              "Tax4Code",
+              "Tax5Code",
+              "isINV",
+              "isService",
+              "isSale",
+              "IsAsset",
+              "AllowMinus",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.itemgroups",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "IGroupDef",
+            "columns": [
+              "GCode",
+              "GName",
+              "GLevel",
+              "GParent",
+              "RptGroup",
+              "Status",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.items",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ItemDef",
+            "columns": [
+              "ICode",
+              "IBarCode",
+              "IName",
+              "IName1",
+              "PrintName",
+              "IGroup",
+              "ISGroup",
+              "IClass",
+              "IUnit",
+              "IUnit1",
+              "IUnit1Cnv",
+              "IUnit2",
+              "IUnit2Cnv",
+              "Price",
+              "WPrice",
+              "ICost",
+              "IActive",
+              "PRLevel",
+              "AllLoc",
+              "isPOSItem",
+              "InTaxCode",
+              "HotelID",
+              "LastChangeBy",
+              "LastChangeTime"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.itemsubgroups",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ISGroupDef",
+            "columns": [
+              "SGCode",
+              "SGName",
+              "SGEName",
+              "Status",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.locations",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "DefRVCList",
+            "columns": [
+              "RVCNo",
+              "RVCName",
+              "EName",
+              "RVCType",
+              "Status",
+              "DeptCode",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.po",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpPO",
+            "columns": [
+              "POID",
+              "POName",
+              "PODate",
+              "DueDate",
+              "Orderby",
+              "Approvedby",
+              "VendorCode",
+              "VendorName",
+              "StatePO",
+              "DeptCode",
+              "PRNo",
+              "Location",
+              "IsPrinted",
+              "HotelID",
+              "IsTotalPO",
+              "IsSendEmail",
+              "CreateBy",
+              "CreateTime",
+              "IsManual",
+              "ManualBy",
+              "ManualTime",
+              "ChangedBy",
+              "ChangedTime"
+            ],
+            "where": [
+              {
+                "column": "PODate",
+                "op": ">=",
+                "param": {
+                  "name": "fromDate",
+                  "type": "date",
+                  "arg": "fromDate"
+                }
+              },
+              {
+                "column": "POID",
+                "op": ">=",
+                "param": {
+                  "name": "fromPo",
+                  "type": "bigint",
+                  "arg": "fromPo"
+                }
+              },
+              {
+                "column": "POID",
+                "op": "<=",
+                "param": {
+                  "name": "toPo",
+                  "type": "bigint",
+                  "arg": "toPo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.pofinlog",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "POFinishOrderLog",
+            "columns": [
+              "POID",
+              "ItemCode",
+              "FieldName",
+              "OldValues",
+              "NewValues",
+              "ClerkID",
+              "ActionTime",
+              "HotelID"
+            ],
+            "where": [
+              {
+                "column": "POID",
+                "op": ">=",
+                "param": {
+                  "name": "fromPo",
+                  "type": "bigint",
+                  "arg": "fromPo"
+                }
+              },
+              {
+                "column": "POID",
+                "op": "<=",
+                "param": {
+                  "name": "toPo",
+                  "type": "bigint",
+                  "arg": "toPo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.polines",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "tmpPODtl",
+            "columns": [
+              "subID",
+              "POID",
+              "itemCode",
+              "itemName",
+              "PRNo",
+              "PRQty",
+              "Qty",
+              "ReceivedQty",
+              "Price",
+              "Discount",
+              "VATCode",
+              "VATRate",
+              "SubAmount",
+              "TotalAmount",
+              "ExRate",
+              "Department",
+              "UnitCode",
+              "OnStock",
+              "PRNotes",
+              "IsFinished",
+              "FinishedBy",
+              "FinishedTime",
+              "isForcedFinished",
+              "ForcedFinishedBy",
+              "ForcedFinishedTime",
+              "LastVendor",
+              "LastPrice",
+              "LastDate"
+            ],
+            "where": [
+              {
+                "column": "POID",
+                "op": ">=",
+                "param": {
+                  "name": "fromPo",
+                  "type": "bigint",
+                  "arg": "fromPo"
+                }
+              },
+              {
+                "column": "POID",
+                "op": "<=",
+                "param": {
+                  "name": "toPo",
+                  "type": "bigint",
+                  "arg": "toPo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.porcv",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ReceivingDetail",
+            "columns": [
+              "ITrnSeq",
+              "ITrnDate",
+              "CheckNo",
+              "IPONo",
+              "podtlID",
+              "IVCode",
+              "TrnQty",
+              "UPrice",
+              "subAmount",
+              "TaTolAmount",
+              "Location",
+              "Status",
+              "HotelID"
+            ],
+            "where": [
+              {
+                "column": "IPONo",
+                "op": ">=",
+                "param": {
+                  "name": "fromPo",
+                  "type": "bigint",
+                  "arg": "fromPo"
+                }
+              },
+              {
+                "column": "IPONo",
+                "op": "<=",
+                "param": {
+                  "name": "toPo",
+                  "type": "bigint",
+                  "arg": "toPo"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.pr",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "PR",
+            "columns": [
+              "PRNumber",
+              "PRDate",
+              "DueDate",
+              "Department",
+              "Orderby",
+              "Approvedby",
+              "Reference",
+              "myDescription",
+              "StatePR",
+              "IsMarketList",
+              "MarketListID",
+              "NotAllow",
+              "IsFromHoldItem",
+              "IsCanceled",
+              "CancelReason",
+              "NotAllowReason",
+              "CreatedTime",
+              "CreatedClerk",
+              "AssSendTime",
+              "AssSendClerk",
+              "AppTime",
+              "AppClerk",
+              "AssignBy",
+              "PRSendTime",
+              "PRSendClerk",
+              "Location",
+              "CanceledBy",
+              "CanceledTime",
+              "ApprovedLevel",
+              "LastApproveClerkID",
+              "HotelID",
+              "LastAssignTime",
+              "NotAllowBy",
+              "NotAllowTime",
+              "SendPRLevel",
+              "BackAssignReason",
+              "OrgPRNumber",
+              "AssignSendLevel",
+              "Notice",
+              "BackLastAppReason",
+              "BackAssignBy",
+              "BackAssignTime",
+              "BackLastAppBy",
+              "BackLastAppTime",
+              "ReCreateFromPR"
+            ],
+            "where": [
+              {
+                "column": "PRDate",
+                "op": ">=",
+                "param": {
+                  "name": "fromDate",
+                  "type": "date",
+                  "arg": "fromDate"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.prhidden",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "PRNotShowByUser",
+            "columns": [
+              "ClerkID",
+              "PRNumber",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.prholds",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "PRHoldItemLog",
+            "columns": [
+              "PRNumber",
+              "ICode",
+              "PRHoldSts",
+              "HoldBy",
+              "HoldTime"
+            ],
+            "where": [
+              {
+                "column": "PRNumber",
+                "op": ">=",
+                "param": {
+                  "name": "fromPr",
+                  "type": "bigint",
+                  "arg": "fromPr"
+                }
+              },
+              {
+                "column": "PRNumber",
+                "op": "<=",
+                "param": {
+                  "name": "toPr",
+                  "type": "bigint",
+                  "arg": "toPr"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.prlines",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "PRDtl",
+            "columns": [
+              "ID",
+              "PRNumber",
+              "ItemCode",
+              "ItemName",
+              "IName1",
+              "Qty",
+              "Price",
+              "POQTY",
+              "ManualStkQty",
+              "ItemLevel",
+              "Notes",
+              "PRTime",
+              "Hold",
+              "ApprovedHold",
+              "VATCode",
+              "DiscountPct",
+              "ExRate",
+              "AssignedVendor",
+              "AssignedPrice",
+              "AssignAmount",
+              "AutoAssigned",
+              "AssignReason",
+              "AssignNotes",
+              "AssignBy",
+              "AssignTime",
+              "ApprovedVendor",
+              "ApprovedPrice",
+              "ApprovedQty",
+              "ApproveAmount",
+              "ApprovedLevel",
+              "ApprovedBy",
+              "ApprovedTime",
+              "AppReason",
+              "AppNotes",
+              "IsCanceled",
+              "CancelReason",
+              "CanceledBy",
+              "CanceledTime"
+            ],
+            "where": [
+              {
+                "column": "PRNumber",
+                "op": ">=",
+                "param": {
+                  "name": "fromPr",
+                  "type": "bigint",
+                  "arg": "fromPr"
+                }
+              },
+              {
+                "column": "PRNumber",
+                "op": "<=",
+                "param": {
+                  "name": "toPr",
+                  "type": "bigint",
+                  "arg": "toPr"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.rcvheaders",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "ReceivingHeader",
+            "columns": [
+              "VSeq",
+              "VNo",
+              "InvoiceSeri",
+              "InvoiceNumber",
+              "VDate",
+              "VStatus",
+              "ReceiveBy"
+            ],
+            "where": [
+              {
+                "column": "VSeq",
+                "op": ">=",
+                "param": {
+                  "name": "fromSeq",
+                  "type": "bigint",
+                  "arg": "fromSeq"
+                }
+              },
+              {
+                "column": "VSeq",
+                "op": "<=",
+                "param": {
+                  "name": "toSeq",
+                  "type": "bigint",
+                  "arg": "toSeq"
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.rvc",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "DefRVCList",
+            "columns": [
+              "RVCNo",
+              "RVCName",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.stockinterface",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "StockInterface",
+            "columns": [
+              "RVCNo",
+              "IClass",
+              "Enable",
+              "StockAccount"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.taxes",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "TaxDef",
+            "columns": [
+              "ID",
+              "TaxCode",
+              "TaxRate",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.units",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "IUnitDef",
+            "columns": [
+              "UnitCode",
+              "UnitName",
+              "RVC",
+              "Status",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.vendorcontracts",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "VendorContract",
+            "columns": [
+              "nSeq",
+              "VendorCode",
+              "ContractNo",
+              "ContractName",
+              "ContractDate",
+              "SignatureDate",
+              "ExpDate",
+              "ContractAmount",
+              "Notice",
+              "LastChangeBy",
+              "LastChangeTime",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.vendorprices",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "VendorPriceList",
+            "columns": [
+              "VendorCode",
+              "ItemCode",
+              "ValidFrom",
+              "ValidTo",
+              "Price",
+              "Notes",
+              "LastChangeBy",
+              "LastChangeTime",
+              "VATCode",
+              "Priority",
+              "PrefPrice",
+              "ExRate",
+              "HotelID"
+            ],
+            "where": [],
+            "order_by": [],
+            "max_rows": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bo.pur.vendors",
+      "contract_ver": 1,
+      "kind": "read",
+      "target": "BO",
+      "target_db": "SMILE_BO",
+      "timeout_ms": 20000,
+      "idempotent": true,
+      "calls": [
+        {
+          "select": {
+            "table": "CLIENT",
+            "columns": [
+              "ClientFolioNum",
+              "ARExternalNum",
+              "ClientName",
+              "InvoiceName",
+              "Attention",
+              "ContactPerson",
+              "Address1",
+              "Address2",
+              "Country",
+              "Tel1",
+              "Tel2",
+              "Fax",
+              "Email",
+              "WebSite",
+              "VATCode",
+              "SwiftCode",
+              "isAP",
+              "isAR",
+              "isTA",
+              "IsCompany",
+              "APClassCode",
+              "APAccGroup",
+              "APBillingCycleCode",
+              "APDueDays",
+              "APBalance",
+              "CurrencyConversionCode",
+              "Deleted",
+              "HotelID",
+              "LastChangeTime"
+            ],
+            "where": [
+              {
+                "column": "isAP",
+                "op": "=",
+                "param": {
+                  "name": "isAP",
+                  "type": "int",
+                  "value": 1
+                }
+              }
+            ],
+            "order_by": [],
+            "max_rows": 5000
           }
         }
       ]
