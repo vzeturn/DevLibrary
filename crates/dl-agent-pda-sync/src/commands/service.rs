@@ -86,6 +86,9 @@ pub fn build(
     // One idle store connection per command worker (RT-1318).
     let workers = usize::try_from(s.options.command_workers).unwrap_or(1);
     let store = Arc::new(SqlSiteCommandStore::new(config).with_max_idle(workers));
+    // The read-only POS verbs (RT-1427) share the keyed store pool; they keep no log row.
+    let revenue = super::pos_revenue::source_of(&store);
+    let bills = super::pos_bills::source_of(&store);
 
     let residue = super::order_residue::source_of(&store);
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
@@ -155,6 +158,8 @@ pub fn build(
         .with_legacy_export(legacy_export)
         .with_residue(residue)
         .with_fo_inhouse(fo_inhouse)
+        .with_revenue(revenue)
+        .with_bills(bills)
         .with_grants(grants.clone())
         .with_schema(schema);
     if let Some(n) = &extras.nudge {
