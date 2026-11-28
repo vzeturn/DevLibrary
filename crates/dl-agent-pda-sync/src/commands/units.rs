@@ -7,6 +7,7 @@
 use dl_uuid::Uuid;
 
 use super::error::Result;
+use super::txn::TxnCommandUnit;
 use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
@@ -77,6 +78,9 @@ pub trait SiteCommandUnit {
     /// The table and multi-check verbs' writes and reads (OW1e, ADR 0112) in the same
     /// transaction.
     fn tables(&mut self) -> &mut dyn TableCommandUnit;
+
+    /// The `txn.*` verbs' reads and writes (ADR 0159) in the same transaction.
+    fn txn(&mut self) -> &mut dyn TxnCommandUnit;
 }
 
 /// The SMILE_POS writes and reads of the order verbs (OW1b, ADR 0104). Every write is a

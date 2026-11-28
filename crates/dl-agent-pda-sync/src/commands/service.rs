@@ -16,6 +16,7 @@ use super::verify::{VerifyCommandHandler, VerifyParts};
 use super::verify_manifest::HttpCloudManifestSource;
 use crate::bootstrap::SqlOrderGrantsProbe;
 use crate::contracts::SyncCatalog;
+use crate::contracts::mapping::{CatalogRowMapper, MapperOptions};
 use crate::contracts::time::TimeZone;
 use crate::hosting::cli::Unhandled;
 use crate::hosting::host::AgentServices;
@@ -92,6 +93,13 @@ pub fn build(
 
     let residue = super::order_residue::source_of(&store);
     let catalog = SyncCatalog::load().map_err(|e| e.to_string())?;
+    // txn.snapshot (ADR 0159) hashes the re-read rows with the catalog mapper capture uses.
+    let zone = crate::hosting::host::site_time_zone(s.options.site_time_zone.as_deref())
+        .unwrap_or_else(|_| TimeZone::local());
+    let mapper = Arc::new(CatalogRowMapper::new(
+        catalog.clone(),
+        MapperOptions::new((*zone).clone()),
+    ));
     let resnapshot = Arc::new(ResnapshotCommandHandler::new(
         s.outbox.clone(),
         s.clock.clone(),
@@ -161,7 +169,8 @@ pub fn build(
         .with_revenue(revenue)
         .with_bills(bills)
         .with_grants(grants.clone())
-        .with_schema(schema);
+        .with_schema(schema)
+        .with_mapper(mapper);
     if let Some(n) = &extras.nudge {
         executor = executor.with_nudge(n.clone());
     }

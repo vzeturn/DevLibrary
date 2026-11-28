@@ -7,8 +7,13 @@
 #![allow(dead_code)]
 
 mod money;
+mod orders;
+mod txn;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+pub use orders::{Check, Line, OrderBook};
+pub use txn::TxnState;
+
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -16,7 +21,7 @@ use dl_agent_pda_sync::capture::CaptureNudge;
 use dl_agent_pda_sync::commands::{
     CheckMoneyFacts, CommandError, CommandWork, EmptyBillFacts, OrderCloseOutcome,
     OrderCommandUnit, OrderLineFacts, OrderPostOutcome, Result, SiteCommandStore, SiteCommandUnit,
-    StoreColumn, TableCommandUnit,
+    StoreColumn, TableCommandUnit, TxnCommandUnit,
 };
 use dl_agent_pda_sync::config::{ManualClock, SharedClock, Timestamp};
 use dl_agent_pda_sync::contracts::wire::{
@@ -35,45 +40,6 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A KDS line.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Line {
-    pub accepted: bool,
-    pub accepted_by: Option<String>,
-    pub done: bool,
-}
-
-/// A `tmpInvoice` header.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Check {
-    pub table_no: String,
-    pub guests: i32,
-    pub status: i32,
-    pub children: i32,
-}
-
-/// The SMILE_POS rows the order verbs touch.
-#[derive(Debug, Clone)]
-pub struct OrderBook {
-    pub checks: HashMap<(i32, i64), Check>,
-    pub lines: BTreeMap<(i64, i64), OrderCheckLine>,
-    pub items: HashSet<String>,
-    pub next_check_no: i64,
-    pub next_trn_seq: i64,
-}
-
-impl Default for OrderBook {
-    fn default() -> Self {
-        OrderBook {
-            checks: HashMap::new(),
-            lines: BTreeMap::new(),
-            items: ["CF01", "TEA"].iter().map(|s| (*s).to_owned()).collect(),
-            next_check_no: 7001,
-            next_trn_seq: 1,
-        }
-    }
-}
-
 /// The store's rows.
 #[derive(Debug, Clone)]
 pub struct State {
@@ -84,6 +50,8 @@ pub struct State {
     /// Check state fingerprint per open check; a check without an entry reads as not open.
     pub fingerprints: HashMap<i64, String>,
     pub orders: OrderBook,
+    /// txn.snapshot rows (ADR 0159).
+    pub txn: TxnState,
 }
 
 impl Default for State {
@@ -95,6 +63,7 @@ impl Default for State {
             next_reservation_id: 100,
             fingerprints: HashMap::new(),
             orders: OrderBook::default(),
+            txn: TxnState::default(),
         }
     }
 }
@@ -121,6 +90,8 @@ pub struct Knobs {
     /// ADR 0144: checks opened at or after the empty-bill cutoff; every other check is stale.
     pub fresh_checks: HashSet<i64>,
     pub move_audit_error: Option<i32>,
+    /// txn.snapshot: the replace hits another bill's key.
+    pub txn_key_conflict: bool,
 }
 
 /// The fake store.
@@ -375,6 +346,10 @@ impl SiteCommandUnit for Unit<'_> {
     }
 
     fn tables(&mut self) -> &mut dyn TableCommandUnit {
+        self
+    }
+
+    fn txn(&mut self) -> &mut dyn TxnCommandUnit {
         self
     }
 }

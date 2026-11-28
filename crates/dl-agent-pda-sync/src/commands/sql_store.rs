@@ -11,6 +11,7 @@ use dl_uuid::Uuid;
 use super::error::{CommandError, Result, check_ctx};
 use super::sql::{self, COMMAND_TIMEOUT};
 use super::sql_text as q;
+use super::txn::TxnCommandUnit;
 use super::units::{
     CommandWork, OrderCommandUnit, SiteCommandStore, SiteCommandUnit, TableCommandUnit,
 };
@@ -358,6 +359,10 @@ impl SiteCommandUnit for SqlSiteCommandUnit<'_> {
     }
 
     fn tables(&mut self) -> &mut dyn TableCommandUnit {
+        self
+    }
+
+    fn txn(&mut self) -> &mut dyn TxnCommandUnit {
         self
     }
 }

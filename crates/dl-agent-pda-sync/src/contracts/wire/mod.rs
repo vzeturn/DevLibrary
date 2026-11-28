@@ -19,6 +19,7 @@ mod staff_sync;
 mod streams;
 mod sync_verify;
 mod table_commands;
+mod txn_commands;
 
 pub use blobs::{SyncBlobRef, SyncBlobRefBatch, SyncBlobRefsAck, blob_contract};
 pub use envelope::{
@@ -26,7 +27,7 @@ pub use envelope::{
     SyncHeartbeat, SyncMode, SyncRow, SyncTombstone, wire_version,
 };
 pub use fingerprint::{CheckStateFingerprint, CheckStateHeader, CheckStateLine, check_aggregate};
-pub use fo_inhouse::{FoInHouseGuest, FoInHouseSearchPayload, FoInHouseSearchResult, txn_reasons};
+pub use fo_inhouse::{FoInHouseGuest, FoInHouseSearchPayload, FoInHouseSearchResult};
 pub use hops::{BatchHops, ResultHops, with_t_sent};
 pub use legacy_import::{
     LegacyImportAck, LegacyImportBranchAck, LegacyImportHostPrinterAck, LegacyImportTableAck,
@@ -75,4 +76,8 @@ pub use table_commands::{
     OrderItemsMovePayload, OrderMultiCheckResult, OrderPoNumberPayload, OrderTableChangePayload,
     OrderTableTransferPayload, is_local_timestamp, multi_check_aggregate, table_command_reasons,
     table_command_types,
+};
+pub use txn_commands::{
+    TxnSnapshotPayload, TxnSnapshotResult, TxnTableRows, json_int64 as txn_json_int64,
+    txn_command_types, txn_outcomes, txn_reasons, txn_scopes,
 };

@@ -51,6 +51,13 @@ pub enum StepKind {
     /// `dbo.LastTrn<rvc>` that `dbo.GetRVCSeqNumber` reaches through dynamic SQL on some
     /// builds (RT-0654).
     SequenceGrants,
+    /// The agent-owned `dbo.Pda_TxnApplied` with its `pda_sync` grant (ADR 0159).
+    TxnApplied,
+    /// `INSERT, DELETE` on the six bill tables for `txn.snapshot` (ADR 0159).
+    TxnGrants,
+    /// The nullable `StoreKey` column of `dbo.Pda_TxnApplied`, the identity a shift got in
+    /// the store (ADR 0160, script 145; RT-1427 for this agent).
+    TxnStoreKey,
     /// The tender and close table writes of `order.tender_*` / `order.check_close`
     /// (ADR 0174, RT-1297).
     MoneyGrants,
@@ -81,6 +88,9 @@ impl StepKind {
             StepKind::OrderGrantsOw1c => "OrderGrantsOw1c",
             StepKind::OrderGrantsOw1e => "OrderGrantsOw1e",
             StepKind::SequenceGrants => "SequenceGrants",
+            StepKind::TxnApplied => "TxnApplied",
+            StepKind::TxnGrants => "TxnGrants",
+            StepKind::TxnStoreKey => "TxnStoreKey",
             StepKind::MoneyGrants => "MoneyGrants",
             StepKind::FoInhouseGrants => "FoInhouseGrants",
             StepKind::PostToSmileGrants => "PostToSmileGrants",
