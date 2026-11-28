@@ -90,7 +90,7 @@ for t in "${targets[@]}"; do
     dlls=$(on_bin x86_64-w64-mingw32-objdump -p "$bdir/dl-agent.exe" \
       | awk '/DLL Name:/ {print tolower($3)}' | sort -u | tr '\n' ' ')
     for d in $dlls; do
-      case $d in kernel32.dll|advapi32.dll|ws2_32.dll|ntdll.dll|userenv.dll|secur32.dll|crypt32.dll|bcrypt.dll|api-ms-win-core-synch-l1-2-0.dll|msvcrt.dll|shell32.dll|ole32.dll|oleaut32.dll|user32.dll|iphlpapi.dll|netapi32.dll|version.dll|wtsapi32.dll|winspool.drv) ;;
+      case $d in kernel32.dll|advapi32.dll|ws2_32.dll|ntdll.dll|userenv.dll|secur32.dll|crypt32.dll|bcrypt.dll|ncrypt.dll|api-ms-win-core-synch-l1-2-0.dll|msvcrt.dll|shell32.dll|ole32.dll|oleaut32.dll|user32.dll|iphlpapi.dll|netapi32.dll|version.dll|wtsapi32.dll|winspool.drv) ;;
         bcryptprimitives.dll) case $t in windows7-*) echo "$t imports $d (Windows 8+)" >&2; exit 1 ;; esac ;;
         *) echo "$t imports non-system DLL $d" >&2; exit 1 ;;
       esac
