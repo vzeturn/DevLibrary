@@ -43,7 +43,7 @@ const fn step(
 }
 
 /// The steps in order (`SqlBootstrapper.Steps`).
-pub const STEPS: [BootstrapStep; 18] = [
+pub const STEPS: [BootstrapStep; 20] = [
     step(
         "login",
         StepKind::Login,
@@ -137,6 +137,21 @@ pub const STEPS: [BootstrapStep; 18] = [
         "Sql.145_txn_store_key.sql",
         false,
     ),
+    // RT-1427: the shift, cash and room-charge verbs' 150 and 160, as the .NET agent.
+    step(
+        "txn_shift_grants",
+        StepKind::TxnShiftGrants,
+        LOGIN_NAME,
+        "Sql.150_txn_shift_grants.sql",
+        false,
+    ),
+    step(
+        "fo_room_charge_grants",
+        StepKind::FoRoomChargeGrants,
+        LOGIN_NAME,
+        "Sql.160_fo_room_charge_grants.sql",
+        false,
+    ),
     step(
         "money_grants",
         StepKind::MoneyGrants,
@@ -178,7 +193,7 @@ pub const STEPS: [BootstrapStep; 18] = [
 ];
 
 /// The embedded scripts by C# resource name.
-const SCRIPTS: [(&str, &str); 18] = [
+const SCRIPTS: [(&str, &str); 20] = [
     (
         "Sql.010_login.sql",
         include_str!("../../assets/sql/010_login.sql"),
@@ -230,6 +245,14 @@ const SCRIPTS: [(&str, &str); 18] = [
     (
         "Sql.145_txn_store_key.sql",
         include_str!("../../assets/sql/145_txn_store_key.sql"),
+    ),
+    (
+        "Sql.150_txn_shift_grants.sql",
+        include_str!("../../assets/sql/150_txn_shift_grants.sql"),
+    ),
+    (
+        "Sql.160_fo_room_charge_grants.sql",
+        include_str!("../../assets/sql/160_fo_room_charge_grants.sql"),
     ),
     (
         "Sql.180_money_grants.sql",
@@ -636,6 +659,8 @@ mod tests {
                 "txn_applied",
                 "txn_grants",
                 "txn_store_key",
+                "txn_shift_grants",
+                "fo_room_charge_grants",
                 "money_grants",
                 "fo_inhouse_grants",
                 "post_to_smile_grants",

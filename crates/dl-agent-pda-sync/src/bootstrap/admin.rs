@@ -422,6 +422,26 @@ const EXISTS_SQL: &str = "SELECT CASE @kind
         OBJECT_ID(N'dbo.Pda_TxnApplied', N'U') IS NULL
         OR COL_LENGTH(N'dbo.Pda_TxnApplied', N'StoreKey') IS NOT NULL
         THEN 1 ELSE 0 END)
+  WHEN 'TxnShiftGrants' THEN (SELECT CASE WHEN
+        (OBJECT_ID(N'dbo.CashierShift', N'U') IS NULL OR (
+          EXISTS (SELECT 1 FROM sys.database_permissions p
+             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'INSERT'
+              AND p.major_id = OBJECT_ID(N'dbo.CashierShift', N'U'))
+          AND EXISTS (SELECT 1 FROM sys.database_permissions p
+             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+             JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
+            WHERE p.class = 1 AND p.state = 'G' AND p.permission_name = 'UPDATE'
+              AND p.major_id = OBJECT_ID(N'dbo.CashierShift', N'U') AND c.name = N'CashEnd')))
+        AND (OBJECT_ID(N'dbo.ShiftMoney', N'U') IS NULL OR (SELECT COUNT(DISTINCT p.permission_name) FROM sys.database_permissions p
+             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name IN ('INSERT','DELETE')
+              AND p.major_id = OBJECT_ID(N'dbo.ShiftMoney', N'U')) = 2)
+        AND (OBJECT_ID(N'dbo.DailyCashLog', N'U') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
+             JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
+            WHERE p.class = 1 AND p.state = 'G' AND p.minor_id = 0 AND p.permission_name = 'INSERT'
+              AND p.major_id = OBJECT_ID(N'dbo.DailyCashLog', N'U')))
+        THEN 1 ELSE 0 END)
   WHEN 'PoNumberGrants' THEN (SELECT CASE WHEN
         COL_LENGTH(N'dbo.tmpInvoice', N'PONumber') IS NULL OR EXISTS (SELECT 1 FROM sys.database_permissions p
            JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id AND u.name = @name
@@ -579,6 +599,9 @@ impl SqlAdmin for SqlServerAdmin {
         }
         if step.kind == StepKind::PostToSmileGrants {
             return post_to_smile_grants_exist(&mut c, step, ctx);
+        }
+        if step.kind == StepKind::FoRoomChargeGrants {
+            return super::fo_room_charge_check::fo_room_charge_grants_exist(&mut c, step, ctx);
         }
         let r = run(
             &mut c,

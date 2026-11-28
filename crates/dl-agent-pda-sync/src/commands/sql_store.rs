@@ -365,4 +365,12 @@ impl SiteCommandUnit for SqlSiteCommandUnit<'_> {
     fn txn(&mut self) -> &mut dyn TxnCommandUnit {
         self
     }
+
+    fn counters(&mut self) -> &mut dyn super::txn_counters::TxnCounterUnit {
+        self
+    }
+
+    fn room_charge(&mut self) -> &mut dyn super::txn_room_charge::TxnRoomChargeUnit {
+        self
+    }
 }

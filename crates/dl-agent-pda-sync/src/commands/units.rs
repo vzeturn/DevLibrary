@@ -8,6 +8,8 @@ use dl_uuid::Uuid;
 
 use super::error::Result;
 use super::txn::TxnCommandUnit;
+use super::txn_counters::TxnCounterUnit;
+use super::txn_room_charge::TxnRoomChargeUnit;
 use crate::contracts::wire::{
     OrderCheckCancelEmptyPayload, OrderCheckClosePayload, OrderCheckCloseResult, OrderCheckLine,
     OrderCheckMergePayload, OrderCheckOpenPayload, OrderCheckResult, OrderComboPostPayload,
@@ -81,6 +83,13 @@ pub trait SiteCommandUnit {
 
     /// The `txn.*` verbs' reads and writes (ADR 0159) in the same transaction.
     fn txn(&mut self) -> &mut dyn TxnCommandUnit;
+
+    /// The `txn.counters` reads and writes (ADR 0161) in the same transaction.
+    fn counters(&mut self) -> &mut dyn TxnCounterUnit;
+
+    /// The Front Office reads and writes of the room-charge verbs (ADR 0162) in the same
+    /// transaction.
+    fn room_charge(&mut self) -> &mut dyn TxnRoomChargeUnit;
 }
 
 /// The SMILE_POS writes and reads of the order verbs (OW1b, ADR 0104). Every write is a

@@ -58,6 +58,12 @@ pub enum StepKind {
     /// The nullable `StoreKey` column of `dbo.Pda_TxnApplied`, the identity a shift got in
     /// the store (ADR 0160, script 145; RT-1427 for this agent).
     TxnStoreKey,
+    /// The `CashierShift`, `ShiftMoney` and `DailyCashLog` grants of the shift and cash
+    /// verbs (ADR 0160, script 150; RT-1427 for this agent).
+    TxnShiftGrants,
+    /// The Front Office database user and folio grants of `txn.room_charge` (ADR 0162,
+    /// script 160; RT-1427 for this agent); acts in the database `Para InterfaceDB` names.
+    FoRoomChargeGrants,
     /// The tender and close table writes of `order.tender_*` / `order.check_close`
     /// (ADR 0174, RT-1297).
     MoneyGrants,
@@ -91,6 +97,8 @@ impl StepKind {
             StepKind::TxnApplied => "TxnApplied",
             StepKind::TxnGrants => "TxnGrants",
             StepKind::TxnStoreKey => "TxnStoreKey",
+            StepKind::TxnShiftGrants => "TxnShiftGrants",
+            StepKind::FoRoomChargeGrants => "FoRoomChargeGrants",
             StepKind::MoneyGrants => "MoneyGrants",
             StepKind::FoInhouseGrants => "FoInhouseGrants",
             StepKind::PostToSmileGrants => "PostToSmileGrants",

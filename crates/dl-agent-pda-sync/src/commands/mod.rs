@@ -47,7 +47,11 @@ mod sql_store;
 mod sql_table;
 pub mod sql_text;
 mod sql_txn;
+mod sql_txn_counters;
+mod sql_txn_room_charge;
 mod txn;
+mod txn_counters;
+mod txn_room_charge;
 mod txn_value;
 mod units;
 pub mod verify;
@@ -88,6 +92,8 @@ pub use txn::{
     TxnAppliedState, TxnCommandUnit, aggregate_hash as txn_aggregate_hash,
     aggregate_line as txn_aggregate_line, convert_rows as txn_convert_rows,
 };
+pub use txn_counters::TxnCounterUnit;
+pub use txn_room_charge::{FoActiveRow, FoFolio, FoPostLine, ROOM_CHARGE_CLERK, TxnRoomChargeUnit};
 pub use txn_value::{
     TCVN3_MAX_LENGTH, TxnInsertValue, TxnLiveColumn, TxnTableWrite, TxnValue,
     max_chars as txn_max_chars, param as txn_param, try_convert as txn_try_convert,
@@ -106,6 +112,7 @@ pub use verify_manifest::{
 /// `SqlTableCommandUnit.*Parameters`), public so tests can hold each batch's free
 /// `@variables` against them.
 pub mod params {
+    pub use super::fo_inhouse::DATABASE_ACCESS_SQL;
     pub use super::sql_money::{
         check_close_parameters, room_charge_parameters, tender_add_parameters,
         tender_remove_parameters,
@@ -122,6 +129,16 @@ pub mod params {
         missing_columns_parameters, move_line_info_parameters, move_line_parameters,
         po_number_parameters, table_info_parameters, transfer_header_parameters,
         transfer_line_info_parameters,
+    };
+    pub use super::sql_txn_counters::{
+        LOCK_SQL as COUNTER_LOCK_SQL, OWN_OBJECT_SQL as COUNTER_OWN_OBJECT_SQL,
+        RAISE_SQL as COUNTER_RAISE_SQL, backing as counter_backing,
+        in_use_sql as counter_in_use_sql,
+    };
+    pub use super::sql_txn_room_charge::{
+        ACTIVE_SQL as ROOM_CHARGE_ACTIVE_SQL, FOLIO_BY_NUMBER_SQL, FOLIOS_BY_ROOM_SQL, LINK_SQL,
+        POST_SQL as ROOM_CHARGE_POST_SQL, post_parameters as room_charge_post_parameters,
+        reverse_sql as room_charge_reverse_sql,
     };
 }
 

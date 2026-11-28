@@ -214,7 +214,7 @@ pub fn search_statement(query: &str, limit: i32) -> (&'static str, Vec<Param>) {
 }
 
 /// `^[A-Za-z0-9_]+$`: the only database names that are interpolated (bracketed).
-fn valid_name(name: &str) -> bool {
+pub fn is_database_name(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
@@ -226,7 +226,7 @@ pub fn resolve_database(c: &mut Client, rvc: i32, ctx: &Ctx) -> Result<Option<St
         Some(SqlValue::String(s)) if !s.trim().is_empty() => s.trim().to_owned(),
         _ => DEFAULT_DATABASE.to_owned(),
     };
-    if !valid_name(&configured) {
+    if !is_database_name(&configured) {
         return Ok(None);
     }
     let r = sql::query(

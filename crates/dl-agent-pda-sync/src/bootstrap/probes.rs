@@ -136,13 +136,18 @@ pub trait OrderGrantsProbe: Send + Sync {
 }
 
 /// The permissions that stand for the order scripts (`SqlOrderGrantsProbe.Checked`):
-/// object, permission, column. `PONumber` is script 200 (RT-1413, RT-1425); a column the
-/// build lacks is probed as NULL ([`MONEY_COLUMN_PROBE_SQL`]) and not reported.
-pub const CHECKED: [(&str, &str, Option<&str>); 5] = [
+/// object, permission, column; with the shift and cash-log writes of script 150 (RT-1427).
+/// `PONumber` is script 200 (RT-1413, RT-1425); a column the build lacks is probed as NULL
+/// ([`MONEY_COLUMN_PROBE_SQL`]) and not reported.
+pub const CHECKED: [(&str, &str, Option<&str>); 9] = [
     ("dbo.PostITrn", "EXECUTE", None),
     ("dbo.tmpInvoice", "INSERT", None),
     ("dbo.tmpInvoice", "UPDATE", Some("NGuest")),
     ("dbo.tmpTrn", "UPDATE", Some("CheckNo")),
+    ("dbo.CashierShift", "INSERT", None),
+    ("dbo.CashierShift", "UPDATE", Some("CashEnd")),
+    ("dbo.ShiftMoney", "DELETE", None),
+    ("dbo.DailyCashLog", "INSERT", None),
     ("dbo.tmpInvoice", "UPDATE", Some("PONumber")),
 ];
 
