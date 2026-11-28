@@ -154,3 +154,21 @@ Cùng cách đo mục 8 (`probe.mjs --samples 200 --gap 150`, iMac -> `azolo-dem
 - Nghi vấn chưa kiểm chứng: máy SR hiện chạy thêm einvoice (30 s/chu kỳ), backup, pda-sync, arrival; pool SQL `SMILE_FO` max 4 đã có `waits: 7`; đo vào buổi tối khác buổi sáng; agent đã qua nhiều bản từ lần 3 tới 1.3.63 (phiên bản lần 3 chưa ghi lại).
 - Tiêu chí 1 (p95 đạt ngưỡng) **chưa đạt**: op đọc nhỏ +143 ms p95 so với ngưỡng +80 ms; `/reservations` chưa đạt. Tiêu chí 2 (có số trước/sau cùng cách đo) đã có. Chưa thấy lệnh lỗi hay mất lệnh trong lượt đo (`ops_failed` 7 trên 517 op là tích lũy từ trước, chưa phân tích).
 - Việc tiếp theo đề xuất: (a) đo lại buổi sáng cùng giờ lần 3 để loại yếu tố giờ; (b) thêm số đo thời gian từng op trong agent (hàng đợi, SQL, đóng gói) vào heartbeat; (c) tăng `max` pool `SMILE_FO` và so `waits`; (d) phía SaaS gộp/song song 3 op của `/reservations`; (e) `pos.menu.items` JOIN 1 truy vấn trong manifest.
+
+## 10. Số đo lần 5: giờ cao điểm sáng (RT-1162, 2026-11-28 09:36-09:53 GMT+7)
+
+Cùng cách đo mục 8 (`probe.mjs --samples 200 --gap 150`, iMac -> `azolo-demo-pms` -> dl-agent máy SR), 200 mẫu tuần tự, không lỗi. Agent trên SR là bản canary mới nhất lúc đo.
+
+| Lệnh | Lần 5 sáng p50 / p95 | Lần 4 tối (1.3.63) p50 / p95 | Lần 3 (sáng, agent cũ) p50 / p95 |
+|---|---|---|---|
+| `/health` | 151.2 / 207.7 | 157.2 / 223.2 | 163.3 / 206.6 |
+| `fo.hotelDate.get` | 313.9 / 366.7 | 320.5 / 366.7 | 224.4 / 259.8 |
+| `pos.check.list` | 305.6 / 341.6 | 320.3 / 368.7 | 224.2 / 237.1 |
+| `pos.menu.items` | 431.4 / 492.2 | - | - |
+| `fo.reservation.list` | 866.3 / 971.6 | 926.6 / 1288 | 604.5 / 721.6 |
+
+Đọc số:
+- Giờ trong ngày **không** phải nguyên nhân: sáng cao điểm gần như bằng tối (op đọc nhỏ 314 so với 320 ms p50). Loại giả thuyết (a).
+- Mức tăng so với lần 3 (+90 ms p50 op nhỏ, +260 ms `/reservations`) là thật và ổn định, nên do thay đổi giữa lần 3 và nay: phiên bản agent (lần 3 chưa ghi bản) hoặc tải thêm trên máy SR (einvoice, pda-sync, backup, arrival). `/health` không đổi nên không do mạng hay SaaS.
+- Tiêu chí 1 vẫn **chưa đạt** (op đọc nhỏ +160 ms p95 trên mốc `/health` so với ngưỡng +80 ms; `/reservations` +765 ms so với +350 ms). Tiêu chí 2 có số đo; chưa thấy lệnh lỗi hay mất lệnh.
+- Việc tiếp (theo thứ tự): (b) số đo thời gian từng op trong agent (hàng đợi, SQL, đóng gói) vào heartbeat để chỉ ra +90 ms nằm ở đâu; (c) tăng `max` pool `SMILE_FO` và so `waits`; chạy lại probe với agent đã tắt thử einvoice/pda-sync để kiểm tra giả thuyết tải; (d) phía SaaS gộp/song song 3 op `/reservations`; (e) `pos.menu.items` JOIN 1 truy vấn.
