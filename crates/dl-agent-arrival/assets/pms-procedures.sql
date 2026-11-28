@@ -1486,25 +1486,27 @@ CREATE PROCEDURE dbo.srCI_InformationBill
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- RT-1484: the lines come from the shared SA_ layer (dbo.SA_FolioBill): a room charge from a restaurant check or
+    -- the minibar is listed as the items of that check / posting (name, unit price, quantity, check no or reference),
+    -- every other folio line stays one line. The C / V / P balance-code rule (RT-1348) lives in that function too.
     SELECT TOP 500
-        FT.FolioNum,
-        FT.FolioBalanceCode AS BalanceCode,
-        FT.TransactionAmount AS Amount,
-        -- SMILE leaves Qty, UnitPrice and Description empty on most lines: a line is one unit of its amount, named
-        -- after its transaction code (the way the e-invoice collector reads it).
-        ISNULL(NULLIF(FT.Qty, 0), 1) AS Qty,
-        ISNULL(NULLIF(FT.UnitPrice, 0), FT.TransactionAmount / ISNULL(NULLIF(FT.Qty, 0), 1)) AS UnitPrice,
-        FT.TransactionDate AS TransDate,
-        dbo.fTCVNToUnicode(COALESCE(NULLIF(RTRIM(TC.Description), ''), NULLIF(RTRIM(FT.Description), ''), '')) AS Description,
-        CAST(FT.RefNumber AS VARCHAR(30)) AS RefNo
-    FROM dbo.FolioTransaction FT WITH (NOLOCK)
+        B.FolioNum,
+        B.BalanceCode,
+        B.Amount,
+        -- SMILE leaves Qty, UnitPrice and Description empty on most folio lines: such a line is one unit of its amount,
+        -- named after its transaction code (the way the e-invoice collector reads it).
+        ISNULL(NULLIF(B.Qty, 0), 1) AS Qty,
+        ISNULL(NULLIF(B.UnitPrice, 0), B.Amount / ISNULL(NULLIF(B.Qty, 0), 1)) AS UnitPrice,
+        B.TransDate,
+        dbo.fTCVNToUnicode(CASE WHEN B.Source = 'FO'
+            THEN COALESCE(NULLIF(RTRIM(TC.Description), ''), NULLIF(RTRIM(B.ItemName), ''), '')
+            ELSE COALESCE(NULLIF(RTRIM(B.ItemName), ''), NULLIF(RTRIM(B.ItemCode), ''), '') END) AS Description,
+        CAST(B.RefNo AS VARCHAR(30)) AS RefNo
+    FROM dbo.SA_FolioBill(@sFolioNum, @sBalanceCode) B
     -- RT-1432: the code + sub code join lives in the shared SA_ layer (dbo.SA_TrnCode_Resolve, installed ahead of
     -- this bundle); no exact sub falls back to sub 0, never to another sub code of the same code.
-    OUTER APPLY dbo.SA_TrnCode_Resolve(FT.TransactionCode, FT.TransactionSubCode, 1, 0) TC
-    WHERE FT.FolioNum = @sFolioNum
-      AND (ISNULL(@sBalanceCode,'') = '' OR UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) = UPPER(LTRIM(RTRIM(@sBalanceCode))))
-      AND UPPER(LTRIM(RTRIM(FT.FolioBalanceCode))) NOT IN ('C','V','P') -- RT-1348: never on a signed bill
-    ORDER BY FT.TransactionDate;
+    OUTER APPLY dbo.SA_TrnCode_Resolve(B.TransactionCode, B.TransactionSubCode, 1, 0) TC
+    ORDER BY B.TransDate, B.TransactionID, B.LineSeq;
 END
 -- @@mmarrival:batch pms
 IF OBJECT_ID('dbo.srCI_FolioInformation', 'P') IS NOT NULL DROP PROCEDURE dbo.srCI_FolioInformation
